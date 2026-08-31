@@ -11251,10 +11251,21 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
         # lockable is a chest must not match generic "door" phrasing
         # (and vice versa), or a player mentioning the wrong kind of
         # lockable gets silently routed to the wrong one. "lever" added
-        # for the dungeon-redesign shortcut mechanic (2026-08-30) --
-        # deliberately excludes "lock"/"door" words so a player can't
-        # accidentally "pick" a lever that's meant to just be pulled.
-        kind_words = {"chest": ("chest", "lock"), "door": ("door", "lock", "gate"), "lever": ("lever", "switch", "wheel", "valve")}
+        # for the dungeon-redesign shortcut mechanic (2026-08-30).
+        #
+        # Real live bug (2026-08-31, dev-bridge, Charvenna: "I picked
+        # the lock successfully, why is it telling me to pick it again?"):
+        # "lock" was deliberately EXCLUDED from lever's words on the
+        # (wrong) theory that it would let a lever be "picked" by
+        # chance -- but _do_lockpick's own kind=="lever" branch already
+        # ALWAYS auto-succeeds regardless of how the player's text got
+        # routed there, so the exclusion provided zero real protection.
+        # All it did was make the single most natural phrase for any
+        # jammed mechanism ("pick the lock") fail to match the lever at
+        # all, falling through to an unrelated, misleadingly-successful-
+        # sounding generic ability check that never actually unlocked
+        # anything. "lock" is back in every kind's word list now.
+        kind_words = {"chest": ("chest", "lock"), "door": ("door", "lock", "gate"), "lever": ("lever", "switch", "wheel", "valve", "lock")}
         if any(w in lowered for w in kind_words.get(lockable["kind"], ("lock",))):
             return lockable
     return None

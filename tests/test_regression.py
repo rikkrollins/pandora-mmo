@@ -5725,6 +5725,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         hub = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_ember_hall")
         self.assertIsNotNone(bot._find_lockable(hub, "open the gate"))
 
+    def test_find_lockable_resolves_pick_the_lock_phrasing_for_a_lever_too(self):
+        """
+        Real live bug (2026-08-31, dev-bridge, Charvenna: "I picked the
+        lock successfully, why is it telling me to pick it again?").
+        "lock" was deliberately excluded from lever's fallback words on
+        the theory it would let a lever be "picked" by chance -- but
+        _do_lockpick's own kind=="lever" branch always auto-succeeds no
+        matter how the text got routed there, so excluding it only broke
+        the single most natural phrase for any jammed mechanism, silently
+        falling through to an unrelated generic ability check that never
+        actually pulled the lever.
+        """
+        alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
+        lockable = bot._find_lockable(alcove, "Pick the lock")
+        self.assertIsNotNone(lockable)
+        self.assertEqual(lockable["kind"], "lever")
+
+    async def test_picking_the_lock_phrasing_actually_pulls_the_lever_end_to_end(self):
+        """Full _do_skill_check dispatch, not just _find_lockable in isolation -- confirms the real player-facing path never falls through to a generic no-op ability check."""
+        user_id = 960240
+        character = make_basic_character(user_id, "PickTheLockLeverTester", current_location="wrathflame_vault_cinder_key_alcove")
+        sink = []
+        await bot._do_skill_check(FakeUpdate(user_id, "Pick the lock", sink), "dexterity", "Pick the lock", forced_roll=1)
+        lever_id = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")["lockables"][0]["id"]
+        self.assertIn(lever_id, bot._UNLOCKED.get(-999, set()))
+
     # -- Dungeon redesign Phase 2 (2026-08-30, same template as Phase 1):
     #    Deep Root Vault is now a real hub-and-spoke too, not an 11-room
     #    corridor with one dead-end chest. -----------------------------

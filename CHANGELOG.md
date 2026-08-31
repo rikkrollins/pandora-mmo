@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.425] — fix: "pick the lock" silently failed to pull a shortcut lever
+
+Real live bug (2026-08-31, dev-bridge, Charvenna: "I picked the lock
+successfully, why is it telling me to pick it again?"). Root cause:
+Phase 0's `_find_lockable` fallback deliberately excluded the word
+"lock" from a `kind: "lever"` lockable's match list, on the theory that
+including it would let a lever be "picked" by pure chance -- but
+`_do_lockpick`'s own lever branch already always succeeds instantly no
+matter how the player's text got routed there, so the exclusion gave
+zero real protection. All it actually did was make the single most
+natural phrase for any jammed mechanism ("pick the lock") fail to match
+the lever at all, silently falling through to an unrelated, real,
+misleadingly-successful-sounding generic ability check that never
+touched the lockable -- exactly what Charvenna hit at the Wrathflame
+Vault's shortcut lever.
+
+Fixed by adding "lock" back to every kind's fallback word list,
+including lever's. No live character needed a data fix -- the lever is
+a pure convenience shortcut, never required to progress, so nobody was
+actually blocked, just confused.
+
+Tested: a real fail-then-pass repro (`git stash` on the old code
+reproduces the exact failure) confirms "Pick the lock" now resolves to
+a lever lockable, and a full `_do_skill_check` dispatch end-to-end test
+confirms the real player-facing path actually pulls the lever instead
+of falling through to a no-op check. Full lockpick/lockable/lever slice
+re-run clean (21/21).
+
 ## [1.27.424] — dungeon redesign Phase 3: Sunken Root Caverns gets real interconnectivity
 
 Phase 3 of the 8-dungeon redesign (see v1.27.420-423) — the first MAIN
