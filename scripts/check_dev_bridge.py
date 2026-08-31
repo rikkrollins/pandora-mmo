@@ -58,6 +58,21 @@ VIDEO_LINE_RE = re.compile(
     r"\[dev_topic_video\] user=(?P<user>\d+) path=(?P<path>.*?) caption=(?P<caption>.*)$"
 )
 
+# Same class of gap again, found 2026-08-31 (Coffee sent a GIF -- which
+# Telegram delivers as a generic document, not a photo/video/animation
+# -- with a real, actionable caption asking to use it for a Remnant
+# summon; it landed in bot_live_tmp.log as [dev_topic_document] and was
+# completely invisible to every sweep, exactly like the image/video
+# gaps above before they were caught). Unlike images/videos, a document
+# handled this way is meant to be a PERMANENT reference (see
+# dev_topic_document_handler's own docstring -- saved under
+# campaign_sources/ for a future session to pull from, never purged),
+# so this is intentionally NOT wired into _purge_processed_media below.
+DOCUMENT_LINE_RE = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \[INFO\] pandora_mmo: "
+    r"\[dev_topic_document\] user=(?P<user>\d+) path=(?P<path>.*?) caption=(?P<caption>.*)$"
+)
+
 
 def load_state() -> dict:
     if not STATE_PATH.exists():
@@ -174,6 +189,22 @@ def list_new_commands() -> list[dict]:
             commands.append({
                 "timestamp": m["ts"], "user": m["user"],
                 "text": f"[video frames extracted to {frames_dir}]{caption_part}",
+            })
+            continue
+        m = DOCUMENT_LINE_RE.match(line)
+        if m:
+            if m["ts"] <= cursor:
+                continue
+            try:
+                path = ast.literal_eval(m["path"])
+                caption = ast.literal_eval(m["caption"])
+            except (ValueError, SyntaxError):
+                continue
+            if not caption:
+                continue  # no caption, nothing actionable to surface -- same as a bare reference image
+            commands.append({
+                "timestamp": m["ts"], "user": m["user"],
+                "text": f"[document saved at {path}] {caption}",
             })
     commands.sort(key=lambda c: c["timestamp"])
     return commands
