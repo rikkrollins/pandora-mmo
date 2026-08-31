@@ -39,6 +39,7 @@ from ai.support_agent import (
 from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack, reaction_precheck
 from rules.crafting import RECIPES
+import rules.dungeon_audit as dungeon_audit
 from tests.helpers import (
     DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
     make_basic_character, use_test_db, complete_arcs_1_through_7,
@@ -30783,6 +30784,209 @@ class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_cast_spell(FakeUpdate(player_id, "cast produce flame", sink3), "cast produce flame")
         self.assertTrue(any("wild shaped" in m.lower() for m in sink3))
         sessions.end_session(-999)
+
+
+def _minimal_dungeon_campaign() -> dict:
+    """
+    A tiny, otherwise-fully-valid 5-room dungeon fixture for
+    rules/dungeon_audit.py's own tests: a hub (3 plain connections),
+    a free branch (Branch A, holds the key quest -- reachable with no
+    gate, satisfying the progression-graph rule), a key-gated branch
+    (Branch B, holds the real is_boss monster), and a far lever room
+    with a real shortcut back to the hub. Every check passes against
+    this fixture unmutated -- each failing-case test below takes a
+    deep copy and breaks exactly the one property it's testing.
+    """
+    campaign = {
+        "locations": {"underground": {}},
+        "quests": {
+            "fixture_key_quest": {
+                "title": "Fixture Key Quest",
+                "location": "fx_branch_a",
+                "reward_item": "fixture_key",
+                "trigger": {"type": "defeat_monster", "monster": "fixture_guardian"},
+            },
+        },
+        "monsters": {
+            "fixture_trash": {"name": "Fixture Trash", "level": 5},
+            "fixture_boss": {"name": "Fixture Boss", "level": 5, "is_boss": True},
+        },
+        "story_arcs": {},
+    }
+    dungeon_audit.add_room(campaign, "underground", "fixture_dungeon", "fx_hub", "The Hub", "A hub.", dungeon_hub=True)
+    dungeon_audit.add_room(campaign, "underground", "fixture_dungeon", "fx_branch_a", "Branch A", "The free branch.")
+    dungeon_audit.add_room(campaign, "underground", "fixture_dungeon", "fx_branch_b", "Branch B", "The gated branch.", monsters=["fixture_boss"])
+    dungeon_audit.add_room(campaign, "underground", "fixture_dungeon", "fx_side_room", "Side Room", "A third hub connection.")
+    dungeon_audit.add_room(campaign, "underground", "fixture_dungeon", "fx_lever_room", "Lever Room", "The far end of the shortcut.")
+
+    dungeon_audit.connect(campaign, "fx_hub", "fx_branch_a")
+    dungeon_audit.connect(campaign, "fx_hub", "fx_side_room")
+    dungeon_audit.connect(campaign, "fx_hub", "fx_lever_room")
+    dungeon_audit.add_key_gate(campaign, "fx_hub", "fx_branch_b", "fixture_key_gate", "a fixture door", "fixture_key")
+    dungeon_audit.add_lever_shortcut(campaign, "fx_lever_room", "fx_hub", "fixture_lever", "a fixture lever")
+    return campaign
+
+
+class DungeonAuditTests(unittest.TestCase):
+    """
+    Real dungeon-quality-checker + authoring-toolkit tests (2026-08-31,
+    per Coffee: catch design issues faster while playtesting, and a
+    reusable authoring layer instead of raw campaign.json surgery each
+    time). One deliberately-passing and one deliberately-failing case
+    per check, using _minimal_dungeon_campaign() as the shared base
+    fixture, plus a correctness test per authoring helper, plus running
+    the real checker against all 8 already-shipped redesigned dungeons.
+    """
+
+    def test_fixture_itself_passes_every_check(self):
+        campaign = _minimal_dungeon_campaign()
+        results = dungeon_audit.audit_dungeon(campaign, "fixture_dungeon")
+        for check_name, failures in results.items():
+            self.assertEqual(failures, [], f"{check_name}: {failures}")
+
+    def test_hub_branches_fails_with_only_two_connections(self):
+        campaign = _minimal_dungeon_campaign()
+        hub = campaign["locations"]["underground"]["fx_hub"]
+        hub["connections"].remove("fx_side_room")
+        failures = dungeon_audit.check_hub_branches(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("needs 3+", failures[0])
+
+    def test_hub_revisited_fails_with_no_locked_shortcut_back(self):
+        campaign = _minimal_dungeon_campaign()
+        del campaign["locations"]["underground"]["fx_lever_room"]["locked_connections"]
+        failures = dungeon_audit.check_hub_revisited(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("no locked_connections shortcut", failures[0])
+
+    def test_no_self_referential_lock_fails_when_the_key_sits_behind_its_own_gate(self):
+        campaign = _minimal_dungeon_campaign()
+        campaign["quests"]["fixture_key_quest"]["location"] = "fx_branch_b"
+        failures = dungeon_audit.check_no_self_referential_lock(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("only reachable by crossing the very lock", failures[0])
+
+    def test_boss_gated_fails_when_the_only_boss_is_freely_reachable(self):
+        campaign = _minimal_dungeon_campaign()
+        # Move the boss out from behind the gate, onto a plain hub connection.
+        campaign["locations"]["underground"]["fx_branch_b"]["monsters"] = []
+        campaign["locations"]["underground"]["fx_side_room"]["monsters"] = ["fixture_boss"]
+        failures = dungeon_audit.check_boss_gated(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("no boss in this dungeon is behind any", failures[0])
+
+    def test_reciprocity_fails_on_a_genuine_one_way_connection(self):
+        campaign = _minimal_dungeon_campaign()
+        campaign["locations"]["underground"]["fx_side_room"]["connections"] = []
+        failures = dungeon_audit.check_reciprocity(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("but not vice versa", failures[0])
+
+    def test_lock_density_fails_with_zero_lockables_across_many_rooms(self):
+        campaign = _minimal_dungeon_campaign()
+        for _ in range(20):
+            room_id = f"fx_filler_{_}"
+            dungeon_audit.add_room(campaign, "underground", "fixture_dungeon", room_id, "Filler", "Filler.")
+            dungeon_audit.connect(campaign, "fx_hub", room_id)
+        del campaign["locations"]["underground"]["fx_hub"]["lockables"]
+        del campaign["locations"]["underground"]["fx_hub"]["locked_connections"]
+        del campaign["locations"]["underground"]["fx_lever_room"]["lockables"]
+        del campaign["locations"]["underground"]["fx_lever_room"]["locked_connections"]
+        failures = dungeon_audit.check_lock_density(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("expected at least", failures[0])
+
+    def test_level_band_fails_when_a_real_trash_monster_exceeds_the_chapter_ceiling(self):
+        campaign = _minimal_dungeon_campaign()
+        campaign["story_arcs"]["arc_1_discovery"] = {"quests": ["fixture_key_quest"]}
+        campaign["locations"]["underground"]["fx_side_room"]["monsters"] = ["fixture_overleveled_trash"]
+        campaign["monsters"]["fixture_overleveled_trash"] = {"name": "Overleveled Trash", "level": 999}
+        failures = dungeon_audit.check_level_band(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("above", failures[0])
+
+    def test_level_band_ignores_a_real_boss_and_a_remnant_exceeding_the_ceiling(self):
+        """The exact real exceptions found running this checker against all 8 shipped dungeons: a real is_boss monster (the dungeon's own climax) and a Remnant superboss are both allowed to exceed the chapter ceiling."""
+        campaign = _minimal_dungeon_campaign()
+        campaign["story_arcs"]["arc_1_discovery"] = {"quests": ["fixture_key_quest"]}
+        campaign["monsters"]["fixture_boss"]["level"] = 999  # the real boss already in fx_branch_b
+        real_remnant_monster_key = next(iter(remnants_module.REMNANTS.values()))["monster_key"]
+        campaign["locations"]["underground"]["fx_side_room"]["monsters"] = [real_remnant_monster_key]
+        campaign["monsters"][real_remnant_monster_key] = {"name": "Remnant Fixture", "level": 999}
+        failures = dungeon_audit.check_level_band(campaign, "fixture_dungeon")
+        self.assertEqual(failures, [])
+
+    def test_add_room_stamps_the_required_tags(self):
+        campaign = {"locations": {}}
+        room = dungeon_audit.add_room(campaign, "underground", "some_dungeon", "some_room", "Some Room", "A room.")
+        self.assertEqual(room["dungeon_id"], "some_dungeon")
+        self.assertTrue(room["dungeon_interior"])
+        self.assertIn("grid_position", room)
+        self.assertEqual(campaign["locations"]["underground"]["some_room"], room)
+
+    def test_connect_writes_both_sides_reciprocally(self):
+        campaign = {"locations": {"underground": {}}}
+        dungeon_audit.add_room(campaign, "underground", "d", "a", "A", "A room.")
+        dungeon_audit.add_room(campaign, "underground", "d", "b", "B", "A room.")
+        dungeon_audit.connect(campaign, "a", "b", direction="north")
+        a = campaign["locations"]["underground"]["a"]
+        b = campaign["locations"]["underground"]["b"]
+        self.assertIn("b", a["connections"])
+        self.assertIn("a", b["connections"])
+        self.assertEqual(a["directions"]["north"], "b")
+        self.assertEqual(b["directions"]["south"], "a")
+
+    def test_add_lever_shortcut_only_ever_lives_on_the_far_room(self):
+        """The exact bug shape this session hit once by hand (wired backwards, caught only by a test failure) -- can't happen through this helper."""
+        campaign = {"locations": {"underground": {}}}
+        dungeon_audit.add_room(campaign, "underground", "d", "hub", "Hub", "A hub.")
+        dungeon_audit.add_room(campaign, "underground", "d", "far", "Far", "A far room.")
+        dungeon_audit.add_lever_shortcut(campaign, "far", "hub", "lever_1", "a lever")
+        far = campaign["locations"]["underground"]["far"]
+        hub = campaign["locations"]["underground"]["hub"]
+        self.assertEqual(far["locked_connections"], {"hub": "lever_1"})
+        self.assertNotIn("locked_connections", hub)
+
+    def test_add_key_gate_produces_a_real_requires_key_item_lockable(self):
+        campaign = {"locations": {"underground": {}}}
+        dungeon_audit.add_room(campaign, "underground", "d", "a", "A", "A room.")
+        dungeon_audit.add_room(campaign, "underground", "d", "b", "B", "A room.")
+        dungeon_audit.add_key_gate(campaign, "a", "b", "gate_1", "a door", "the_key")
+        a = campaign["locations"]["underground"]["a"]
+        self.assertEqual(a["locked_connections"], {"b": "gate_1"})
+        lockable = a["lockables"][0]
+        self.assertEqual(lockable["requires_key_item"], "the_key")
+
+    def test_dump_dungeon_graph_names_every_room_and_lockable(self):
+        campaign = _minimal_dungeon_campaign()
+        text = dungeon_audit.dump_dungeon_graph(campaign, "fixture_dungeon")
+        self.assertIn("fx_hub", text)
+        self.assertIn("fixture_key_gate", text)
+        self.assertIn("fixture_lever", text)
+
+    def test_all_eight_shipped_dungeons_pass_every_real_check(self):
+        """
+        The real, live payoff: running this checker against every one
+        of the 8 already-shipped, hand-built redesigned dungeons.
+        Confirmed clean by hand while building this checker (2026-08-31)
+        -- if a future edit ever regresses one of them, this is the
+        test that catches it.
+        """
+        import json
+        campaign_path = os.path.join(os.path.dirname(__file__), "..", "campaigns", "default", "campaign.json")
+        with open(campaign_path) as f:
+            real_campaign = json.load(f)
+        dungeon_ids = sorted({
+            loc.get("dungeon_id")
+            for layer in real_campaign["locations"].values()
+            for loc in layer.values()
+            if loc.get("dungeon_id")
+        })
+        self.assertEqual(len(dungeon_ids), 8, dungeon_ids)
+        for dungeon_id in dungeon_ids:
+            results = dungeon_audit.audit_dungeon(real_campaign, dungeon_id)
+            for check_name, failures in results.items():
+                self.assertEqual(failures, [], f"{dungeon_id}/{check_name}: {failures}")
 
 
 if __name__ == "__main__":

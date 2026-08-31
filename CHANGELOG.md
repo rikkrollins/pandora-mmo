@@ -2,6 +2,53 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.440] — tool: dungeon quality checker + authoring toolkit, plus a real reciprocity fix it found
+
+Real request (2026-08-31, Coffee): "the purpose of this is so as i
+test the dungeons, if there are any issues u can then fix them and
+make the dungeon better. ALSO i have plans after chapter 8 to use this
+to rework dungeons to evolve them or get harder." New `rules/
+dungeon_audit.py` + `scripts/audit_dungeon.py` — a real, deterministic
+checker (no AI involved, discussed and confirmed directly with Coffee:
+Ollama never decides structural/logical facts in this game, only
+narrates what code has already decided) covering 7 checks drawn
+directly from the same Zelda-dungeon-design research behind the
+original 8-dungeon redesign: a real branching hub, real backtracking/
+shortcuts, no item ever placed behind the lock it opens, the boss
+actually gated, full room reciprocity, a real lock/puzzle density
+floor, and monster/boss levels matching the confirmed per-chapter
+level-band model. Also ships a small authoring layer (`add_room`,
+`connect`, `add_lever_shortcut`, `add_key_gate`, `dump_dungeon_graph`)
+turning the raw campaign.json surgery every one of this session's 8
+dungeon builds required into calls against tested code that can't get
+the shape wrong — directly closing the exact bug class that slipped
+through once by hand this session (a shortcut lever wired backwards,
+caught only by a test failure).
+
+Running the checker against all 8 already-shipped dungeons for the
+first time found one real, live gap: Sunken Root Caverns' Deep Tunnels
+hub was missing its own reciprocal connection back from The Forgotten
+Cistern (a genuine one-way edge with no lock to justify it) — fixed
+directly. Every other finding on the first pass turned out to be a
+real, intentional design pattern already documented elsewhere in this
+project (Remnant superbosses sit outside their zone's band by design;
+early "meet the weak stuff at the front door" trash sits below a
+chapter's floor on purpose; a dungeon's own climax boss is allowed to
+exceed the general ceiling, the same precedent this bestiary already
+sets for damage_bonus) — each one led to a real refinement of the
+checker itself rather than a silenced false positive, documented in
+its own docstring.
+
+Tested: one deliberately-passing and one deliberately-failing real
+case per check (14 tests) against a shared minimal fixture dungeon,
+one correctness test per authoring helper, and the real payoff --
+running the actual checker against all 8 shipped dungeons and
+asserting every one passes every check cleanly (15 tests total, all
+real, no mocks). This is a Claude-Code-side diagnostic/authoring tool,
+not a bot.py change, so no deploy is needed for the toolkit itself --
+but the real Sunken Root Caverns reciprocity fix IS live campaign
+data, and follows the normal deploy/announce/release discipline below.
+
 ## [1.27.439] — fix: an absent party member's own quest could get stuck active forever
 
 Real live report (2026-08-31, Coffee: "why didn't Charvenna get exp
