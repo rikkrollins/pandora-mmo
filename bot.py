@@ -13293,6 +13293,46 @@ def _npc_quest_facts(character: dict, npc_id: str) -> str | None:
                 f"Reward: {q['reward_xp']} XP, {q['reward_gold']} gold."
             )
 
+    # Real live bug (2026-08-30, dev-bridge, Coffee: "I accepted the
+    # quest. I've been trying to talk to Ren multiple times and it says
+    # I have not completed the quest for some reason Lorianna has
+    # completed the quest"). This function only ever told the model
+    # about OFFERABLE quests -- it had zero grounding for "the player
+    # already has this quest active and it just isn't done yet," so
+    # asking the giver about a quest already accepted (the completely
+    # normal thing to do while it's genuinely still in progress) handed
+    # the model nothing but the player's own confused question to work
+    # with. Per CLAUDE.md's own standing rule ("never let AI narration
+    # invent a game fact"), an ungrounded model can and did fabricate a
+    # specific, plausible-sounding but entirely made-up detail (blaming
+    # a named party member) rather than just saying "keep at it."
+    # quest completion is tracked per-CHARACTER (_check_quest_
+    # completions_defeat_monster already credits every eligible party
+    # member independently, confirmed by direct code read) -- a party-
+    # mate's own separate progress on the same quest_id is real but
+    # never relevant to what this NPC tells THIS specific player about
+    # THEIR OWN status.
+    trigger_hints = {
+        "defeat_monster": lambda t: f"defeating a {t['monster'].replace('_', ' ')}",
+        "reach_location": lambda t: f"reaching {cl.get_location(CAMPAIGN, t['location'])['name']}",
+        "gather_material": lambda t: f"gathering {t['material'].replace('_', ' ')}",
+        "npc_dialogue": lambda t: f"talking to {CAMPAIGN['npcs'].get(t.get('npc'), {}).get('name', 'the right person')}",
+        "solve_puzzle": lambda t: "solving the real puzzle it's tied to",
+    }
+    for quest_id, quest in CAMPAIGN.get("quests", {}).items():
+        if quest.get("giver_npc") != npc_id or quest_id not in character["active_quests"]:
+            continue
+        trigger = quest.get("trigger", {})
+        hint_fn = trigger_hints.get(trigger.get("type"))
+        still_needs = hint_fn(trigger) if hint_fn else "finishing its real objective"
+        lines.append(
+            f"The player already accepted your quest \"{quest['title']}\" and it genuinely "
+            f"isn't done yet — it only completes once THEY personally finish {still_needs}. "
+            f"If asked why it isn't done, say that plainly. Never claim anyone else (a party "
+            f"member or otherwise) has completed it for them — quest progress belongs to each "
+            f"person individually, and you have no real information about anyone else's."
+        )
+
     if not lines:
         return None
     return (

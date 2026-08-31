@@ -22304,6 +22304,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(facts, "asking Borin about his own quest should be grounded in a real answer")
         self.assertIn("A Name Worth Vouching For", facts)
 
+    async def test_asking_the_giver_about_an_active_unfinished_quest_is_grounded_not_hallucinated(self):
+        """
+        Real live bug (2026-08-30, dev-bridge, Coffee: "I accepted the
+        quest ... it says I have not completed the quest for some
+        reason Lorianna has completed the quest"). _npc_quest_facts
+        never told the model anything about a quest the player already
+        holds active but hasn't finished -- asking the giver about it
+        while it's genuinely still in progress got zero grounding,
+        letting the model invent specifics (like blaming a named party
+        member) instead of just saying "keep at it." Now grounded: the
+        real remaining trigger, and an explicit instruction that quest
+        progress is per-person and another party member's status is
+        never relevant.
+        """
+        user_id = 900953
+        character = make_basic_character(user_id, "ActiveQuestAsker", current_location="hollow_stump_shrine")
+        db.update_character(user_id, -999, active_quests={"wrens_trial_by_fire": {}})
+        character = db.get_character(user_id, -999)
+        facts = bot._npc_quest_facts(character, "wren_hollowbrook")
+        self.assertIsNotNone(facts)
+        self.assertIn("What Wren Won't Say", facts)
+        self.assertIn("isn't done yet", facts)
+        self.assertIn("defeating a wolf", facts)
+        self.assertIn("Never claim anyone else", facts)
+
     # -- Character description field (2026-07-16, per Coffee) ----------
     async def test_set_description_inline_extraction_saves_directly(self):
         user_id = 900508

@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.436] — fix: quest-giver dialogue hallucinating another party member's progress
+
+Real live bug (2026-08-30, dev-bridge, Coffee: "I accepted the quest.
+I've been trying to talk to Ren multiple times and it says I have not
+completed the quest for some reason Lorianna has completed the quest").
+Investigated the underlying quest-completion mechanic directly:
+`_check_quest_completions_defeat_monster` already credits every
+eligible party member independently and correctly, per character — no
+real crediting bug there. The actual gap was in NPC dialogue grounding:
+`_npc_quest_facts` only ever told the model about quests it could
+*offer* — it had zero grounding for "the player already has this quest
+active and it just isn't done yet," so asking the giver about a quest
+that's genuinely still in progress (a completely normal thing to do)
+handed the model nothing to work with. Per this project's own standing
+rule that AI narration must never invent a game fact, the ungrounded
+model fabricated a specific, plausible-sounding but entirely made-up
+detail (blaming a named party member) instead of just saying "keep at
+it."
+
+Fixed by grounding `_npc_quest_facts` with the real remaining trigger
+for any of the player's own active-but-unfinished quests from that
+giver, plus an explicit instruction that quest progress is tracked
+per-person and another party member's own status is never relevant to
+what this NPC tells THIS player.
+
+Tested: a real fail-then-pass repro confirms asking Wren about "What
+Wren Won't Say" while it's still active and unfinished now grounds the
+model in the real trigger ("defeating a wolf") and the anti-hallucation
+instruction, instead of silence on the subject. Related npc-quest-facts/
+companion-quest regression slice re-run clean (3/3).
+
 ## [1.27.435] — fix: real dev-bridge blind spot for Development-topic special commands
 
 Real live incident (2026-08-31, Coffee: "check dev i jus posted, how
