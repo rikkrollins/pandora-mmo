@@ -42,6 +42,7 @@ from rules.combat import resolve_attack, reaction_precheck
 from rules.crafting import RECIPES
 import rules.dungeon_audit as dungeon_audit
 import rules.dungeon_evolve as dungeon_evolve
+import scripts.build_location_grid as build_location_grid
 from tests.helpers import (
     DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
     make_basic_character, use_test_db, complete_arcs_1_through_7,
@@ -31293,6 +31294,49 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertGreater(summary["room_count"], source_room_count)
 
+    def test_evolve_dungeon_never_conflicts_on_the_real_map_grid(self):
+        """
+        Real live bug (2026-09-01, Coffee: "make sure the maps and
+        coordinates match on the map generations, make sure there are
+        no conflictions"): the first shipped evolve (Wrathflame Vault,
+        Unbound Deeper) put every generated room at the same default
+        {"x":0,"y":0}, and separately, a hub fanning out to more
+        branches than the minimap's real 4-cardinal-neighbor budget
+        left several branches reachable by text but invisible on the
+        map. evolve_dungeon now calls the same real, authoritative
+        scripts/build_location_grid.build_layer(...) Coffee's own
+        "make sure locations don't conflict" tool already uses, and
+        retries (fresh RNG) if any of its own new rooms can't be
+        cleanly placed -- confirmed here across several real source
+        dungeons and seeds, not just the one that happened to work.
+        """
+        import copy
+        for source_dungeon_id, seed in [("goblin_warrens", 1), ("sunken_root_caverns", 7), ("stonearch_bridge", 12)]:
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"{source_dungeon_id}_evolved_gridcheck"
+            summary = dungeon_evolve.evolve_dungeon(campaign, source_dungeon_id, new_id, "underground", rebirth_gate=1, rng=rng)
+            results, notes = build_location_grid.build_layer("underground", campaign["locations"]["underground"])
+            missing = [rid for rid in summary["room_ids"] if "grid_position" not in results.get(rid, {})]
+            self.assertEqual(missing, [], f"{source_dungeon_id}: {missing}")
+            positions = [tuple(results[rid]["grid_position"].values()) for rid in summary["room_ids"]]
+            self.assertEqual(len(positions), len(set(positions)), f"{source_dungeon_id}: duplicate grid cells among its own new rooms")
+
+    def test_shipped_wrathflame_vault_evolved_has_no_real_map_conflicts(self):
+        """The actual committed dungeon (not a fresh test generation) -- guards against a future hand-edit reintroducing the same class of bug this fix addresses."""
+        import json
+        campaign_path = os.path.join(os.path.dirname(__file__), "..", "campaigns", "default", "campaign.json")
+        with open(campaign_path) as f:
+            real_campaign = json.load(f)
+        room_ids = [
+            rid for rid, loc in real_campaign["locations"]["underground"].items()
+            if loc.get("dungeon_id") == "wrathflame_vault_evolved"
+        ]
+        self.assertTrue(room_ids)
+        results, notes = build_location_grid.build_layer("underground", real_campaign["locations"]["underground"])
+        missing = [rid for rid in room_ids if "grid_position" not in results.get(rid, {})]
+        self.assertEqual(missing, [])
+
     def test_evolve_dungeon_never_places_a_permanent_key_item_lock(self):
         import copy
         campaign = copy.deepcopy(bot.CAMPAIGN)
@@ -31321,32 +31365,42 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(lo <= level <= hi, f"{monster_key} is level {level}, outside {summary['target_band']}")
 
     async def test_evolve_dungeon_new_entrance_is_really_rebirth_gated_end_to_end(self):
-        """Real end-to-end call through bot._do_move -- not just reading the flag -- confirms the EXISTING _meets_rebirth_requirement mechanism actually blocks/admits based on the new entrance's requires_rebirth_count, with zero new bot.py code."""
+        """
+        Real end-to-end call through bot._do_move -- not just reading
+        the flag -- confirms the EXISTING _meets_rebirth_requirement
+        mechanism actually blocks/admits based on the new entrance's
+        requires_rebirth_count, with zero new bot.py code. Uses
+        goblin_warrens, not wrathflame_vault -- the real, shipped
+        wrathflame_vault_evolved already occupies its own source hub's
+        real compass-grid budget, so evolving a SECOND variant onto
+        that same hub within one campaign object is a real, expected
+        capacity limit (not a bug this test should trip over).
+        """
         import copy
         from unittest.mock import patch
         campaign = copy.deepcopy(bot.CAMPAIGN)
         rng = random.Random(11)
         dungeon_evolve.evolve_dungeon(
-            campaign, "wrathflame_vault", "wrathflame_vault_evolved_test5", "underground",
-            rebirth_gate=1, target_band=(35, 50), rng=rng,
+            campaign, "goblin_warrens", "goblin_warrens_evolved_test5", "underground",
+            rebirth_gate=1, rng=rng,
         )
-        entrance = campaign["locations"]["underground"]["wrathflame_vault_evolved_test5_entrance"]
+        entrance = campaign["locations"]["underground"]["goblin_warrens_evolved_test5_entrance"]
         self.assertEqual(entrance.get("requires_rebirth_count"), 1)
 
         with patch.object(bot, "CAMPAIGN", campaign):
             user_id = 960900
-            make_basic_character(user_id, "RebirthGateTester", current_location="wrathflame_vault_ember_hall")
+            make_basic_character(user_id, "RebirthGateTester", current_location="goblin_warrens_the_old_seam")
             db.update_character(user_id, -999, rebirth_count=0)
             sink = []
-            await bot._do_move(FakeUpdate(user_id, "", sink), "go to wrathflame vault evolved test5")
+            await bot._do_move(FakeUpdate(user_id, "", sink), "go to goblin warrens evolved test5")
             character = db.get_character(user_id, -999)
-            self.assertNotEqual(character["current_location"], "wrathflame_vault_evolved_test5_entrance")
+            self.assertNotEqual(character["current_location"], "goblin_warrens_evolved_test5_entrance")
 
             db.update_character(user_id, -999, rebirth_count=1)
             sink2 = []
-            await bot._do_move(FakeUpdate(user_id, "", sink2), "go to wrathflame vault evolved test5")
+            await bot._do_move(FakeUpdate(user_id, "", sink2), "go to goblin warrens evolved test5")
             character = db.get_character(user_id, -999)
-            self.assertEqual(character["current_location"], "wrathflame_vault_evolved_test5_entrance")
+            self.assertEqual(character["current_location"], "goblin_warrens_evolved_test5_entrance")
 
     def test_evolve_dungeon_is_deterministic_with_the_same_seed(self):
         import copy

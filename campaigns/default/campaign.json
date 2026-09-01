@@ -3514,9 +3514,10 @@
           "wrathflame_vault_evolved_entrance"
         ],
         "directions": {
-          "up": "wrathflame_vault_threshold",
           "down": "wrathflame_vault_ash_gallery",
-          "east": "wrathflame_vault_bellows_chamber"
+          "up": "wrathflame_vault_threshold",
+          "east": "wrathflame_vault_bellows_chamber",
+          "west": "wrathflame_vault_evolved_entrance"
         },
         "monsters": [
           "cinder_hound"
@@ -6895,35 +6896,112 @@
         "description": "Where the old vault wall finally gave, and heat that was never natural pours up through the new gap.",
         "connections": [
           "wrathflame_vault_ember_hall",
-          "wrathflame_vault_evolved_hub"
+          "wrathflame_vault_evolved_approach_0"
         ],
-        "directions": {},
+        "directions": {
+          "east": "wrathflame_vault_ember_hall",
+          "north": "wrathflame_vault_evolved_approach_0"
+        },
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": 0
+          "x": -2,
+          "y": -88
         },
         "requires_rebirth_count": 1
       },
-      "wrathflame_vault_evolved_hub": {
-        "name": "The Ember Confluence",
-        "description": "Seven raw tunnels meet here, each radiating its own kind of wrongness -- heat from somewhere below rises through all of them at once.",
+      "wrathflame_vault_evolved_approach_0": {
+        "name": "The Narrowing Flue",
+        "description": "The passage tightens here, smoke-blackened stone pressing in from both sides.",
         "connections": [
           "wrathflame_vault_evolved_entrance",
-          "wrathflame_vault_evolved_b1_r0",
-          "wrathflame_vault_evolved_b2_r0",
-          "wrathflame_vault_evolved_b3_r0",
-          "wrathflame_vault_evolved_b4_r0",
-          "wrathflame_vault_evolved_b5_r0",
-          "wrathflame_vault_evolved_b6_r0"
+          "wrathflame_vault_evolved_approach_1"
         ],
-        "directions": {},
+        "directions": {
+          "south": "wrathflame_vault_evolved_entrance",
+          "north": "wrathflame_vault_evolved_approach_1"
+        },
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": 0
+          "x": -2,
+          "y": -87
+        }
+      },
+      "wrathflame_vault_evolved_approach_1": {
+        "name": "The Long Descent",
+        "description": "Stairs cut roughly into the rock, still a long way from wherever they're actually going.",
+        "connections": [
+          "wrathflame_vault_evolved_approach_0",
+          "wrathflame_vault_evolved_approach_2"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_approach_0",
+          "north": "wrathflame_vault_evolved_approach_2"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -2,
+          "y": -86
+        }
+      },
+      "wrathflame_vault_evolved_approach_2": {
+        "name": "The Windless Stretch",
+        "description": "The air stops moving entirely here, heavy with old heat that has nowhere left to go.",
+        "connections": [
+          "wrathflame_vault_evolved_approach_1",
+          "wrathflame_vault_evolved_approach_3"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_approach_1",
+          "north": "wrathflame_vault_evolved_approach_3"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -2,
+          "y": -85
+        }
+      },
+      "wrathflame_vault_evolved_approach_3": {
+        "name": "The Threshold Beyond the Threshold",
+        "description": "A second seal, older and less carefully made than the first one.",
+        "connections": [
+          "wrathflame_vault_evolved_approach_2",
+          "wrathflame_vault_evolved_hub"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_approach_2",
+          "north": "wrathflame_vault_evolved_hub"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -2,
+          "y": -84
+        }
+      },
+      "wrathflame_vault_evolved_hub": {
+        "name": "The Ember Confluence",
+        "description": "Four raw tunnels meet here, each radiating its own kind of wrongness -- heat from somewhere below rises through all of them at once.",
+        "connections": [
+          "wrathflame_vault_evolved_approach_3",
+          "wrathflame_vault_evolved_b1_r0",
+          "wrathflame_vault_evolved_b2_r0",
+          "wrathflame_vault_evolved_b3_r0"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_approach_3",
+          "north": "wrathflame_vault_evolved_b1_r0",
+          "west": "wrathflame_vault_evolved_b2_r0",
+          "east": "wrathflame_vault_evolved_b3_r0"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -2,
+          "y": -83
         },
         "dungeon_hub": true,
         "lockables": [
@@ -6934,220 +7012,306 @@
           }
         ],
         "locked_connections": {
-          "wrathflame_vault_evolved_b7_r0": "wrathflame_vault_evolved_boss_gate"
+          "wrathflame_vault_evolved_b4_r0": "wrathflame_vault_evolved_boss_gate"
         }
       },
       "wrathflame_vault_evolved_b1_r0": {
-        "name": "The Choir Landing",
-        "description": "A stair landing gone quiet, the way a throat goes quiet right before it screams.",
+        "name": "The Sentinel's Landing",
+        "description": "Something root-wrought and patient stands watch over a stair that hasn't seen a living visitor in a long time.",
         "connections": [
           "wrathflame_vault_evolved_hub",
           "wrathflame_vault_evolved_b1_r1"
         ],
-        "directions": {},
+        "directions": {
+          "south": "wrathflame_vault_evolved_hub",
+          "north": "wrathflame_vault_evolved_b1_r1"
+        },
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": 0
+          "x": -2,
+          "y": -82
+        },
+        "monsters": [
+          "root_wrought_sentinel"
+        ]
+      },
+      "wrathflame_vault_evolved_b1_r1": {
+        "name": "The Turning Stair",
+        "description": "A stairwell that spirals in a direction stairs shouldn't, guarded by something that clearly knows the difference.",
+        "connections": [
+          "wrathflame_vault_evolved_b1_r0",
+          "wrathflame_vault_evolved_b1_r2"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_b1_r0",
+          "north": "wrathflame_vault_evolved_b1_r2"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -2,
+          "y": -81
+        },
+        "monsters": [
+          "turning_stair_guardian"
+        ]
+      },
+      "wrathflame_vault_evolved_b2_r0": {
+        "name": "The Wolf Run",
+        "description": "Claw marks score the walls at exactly the height of something that hunts in packs.",
+        "connections": [
+          "wrathflame_vault_evolved_hub",
+          "wrathflame_vault_evolved_b2_r1"
+        ],
+        "directions": {
+          "east": "wrathflame_vault_evolved_hub",
+          "west": "wrathflame_vault_evolved_b2_r1"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -3,
+          "y": -83
+        },
+        "monsters": [
+          "stray_wood_wolf",
+          "young_turning_stair_guardian"
+        ]
+      },
+      "wrathflame_vault_evolved_b2_r1": {
+        "name": "The Bound Loom",
+        "description": "A loom shackled to the wall, still weaving -- whoever built it clearly stopped trusting it at some point.",
+        "connections": [
+          "wrathflame_vault_evolved_b2_r0",
+          "wrathflame_vault_evolved_b2_r2"
+        ],
+        "directions": {
+          "east": "wrathflame_vault_evolved_b2_r0",
+          "west": "wrathflame_vault_evolved_b2_r2"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -4,
+          "y": -83
+        },
+        "monsters": [
+          "bound_loom_warden",
+          "stray_wood_wolf"
+        ]
+      },
+      "wrathflame_vault_evolved_b2_r2": {
+        "name": "The Choir Landing",
+        "description": "A stair landing gone quiet, the way a throat goes quiet right before it screams.",
+        "connections": [
+          "wrathflame_vault_evolved_b2_r1",
+          "wrathflame_vault_evolved_b2_r3"
+        ],
+        "directions": {
+          "east": "wrathflame_vault_evolved_b2_r1",
+          "west": "wrathflame_vault_evolved_b2_r3"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -5,
+          "y": -83
         },
         "monsters": [
           "bound_voiceless_warden"
         ]
       },
-      "wrathflame_vault_evolved_b1_r1": {
-        "name": "The Silent Choir's Hall",
-        "description": "Something here used to sing in unison. It still moves in unison -- it just doesn't have any sound left.",
-        "connections": [
-          "wrathflame_vault_evolved_b1_r0",
-          "wrathflame_vault_evolved_b1_r2"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "choir_remnant",
-          "pool_wrought_spider"
-        ]
-      },
-      "wrathflame_vault_evolved_b1_r2": {
-        "name": "The Loom Passage",
-        "description": "Threads of something not quite fabric span wall to wall, and whatever wove them is still tending the pattern.",
-        "connections": [
-          "wrathflame_vault_evolved_b1_r1",
-          "wrathflame_vault_evolved_b1_r3"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "loom_warden",
-          "voiceless_warden"
-        ]
-      },
-      "wrathflame_vault_evolved_b1_r3": {
-        "name": "The Farthest Warren Vent",
-        "description": "A tunnel bored in from somewhere else entirely, warmer at this end than it has any right to be.",
-        "connections": [
-          "wrathflame_vault_evolved_b1_r2"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "verge_wraith",
-          "warren_paymasters_scout"
-        ]
-      },
-      "wrathflame_vault_evolved_b2_r0": {
-        "name": "The Stilled Works",
-        "description": "Machinery that should have rusted solid centuries ago instead stands ready, waiting on a command no one alive gave it.",
-        "connections": [
-          "wrathflame_vault_evolved_hub",
-          "wrathflame_vault_evolved_b2_r1"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "still_machinery_sentinel"
-        ]
-      },
-      "wrathflame_vault_evolved_b2_r1": {
-        "name": "The Scout's Perch",
-        "description": "A lookout post someone built facing entirely the wrong direction, watching for a threat that already got past it.",
-        "connections": [
-          "wrathflame_vault_evolved_b2_r0"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "warren_paymasters_scout"
-        ]
-      },
       "wrathflame_vault_evolved_b3_r0": {
-        "name": "The Toll Landing",
-        "description": "A collection point for a toll no one living remembers agreeing to pay.",
+        "name": "The Young Choir's Hall",
+        "description": "Something here is still learning to sing in unison. It hasn't gotten there yet.",
         "connections": [
           "wrathflame_vault_evolved_hub",
           "wrathflame_vault_evolved_b3_r1"
         ],
-        "directions": {},
+        "directions": {
+          "west": "wrathflame_vault_evolved_hub",
+          "east": "wrathflame_vault_evolved_b3_r1"
+        },
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": 0
+          "x": -1,
+          "y": -83
         },
         "monsters": [
-          "the_toll_master",
-          "still_machinery_sentinel"
+          "young_choir_remnant",
+          "young_goblin"
         ]
       },
       "wrathflame_vault_evolved_b3_r1": {
-        "name": "The Bone Cairn Approach",
-        "description": "Old remains stacked with real care, a long time ago, by someone who is very much still keeping watch over them.",
+        "name": "The Vein Seam",
+        "description": "Raw metal veins run through the rock, and something's been picking at them for a very long time.",
         "connections": [
           "wrathflame_vault_evolved_b3_r0",
           "wrathflame_vault_evolved_b3_r2"
         ],
-        "directions": {},
+        "directions": {
+          "west": "wrathflame_vault_evolved_b3_r0",
+          "east": "wrathflame_vault_evolved_b3_r2"
+        },
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
           "x": 0,
-          "y": 0
+          "y": -83
         },
         "monsters": [
-          "bone_legionnaire",
-          "elder_hollow_watcher"
-        ]
-      },
-      "wrathflame_vault_evolved_b3_r2": {
-        "name": "The Crystalline Seam",
-        "description": "Veins of raw crystal run through the rock here, and something small and many-legged has made a home in every one of them.",
-        "connections": [
-          "wrathflame_vault_evolved_b3_r1"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "crystal_spiderling",
+          "young_choir_remnant",
           "the_vein_bound_picker"
         ]
       },
-      "wrathflame_vault_evolved_b4_r0": {
-        "name": "The Turning Stair",
-        "description": "A stairwell that spirals in a direction stairs shouldn't, guarded by something that clearly knows the difference.",
+      "wrathflame_vault_evolved_b3_r2": {
+        "name": "The Elder Seam",
+        "description": "The crystal here has grown large enough to have its own permanent tenant.",
         "connections": [
-          "wrathflame_vault_evolved_hub",
-          "wrathflame_vault_evolved_b4_r1"
+          "wrathflame_vault_evolved_b3_r1",
+          "wrathflame_vault_evolved_b3_r3"
         ],
-        "directions": {},
+        "directions": {
+          "west": "wrathflame_vault_evolved_b3_r1",
+          "east": "wrathflame_vault_evolved_b3_r3"
+        },
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": 0
+          "x": 1,
+          "y": -83
         },
         "monsters": [
-          "root_cavern_stalker",
-          "turning_stair_guardian"
+          "elder_crystal_spider",
+          "warren_ledger_keeper"
+        ]
+      },
+      "wrathflame_vault_evolved_b4_r0": {
+        "name": "The Vault Behind the Vault",
+        "description": "Past the sealed door, the air changes -- this was never part of the original vault at all.",
+        "connections": [
+          "wrathflame_vault_evolved_b4_r1",
+          "wrathflame_vault_evolved_hub"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_b4_r1"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -3,
+          "y": -95
+        },
+        "monsters": [
+          "the_vein_bound_picker",
+          "root_wrought_sentinel"
         ]
       },
       "wrathflame_vault_evolved_b4_r1": {
-        "name": "The Buried Cache",
-        "description": "A half-collapsed side-chamber -- a real cache still wedged into the rubble, and, further back, an old lever that looks like it leads somewhere useful.",
+        "name": "The Channel Cistern",
+        "description": "Runoff channels converge here, carrying heat, ash, and at least one very confused goblin down from somewhere above.",
         "connections": [
-          "wrathflame_vault_evolved_b4_r0"
+          "wrathflame_vault_evolved_b4_r0",
+          "wrathflame_vault_evolved_b4_r2"
         ],
-        "directions": {},
+        "directions": {
+          "north": "wrathflame_vault_evolved_b4_r0",
+          "south": "wrathflame_vault_evolved_b4_r2"
+        },
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": 0
+          "x": -3,
+          "y": -96
         },
         "monsters": [
-          "young_goblin",
-          "loom_warden"
+          "the_vein_bound_picker",
+          "channel_bound_goblin"
+        ]
+      },
+      "wrathflame_vault_evolved_b1_r2": {
+        "name": "The Still Pool Chamber",
+        "description": "Dark water sits perfectly motionless, disturbed only by whatever's living in it.",
+        "connections": [
+          "wrathflame_vault_evolved_b1_r1",
+          "wrathflame_vault_evolved_b1_r3"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_b1_r1",
+          "north": "wrathflame_vault_evolved_b1_r3"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -2,
+          "y": -80
+        },
+        "monsters": [
+          "pool_wrought_spider",
+          "still_machinery_sentinel"
+        ]
+      },
+      "wrathflame_vault_evolved_b4_r2": {
+        "name": "The Waking Ember's Chamber",
+        "description": "The heat here isn't ambient anymore. Something is generating it on purpose, and it's aware you've arrived.",
+        "connections": [
+          "wrathflame_vault_evolved_b4_r1"
+        ],
+        "directions": {
+          "north": "wrathflame_vault_evolved_b4_r1"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -3,
+          "y": -97
+        },
+        "monsters": [
+          "bone_legionnaire",
+          "elder_choir_remnant",
+          "the_waking_ember"
+        ]
+      },
+      "wrathflame_vault_evolved_b1_r3": {
+        "name": "The Toll Landing",
+        "description": "A collection point for a toll no one living remembers agreeing to pay.",
+        "connections": [
+          "wrathflame_vault_evolved_b1_r2"
+        ],
+        "directions": {
+          "south": "wrathflame_vault_evolved_b1_r2"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -2,
+          "y": -79
+        },
+        "monsters": [
+          "the_toll_master"
+        ]
+      },
+      "wrathflame_vault_evolved_b2_r3": {
+        "name": "The Buried Lever Nook",
+        "description": "A half-collapsed side-chamber -- an old lever wedged into the rubble looks like it leads somewhere useful.",
+        "connections": [
+          "wrathflame_vault_evolved_b2_r2"
+        ],
+        "directions": {
+          "east": "wrathflame_vault_evolved_b2_r2"
+        },
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": -6,
+          "y": -83
+        },
+        "monsters": [
+          "bone_legionnaire"
         ],
         "lockables": [
-          {
-            "id": "wrathflame_vault_evolved_cache_0",
-            "kind": "chest",
-            "name": "a real, half-buried cache",
-            "loot": {
-              "healing_potion": 2
-            },
-            "gold": 106
-          },
           {
             "id": "wrathflame_vault_evolved_shortcut_lever",
             "kind": "lever",
@@ -7158,168 +7322,35 @@
           "wrathflame_vault_evolved_hub": "wrathflame_vault_evolved_shortcut_lever"
         }
       },
-      "wrathflame_vault_evolved_b5_r0": {
-        "name": "The Bound Loom",
-        "description": "Another loom, this one shackled -- whoever built these clearly stopped trusting them at some point.",
+      "wrathflame_vault_evolved_b3_r3": {
+        "name": "The Ledger Vault",
+        "description": "A real cache, half-buried, guarded by whoever's still keeping the books on it.",
         "connections": [
-          "wrathflame_vault_evolved_hub",
-          "wrathflame_vault_evolved_b5_r1"
+          "wrathflame_vault_evolved_b3_r2"
         ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
+        "directions": {
+          "west": "wrathflame_vault_evolved_b3_r2"
         },
-        "monsters": [
-          "bound_loom_warden",
-          "warren_toll_collector"
-        ]
-      },
-      "wrathflame_vault_evolved_b5_r1": {
-        "name": "The Second Loom Hall",
-        "description": "Identical to the last loom hall in every way except the pattern it's weaving.",
-        "connections": [
-          "wrathflame_vault_evolved_b5_r0",
-          "wrathflame_vault_evolved_b5_r2"
-        ],
-        "directions": {},
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "loom_warden"
-        ]
-      },
-      "wrathflame_vault_evolved_b5_r2": {
-        "name": "The Channel Cistern",
-        "description": "Runoff channels converge here, carrying heat, ash, and at least one very confused goblin down from somewhere above.",
-        "connections": [
-          "wrathflame_vault_evolved_b5_r1"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "channel_bound_goblin"
-        ]
-      },
-      "wrathflame_vault_evolved_b6_r0": {
-        "name": "The Elder Seam",
-        "description": "The crystal here has grown large enough to have its own permanent tenant.",
-        "connections": [
-          "wrathflame_vault_evolved_hub",
-          "wrathflame_vault_evolved_b6_r1"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "elder_crystal_spider"
-        ]
-      },
-      "wrathflame_vault_evolved_b6_r1": {
-        "name": "The Watching Cairn",
-        "description": "A smaller cairn than the one above, tended just as carefully.",
-        "connections": [
-          "wrathflame_vault_evolved_b6_r0"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "young_cairn_watcher",
-          "warren_paymasters_scout"
-        ]
-      },
-      "wrathflame_vault_evolved_b7_r0": {
-        "name": "The Vault Behind the Vault",
-        "description": "Past the sealed door, the air changes -- this was never part of the original vault at all.",
-        "connections": [
-          "wrathflame_vault_evolved_b7_r1",
-          "wrathflame_vault_evolved_hub"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "the_idol_warden"
-        ]
-      },
-      "wrathflame_vault_evolved_b7_r1": {
-        "name": "The Lurker's Approach",
-        "description": "Something further in has been listening to every step since the door opened.",
-        "connections": [
-          "wrathflame_vault_evolved_b7_r0",
-          "wrathflame_vault_evolved_b7_r2"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "warren_toll_collector",
-          "warren_deep_lurker"
-        ]
-      },
-      "wrathflame_vault_evolved_b7_r2": {
-        "name": "The Last Stretch",
-        "description": "The tunnel narrows here, on purpose, so that whatever's ahead only ever has to face one of you at a time.",
-        "connections": [
-          "wrathflame_vault_evolved_b7_r1",
-          "wrathflame_vault_evolved_b7_r3"
-        ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
+          "x": 2,
+          "y": -83
         },
         "monsters": [
           "warren_paymasters_scout",
-          "den_bound_wolf"
-        ]
-      },
-      "wrathflame_vault_evolved_b7_r3": {
-        "name": "The Glyph's Own Chamber",
-        "description": "Carved floor to ceiling in a script no living scholar has ever translated -- and something is still actively adding to it.",
-        "connections": [
-          "wrathflame_vault_evolved_b7_r2"
+          "warren_ledger_keeper"
         ],
-        "directions": {},
-        "dungeon_id": "wrathflame_vault_evolved",
-        "dungeon_interior": true,
-        "grid_position": {
-          "x": 0,
-          "y": 0
-        },
-        "monsters": [
-          "bone_legionnaire",
-          "the_last_glyph"
+        "lockables": [
+          {
+            "id": "wrathflame_vault_evolved_cache_0",
+            "kind": "chest",
+            "name": "a real, half-buried cache",
+            "loot": {
+              "healing_potion": 1
+            },
+            "gold": 69
+          }
         ]
       }
     },

@@ -52,6 +52,23 @@ from rules.dungeon_audit import (
     add_room,
     connect,
 )
+from scripts import build_location_grid
+
+# The hub's own real, plain-`connections` lateral neighbor budget: one
+# edge back to the entrance (from the source dungeon) plus this many
+# generated branches. Real live bug (2026-09-01, found right after
+# shipping Wrathflame Vault Evolved): a room can only ever carry 4
+# real cardinal (N/S/E/W) neighbors on this game's actual minimap
+# (scripts/build_location_grid.py's own hard compass-grid limit) --
+# the shipped dungeon's hub fanned out to 6 non-boss branches at once
+# (7 total, the boss branch excluded since its own hub edge is
+# locked_connections-only and never counts as a lateral neighbor),
+# blowing that budget so several branches were reachable by text but
+# invisible on the map. 3 non-boss branches + 1 entrance edge = 4,
+# exactly the real limit -- matches real ALTTP hub design too, which
+# rarely fans out past 3-4 real branches. Room-count growth now comes
+# from LONGER branches, not more of them (see _generate_once below).
+_HUB_NON_BOSS_BRANCHES = 3
 
 
 def _harder_target_band(campaign: dict, source_dungeon_id: str, explicit_band: tuple[int, int] | None = None) -> tuple[int, int]:
@@ -146,7 +163,53 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         requires_rebirth_count=rebirth_gate,
     )
     room_ids.append(entrance_id)
+    # Deliberately UNHINTED -- the source dungeon's own hub can already
+    # have real, pre-existing neighbors (including vertical up/down
+    # delves, which also compete for the same 4 lateral compass slots;
+    # a real live case found testing this fix: Wrathflame Vault's own
+    # Ember Hall already has two "up"/"down" delves plus one more plain
+    # neighbor, filling 3 of its 4 slots before this new edge is even
+    # considered). Forcing a specific direction here fought the
+    # existing algorithm's own fallback instead of using it -- letting
+    # it fall into whichever real slot is actually free (or none, which
+    # is handled gracefully as a "no compass label" note, not a
+    # failure) is simpler and correct either way.
     connect(campaign, source_hub_id, entrance_id)
+
+    # Real, confirmed root cause found testing this fix: with the hub
+    # only 1 hop past the entrance (2 hops from the SOURCE dungeon's
+    # own hub), it can land close enough to the source hub's own
+    # nearby structure -- including vertical up/down delves, which
+    # also claim lateral compass cells -- that a completely unrelated,
+    # pre-existing room ends up occupying a cell this new hub actually
+    # needs. When that happens, an earlier-processed branch can then
+    # cascade into "stealing" a later branch's own intended slot via
+    # its own fallback search, leaving the last branch processed with
+    # zero real slots left at all -- not a rare edge case, reproduced
+    # on every seed tried against Wrathflame Vault. A short buffer
+    # corridor between entrance and hub pushes the hub's own 4-way
+    # fan-out far enough from the source dungeon's own local geometry
+    # that this becomes vanishingly unlikely -- each extra hop moves
+    # another real cell further away in whatever direction the BFS
+    # picks, and dungeon_audit's own checks don't care how many plain
+    # corridor rooms sit between two real locations.
+    # Random per-attempt length (not fixed) -- a busier source hub
+    # (e.g. Goblin Warrens', already at its own real 4-neighbor cap)
+    # can still need more distance than a quieter one before this
+    # dungeon's own fan-out clears its local geometry entirely; varying
+    # the buffer length gives evolve_dungeon's own retry loop a
+    # genuinely different attempt to try each time instead of
+    # deterministically failing the same way every retry.
+    buffer_tail = entrance_id
+    for i in range(rng.randint(4, 8)):
+        buffer_id = f"{new_dungeon_id}_approach_{i}"
+        add_room(
+            campaign, layer, new_dungeon_id, buffer_id, f"{display_name} -- Approach {i + 1}",
+            "The passage narrows here, still a long way from wherever it's actually going.",
+        )
+        room_ids.append(buffer_id)
+        connect(campaign, buffer_tail, buffer_id)
+        buffer_tail = buffer_id
 
     hub_id = f"{new_dungeon_id}_hub"
     add_room(
@@ -155,7 +218,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         dungeon_hub=True,
     )
     room_ids.append(hub_id)
-    connect(campaign, entrance_id, hub_id)
+    connect(campaign, buffer_tail, hub_id)
 
     trash_candidates = _candidate_monsters(campaign, target_band, boss=False)
     boss_candidates = _candidate_monsters(campaign, target_band, boss=True)
@@ -181,35 +244,116 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         best_level = max(level for _, level in leveled_bosses)
         boss_candidates = [key for key, level in leveled_bosses if level == best_level]
 
-    num_branches = rng.randint(3, 5)
-    branch_leaf_ids = []
-    total_rooms = 2  # entrance + hub
-    branch_idx = 0
-    while branch_idx < num_branches or total_rooms < min_rooms:
-        branch_idx += 1
-        branch_len = rng.randint(2, 4)
-        prev_id = hub_id
-        leaf_id = hub_id
-        for step in range(branch_len):
-            room_id = f"{new_dungeon_id}_b{branch_idx}_r{step}"
-            add_room(
-                campaign, layer, new_dungeon_id, room_id, f"{display_name} -- Chamber {branch_idx}-{step}",
-                "One more room this deep in, same as the last, except for what's waiting in it.",
-                monsters=rng.sample(trash_candidates, k=min(rng.randint(1, 2), len(trash_candidates))) if trash_candidates else [],
-            )
-            room_ids.append(room_id)
-            connect(campaign, prev_id, room_id)
-            prev_id = room_id
-            leaf_id = room_id
-            total_rooms += 1
-        branch_leaf_ids.append(leaf_id)
-        if branch_idx >= 12:
-            break  # safety valve, should never actually trigger
+    def _new_room(branch_idx: int, step: int) -> str:
+        room_id = f"{new_dungeon_id}_b{branch_idx}_r{step}"
+        add_room(
+            campaign, layer, new_dungeon_id, room_id, f"{display_name} -- Chamber {branch_idx}-{step}",
+            "One more room this deep in, same as the last, except for what's waiting in it.",
+            monsters=rng.sample(trash_candidates, k=min(rng.randint(1, 2), len(trash_candidates))) if trash_candidates else [],
+        )
+        room_ids.append(room_id)
+        return room_id
 
-    # Extra chest lockables at 1-2 random leaves -- comfortable
-    # lock_density padding regardless of final room count, real loot
-    # from items already known-good elsewhere in this same catalog.
-    chest_leaves = rng.sample(branch_leaf_ids, k=min(rng.randint(1, 2), len(branch_leaf_ids)))
+    # Fixed branch count (_HUB_NON_BOSS_BRANCHES + 1 boss branch) to
+    # stay inside the hub's real grid budget -- see that constant's own
+    # comment. Each non-boss branch also gets its OWN compass direction,
+    # held consistently for every room it's ever extended to -- a real
+    # second grid-conflict bug found testing this fix: with NO
+    # direction hint at all, build_location_grid's own BFS tries the
+    # same "north first" default for every brand-new room with no
+    # distinguishing hint, so a long, hint-less branch can wander and
+    # collide with a completely different branch's own cells several
+    # rooms out, even though the hub's own slot budget was already
+    # fixed. Radiating each branch outward on its own axis makes two
+    # branches colliding with EACH OTHER geometrically impossible.
+    #
+    # The 4 directions are RANDOMLY assigned per attempt (not a fixed
+    # order) rather than reserving one direction for the entrance edge
+    # up front -- a real live case found testing this fix: the source
+    # dungeon's own hub can already have pre-existing neighbors
+    # (including vertical up/down delves, which also compete for the
+    # same 4 lateral slots) landing the entrance-to-hub edge in an
+    # unpredictable direction relative to the source hub, which a FIXED
+    # branch layout could then collide with several rooms later once
+    # everything's placed relative to that same unpredictable origin.
+    # Random reshuffling means a failed attempt (caught by the
+    # grid-placement check in evolve_dungeon's own retry loop) tries a
+    # genuinely different geometry next time, instead of failing
+    # identically on every retry.
+    # Real, confirmed bug found testing this fix: the boss branch (the
+    # 4th) used to get a hardcoded "north" regardless of what the other
+    # 3 branches sampled -- since connect() blindly overwrites a
+    # direction rather than checking for a conflict, whichever branch
+    # ended up ALSO sampling "north" had its own hub-side hint silently
+    # clobbered by the boss branch's later connect() call (the boss
+    # branch is always generated last), corrupting that branch's own
+    # placement data before build_location_grid ever saw it. All 4
+    # directions are shuffled together so every branch (boss included)
+    # gets a real, distinct one -- the boss branch's hub edge still
+    # gets removed from `connections` below regardless, so this is only
+    # about keeping the intermediate `directions` data honest, not
+    # about the boss branch's own final grid placement (it becomes a
+    # separate island either way).
+    num_branches = _HUB_NON_BOSS_BRANCHES + 1
+    branch_directions = rng.sample(["north", "south", "east", "west"], num_branches)
+    total_rooms = 2  # entrance + hub
+    branches = []  # [{"idx", "tail_id", "next_step", "direction"}, ...] -- tracks each branch's own growing tail
+    for branch_idx in range(1, num_branches + 1):
+        direction = branch_directions[branch_idx - 1]
+        branch_len = rng.randint(2, 4)
+        tail_id = hub_id
+        for step in range(branch_len):
+            new_room_id = _new_room(branch_idx, step)
+            connect(campaign, tail_id, new_room_id, direction=direction)
+            tail_id = new_room_id
+            total_rooms += 1
+        branches.append({"idx": branch_idx, "tail_id": tail_id, "next_step": branch_len, "direction": direction})
+
+    # Room-count growth now comes from EXTENDING existing branches'
+    # own tails further, not from adding more branches (that's exactly
+    # what caused the grid-overflow bug this fix addresses) -- each
+    # extension keeps walking the SAME fixed direction as the rest of
+    # its own branch, for the same collision-avoidance reason above.
+    # Always extends the CURRENTLY SHORTEST branch (not a uniform
+    # random pick) -- keeps growth spread evenly across all 4 rather
+    # than risking one branch getting unluckily long. A real, separate
+    # grid-conflict case found testing this fix: a long enough straight
+    # branch can wander far enough from the hub to cross back into the
+    # SOURCE dungeon's own pre-existing room layout (Wrathflame Vault's
+    # real 13 rooms occupy real cells too, in whatever shape it was
+    # originally authored in) -- even distribution keeps every branch
+    # shorter and closer to the hub, minimizing that reach.
+    while total_rooms < min_rooms:
+        b = min(branches, key=lambda x: x["next_step"])
+        new_tail = _new_room(b["idx"], b["next_step"])
+        connect(campaign, b["tail_id"], new_tail, direction=b["direction"])
+        b["tail_id"] = new_tail
+        b["next_step"] += 1
+        total_rooms += 1
+
+    branch_idx = num_branches  # the last branch generated is always the boss branch, same convention as before
+    branch_leaf_ids = [b["tail_id"] for b in branches]
+
+    # Extra chest lockables -- comfortable lock_density padding, real
+    # loot from items already known-good elsewhere in this same
+    # catalog. Real bug found testing this fix: a fixed 1-2 chests was
+    # only ever enough for a Wrathflame-Vault-sized dungeon (~20 rooms,
+    # needing 2-3 real lockables); a larger source like Goblin Warrens
+    # can push the generated room count past 40, where
+    # check_lock_density's own room_count // 8 floor genuinely needs
+    # more than a fixed small range can provide. Scales with the real
+    # final room count instead, sampling from every non-hub/entrance/
+    # buffer room (not just the 4 branch leaves, which can't supply
+    # more than 4 unique picks on their own once a larger dungeon needs
+    # more chests than that).
+    # len(room_ids), not total_rooms -- total_rooms only tracks
+    # entrance+hub+branches, but check_lock_density's own room_count
+    # counts every room tagged with this dungeon_id, buffer corridor
+    # rooms included.
+    lock_floor = max(1, len(room_ids) // 8)
+    chests_needed = max(rng.randint(1, 2), lock_floor - 1)  # -1 for the guaranteed lever; the boss door is added below
+    chest_pool = [rid for rid in room_ids if rid not in (entrance_id, hub_id) and "_approach_" not in rid]
+    chest_leaves = rng.sample(chest_pool, k=min(chests_needed, len(chest_pool)))
     for i, leaf_id in enumerate(chest_leaves):
         _, leaf_room = _find_room(campaign, leaf_id)
         leaf_room.setdefault("lockables", []).append({
@@ -304,15 +448,44 @@ def evolve_dungeon(
         summary = _generate_once(
             trial, source_hub_id, source_layer, new_dungeon_id, layer, rebirth_gate, target_band, min_rooms, rng, display_name,
         )
+
+        # Real grid coordinates, not add_room's own {"x":0,"y":0} default
+        # (the actual root cause of the map-conflict bug this fix
+        # addresses) -- reuses the same authoritative, already-tested
+        # BFS-over-connections logic scripts/build_location_grid.py's
+        # own --apply uses campaign-wide, so a generated room's
+        # placement is computed with full awareness of its real
+        # neighbors, not invented separately here. Only WRITES BACK the
+        # entries for this dungeon's own new rooms (plus the source
+        # hub, whose own connections list gained the new entrance edge)
+        # -- deliberately does NOT bundle in any of this layer's other
+        # pre-existing direction/position fixes the same BFS would also
+        # compute, to keep an evolve's diff scoped to what it actually
+        # generated. If any new room genuinely can't be grid-placed
+        # (the compass-grid equivalent of "no free cardinal slot" /
+        # "genuinely disconnected"), that's treated exactly like any
+        # other check failure below -- discarded and retried.
+        grid_results, _grid_notes = build_location_grid.build_layer(layer, trial["locations"][layer])
+        grid_ok = all("grid_position" in grid_results.get(rid, {}) for rid in summary["room_ids"])
+        if grid_ok:
+            for room_id in summary["room_ids"]:
+                trial["locations"][layer][room_id]["grid_position"] = grid_results[room_id]["grid_position"]
+                trial["locations"][layer][room_id]["directions"] = grid_results[room_id]["directions"]
+            if source_layer == layer:
+                trial["locations"][layer][source_hub_id]["directions"] = grid_results[source_hub_id]["directions"]
+
         failures = dungeon_audit.audit_dungeon(trial, new_dungeon_id)
-        if all(not f for f in failures.values()):
+        if grid_ok and all(not f for f in failures.values()):
             for room_id in summary["room_ids"]:
                 campaign["locations"][layer][room_id] = trial["locations"][layer][room_id]
             campaign["locations"][source_layer][source_hub_id] = trial["locations"][source_layer][source_hub_id]
             if new_dungeon_id not in campaign.setdefault("evolved_dungeon_ids", []):
                 campaign["evolved_dungeon_ids"].append(new_dungeon_id)
             return summary
-        last_failures = failures
+        last_failures = dict(failures)
+        if not grid_ok:
+            unplaced = [rid for rid in summary["room_ids"] if "grid_position" not in grid_results.get(rid, {})]
+            last_failures["grid_placement"] = [f"{rid!r} could not be placed on the compass grid" for rid in unplaced]
     raise RuntimeError(
         f"evolve_dungeon: could not generate a valid {new_dungeon_id!r} in {max_retries} attempts; "
         f"last failures: {last_failures}"

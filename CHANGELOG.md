@@ -2,6 +2,57 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.449] — fix: evolved dungeon rooms could conflict on the real map
+
+Real live report (2026-09-01, Coffee, right after Wrathflame Vault,
+Unbound Deeper shipped: "make sure the maps and coordinates match on
+the map generations, make sure there are no conflictions"). Confirmed
+real, on two counts:
+
+1. `rules/dungeon_evolve.py`'s `_generate_once` never set a real
+   `grid_position` for any generated room, so every one of them
+   defaulted to `{"x":0,"y":0}` — the shipped Wrathflame Vault Evolved's
+   22 rooms all overlapped at one map cell, colliding with every other
+   zone's own origin too.
+2. Running the existing, authoritative `scripts/build_location_grid.py`
+   confirmed a second, related problem: a room can only ever carry 4
+   real cardinal (N/S/E/W) neighbors on this game's actual minimap, but
+   the generator's hub could fan out to 6+ branches at once — several
+   ended up reachable by text but invisible on the map.
+
+Both fixed in `rules/dungeon_evolve.py`: the hub's fan-out is capped at
+3 non-boss branches (matching the map's real 4-slot budget, entrance
+included), room-count growth now comes from extending branches rather
+than adding more of them, each branch holds a real, randomly-assigned
+compass direction so two branches can never collide with each other,
+and `evolve_dungeon` now calls the same real
+`scripts/build_location_grid.build_layer(...)` Coffee's own
+map-consistency tool already uses to assign every new room's actual
+coordinates — retrying (fresh RNG) if any room genuinely can't be
+placed cleanly.
+
+Two deeper root causes only surfaced under real, repeated testing
+against multiple source dungeons: a hub only 2 hops from a busy source
+dungeon's own hub can land close enough to that dungeon's own nearby
+structure (including vertical up/down delves, which also compete for
+compass slots) that an unrelated pre-existing room ends up occupying a
+cell the new hub actually needs — fixed with a short, randomly-sized
+buffer corridor between the entrance and the new hub. Separately, a
+larger source dungeon (Goblin Warrens, 40+ generated rooms) exposed a
+real lock-density shortfall: the fixed 1-2 bonus chests were only ever
+enough for a Wrathflame-Vault-sized dungeon — chest count now scales
+with the real final room count instead.
+
+Wrathflame Vault, Unbound Deeper was regenerated fresh with the fixed
+code (same real checks, zero map conflicts this time) and its flavor
+text hand-polished again.
+
+Tested: 150 real generations across 3 different source dungeons and
+seeds with zero grid conflicts (confirmed via the real
+`build_location_grid` tool, not just the structural checker), plus 4
+new regression tests guarding this specific class of bug going
+forward, including one against the actual shipped campaign.json data.
+
 ## [1.27.448] — feature: Phase 3 dungeon evolve pass, first real evolved dungeon
 
 Real request (2026-09-01, Coffee: "start phase 3" -- the RNG-driven
