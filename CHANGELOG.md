@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.445] — feature: unlocked paths now stay open in "look around" forever
+
+Real live feature request (2026-09-01, Coffee: "if we gain access to a
+path or doorway show it in the travelable locations in pop up buttons
+later so we can do that way later on without having to perform the
+action again"). v1.27.437 already showed a one-time travel button
+right after a successful unlock, but that was it — a LATER "look
+around" at the same room never surfaced that path again, even though
+the game already correctly remembered it was open (`_UNLOCKED`). The
+"look around" travel-button builder only ever read a location's plain
+`connections` list; a lockable's `locked_connections` entry is
+deliberately never added there until unlocked, and nothing ever
+promoted it afterward.
+
+`_look_action_keyboard` now also takes the chat's ID and folds in any
+`locked_connections` destination whose lockable is already in
+`_UNLOCKED` for this chat, using the exact same direction/emoji/label
+logic ordinary connections already get — permanently, no re-unlocking,
+no re-performing the action, ever again. Per-chat, same as every other
+piece of unlock state in this game.
+
+Tested: real fail-then-pass repro at the Wrathflame Vault cinder-key
+alcove's own shortcut lever — before pulling it, "look around" shows
+no button to the Ember Hall; after, it does, on every subsequent call;
+a second chat that never pulled the lever still sees nothing. No
+regressions in the existing directional-emoji/fallback/immediate-
+unlock-button tests.
+
 ## [1.27.444] — fix: skill-check narration could invent the wrong die type
 
 Real live report (2026-09-01, dev-bridge screenshot, Charvenna: "This

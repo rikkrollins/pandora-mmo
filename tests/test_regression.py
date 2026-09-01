@@ -5971,6 +5971,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_lockpick(FakeUpdate(960212, "pick the lock", sink3, chat_id=chat_id3), character3, dict(chest), "pick the lock", forced_roll=20)
         self.assertIn(chest["id"], bot._UNLOCKED.get(chat_id3, set()))
 
+    async def test_unlocked_path_permanently_joins_the_look_around_travel_buttons(self):
+        """
+        Real live feature request (2026-09-01, Coffee: "if we gain
+        access to a path or doorway show it in the travelable
+        locations in pop up buttons later so we can do that way later
+        on without having to perform the action again"). The one-time
+        button shown right after a successful unlock (see
+        test_successful_unlock_shows_an_immediate_travel_button_to_the_
+        newly_open_path above) doesn't help on a LATER "look around" --
+        this confirms the destination now shows up there too, forever,
+        once genuinely unlocked, and never before.
+        """
+        alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
+        lever = alcove["lockables"][0]
+        chat_id = -960213
+        character = make_basic_character(960213, "PermanentButtonTester", chat_id=chat_id, current_location="wrathflame_vault_cinder_key_alcove")
+
+        kb_before = bot._look_action_keyboard(alcove, [], chat_id)
+        before_datas = [btn.callback_data for row in kb_before.inline_keyboard for btn in row] if kb_before else []
+        self.assertNotIn("travel|go|wrathflame_vault_ember_hall", before_datas, "the lever hasn't been pulled yet -- no button")
+
+        sink = []
+        await bot._do_lockpick(FakeUpdate(960213, "pull the lever", sink, chat_id=chat_id), character, dict(lever), "pull the lever")
+
+        kb_after = bot._look_action_keyboard(alcove, [], chat_id)
+        after_datas = [btn.callback_data for row in kb_after.inline_keyboard for btn in row]
+        self.assertIn("travel|go|wrathflame_vault_ember_hall", after_datas, "once genuinely unlocked, the path must show up on every future look-around, not just the one-time post-unlock button")
+
+        # Another chat that never pulled this lever must still see nothing -- this is real per-chat state, not global.
+        other_chat_kb = bot._look_action_keyboard(alcove, [], -960214)
+        other_datas = [btn.callback_data for row in other_chat_kb.inline_keyboard for btn in row] if other_chat_kb else []
+        self.assertNotIn("travel|go|wrathflame_vault_ember_hall", other_datas)
+
     async def test_blocked_lever_connection_tells_the_player_to_pull_not_pick(self):
         """
         Real live bug (2026-08-31, dev-bridge: "I picked the lock
@@ -30558,7 +30591,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         direct read of campaign.json's own "directions" dict.
         """
         location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
-        kb = bot._look_action_keyboard(location, [])
+        kb = bot._look_action_keyboard(location, [], 999999)
         labels_by_data = {btn.callback_data: btn.text for row in kb.inline_keyboard for btn in row}
         self.assertEqual(labels_by_data["travel|go|market_row"][:2], "⬆️")
         self.assertEqual(labels_by_data["travel|go|stonearch_bridge"][:2], "⬇️")
@@ -30572,7 +30605,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         real_location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
         stripped = dict(real_location)
         stripped["directions"] = {}
-        kb = bot._look_action_keyboard(stripped, [])
+        kb = bot._look_action_keyboard(stripped, [], 999999)
         labels = [btn.text for row in kb.inline_keyboard for btn in row]
         self.assertTrue(any(label.startswith("🚶") for label in labels))
         self.assertFalse(any(label.startswith(("⬆️", "⬇️", "➡️", "⬅️", "🔼", "🔽")) for label in labels))

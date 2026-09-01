@@ -20881,7 +20881,7 @@ _DIRECTION_EMOJI = {
 }
 
 
-def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> InlineKeyboardMarkup | None:
+def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id: int) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-21): "when u look around put pop up options for
     areas u have already traveled to so they can tap ... (use fog of
@@ -20904,6 +20904,20 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> Inlin
     call, no extra state), which is why these two specifically and not
     also a "talk to X" button per NPC present -- talking is its own
     real conversation, not a single obvious tap target.
+
+    Extended again (2026-09-01, per Coffee: "if we gain access to a
+    path or doorway show it in the travelable locations in pop up
+    buttons later so we can do that way later on without having to
+    perform the action again"). _travel_button_for_unlocked_
+    destination already shows a one-time button right after a
+    successful unlock, but a LATER "look around" never surfaced that
+    same path again -- this function only ever read plain
+    `connections`, and a locked_connections destination is deliberately
+    never added there (see add_lever_shortcut/add_key_gate's own
+    docstrings). Once a lockable is genuinely in `_UNLOCKED` for this
+    chat, its destination now joins the ordinary travel rows below,
+    permanently, same as any other connection -- no re-unlocking, no
+    re-performing the action, ever again.
     """
     rows = []
     if location.get("shop"):
@@ -20917,7 +20931,14 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list) -> Inlin
     if location.get("id") == "hollow_stump_shrine":
         rows.append([InlineKeyboardButton("🕯️ Pray at the Shrine", callback_data="lookact|pray")])
 
-    connections = location.get("connections", [])
+    unlocked_here = _chat_scoped_set(_UNLOCKED, chat_id)
+    already_unlocked_dests = {
+        dest_id for dest_id, lockable_id in location.get("locked_connections", {}).items()
+        if lockable_id in unlocked_here
+    }
+    connections = list(location.get("connections", [])) + [
+        d for d in already_unlocked_dests if d not in location.get("connections", [])
+    ]
     direction_for_dest = {dest: word for word, dest in location.get("directions", {}).items()}
     for dest_id in connections:
         dest = cl.get_location(CAMPAIGN, dest_id)
@@ -21949,7 +21970,7 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     if unclaimed_board_quests:
         lines.append("📋 There's a bounty posted on the board here — say \"check quests\" to see it.")
 
-    return lines, _look_action_keyboard(location, unclaimed_board_quests)
+    return lines, _look_action_keyboard(location, unclaimed_board_quests, chat_id)
 
 
 async def _do_check_weather(update: Update) -> None:
