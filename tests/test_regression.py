@@ -31412,6 +31412,34 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(hits, 0, "expected at least one switch-gated evolve across 20 real seeds")
         self.assertLess(hits, 20, "expected at least one evolve WITHOUT a switch across 20 real seeds -- it should be a real fraction, not every time")
 
+    def test_evolve_dungeon_sometimes_places_a_real_remote_torch_gate(self):
+        """
+        Real remote-gate mechanic (2026-09-01, per Coffee: "lighting a
+        torch here opens a gate somewhere else"). Confirmed via the
+        real data shape, not just that a switch exists: the torch's own
+        `lockables` entry must live in a DIFFERENT room than whichever
+        room's `locked_connections` references it -- already supported
+        by the existing data model, dungeon_audit.py's own checks don't
+        need to know or care. Statistical across real seeds, same
+        discipline as the plain switch-gate test above.
+        """
+        import copy
+        remote_hits = 0
+        for seed in range(40):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_torch_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            switch_room_by_id = {
+                lk["id"]: rid for rid, r in rooms.items() for lk in r.get("lockables", []) if lk.get("kind") == "switch"
+            }
+            for rid, room in rooms.items():
+                for lockable_id in room.get("locked_connections", {}).values():
+                    if lockable_id in switch_room_by_id and switch_room_by_id[lockable_id] != rid:
+                        remote_hits += 1
+        self.assertGreater(remote_hits, 0, "expected at least one real remote torch gate across 40 real seeds")
+
     def test_evolve_dungeon_monsters_fall_inside_the_resolved_target_band(self):
         import copy
         campaign = copy.deepcopy(bot.CAMPAIGN)

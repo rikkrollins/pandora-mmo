@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.451] — feature: real remote torch gates in the evolve pass
+
+Follow-up to v1.27.450 (per Coffee: "lighting a torch here opens a
+gate somewhere else"). The generator's own switch-gate branches can
+now be a torch whose real `lockables` definition lives in a different
+room than the door it gates -- already-supported by the existing data
+model, just not wired into the RNG generator until now.
+
+Real bug found writing this test: torch flavor was originally gated
+behind "element happens to roll fire (10%) AND a second 50% coin
+flip," making the whole feature (and the remote-gate roll on top of
+it) so rare that a real 40-seed test could -- and did -- observe zero
+occurrences. Torch/crystal flavor is now its own direct 50/50 roll,
+not a rare compound one, so the mechanic actually shows up in
+practice at the rate it was designed to.
+
+Tested: statistical test across real seeds confirms a real remote
+gate (lockable definition and its locked_connections reference living
+in two different rooms) shows up reliably; full existing suite (40
+tests) still passes.
+
 ## [1.27.450] — feature: new ALTTP-style dungeon mechanics (Phase 4, Parts B+C)
 
 Real request (2026-09-01, Coffee, after a long research + design

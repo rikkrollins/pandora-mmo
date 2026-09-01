@@ -352,13 +352,45 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         hub_room_for_switch["connections"].remove(switch_branch_first_id)
         switch_gate_far_room["connections"].remove(hub_id)
         switch_gate_far_room.setdefault("connections", []).append(hub_id)
-        element = rng.choice(["fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical"])
         switch_id = f"{new_dungeon_id}_switch_{switch_branch['idx']}"
-        # A fire switch is sometimes flavored as a torch/brazier instead
-        # of a crystal -- same mechanic either way (kind="switch",
-        # element="fire"), purely cosmetic naming.
-        switch_name = "a lit brazier" if element == "fire" and rng.random() < 0.5 else f"a {element} crystal"
-        hub_room_for_switch.setdefault("lockables", []).append({"id": switch_id, "kind": "switch", "name": switch_name, "element": element})
+        # Torch/brazier flavor is its OWN real 50/50 roll, not a rare
+        # "fire AND also a coin flip" combination -- a real bug found
+        # testing this fix: the original "element==fire (10%) AND a
+        # second 50% roll" chain made torches (and therefore remote
+        # gates, scoped to torches below) so rare that 40 real seeds
+        # could easily -- and did -- produce zero, not because the
+        # mechanic was broken, just because the odds of ever observing
+        # it were far lower than intended.
+        is_torch = rng.random() < 0.5
+        element = "fire" if is_torch else rng.choice(["cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical"])
+        switch_name = "a lit brazier" if is_torch else f"a {element} crystal"
+        switch_lockable = {"id": switch_id, "kind": "switch", "name": switch_name, "element": element}
+
+        # Real remote gate (2026-09-01, per Coffee: "lighting a torch
+        # here opens a gate somewhere else"). Scoped to torches
+        # specifically, matching how he described it -- ~40% of the
+        # time a torch is placed at all, its own definition goes in a
+        # DIFFERENT room entirely (any room along a different,
+        # unrelated non-boss/non-gated branch), while the
+        # locked_connections entry gating the actual path stays on the
+        # hub, same as always. Already supported by the existing data
+        # model (a locked_connections entry only ever needs the
+        # lockable's OWN id, never requires it live in the same room)
+        # and confirmed harmless to dungeon_audit.py's own checks:
+        # check_no_self_referential_lock only ever looks up a SAME-room
+        # lockable for a requires_key_item gate, which a switch never
+        # has, so a remote placement is simply invisible to it, not a
+        # violation.
+        remote_candidates = [
+            rid for b in branches if b["idx"] not in (branch_idx, switch_branch["idx"])
+            for rid in [f"{new_dungeon_id}_b{b['idx']}_r{step}" for step in range(b["next_step"])]
+        ]
+        if is_torch and remote_candidates and rng.random() < 0.4:
+            host_room_id = rng.choice(remote_candidates)
+            _, host_room = _find_room(campaign, host_room_id)
+            host_room.setdefault("lockables", []).append(switch_lockable)
+        else:
+            hub_room_for_switch.setdefault("lockables", []).append(switch_lockable)
         hub_room_for_switch.setdefault("locked_connections", {})[switch_branch_first_id] = switch_id
 
     # Extra chest lockables -- comfortable lock_density padding, real
