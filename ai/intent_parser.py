@@ -2051,6 +2051,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\bopen(?:ing|ed)?\b.*\b(?:door|gate|lock)\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
 
+    # Real live bug (2026-09-01, dev-bridge screenshots: Sugar's "Pull
+    # the lever" and Charvenna's "Pull the thick root lever" -- Deep
+    # Root Vault's own room text literally reads "A thick root lever is
+    # here, waiting to be pulled" -- both got total silence, reported
+    # as "why isn't this working, why so slow"). Same exact gap as the
+    # "open the door/gate" fix just above, just never generalized to
+    # the lever kind: "pull" is the single most natural verb for a
+    # lever (the room's own generated description uses the word
+    # "pulled"), but nothing routed it to skill_check at all, so it
+    # fell all the way through to the silent "chat" default -- not a
+    # performance issue, a real routing gap. _find_lockable's own kind_
+    # words for a lever already include "lever"/"switch", so this only
+    # needs to get the player INTO _do_skill_check in the first place.
+    if re.search(r"\bpull(?:ing|ed)?\b.*\b(?:lever|switch)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
     # Real live feature request (2026-08-31, dev-bridge, Elduinn: "I
     # don't know if this area has a lever but if it doesn't, you should
     # tell us"). A genuine QUESTION about whether a lockable exists here

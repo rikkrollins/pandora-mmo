@@ -4340,6 +4340,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result = _keyword_fallback("open the chest", [])
         self.assertEqual(result["action"], "examine")
 
+    def test_pull_the_lever_routes_to_a_real_lockpick_attempt_not_silence(self):
+        """
+        Real live bug (2026-09-01, dev-bridge screenshots: Sugar's
+        "Pull the lever" and Charvenna's "Pull the thick root lever" --
+        the exact room text says "A thick root lever is here, waiting
+        to be pulled" -- got total silence, reported live as "why
+        isn't this working, why is it so slow today"). Same exact gap
+        class as the "open the door/gate" fix above, just never
+        generalized to the lever kind: "pull" is the single most
+        natural verb for a lever, but nothing ever routed it to
+        skill_check, so it fell all the way through to the silent
+        "chat" default.
+        """
+        for phrase in ("Pull the lever", "Pull the thick root lever", "pulling the switch", "I pull this lever"):
+            result = _keyword_fallback(phrase, [])
+            self.assertEqual(result["action"], "skill_check", f"{phrase!r} misclassified as {result['action']!r}")
+            self.assertEqual(result["ability"], "dexterity")
+
     def test_asking_about_a_lockable_routes_to_examine_not_the_model(self):
         """
         Real live feature request (2026-08-31, dev-bridge, Elduinn: "I
@@ -13310,6 +13328,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_lockpick(FakeUpdate(960102, "pull the lever", sink), character, dict(lockable), "pull the lever", forced_roll=1)
         self.assertIn("test_shortcut_lever", bot._UNLOCKED.get(-999, set()))
         self.assertTrue(any("way back" in s.lower() for s in sink), sink)
+
+    async def test_pulling_the_deep_root_vault_lever_end_to_end_gives_a_discrete_sound_cue(self):
+        """
+        Real live repro (2026-09-01, dev-bridge screenshots): Sugar and
+        Charvenna both typed the exact room-echoed phrase ("pull the
+        lever" / "pull the thick root lever") at Deep Root Vault's own
+        "The Last Seed" and got total silence -- the intent-routing gap
+        fixed just above, exercised here end to end through the real
+        location's own real lockable, plus the new atmospheric sound
+        cue Coffee asked for right after: "if it worked tell the user.
+        maybe be discrete 'You hear a tick sound in a far off room'."
+        """
+        chat_id = -960230
+        character = make_basic_character(960230, "RealLeverTester", chat_id=chat_id, current_location="deep_root_vault_last_seed")
+        sink = []
+        await bot._do_skill_check(FakeUpdate(960230, "Pull the thick root lever", sink, chat_id=chat_id), "dexterity", "Pull the thick root lever")
+        self.assertIn("deep_root_vault_hub_shortcut", bot._UNLOCKED.get(chat_id, set()))
+        self.assertTrue(any("distant tick echoes" in s for s in sink), sink)
 
     def test_reveal_dungeon_teaser_writes_exactly_the_given_room_ids_once(self):
         """The 'visual tease' beat: a hub-entry reveal targets specific real room ids, not a random layer-wide pick, and never re-adds an id already visited or already revealed."""

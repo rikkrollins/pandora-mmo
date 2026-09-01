@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.443] — fix: "pull the lever" was total silence, not slowness
+
+Real live incident (2026-09-01, dev-bridge screenshots, reported live
+as "why isn't this working, why is it so slow today"): Sugar and
+Charvenna both typed the exact phrase Deep Root Vault's own room text
+uses ("A thick root lever is here, waiting to be pulled") — "Pull the
+lever" / "Pull the thick root lever" — and got total silence. Not a
+performance problem: the bot and Ollama were both healthy and
+responsive the whole time. The real cause was a routing gap in the
+intent parser — the v1.27.431 fix that taught "open the door/gate" to
+reach the real lockpick check was never generalized to "pull the
+lever," the single most natural verb for the lever kind specifically
+(and the literal word the room's own generated text uses). With no
+route to `skill_check`, it fell all the way through to the silent
+"chat" default — indistinguishable, from the player's side, from the
+bot being unresponsive.
+
+Also added the discrete confirmation Coffee asked for right after
+finding this: a real lever pull now reads "a distant tick echoes
+through the vault" alongside the existing "a way back just opened"
+line, instead of a flat status message.
+
+Tested: real fail-then-pass repros for the exact reported phrases and
+a full end-to-end pull at Deep Root Vault's real "The Last Seed"
+location, confirming both the routing and the new sound cue. Full
+lockpick/lockable/find_lockable/blocked/pull slice re-run clean
+(33/33); confirmed the existing formation "pull X back" mechanic
+(unrelated, checked earlier in the same function) has zero collision
+with this fix.
+
 ## [1.27.442] — feature: a real uploaded animation for The Root That Remembers' summon
 
 Real request (2026-08-31, Coffee, dev-bridge): sent a real GIF and

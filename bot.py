@@ -11320,8 +11320,13 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
 
     if lockable.get("kind") == "lever":
         _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        # Discrete atmospheric confirmation (2026-09-01, per Coffee,
+        # right after the "pull the lever" routing fix: "if it worked
+        # tell the user. maybe be discrete 'You hear a tick sound in a
+        # far off room/location'") -- a real mechanism change deserves
+        # a real, felt sound cue, not just a flat status line.
         await update.effective_chat.send_message(
-            f"🔧 **{character['name']}** pulls {lockable['name'].lower()} — somewhere behind you, a way back just opened.",
+            f"🔧 **{character['name']}** pulls {lockable['name'].lower()} — a distant tick echoes through the vault; somewhere behind you, a way back just opened.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]),
         )
