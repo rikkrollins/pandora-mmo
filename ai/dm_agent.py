@@ -209,7 +209,19 @@ def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
         f"Character: {character.get('name')} ({character.get('char_class')})\n"
         f"{_pronoun_line(character)}\n\n"
         f"Attempted action: {action_text}\n"
-        f"Ability used: {ability.title()}\n\n"
+        f"Ability used: {ability.title()}\n"
+        # Real live bug (2026-09-01, dev-bridge screenshot): a failed
+        # gather check's narration read "The d12 whispers 4," despite
+        # the preamble already saying "the actual raw d20 number" --
+        # the SAME model, on the very next roll (a success), correctly
+        # said "d20." The general prose instruction alone wasn't a
+        # reliable enough guardrail for this model to never invent a
+        # wrong die type; every ability check in this game is a d20,
+        # full stop, so it's restated here as its own isolated, hard
+        # fact line -- same "Known real fact" pattern grounded_fact
+        # already uses for a search/perception check's own discovery.
+        f"Known real fact: this is a d20 roll. It is never a d12, d10, d8, "
+        f"d6, or any other die -- do not call it anything but a d20.\n\n"
         f"Mechanical result (already decided, narrate faithfully): {mechanical_result}\n\n"
         f"{fact_line}"
         f"Tone guidance for this specific roll: {drama}\n\n"

@@ -5056,6 +5056,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         call_args = mock_narrate.call_args.args
         self.assertIn("Pickaxe", call_args[-1])
 
+    def test_skill_check_prompt_always_states_the_die_type_is_a_d20(self):
+        """
+        Real live bug (2026-09-01, dev-bridge screenshot): a failed
+        gather check's narration read "The d12 whispers 4," despite the
+        preamble already saying "the actual raw d20 number" in prose --
+        the same model correctly said "d20" on its very next roll, a
+        real success. The general instruction alone isn't a reliable
+        enough guardrail for this model, so it's restated as its own
+        isolated, hard "Known real fact" line -- present on every
+        skill-check prompt, not just when a grounded_fact happens to be
+        given.
+        """
+        import ai.dm_agent as dm_agent_module
+        character = {"name": "Charvenna", "char_class": "Druid"}
+        prompt = dm_agent_module._build_skill_check_prompt(
+            character, "gather bitter-root herbs", "wisdom",
+            {"raw_roll": 4, "total": 8, "dc": 13, "success": False},
+        )
+        self.assertIn("Known real fact: this is a d20 roll", prompt)
+        self.assertIn("never a d12", prompt)
+
     def test_gathering_tools_stocked_at_marens_wares(self):
         shop = bot.CAMPAIGN["shops"]["marens_wares"]
         for tool_id in ("fishing_pole", "bait", "woodcutters_axe", "pickaxe", "shears"):

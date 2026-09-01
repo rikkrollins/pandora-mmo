@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.444] — fix: skill-check narration could invent the wrong die type
+
+Real live report (2026-09-01, dev-bridge screenshot, Charvenna: "This
+is not right"): a failed gather check's narration read "The d12
+whispers 4," despite this game only ever using a d20 for every
+ability check — and despite the exact same model correctly saying
+"d20" on its very next roll, a real success moments later. The
+preamble already said "mention the actual raw d20 number" in prose,
+but that alone wasn't a reliable enough guardrail for this small local
+model to never invent a different die.
+
+Restated as its own isolated, hard "Known real fact" line on every
+skill-check prompt — same pattern `grounded_fact` already uses for a
+search/perception check's own real discovery, just always present
+instead of conditional. Scoped to `_build_skill_check_prompt`
+specifically (where the real bug was observed); combat narration's own
+prompt already has a similar instruction and no reported issue, so
+left untouched rather than speculatively changed.
+
+Tested: real fail-then-pass repro confirms the fact line is present on
+every built prompt, not just when a grounded_fact happens to be given.
+
 ## [1.27.443] — fix: "pull the lever" was total silence, not slowness
 
 Real live incident (2026-09-01, dev-bridge screenshots, reported live
