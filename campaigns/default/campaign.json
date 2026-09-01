@@ -6091,8 +6091,7 @@
           "up": "greymoor_downs_the_sunken_stair",
           "east": "greymoor_downs_the_sealed_larder",
           "down": "greymoor_downs_the_deeper_dark",
-          "west": "greymoor_downs_the_hollows_edge",
-          "south": "greymoor_downs_the_wardens_hollow"
+          "west": "greymoor_downs_the_hollows_edge"
         },
         "monsters": [
           "sunken_cellar_stalker"
@@ -6643,8 +6642,8 @@
           "the_silt_bound_current"
         ],
         "grid_position": {
-          "x": 0,
-          "y": -1
+          "x": 1,
+          "y": 1
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -6767,16 +6766,10 @@
         "connections": [
           "greymoor_downs_the_cellar_hollow"
         ],
-        "directions": {
-          "north": "greymoor_downs_the_cellar_hollow"
-        },
+        "directions": {},
         "monsters": [
           "the_warden_bound_stalker"
         ],
-        "grid_position": {
-          "x": 3,
-          "y": -8
-        },
         "dungeon_interior": true,
         "dungeon_id": "greymoor_downs"
       },

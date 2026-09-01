@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.453] — fix: real map-coordinate bugs in Sunken Root Caverns & Greymoor Downs
+
+Real report (2026-09-01, Coffee: "is the map suppose to look like that
+for sunken root cavern dungeon?"), while checking on Elduinn/
+Charvenna's current quests. Ran `scripts/build_location_grid.py`
+against the live campaign and found two genuine, pre-existing (not
+newly introduced) map bugs, root-caused down to exact stored
+coordinates rather than fixed by guessing:
+
+- **`sunken_root_caverns_the_silt_hollow`** had a stale `grid_position`
+  two cells away from its only real neighbor (`deep_tunnels`) instead
+  of directly adjacent — any line drawn between them would have cut
+  straight through an unrelated occupied cell. Repositioned to the one
+  genuinely free adjacent cell.
+- **`greymoor_downs_the_wardens_hollow`** was labeled a "north/south"
+  compass neighbor of `the_cellar_hollow`, but `the_cellar_hollow`
+  already has 5 real connections (`up`/`east`/`down`/`west` plus this
+  one) — one more than the map's 4-cardinal-direction limit can ever
+  represent, confirmed as a genuine structural overflow, not a
+  stale-data glitch. Its position was also mathematically inconsistent
+  with the label it carried. Downgraded to connections-only (still
+  reachable by text/button, same accepted convention already used for
+  over-dense hubs elsewhere in the dungeon toolkit) and its now-orphaned
+  `grid_position` removed so it can't render as a disconnected dot.
+
+Deliberately did NOT run the full authoritative grid-regenerator
+against the whole campaign — a real dry-run comparison showed it would
+have reshuffled 30-50+ unrelated rooms in both dungeons onto a
+completely different coordinate origin, a much bigger, riskier change
+than what was actually broken. Fixed only the two confirmed-bad
+entries by hand instead. (Also checked and ruled out a third apparent
+issue, `greymoor_downs_the_wardens_vault` — looked like a one-way
+connection at first glance, but it's a real, working `locked_connections`
+door gate, not a bug.)
+
+Data-only change (`campaigns/default/campaign.json`) — requires a bot
+restart to take effect, since `CAMPAIGN` is loaded once at process
+start. Tested: `dungeon_audit.audit_dungeon` passes for both dungeons
+with zero failures; 25 existing real handler tests covering both
+dungeons' quests, hubs, lever shortcuts, and the warden's-vault key
+gate all still pass unchanged.
+
 ## [1.27.452] — feature: pressure plates & movable objects ("as above, so below")
 
 Real request (2026-09-01, Coffee, mid-conversation on Parts B/C): "also
