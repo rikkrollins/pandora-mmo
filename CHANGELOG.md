@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.447] — fix: Choked Reliquary riddle read as a grave, not water
+
+Real live incident (2026-09-01, dev-bridge screenshot, reported live
+as "we have answered the riddle and it has not worked"): The Choked
+Reliquary's riddle ("What the Water Remembers", Sunken Root Caverns)
+has always only accepted "water" — but its wording, "I have no mouth,
+yet I remember every name spoken near me. I have no hands, yet I never
+let go," reads far more naturally as a gravestone. Two real players
+tried a long list of genuinely reasonable answers (gravestone, grave,
+tomb, headstone, casket, urn, memorial, tombstone, monument, shrine,
+cemetery, graveyard, death, will) and got stuck for real — and a
+trusted human co-dev (Sugar), reading the same riddle cold in the
+group chat, independently told them "Answer is grave" too. Not a
+mechanical bug: the exact-match check against `accepted_answers` was
+working exactly as coded the whole time. The riddle text itself was
+just misleading.
+
+Reworded to use unambiguous water imagery — a still surface, ripples,
+sinking beneath — instead of anything grave-coded, keeping the
+existing accepted answers ("water"/"the water"/"root water"/"the root
+water") unchanged since those were always the right fit for this
+quest's own title and location.
+
+Tested: real fail-then-pass repro confirms the old grave-coded phrase
+is gone and the new wording is present; existing end-to-end
+"answering completes the quest" test still passes unchanged. Data-only
+change (campaign.json), but still needs a restart since campaign
+content loads once at bot startup.
+
 ## [1.27.446] — fix: puzzle "What's Next" hints gave zero actionable info
 
 Real live report (2026-09-01, dev-bridge screenshot + caption, a

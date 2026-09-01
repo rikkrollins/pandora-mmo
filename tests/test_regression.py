@@ -6445,6 +6445,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertIn("the_choked_reliquarys_answer", character.get("completed_quests") or [])
 
+    def test_choked_reliquarys_riddle_wording_actually_points_at_water_not_a_grave(self):
+        """
+        Real live incident (2026-09-01, dev-bridge screenshot): the
+        riddle's only accepted answer was always "water" (matching this
+        quest's own title, "What the Water Remembers"), but the old
+        wording -- "I have no mouth, yet I remember every name spoken
+        near me. I have no hands, yet I never let go" -- reads far more
+        naturally as a gravestone. Two real players AND a trusted human
+        dev (Sugar, in the group chat: "Answer is grave") all
+        independently landed on grave/tomb/headstone/etc. and got stuck
+        for real, repeated attempts. Not a mechanical bug -- the exact-
+        match check was always working correctly -- the riddle text
+        itself was misleading. Reworded to use water-specific imagery
+        (a still surface, ripples, sinking beneath) instead of anything
+        that evokes burial. Guards against a future edit accidentally
+        reintroducing grave-coded language, and keeps the puzzle's own
+        riddle text and the quest's clue field (shown via /ask_clue and
+        the "What's Next" hint) in sync with each other.
+        """
+        puzzle = bot.CAMPAIGN["puzzles"]["choked_reliquarys_riddle"]
+        quest = bot.CAMPAIGN["quests"]["the_choked_reliquarys_answer"]
+        self.assertIn(puzzle["riddle"], quest["clue"])
+        for grave_word in ("mouth, yet I remember every name spoken near me", "never let go. What am I"):
+            self.assertNotIn(grave_word, puzzle["riddle"])
+        self.assertIn("ripples", puzzle["riddle"])
+
     async def test_sunken_root_caverns_hub_entry_fires_the_teaser_reveal(self):
         user_id = 960236
         make_basic_character(user_id, "SRCTeaserHubTester", current_location="sunken_root_caverns")

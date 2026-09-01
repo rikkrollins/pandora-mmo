@@ -10088,7 +10088,7 @@
       },
       "reward_xp": 700,
       "reward_gold": 200,
-      "clue": "The Choked Reliquary's Voice poses a real question: \"I have no mouth, yet I remember every name spoken near me. I have no hands, yet I never let go. What am I?\""
+      "clue": "The Choked Reliquary's Voice poses a real question: \"I have no mouth, yet every name spoken over my still surface sends ripples outward long after the sound fades. I have no hands, yet nothing that sinks beneath me is ever given back. What am I?\""
     },
     "the_deep_veins_reckoning": {
       "title": "The Vein Key",
@@ -13553,7 +13553,7 @@
       ]
     },
     "choked_reliquarys_riddle": {
-      "riddle": "I have no mouth, yet I remember every name spoken near me. I have no hands, yet I never let go. What am I?",
+      "riddle": "I have no mouth, yet every name spoken over my still surface sends ripples outward long after the sound fades. I have no hands, yet nothing that sinks beneath me is ever given back. What am I?",
       "accepted_answers": [
         "water",
         "the water",
