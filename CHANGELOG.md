@@ -2,6 +2,58 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.452] — feature: pressure plates & movable objects ("as above, so below")
+
+Real request (2026-09-01, Coffee, mid-conversation on Parts B/C): "also
+make switches that we need to place things on or stand on to open the
+a door... Pots, crates, barrels, kegs, anything in the enviroment can
+be used for this... also pushing things down holes, can be used for
+switchs on the floor below. 'As above so below'... maybe filling urns
+with liquids?" — a distinct, movable-object puzzle mechanic alongside
+the elemental switches shipped in v1.27.450.
+
+**New mechanics** (`bot.py`):
+- **Pressure plates** (`kind: "pressure_plate"`) — a real, re-toggleable
+  gate sharing the switch's own `_SWITCH_STATE` store. Push something
+  heavy onto it (a crate, urn, statue, block) or fill a container with
+  the right liquid, and it sinks with a click; it lifts back up when
+  whatever's on it is moved off. New `_do_activate_pressure_plate` and
+  `_find_lockable`/`_do_lockpick` routing (`"plate"`, `"urn"`, `"crate"`,
+  `"statue"`, `"block"` keywords), room-description callouts, and
+  examine-honesty text — same discipline as every other lockable kind.
+  Deliberately does NOT respond to spell-casting (pushing/filling is a
+  physical act, not a magical one — unlike switches, which respond to
+  both).
+- **"As above, so below"** — a real new `push_down_pit` action: shove
+  an object down a visible pit (B3, v1.27.450) and it lands on whatever
+  pressure plate sits in the room directly below, activating it
+  remotely. New `_do_push_object_down_pit`, with its own honest
+  fallback narration when there's no pit here, or nothing to activate
+  down there.
+- **Intent routing** (`ai/intent_parser.py`): new deterministic regexes
+  for "push/place/put/move/shove X onto the plate/urn/crate/statue",
+  "fill the urn/vessel/basin with...", and "push/throw/drop/shove/kick
+  X down the hole" (routed to the new `push_down_pit` action, kept
+  distinct from "jump down" a pit, which moves the CHARACTER, not an
+  object) — `push_down_pit` added to the LLM-classifier's
+  `valid_actions` allowlist alongside the deterministic fallback.
+
+**Generator wiring** (`rules/dungeon_evolve.py`): the evolve pass now
+also, independently of the elemental switch it already rolls for, has
+a real chance to gate a second, DIFFERENT branch behind a pressure
+plate with its own crate sitting in the same room — the two gate types
+never land on the same branch in one generation, so a dungeon can
+carry a switch, a plate, both, or neither.
+
+Tested: 6 new real handler-driven tests (toggle, gated-destination
+block/admit, real intent-parser routing, and the "as above, so below"
+push-down-a-pit-to-hit-a-plate-below path, including the "no pit here"
+honest fallback) plus a new 20-seed statistical generator test
+confirming plates actually get placed with a real movable object, and
+never on the same branch as a switch. Full existing suite (47 tests
+across dungeon-evolve, dungeon-audit, and switch/breakable/pit
+coverage) still passes.
+
 ## [1.27.451] — feature: real remote torch gates in the evolve pass
 
 Follow-up to v1.27.450 (per Coffee: "lighting a torch here opens a

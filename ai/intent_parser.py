@@ -2092,6 +2092,26 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\bjump\b.*\b(?:down|through|into)\b.*\b(?:gap|hole|pit|opening|chasm)\b|\bjump down\b", lowered):
         return {**base, "action": "move"}
 
+    # Real pressure-plate / movable-object mechanic (2026-09-01, per
+    # Coffee: pushing a crate/statue onto a plate, or filling an urn
+    # with liquid). Same routing shape as the switch/breakable fixes
+    # above -- into skill_check -> _do_skill_check -> _find_lockable ->
+    # _do_lockpick's own real "pressure_plate" branch.
+    if re.search(r"\b(?:push|place|put|move|shove)\b.*\b(?:onto|on)\b.*\b(?:plate|switch|urn|crate|statue|block)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+    if re.search(r"\bfill\b.*\b(?:urn|vessel|basin|jug|pot)\b.*\bwith\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
+    # Real "as above, so below" mechanic (2026-09-01, per Coffee):
+    # pushing a movable object down a real pit can activate a real
+    # pressure plate in the room below -- a genuinely different action
+    # from the player's own "jump down" just above (a distinct verb
+    # set: push/throw/drop/shove/kick, never "jump"), so it gets its
+    # own real action/handler (_do_push_object_down_pit) instead of
+    # overloading "move".
+    if re.search(r"\b(?:push|throw|drop|shove|kick)\b.*\b(?:down|into|through)\b.*\b(?:gap|hole|pit|opening|chasm)\b", lowered):
+        return {**base, "action": "push_down_pit"}
+
     # Real live feature request (2026-08-31, dev-bridge, Elduinn: "I
     # don't know if this area has a lever but if it doesn't, you should
     # tell us"). A genuine QUESTION about whether a lockable exists here
@@ -2686,7 +2706,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "sell_market", "buy_market", "view_market_listing", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
-                "talk_party", "use_environment", "throw_weapon",
+                "talk_party", "use_environment", "throw_weapon", "push_down_pit",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
                 "check_remnants", "check_story", "check_magic", "check_affinity",
                 "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",

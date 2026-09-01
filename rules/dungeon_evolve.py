@@ -344,8 +344,10 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     # its own separate grid island the same way the boss branch does
     # (confirmed safe by extensive real testing, see evolve_dungeon's
     # own grid-placement retry step).
+    switch_branch_idx = None
     if rng.random() < 0.5:
         switch_branch = rng.choice([b for b in branches if b["idx"] != branch_idx])
+        switch_branch_idx = switch_branch["idx"]
         switch_branch_first_id = f"{new_dungeon_id}_b{switch_branch['idx']}_r0"
         _, hub_room_for_switch = _find_room(campaign, hub_id)
         _, switch_gate_far_room = _find_room(campaign, switch_branch_first_id)
@@ -392,6 +394,40 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         else:
             hub_room_for_switch.setdefault("lockables", []).append(switch_lockable)
         hub_room_for_switch.setdefault("locked_connections", {})[switch_branch_first_id] = switch_id
+
+    # Pressure-plate gate (2026-09-01, per Coffee: "pushing things down
+    # holes"/"filling urns" mechanic -- the first ask was specifically
+    # for a movable-object puzzle distinct from the elemental switch
+    # above). A second, independent kind of branch gate, deliberately
+    # rolled on a DIFFERENT branch than the switch above (never the
+    # same one) so it can't compete with or replace the switch odds the
+    # existing statistical test already measures -- both gates can
+    # coexist on the same generated dungeon, or neither can. The real
+    # movable object (a crate) is placed in the SAME room as the plate
+    # itself, matching the reversible bot.py mechanic
+    # (_do_activate_pressure_plate/_SWITCH_STATE) -- push it onto the
+    # plate to open the gate, exactly the "something heavy" pattern
+    # Coffee described.
+    plate_branch_idx = None
+    plate_eligible = [b for b in branches if b["idx"] != branch_idx and b["idx"] != switch_branch_idx]
+    if plate_eligible and rng.random() < 0.35:
+        plate_branch = rng.choice(plate_eligible)
+        plate_branch_idx = plate_branch["idx"]
+        plate_branch_first_id = f"{new_dungeon_id}_b{plate_branch['idx']}_r0"
+        _, hub_room_for_plate = _find_room(campaign, hub_id)
+        _, plate_gate_far_room = _find_room(campaign, plate_branch_first_id)
+        hub_room_for_plate["connections"].remove(plate_branch_first_id)
+        plate_gate_far_room["connections"].remove(hub_id)
+        plate_gate_far_room.setdefault("connections", []).append(hub_id)
+        plate_id = f"{new_dungeon_id}_plate_{plate_branch['idx']}"
+        crate_id = f"{new_dungeon_id}_crate_{plate_branch['idx']}"
+        hub_room_for_plate.setdefault("lockables", []).append(
+            {"id": plate_id, "kind": "pressure_plate", "name": "a stone pressure plate"}
+        )
+        hub_room_for_plate.setdefault("movable_objects", []).append(
+            {"id": crate_id, "name": "a heavy crate"}
+        )
+        hub_room_for_plate.setdefault("locked_connections", {})[plate_branch_first_id] = plate_id
 
     # Extra chest lockables -- comfortable lock_density padding, real
     # loot from items already known-good elsewhere in this same
@@ -517,6 +553,8 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         "source_hub_id": source_hub_id,
         "bonus_room_id": bonus_room_id,
         "has_shop": len(room_ids) >= 18,
+        "switch_branch_idx": switch_branch_idx,
+        "plate_branch_idx": plate_branch_idx,
     }
 
 

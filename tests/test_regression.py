@@ -31440,6 +31440,40 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
                         remote_hits += 1
         self.assertGreater(remote_hits, 0, "expected at least one real remote torch gate across 40 real seeds")
 
+    def test_evolve_dungeon_sometimes_places_a_real_pressure_plate_gate(self):
+        """
+        Real movable-object/pressure-plate mechanic (2026-09-01, per
+        Coffee: "pushing things down holes"/"filling urns"). A second,
+        independent branch gate alongside the elemental switch above --
+        confirmed statistically, and confirmed it never lands on the
+        SAME branch as a switch when both roll on the same generation
+        (the two gates are deliberately mutually exclusive per-branch,
+        see dungeon_evolve.py's own plate_eligible filter).
+        """
+        import copy
+        hits = 0
+        for seed in range(20):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_plate_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            plate_lockables = [lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("kind") == "pressure_plate"]
+            switch_lockables = [lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("kind") == "switch"]
+            if plate_lockables:
+                hits += 1
+                # Every real plate has its own movable object sitting in the same room.
+                plate_rooms = [r for r in rooms.values() if any(lk.get("kind") == "pressure_plate" for lk in r.get("lockables", []))]
+                for r in plate_rooms:
+                    self.assertTrue(r.get("movable_objects"), "expected a real movable object placed with the pressure plate")
+                # Never the same branch id as a switch gate in the same generation.
+                if switch_lockables:
+                    plate_ids = {lk["id"].rsplit("_", 1)[-1] for lk in plate_lockables}
+                    switch_ids = {lk["id"].rsplit("_", 1)[-1] for lk in switch_lockables}
+                    self.assertTrue(plate_ids.isdisjoint(switch_ids), "a switch and a plate should never gate the same branch index")
+        self.assertGreater(hits, 0, "expected at least one pressure-plate-gated evolve across 20 real seeds")
+        self.assertLess(hits, 20, "expected at least one evolve WITHOUT a pressure plate across 20 real seeds -- it should be a real fraction, not every time")
+
     def test_evolve_dungeon_monsters_fall_inside_the_resolved_target_band(self):
         import copy
         campaign = copy.deepcopy(bot.CAMPAIGN)
@@ -31548,6 +31582,27 @@ def _switch_test_campaign() -> dict:
         "connections": [], "pit_down_to": "fx_pit_dest",
     }
     layer["fx_pit_dest"] = {"name": "Below The Pit", "description": "Landed here.", "connections": []}
+    layer["fx_plate_room"] = {
+        "name": "Plate Test Room", "description": "A test room with a real pressure plate.",
+        "connections": ["fx_plate_hub"],
+        "locked_connections": {"fx_plate_dest": "fx_plate_1"},
+        "lockables": [{"id": "fx_plate_1", "kind": "pressure_plate", "name": "a stone pressure plate"}],
+        "movable_objects": [{"id": "fx_crate_1", "name": "a heavy crate"}],
+    }
+    layer["fx_plate_hub"] = {"name": "Plate Test Hub", "description": "Hub.", "connections": ["fx_plate_room"]}
+    layer["fx_plate_dest"] = {"name": "Beyond The Plate", "description": "Gated room.", "connections": ["fx_plate_room"]}
+    layer["fx_pit_plate_room"] = {
+        "name": "Pit-Above-Plate Test Room", "description": "A real, visible gap leads down from here, right above a real pressure plate.",
+        "connections": [], "pit_down_to": "fx_pit_plate_dest",
+    }
+    layer["fx_pit_plate_dest"] = {
+        "name": "Below The Second Pit", "description": "A real pressure plate sits here.",
+        "connections": ["fx_pit_plate_hub"],
+        "locked_connections": {"fx_pit_plate_gated": "fx_plate_2"},
+        "lockables": [{"id": "fx_plate_2", "kind": "pressure_plate", "name": "a stone pressure plate"}],
+    }
+    layer["fx_pit_plate_hub"] = {"name": "Below-Pit Hub", "description": "Hub.", "connections": ["fx_pit_plate_dest"]}
+    layer["fx_pit_plate_gated"] = {"name": "Beyond The Second Plate", "description": "Gated room.", "connections": ["fx_pit_plate_dest"]}
     return campaign
 
 
@@ -31687,6 +31742,80 @@ class SwitchAndBreakableAndPitTests(unittest.IsolatedAsyncioTestCase):
     def test_jump_down_intent_routes_through_the_real_parser(self):
         intent = _keyword_fallback("I jump down into the gap", [])
         self.assertEqual(intent["action"], "move")
+
+    async def test_pressure_plate_push_toggles_active_then_inactive(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961007, -961007
+            make_basic_character(user_id, "PlatePushTester", chat_id=chat_id, current_location="fx_plate_room")
+            sink = []
+            await bot._do_skill_check(FakeUpdate(user_id, "push the crate onto the plate", sink, chat_id=chat_id), "dexterity", "push the crate onto the plate")
+            self.assertTrue(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_plate_1"))
+            self.assertTrue(any("sinks into place" in s for s in sink))
+
+            sink2 = []
+            await bot._do_skill_check(FakeUpdate(user_id, "push the crate onto the plate", sink2, chat_id=chat_id), "dexterity", "push the crate onto the plate")
+            self.assertFalse(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_plate_1"))
+            self.assertTrue(any("lifts back up" in s for s in sink2))
+
+    async def test_pressure_plate_gated_destination_blocks_and_admits_based_on_current_state(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961008, -961008
+            make_basic_character(user_id, "PlateGateTester", chat_id=chat_id, current_location="fx_plate_room")
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "go to beyond the plate")
+            character = db.get_character(user_id, chat_id)
+            self.assertNotEqual(character["current_location"], "fx_plate_dest")
+
+            await bot._do_skill_check(FakeUpdate(user_id, "fill the urn with water", [], chat_id=chat_id), "dexterity", "push the crate onto the plate")
+            sink2 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to beyond the plate")
+            character = db.get_character(user_id, chat_id)
+            self.assertEqual(character["current_location"], "fx_plate_dest")
+
+    def test_pressure_plate_push_intent_routes_through_the_real_parser(self):
+        intent = _keyword_fallback("push the crate onto the plate", [])
+        self.assertEqual(intent["action"], "skill_check")
+        intent2 = _keyword_fallback("fill the urn with water", [])
+        self.assertEqual(intent2["action"], "skill_check")
+
+    async def test_push_object_down_pit_activates_a_real_plate_below(self):
+        """Real "as above, so below" mechanic -- pushing an object down a real pit activates a real pressure plate in the destination room, remotely."""
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961009, -961009
+            make_basic_character(user_id, "PushDownPitTester", chat_id=chat_id, current_location="fx_pit_plate_room")
+            sink = []
+            await bot._do_push_object_down_pit(FakeUpdate(user_id, "", sink, chat_id=chat_id), "I push the crate down into the pit")
+            self.assertTrue(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_plate_2"))
+            self.assertTrue(any("sinks into place" in s for s in sink))
+
+            # Real end-to-end: the gated destination is now reachable from BELOW.
+            db.update_character(user_id, chat_id, current_location="fx_pit_plate_dest")
+            sink2 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to beyond the second plate")
+            character = db.get_character(user_id, chat_id)
+            self.assertEqual(character["current_location"], "fx_pit_plate_gated")
+
+    async def test_push_object_down_pit_with_no_pit_here_says_so(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961010, -961010
+            make_basic_character(user_id, "NoPitTester", chat_id=chat_id, current_location="fx_plate_hub")
+            sink = []
+            await bot._do_push_object_down_pit(FakeUpdate(user_id, "", sink, chat_id=chat_id), "I push the crate down into the pit")
+            self.assertTrue(any("isn't one here" in s for s in sink))
+
+    def test_push_down_pit_intent_routes_through_the_real_parser_and_is_distinct_from_jump(self):
+        intent = _keyword_fallback("I push the crate down into the pit", [])
+        self.assertEqual(intent["action"], "push_down_pit")
+        jump_intent = _keyword_fallback("I jump down into the pit", [])
+        self.assertEqual(jump_intent["action"], "move")
 
 
 if __name__ == "__main__":

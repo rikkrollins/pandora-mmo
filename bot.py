@@ -11246,17 +11246,18 @@ def _lockable_is_open(location: dict, lockable_id: str, chat_id: int) -> bool:
     floor) is a one-way PERMANENT open, tracked in _UNLOCKED -- once
     picked, always open (see _UNLOCKED's own docstring, "permanent,
     add-only"). `kind: "switch"` (2026-09-01, elemental crystal
-    switches/torches) is the one real exception: it can be toggled
-    back OFF, so its actual current state lives in the separate
-    _SWITCH_STATE store instead -- plain _UNLOCKED-style membership
-    would be wrong for it (that would only ever mean "has been used at
-    least once," not "is on right now"). Every real gating check in
-    this file (the move-blocking check, the permanent-unlock travel
-    button row) routes through this one function so they can never
-    silently drift out of sync with each other.
+    switches/torches) and `kind: "pressure_plate"` (2026-09-01,
+    movable-object/liquid-fill puzzles) are the real exceptions: both
+    can be toggled back OFF, so their actual current state lives in
+    the separate _SWITCH_STATE store instead -- plain _UNLOCKED-style
+    membership would be wrong for either (that would only ever mean
+    "has been used at least once," not "is on right now"). Every real
+    gating check in this file (the move-blocking check, the permanent-
+    unlock travel button row) routes through this one function so they
+    can never silently drift out of sync with each other.
     """
     lockable = next((lk for lk in location.get("lockables", []) if lk["id"] == lockable_id), None)
-    if lockable and lockable.get("kind") == "switch":
+    if lockable and lockable.get("kind") in ("switch", "pressure_plate"):
         return _chat_scoped_dict(_SWITCH_STATE, chat_id).get(lockable_id, False)
     return lockable_id in _chat_scoped_set(_UNLOCKED, chat_id)
 
@@ -11306,6 +11307,7 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
             "switch": ("switch", "crystal", "torch", "brazier", "lantern", "lock"),
             "breakable_wall": ("wall", "crack", "cracked", "bomb", "explode"),
             "breakable_floor": ("floor", "crack", "cracked", "bomb", "explode"),
+            "pressure_plate": ("plate", "urn", "crate", "statue", "block", "switch"),
         }
         if any(w in lowered for w in kind_words.get(lockable["kind"], ("lock",))):
             return lockable
@@ -11401,6 +11403,71 @@ async def _do_break_obstacle(
     )
 
 
+async def _do_activate_pressure_plate(
+    update: Update, character: dict, location: dict, lockable: dict, verb: str,
+) -> None:
+    """
+    Real pressure-plate / movable-object mechanic (2026-09-01, per
+    Coffee: pushing a crate/statue onto a plate, or filling an urn
+    with liquid, to hold a door open -- plus "as above, so below":
+    pushing an object down a real visible pit can land it on a plate
+    in the room below, see _do_push_object_down_pit). Shares the SAME
+    toggle store as elemental switches (_SWITCH_STATE) -- both are the
+    same category of re-lockable puzzle state, just triggered by a
+    different real action (an object's placement/substance, not a hit
+    or a spell).
+    """
+    chat_id = update.effective_chat.id
+    switch_state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
+    now_active = not switch_state.get(lockable["id"], False)
+    switch_state[lockable["id"]] = now_active
+    if now_active:
+        message = f"⚖️ **{character['name']}** {verb} {lockable['name'].lower()} — it sinks into place with a heavy click; somewhere nearby, a way opens."
+    else:
+        message = f"⚖️ **{character['name']}** {verb} {lockable['name'].lower()} — it lifts back up; the way it opened swings shut again."
+    await update.effective_chat.send_message(
+        message,
+        message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]) if now_active else None,
+    )
+
+
+async def _do_push_object_down_pit(update: Update, text: str) -> None:
+    """
+    Real "as above, so below" mechanic (2026-09-01, per Coffee): pushing
+    a movable object down a real, visible pit can land it on a real
+    pressure plate in the room below, activating it remotely -- reuses
+    the SAME real `pit_down_to` field B3's own "jump down" action uses
+    for the player's own descent, just for an object instead. A
+    genuinely different action from "jump down" (a different verb set
+    entirely -- push/throw/drop/shove/kick, never "jump"), so it gets
+    its own real dispatch rather than overloading _do_move.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    destination_id = location.get("pit_down_to") if location else None
+    if not destination_id:
+        await update.effective_chat.send_message(
+            f"**{character['name']}** looks for a gap to drop something through, but there isn't one here.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    destination = cl.get_location(CAMPAIGN, destination_id)
+    plate = next((lk for lk in destination.get("lockables", []) if lk.get("kind") == "pressure_plate"), None)
+    if plate is None:
+        await update.effective_chat.send_message(
+            f"🕳️ **{character['name']}** pushes it through the gap — it tumbles down and lands somewhere out of sight, with no obvious effect.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    await _do_activate_pressure_plate(update, character, destination, plate, verb="sends tumbling down onto")
+
+
 async def _do_lockpick(update: Update, character: dict, lockable: dict, action_text: str,
                         forced_roll: int | None = None) -> None:
     """
@@ -11425,14 +11492,15 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     """
     location = cl.get_location(CAMPAIGN, character["current_location"])
 
-    # switch/breakable_wall/breakable_floor are deliberately excluded
-    # from this early generic "already unlocked" short-circuit -- a
-    # switch can be toggled back OFF, so hitting it again is a real,
-    # meaningful action every time, never a no-op repeat; the two
-    # breakable kinds have their own more specific "already broken
-    # open" message (_do_break_obstacle, dispatched below) that this
-    # generic check would otherwise shadow before it's ever reached.
-    if lockable.get("kind") not in ("switch", "breakable_wall", "breakable_floor") and lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
+    # switch/pressure_plate/breakable_wall/breakable_floor are
+    # deliberately excluded from this early generic "already unlocked"
+    # short-circuit -- switch/pressure_plate can be toggled back OFF,
+    # so activating one again is a real, meaningful action every time,
+    # never a no-op repeat; the two breakable kinds have their own more
+    # specific "already broken open" message (_do_break_obstacle,
+    # dispatched below) that this generic check would otherwise shadow
+    # before it's ever reached.
+    if lockable.get("kind") not in ("switch", "pressure_plate", "breakable_wall", "breakable_floor") and lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         await update.effective_chat.send_message(
             f"{lockable['name'].capitalize()} is already unlocked.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -11441,6 +11509,10 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
 
     if lockable.get("kind") == "switch":
         await _do_activate_switch(update, character, location, lockable, method="hit")
+        return
+
+    if lockable.get("kind") == "pressure_plate":
+        await _do_activate_pressure_plate(update, character, location, lockable, verb="pushes something onto")
         return
 
     if lockable.get("kind") in ("breakable_wall", "breakable_floor"):
@@ -22059,16 +22131,17 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     # Once unlocked, the ordinary connections/travel-button listing
     # already covers the now-open path -- no need to keep calling out a
     # lockable that no longer blocks anything.
-    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "breakable_wall": "💥", "breakable_floor": "💥"}
+    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "pressure_plate": "⚖️", "breakable_wall": "💥", "breakable_floor": "💥"}
     for lockable in location.get("lockables", []):
         if lockable.get("hidden"):
             continue
         kind = lockable.get("kind")
-        # A switch is deliberately NEVER skipped here even once it's
-        # been used -- it can be toggled back off, so it's still a
-        # real, present object in the room either way, unlike every
-        # other kind which "resolves" into an open path once picked.
-        if kind != "switch" and _lockable_is_open(location, lockable["id"], chat_id):
+        # switch/pressure_plate are deliberately NEVER skipped here
+        # even once used -- both can be toggled back off, so they're
+        # still real, present objects in the room either way, unlike
+        # every other kind which "resolves" into an open path once
+        # picked.
+        if kind not in ("switch", "pressure_plate") and _lockable_is_open(location, lockable["id"], chat_id):
             continue
         emoji = lockable_emoji.get(kind, "🔒")
         if kind == "lever":
@@ -22077,6 +22150,9 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
             active = _lockable_is_open(location, lockable["id"], chat_id)
             element = lockable.get("element", "")
             state = f"{'glowing' if active else 'dark'}{f' {element}' if element else ''}, {'active' if active else 'inactive'}"
+        elif kind == "pressure_plate":
+            active = _lockable_is_open(location, lockable["id"], chat_id)
+            state = "pressed down, active" if active else "raised, waiting for something heavy or the right liquid"
         elif kind in ("breakable_wall", "breakable_floor"):
             state = "cracked, looks breakable"
         else:
@@ -22971,6 +23047,8 @@ async def _do_examine(update: Update, target_text: str) -> None:
             if kind == "switch":
                 element = lockable_match.get("element", "")
                 state = f"{'glowing' if is_open else 'dark'}{f' {element}' if element else ''} — hit it, or cast the right kind of magic at it, to toggle it"
+            elif kind == "pressure_plate":
+                state = f"{'pressed down' if is_open else 'raised'} — push something heavy onto it, or fill it with the right liquid, to toggle it"
             elif is_open:
                 state = "already open" if kind not in ("breakable_wall", "breakable_floor") else "already broken open"
             elif kind == "lever":
@@ -24800,6 +24878,7 @@ async def _do_move(update: Update, text: str) -> None:
         verb_hint = {
             "lever": "pulling the lever",
             "switch": "hitting it, or casting the right kind of magic at it",
+            "pressure_plate": "pushing something heavy onto it, or filling it with the right liquid",
             "breakable_wall": "breaking through it",
             "breakable_floor": "breaking through it",
         }.get(lockable.get("kind") if lockable else None, "picking the lock")
@@ -25379,6 +25458,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         verb_hint = {
             "lever": "pulling the lever",
             "switch": "hitting it, or casting the right kind of magic at it",
+            "pressure_plate": "pushing something heavy onto it, or filling it with the right liquid",
             "breakable_wall": "breaking through it",
             "breakable_floor": "breaking through it",
         }.get(lockable.get("kind") if lockable else None, "picking the lock")
@@ -30757,6 +30837,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_throw_weapon(update, intent.get("raw_text", text))
     elif action == "move":
         await _do_move(update, text)
+    elif action == "push_down_pit":
+        await _do_push_object_down_pit(update, text)
     elif action == "look":
         await _do_look(update)
     elif action == "examine":
