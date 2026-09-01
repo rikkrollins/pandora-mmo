@@ -2,6 +2,63 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.450] — feature: new ALTTP-style dungeon mechanics (Phase 4, Parts B+C)
+
+Real request (2026-09-01, Coffee, after a long research + design
+conversation grounded in real A Link to the Past dungeon design): new
+puzzle mechanics for the dungeon toolkit, plus generator improvements
+so the evolve pass actually uses them.
+
+**New mechanics** (`bot.py`):
+- **Elemental switches** (`kind: "switch"`) — a real, RE-LOCKABLE
+  toggle (new `_SWITCH_STATE` store, separate from the existing
+  permanent `_UNLOCKED`): a plain hit always flips it; casting a spell
+  whose `damage_type` matches the switch's own `element` also flips it
+  (a mismatched element narrates honestly that nothing happened, but
+  still spends the resource — same as any other cast). Also doubles as
+  a torch/brazier (`element: "fire"`), and can gate a door in a
+  DIFFERENT room than the switch itself — the existing data model
+  already supported this, no new plumbing needed.
+- **Breakable walls/floors** (`kind: "breakable_wall"`/`"breakable_floor"`)
+  — a visible, telegraphed obstacle, destroyed by a hit or a matching
+  fire/force spell. One-way and permanent, so it reuses the existing
+  `_UNLOCKED` store, not the new re-lockable one.
+- **Visible pits** — a new `pit_down_to` room field; "jump down"/"jump
+  into the gap" moves the character straight there, no roll, no
+  damage. Deliberately visible-only for this pass — a truly hidden
+  pit would need a real perception/search system this game doesn't
+  have yet.
+- The non-combat spell-cast path required real new plumbing:
+  `_do_cast_spell` previously required an active combat session for
+  every damage-effect spell — it now checks for a matching
+  switch/breakable at the caster's own location FIRST, before that
+  combat-only gate, so casting at a real puzzle object works with no
+  fight going on at all.
+
+**Generator improvements** (`rules/dungeon_evolve.py`):
+- **Miniboss** — one non-boss branch's leaf now gets a real mid-tier
+  monster (upper half of the target band), distinct from both trash
+  and the real boss.
+- **Bonus room** — a free, unguarded extra room with a real chest,
+  off the critical path, exempt from every reachability check by
+  construction.
+- **Dungeon shop** — dungeons at 18+ rooms get a real shop in the hub,
+  via one new reusable "wandering trader" NPC/shop pair (every
+  existing shop was tied to a specific named overworld NPC, none of
+  which fit turning up in a random dungeon).
+- **Switch-gated branches** — roughly half of all evolves now gate one
+  non-boss branch behind a real elemental switch instead of leaving
+  every branch a plain, freely-open corridor.
+
+Tested: 39 real tests across dungeon generation, structural checks,
+and the new bot.py mechanics themselves (hit/magic activation,
+wrong-element no-ops, real end-to-end move-blocking on a switch's
+CURRENT toggle state, breakable permanence, real pit traversal) — all
+via genuine fail-then-pass verification, plus a 240-real-generation
+sweep across 5 source dungeons and many seeds confirming the new
+generator features never break the existing structural or map-grid
+guarantees.
+
 ## [1.27.449] — fix: evolved dungeon rooms could conflict on the real map
 
 Real live report (2026-09-01, Coffee, right after Wrathflame Vault,

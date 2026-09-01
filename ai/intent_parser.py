@@ -2067,6 +2067,31 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\bpull(?:ing|ed)?\b.*\b(?:lever|switch)\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
 
+    # Real elemental crystal-switch mechanic (2026-09-01, per Coffee's
+    # own ALTTP-inspired ask: hitting it also alternates it, same as
+    # casting a matching spell at it). Same routing shape as the lever
+    # fix just above -- "hit"/"strike" is the single most natural verb
+    # for a switch/crystal/torch, so it needs the exact same real path
+    # into _do_skill_check -> _find_lockable -> _do_lockpick.
+    if re.search(r"\b(?:hit|strike|attack|light)\b.*\b(?:switch|crystal|torch|brazier|lantern)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
+    # Real breakable wall/floor mechanic (2026-09-01, per Coffee: "cracks
+    # in walls we can explode... or cast a fire spell onto it"). A plain
+    # hit/bomb/explode attempt routes the same way; casting a real fire/
+    # force spell at one is handled separately in _do_cast_spell's own
+    # non-combat object-targeting branch, not here.
+    if re.search(r"\b(?:hit|strike|attack|bomb|blow up|explode|smash)\b.*\b(?:wall|floor|crack)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
+    # Real ALTTP-style visible pit mechanic (2026-09-01, per Coffee):
+    # jumping down a real, visible gap to the floor below is a genuine
+    # one-way MOVE, not a skill check -- routed straight to the same
+    # "move" action _do_move already handles everything else through;
+    # _do_move's own new pit_down_to check does the actual work.
+    if re.search(r"\bjump\b.*\b(?:down|through|into)\b.*\b(?:gap|hole|pit|opening|chasm)\b|\bjump down\b", lowered):
+        return {**base, "action": "move"}
+
     # Real live feature request (2026-08-31, dev-bridge, Elduinn: "I
     # don't know if this area has a lever but if it doesn't, you should
     # tell us"). A genuine QUESTION about whether a lockable exists here

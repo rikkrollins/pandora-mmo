@@ -726,6 +726,18 @@ def _adjust_faction_standing(telegram_user_id: int, chat_id: int, faction_id: st
 # chat_id now, via the _chat_scoped_set/_chat_scoped_dict helpers below.
 _UNLOCKED: dict[int, set[str]] = {}
 
+# Real toggle state for `kind: "switch"` lockables (elemental crystal
+# switches / torches, 2026-09-01 per Coffee's own ALTTP-inspired ask --
+# "the original design works also by just hitting it and it alternating
+# colors"). Deliberately a SEPARATE store from _UNLOCKED, not folded
+# into it: every existing lockable kind (door/chest/lever) is a
+# one-way, permanent open, and _UNLOCKED's own contract (see above) is
+# explicitly "permanent, add-only" -- a switch can be toggled back OFF,
+# which would break that contract and the several call sites that
+# already assume membership means "open forever." Chat-scoped the same
+# way, real boolean state that flips both ways.
+_SWITCH_STATE: dict[int, dict[str, bool]] = {}
+
 # Named hostile NPCs (campaign.json npc ids) already defeated in combat —
 # in-memory, same reasoning as _UNLOCKED. A defeated antagonist doesn't
 # respawn to ambush the same world again.
@@ -11226,6 +11238,29 @@ def _format_skill_check_result(flavor_text: str, result: dict, ability: str, dc:
     return "\n".join(lines)
 
 
+def _lockable_is_open(location: dict, lockable_id: str, chat_id: int) -> bool:
+    """
+    Whether a lockable's own gate should currently allow passage.
+
+    Every existing kind (door/lever/chest/breakable_wall/breakable_
+    floor) is a one-way PERMANENT open, tracked in _UNLOCKED -- once
+    picked, always open (see _UNLOCKED's own docstring, "permanent,
+    add-only"). `kind: "switch"` (2026-09-01, elemental crystal
+    switches/torches) is the one real exception: it can be toggled
+    back OFF, so its actual current state lives in the separate
+    _SWITCH_STATE store instead -- plain _UNLOCKED-style membership
+    would be wrong for it (that would only ever mean "has been used at
+    least once," not "is on right now"). Every real gating check in
+    this file (the move-blocking check, the permanent-unlock travel
+    button row) routes through this one function so they can never
+    silently drift out of sync with each other.
+    """
+    lockable = next((lk for lk in location.get("lockables", []) if lk["id"] == lockable_id), None)
+    if lockable and lockable.get("kind") == "switch":
+        return _chat_scoped_dict(_SWITCH_STATE, chat_id).get(lockable_id, False)
+    return lockable_id in _chat_scoped_set(_UNLOCKED, chat_id)
+
+
 def _find_lockable(location: dict, action_text: str) -> dict | None:
     """
     Match a chest/door target mentioned in the player's text against this
@@ -11259,10 +11294,111 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
         # all, falling through to an unrelated, misleadingly-successful-
         # sounding generic ability check that never actually unlocked
         # anything. "lock" is back in every kind's word list now.
-        kind_words = {"chest": ("chest", "lock"), "door": ("door", "lock", "gate"), "lever": ("lever", "switch", "wheel", "valve", "lock")}
+        # "switch" (2026-09-01, elemental crystal switches/torches) and
+        # "breakable_wall"/"breakable_floor" (cracked walls/floors) are
+        # real, distinct kinds from "lever" -- each gets its own word
+        # list rather than piggybacking on lever's, even though a
+        # crystal switch is colloquially still "a switch" too.
+        kind_words = {
+            "chest": ("chest", "lock"),
+            "door": ("door", "lock", "gate"),
+            "lever": ("lever", "switch", "wheel", "valve", "lock"),
+            "switch": ("switch", "crystal", "torch", "brazier", "lantern", "lock"),
+            "breakable_wall": ("wall", "crack", "cracked", "bomb", "explode"),
+            "breakable_floor": ("floor", "crack", "cracked", "bomb", "explode"),
+        }
         if any(w in lowered for w in kind_words.get(lockable["kind"], ("lock",))):
             return lockable
     return None
+
+
+# Real, non-canonical mapping used only for a switch's own flavor emoji
+# -- not a game-mechanical enum, just visual variety per element.
+_SWITCH_ELEMENT_EMOJI = {
+    "fire": "🔥", "cold": "❄️", "lightning": "⚡", "force": "💥", "radiant": "✨",
+    "psychic": "🌀", "poison": "☠️", "necrotic": "💀", "earth": "🪨", "physical": "⚔️",
+}
+
+
+async def _do_activate_switch(
+    update: Update, character: dict, location: dict, lockable: dict, method: str, spell_damage_type: str | None = None,
+) -> None:
+    """
+    Real elemental crystal-switch mechanic (2026-09-01, per Coffee's own
+    ALTTP-inspired ask: elemental colors, activated either by the
+    matching magic type OR by "just hitting it and it alternating
+    colors" like the original game). Called from BOTH the hit path
+    (_do_lockpick's own `kind == "switch"` branch) and the magic path
+    (_do_cast_spell's new non-combat object-targeting branch) so the
+    real toggle logic/narration only lives in one place.
+
+    TOGGLES rather than permanently opening -- real state lives in
+    _SWITCH_STATE, never _UNLOCKED (see _lockable_is_open's own
+    docstring for exactly why a re-lockable mechanism can't reuse that
+    store). A plain hit always flips it regardless of element; a spell
+    only flips it if its own damage_type matches the switch's `element`
+    -- a mismatched element narrates honestly that nothing happened,
+    rather than silently doing nothing.
+    """
+    chat_id = update.effective_chat.id
+    element_emoji = _SWITCH_ELEMENT_EMOJI.get(lockable.get("element"), "🔷")
+    if method == "magic" and spell_damage_type != lockable.get("element"):
+        await update.effective_chat.send_message(
+            f"{element_emoji} The magic washes over {lockable['name'].lower()}, but it stays exactly as it was — wrong element.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    switch_state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
+    now_active = not switch_state.get(lockable["id"], False)
+    switch_state[lockable["id"]] = now_active
+    verb = "strikes" if method == "hit" else "channels magic into"
+    if now_active:
+        message = f"{element_emoji} **{character['name']}** {verb} {lockable['name'].lower()} — it flares to life; somewhere nearby, a way opens."
+    else:
+        message = f"{element_emoji} **{character['name']}** {verb} {lockable['name'].lower()} — it dims and goes dark; the way it opened swings shut again."
+    await update.effective_chat.send_message(
+        message,
+        message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]) if now_active else None,
+    )
+
+
+async def _do_break_obstacle(
+    update: Update, character: dict, location: dict, lockable: dict, method: str, spell_damage_type: str | None = None,
+) -> None:
+    """
+    Real ALTTP-style breakable wall/floor mechanic (2026-09-01, per
+    Coffee: "cracks in walls we can explode... or cast a fire spell
+    onto it or some type of magic that can blow it up"). Visible and
+    telegraphed -- the room's own description already says it looks
+    breakable, same "state it if it's visible" rule the pit mechanic
+    uses. Unlike the elemental switch above, this is ONE-WAY and
+    PERMANENT, so it lives in _UNLOCKED like every other door/lever,
+    never the re-lockable _SWITCH_STATE. A plain hit always works; a
+    spell only works if its own damage_type is "fire" or "force" (the
+    two elements that plausibly "blow something up").
+    """
+    chat_id = update.effective_chat.id
+    if method == "magic" and spell_damage_type not in ("fire", "force"):
+        await update.effective_chat.send_message(
+            f"The magic washes over {lockable['name'].lower()} without effect — nothing about it can blow this open.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    if lockable["id"] in _chat_scoped_set(_UNLOCKED, chat_id):
+        await update.effective_chat.send_message(
+            f"{lockable['name'].capitalize()} is already broken open.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    _chat_scoped_set(_UNLOCKED, chat_id).add(lockable["id"])
+    verb = "smashes through" if method == "hit" else "blasts open"
+    noun = "wall" if lockable.get("kind") == "breakable_wall" else "floor"
+    await update.effective_chat.send_message(
+        f"💥 **{character['name']}** {verb} {lockable['name'].lower()} — the {noun} gives way, opening a path that wasn't there a moment ago.",
+        message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]),
+    )
 
 
 async def _do_lockpick(update: Update, character: dict, lockable: dict, action_text: str,
@@ -11289,11 +11425,26 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     """
     location = cl.get_location(CAMPAIGN, character["current_location"])
 
-    if lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
+    # switch/breakable_wall/breakable_floor are deliberately excluded
+    # from this early generic "already unlocked" short-circuit -- a
+    # switch can be toggled back OFF, so hitting it again is a real,
+    # meaningful action every time, never a no-op repeat; the two
+    # breakable kinds have their own more specific "already broken
+    # open" message (_do_break_obstacle, dispatched below) that this
+    # generic check would otherwise shadow before it's ever reached.
+    if lockable.get("kind") not in ("switch", "breakable_wall", "breakable_floor") and lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         await update.effective_chat.send_message(
             f"{lockable['name'].capitalize()} is already unlocked.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
+        return
+
+    if lockable.get("kind") == "switch":
+        await _do_activate_switch(update, character, location, lockable, method="hit")
+        return
+
+    if lockable.get("kind") in ("breakable_wall", "breakable_floor"):
+        await _do_break_obstacle(update, character, location, lockable, method="hit")
         return
 
     key_item = lockable.get("requires_key_item")
@@ -20931,10 +21082,9 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id:
     if location.get("id") == "hollow_stump_shrine":
         rows.append([InlineKeyboardButton("🕯️ Pray at the Shrine", callback_data="lookact|pray")])
 
-    unlocked_here = _chat_scoped_set(_UNLOCKED, chat_id)
     already_unlocked_dests = {
         dest_id for dest_id, lockable_id in location.get("locked_connections", {}).items()
-        if lockable_id in unlocked_here
+        if _lockable_is_open(location, lockable_id, chat_id)
     }
     connections = list(location.get("connections", [])) + [
         d for d in already_unlocked_dests if d not in location.get("connections", [])
@@ -21909,12 +22059,28 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     # Once unlocked, the ordinary connections/travel-button listing
     # already covers the now-open path -- no need to keep calling out a
     # lockable that no longer blocks anything.
-    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧"}
+    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "breakable_wall": "💥", "breakable_floor": "💥"}
     for lockable in location.get("lockables", []):
-        if lockable.get("hidden") or lockable["id"] in _chat_scoped_set(_UNLOCKED, chat_id):
+        if lockable.get("hidden"):
             continue
-        emoji = lockable_emoji.get(lockable.get("kind"), "🔒")
-        state = "waiting to be pulled" if lockable.get("kind") == "lever" else "locked"
+        kind = lockable.get("kind")
+        # A switch is deliberately NEVER skipped here even once it's
+        # been used -- it can be toggled back off, so it's still a
+        # real, present object in the room either way, unlike every
+        # other kind which "resolves" into an open path once picked.
+        if kind != "switch" and _lockable_is_open(location, lockable["id"], chat_id):
+            continue
+        emoji = lockable_emoji.get(kind, "🔒")
+        if kind == "lever":
+            state = "waiting to be pulled"
+        elif kind == "switch":
+            active = _lockable_is_open(location, lockable["id"], chat_id)
+            element = lockable.get("element", "")
+            state = f"{'glowing' if active else 'dark'}{f' {element}' if element else ''}, {'active' if active else 'inactive'}"
+        elif kind in ("breakable_wall", "breakable_floor"):
+            state = "cracked, looks breakable"
+        else:
+            state = "locked"
         lines.append(f"{emoji} {lockable['name'].capitalize()} is here, {state}.")
     resource_nodes = location.get("resource_nodes", [])
     if resource_nodes:
@@ -22800,11 +22966,17 @@ async def _do_examine(update: Update, target_text: str) -> None:
         # each get their own real line, not a generic "there's a thing".
         lockable_match = _find_lockable(location, target_text)
         if lockable_match:
-            already_open = lockable_match["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id)
-            if already_open:
-                state = "already open"
-            elif lockable_match.get("kind") == "lever":
+            kind = lockable_match.get("kind")
+            is_open = _lockable_is_open(location, lockable_match["id"], update.effective_chat.id)
+            if kind == "switch":
+                element = lockable_match.get("element", "")
+                state = f"{'glowing' if is_open else 'dark'}{f' {element}' if element else ''} — hit it, or cast the right kind of magic at it, to toggle it"
+            elif is_open:
+                state = "already open" if kind not in ("breakable_wall", "breakable_floor") else "already broken open"
+            elif kind == "lever":
                 state = "waiting to be pulled"
+            elif kind in ("breakable_wall", "breakable_floor"):
+                state = "cracked — it looks like it could be broken open, by force or the right kind of magic"
             elif lockable_match.get("requires_key_item"):
                 state = "sealed shut — it won't budge without something specific, not brute force or a steady hand"
             else:
@@ -24491,6 +24663,21 @@ async def _do_move(update: Update, text: str) -> None:
     destination_id = None
     lowered = text.lower()
 
+    # Real ALTTP-style visible pit mechanic (2026-09-01, per Coffee: a
+    # character can jump down a gap to the floor below, but it must be
+    # STATED whether they can see what's below or not). Deliberately
+    # v1-scoped to VISIBLE pits only -- the room's own description
+    # already tells the player honestly a real gap is here (same
+    # "state it if it's visible" rule the switches/breakables use), so
+    # "jump down"/"jump into the gap" needs no roll, no destination
+    # name, no damage -- just a direct one-way move via the location's
+    # own `pit_down_to` field. A genuinely HIDDEN pit (the player falls
+    # through one they didn't know was there) is explicitly out of
+    # scope for this pass -- it would need a real perception/search
+    # system this game doesn't have yet.
+    if re.search(r"\bjump\b.*\b(?:down|through|into)\b.*\b(?:gap|hole|pit|opening|chasm)\b|\bjump down\b", lowered) and current.get("pit_down_to"):
+        destination_id = current["pit_down_to"]
+
     # Compass navigation (world-expansion pass, 2026-07-19): "directions"
     # is an optional per-location dict (compass word -> location id) that
     # sits alongside "connections" -- checked first since it's unambiguous
@@ -24498,7 +24685,7 @@ async def _do_move(update: Update, text: str) -> None:
     # below that's still how a player naming a destination directly (or any
     # pre-expansion location with no directions at all) always worked.
     direction_words = current.get("directions", {})
-    if direction_words:
+    if direction_words and destination_id is None:
         words_in_text = set(re.findall(r"[a-z]+", lowered))
         for word, loc_id in direction_words.items():
             if word in words_in_text and loc_id in reachable:
@@ -24598,7 +24785,7 @@ async def _do_move(update: Update, text: str) -> None:
 
     locked_connections = current.get("locked_connections", {})
     lockable_id = locked_connections.get(destination_id)
-    if lockable_id and lockable_id not in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
+    if lockable_id and not _lockable_is_open(current, lockable_id, update.effective_chat.id):
         lockable = next(
             (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
         )
@@ -24610,7 +24797,12 @@ async def _do_move(update: Update, text: str) -> None:
         # only a pull, and only from the far room. Telling a player to
         # "pick" a lever they can't even reach yet was the real source
         # of the confusion, not a repeat-lock bug.
-        verb_hint = "pulling the lever" if lockable and lockable.get("kind") == "lever" else "picking the lock"
+        verb_hint = {
+            "lever": "pulling the lever",
+            "switch": "hitting it, or casting the right kind of magic at it",
+            "breakable_wall": "breaking through it",
+            "breakable_floor": "breaking through it",
+        }.get(lockable.get("kind") if lockable else None, "picking the lock")
         await update.effective_chat.send_message(
             f"The way to {destination['name']} is blocked by {name}. Try {verb_hint} first.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -25172,7 +25364,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
 
     locked_connections = current.get("locked_connections", {})
     lockable_id = locked_connections.get(destination_id)
-    if lockable_id and lockable_id not in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
+    if lockable_id and not _lockable_is_open(current, lockable_id, update.effective_chat.id):
         lockable = next(
             (lk for lk in current.get("lockables", []) if lk["id"] == lockable_id), None
         )
@@ -25184,7 +25376,12 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         # only a pull, and only from the far room. Telling a player to
         # "pick" a lever they can't even reach yet was the real source
         # of the confusion, not a repeat-lock bug.
-        verb_hint = "pulling the lever" if lockable and lockable.get("kind") == "lever" else "picking the lock"
+        verb_hint = {
+            "lever": "pulling the lever",
+            "switch": "hitting it, or casting the right kind of magic at it",
+            "breakable_wall": "breaking through it",
+            "breakable_floor": "breaking through it",
+        }.get(lockable.get("kind") if lockable else None, "picking the lock")
         await update.effective_chat.send_message(
             f"The way to {destination['name']} is blocked by {name}. Try {verb_hint} first.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -28069,6 +28266,29 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
             db.remove_item(update.effective_user.id, update.effective_chat.id, scroll_item_id, 1)
 
     if spell["effect"] == "damage":
+        # Real non-combat object-targeting path (2026-09-01, elemental
+        # switches + breakable walls/floors, per Coffee's own ask to use
+        # magic as well as a plain hit). Checked BEFORE the ordinary
+        # combat-session gate just below -- a real puzzle object sitting
+        # in a room is a genuinely valid cast target even with no active
+        # fight at all, which the existing "there's nothing to cast that
+        # at right now" refusal never accounted for. Only fires when the
+        # caster's own current location actually has a matching switch/
+        # breakable lockable; otherwise falls through to the existing
+        # combat-only behavior completely unchanged.
+        location = cl.get_location(CAMPAIGN, character["current_location"])
+        object_lockable = _find_lockable(location, text) if location else None
+        if object_lockable and object_lockable.get("kind") in ("switch", "breakable_wall", "breakable_floor"):
+            if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):
+                return
+            _consume_scroll_if_any()
+            damage_type = spell.get("damage_type", "physical")
+            if object_lockable["kind"] == "switch":
+                await _do_activate_switch(update, character, location, object_lockable, method="magic", spell_damage_type=damage_type)
+            else:
+                await _do_break_obstacle(update, character, location, object_lockable, method="magic", spell_damage_type=damage_type)
+            return
+
         async with _held_session(chat_id, update.effective_user.id) as session:
             if session is None:
                 await update.effective_chat.send_message(

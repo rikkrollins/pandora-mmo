@@ -31348,6 +31348,70 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             for lockable in room.get("lockables", []):
                 self.assertNotIn("requires_key_item", lockable)
 
+    def test_evolve_dungeon_places_a_real_bonus_room_with_no_gate(self):
+        """ALTTP research: reward exploration off the critical path. The bonus room is a real, named room with a real chest, reachable via a plain connection (no lockable gating it), so check_boss_gated/reachability never has to know about it."""
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(4)
+        summary = dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_bonus_test", "underground", rebirth_gate=1, rng=rng,
+        )
+        bonus_room = campaign["locations"]["underground"][summary["bonus_room_id"]]
+        self.assertIn("Quiet Alcove", bonus_room["name"])
+        self.assertTrue(any(lk["kind"] == "chest" for lk in bonus_room.get("lockables", [])))
+        # Genuinely reachable via a plain connections edge, not gated.
+        rooms = dungeon_audit._dungeon_rooms(campaign, "goblin_warrens_evolved_bonus_test")
+        self.assertTrue(any(summary["bonus_room_id"] in r.get("connections", []) for r in rooms.values()))
+
+    def test_evolve_dungeon_places_a_miniboss_distinct_from_the_real_boss(self):
+        """ALTTP research: dungeons almost always have a mid-tier 'not ready yet' encounter distinct from both trash and the real climax."""
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(6)
+        summary = dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_miniboss_test", "underground", rebirth_gate=1, rng=rng,
+        )
+        rooms = dungeon_audit._dungeon_rooms(campaign, "goblin_warrens_evolved_miniboss_test")
+        lo, hi = summary["target_band"]
+        mid_lo = lo + (hi - lo) // 2
+        miniboss_hits = [
+            monster_key for room_id, room in rooms.items() if room_id != summary["boss_room_id"]
+            for monster_key in room.get("monsters", [])
+            if not campaign["monsters"].get(monster_key, {}).get("is_boss")
+            and (campaign["monsters"][monster_key].get("level") or 0) >= mid_lo
+        ]
+        self.assertTrue(miniboss_hits, "expected at least one real mid-tier monster outside the boss room")
+
+    def test_evolve_dungeon_places_a_shop_only_for_large_dungeons(self):
+        """The shop system already exists end-to-end -- only gap was every real shop being tied to a specific named overworld NPC. A large evolve gets the one reusable wandering-trader NPC/shop in its hub; a small one doesn't."""
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(1)  # goblin_warrens + seed 1 produces a large (40+ room) dungeon, confirmed via real generation
+        summary = dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_shop_test", "underground", rebirth_gate=1, rng=rng,
+        )
+        hub_room = dungeon_audit._dungeon_rooms(campaign, "goblin_warrens_evolved_shop_test")["goblin_warrens_evolved_shop_test_hub"]
+        if summary["room_count"] >= 18:
+            self.assertEqual(hub_room.get("shop"), "wandering_traders_pack")
+            self.assertIn("wandering_dungeon_trader", hub_room.get("npcs", []))
+        else:
+            self.assertIsNone(hub_room.get("shop"))
+
+    def test_evolve_dungeon_sometimes_gates_a_branch_behind_a_real_elemental_switch(self):
+        """Real elemental crystal switches/torches (2026-09-01, per Coffee) -- roughly half of all evolves should feature at least one, confirmed statistically across real seeds rather than forcing one specific seed to prove a fluke."""
+        import copy
+        hits = 0
+        for seed in range(20):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_switch_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            if any(lk.get("kind") == "switch" for r in rooms.values() for lk in r.get("lockables", [])):
+                hits += 1
+        self.assertGreater(hits, 0, "expected at least one switch-gated evolve across 20 real seeds")
+        self.assertLess(hits, 20, "expected at least one evolve WITHOUT a switch across 20 real seeds -- it should be a real fraction, not every time")
+
     def test_evolve_dungeon_monsters_fall_inside_the_resolved_target_band(self):
         import copy
         campaign = copy.deepcopy(bot.CAMPAIGN)
@@ -31421,6 +31485,180 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             room_b = campaign_b["locations"]["underground"][room_id]
             self.assertEqual(room_a.get("monsters", []), room_b.get("monsters", []))
             self.assertEqual(room_a.get("connections", []), room_b.get("connections", []))
+
+
+def _switch_test_campaign() -> dict:
+    """
+    A minimal, synthetic campaign fixture for the new Phase 4 puzzle
+    mechanics (elemental switches, breakable walls/floors, visible
+    pits) -- none of these exist in any real, shipped dungeon yet (the
+    evolve-pass generator wiring for them is separate follow-up work),
+    so tests exercise the real bot.py mechanics directly against a
+    small fixture rather than real campaign.json data.
+    """
+    import copy
+    campaign = copy.deepcopy(bot.CAMPAIGN)
+    layer = campaign["locations"]["underground"]
+    layer["fx_switch_room"] = {
+        "name": "Switch Test Room", "description": "A test room with a real switch.",
+        "connections": ["fx_switch_dest"],
+        "locked_connections": {"fx_switch_dest_gated": "fx_switch_1"},
+        "lockables": [{"id": "fx_switch_1", "kind": "switch", "name": "a fire crystal", "element": "fire"}],
+    }
+    layer["fx_switch_dest"] = {"name": "Switch Test Hub", "description": "Hub.", "connections": ["fx_switch_room"]}
+    layer["fx_switch_dest_gated"] = {"name": "Beyond The Switch", "description": "Gated room.", "connections": ["fx_switch_room"]}
+    layer["fx_break_room"] = {
+        "name": "Break Test Room", "description": "A test room with a real breakable wall.",
+        "connections": ["fx_break_hub"],
+        "locked_connections": {"fx_break_dest": "fx_break_wall_1"},
+        "lockables": [{"id": "fx_break_wall_1", "kind": "breakable_wall", "name": "a cracked wall"}],
+    }
+    layer["fx_break_hub"] = {"name": "Break Test Hub", "description": "Hub.", "connections": ["fx_break_room"]}
+    layer["fx_break_dest"] = {"name": "Beyond The Wall", "description": "Gated room.", "connections": ["fx_break_room"]}
+    layer["fx_pit_room"] = {
+        "name": "Pit Test Room", "description": "A real, visible gap leads down from here.",
+        "connections": [], "pit_down_to": "fx_pit_dest",
+    }
+    layer["fx_pit_dest"] = {"name": "Below The Pit", "description": "Landed here.", "connections": []}
+    return campaign
+
+
+class SwitchAndBreakableAndPitTests(unittest.IsolatedAsyncioTestCase):
+    """
+    Real Phase 4 puzzle-mechanic tests (2026-09-01, per Coffee: elemental
+    crystal switches activated by a matching spell OR a plain hit,
+    breakable walls/floors via a hit or fire/force magic, and visible
+    pits you can jump down). Uses a synthetic fixture campaign (see
+    _switch_test_campaign) via unittest.mock.patch.object(bot, "CAMPAIGN",
+    ...) -- none of these mechanics exist in any real shipped dungeon
+    yet, only in the bot.py machinery itself.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        use_test_db("tests/tmp/switch_breakable_pit_test.db")
+
+    async def test_switch_hit_toggles_active_then_inactive(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961001, -961001
+            make_basic_character(user_id, "SwitchHitTester", chat_id=chat_id, current_location="fx_switch_room")
+            sink = []
+            await bot._do_skill_check(FakeUpdate(user_id, "hit the crystal", sink, chat_id=chat_id), "dexterity", "hit the crystal")
+            self.assertTrue(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_switch_1"))
+            self.assertTrue(any("flares to life" in s for s in sink))
+
+            sink2 = []
+            await bot._do_skill_check(FakeUpdate(user_id, "hit the crystal", sink2, chat_id=chat_id), "dexterity", "hit the crystal")
+            self.assertFalse(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_switch_1"))
+            self.assertTrue(any("dims and goes dark" in s for s in sink2))
+
+    async def test_switch_magic_matching_element_toggles_wrong_element_does_not(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961002, -961002
+            make_basic_character(
+                user_id, "SwitchMageTester", chat_id=chat_id, current_location="fx_switch_room",
+                char_class="Wizard", known_spells=["fireball", "magic_missile"],
+            )
+            db.update_character(user_id, chat_id, spell_slots_current=5, spell_slots_max=5)
+
+            # Wrong element (magic_missile is "force", the switch is "fire") -- no toggle.
+            # Real design: the slot is still spent -- casting AT the wrong
+            # target is still a real, deliberate cast, same as every other
+            # spell in this game spending its resource regardless of
+            # whether the effect actually did anything to that target.
+            sink = []
+            await bot._do_cast_spell(FakeUpdate(user_id, "cast magic missile at the fire crystal", sink, chat_id=chat_id), "cast magic missile at the fire crystal")
+            self.assertFalse(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_switch_1", False))
+            self.assertTrue(any("wrong element" in s for s in sink))
+
+            # Matching element (fireball is "fire") -- toggles on, spends a real slot too.
+            sink2 = []
+            await bot._do_cast_spell(FakeUpdate(user_id, "cast fireball at the fire crystal", sink2, chat_id=chat_id), "cast fireball at the fire crystal")
+            self.assertTrue(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_switch_1"))
+            character_after = db.get_character(user_id, chat_id)
+            self.assertEqual(character_after["spell_slots_current"], 3)  # 5 - 1 (magic_missile) - 1 (fireball)
+
+    async def test_switch_gated_destination_blocks_and_admits_based_on_current_toggle_state(self):
+        """Real end-to-end move-blocking check -- not just reading _SWITCH_STATE -- confirms _do_move's own gate honors the switch's CURRENT state, not a permanent one-time unlock."""
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961003, -961003
+            make_basic_character(user_id, "SwitchGateTester", chat_id=chat_id, current_location="fx_switch_room")
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "go to beyond the switch")
+            character = db.get_character(user_id, chat_id)
+            self.assertNotEqual(character["current_location"], "fx_switch_dest_gated")
+
+            await bot._do_skill_check(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), "dexterity", "hit the crystal")
+            sink2 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to beyond the switch")
+            character = db.get_character(user_id, chat_id)
+            self.assertEqual(character["current_location"], "fx_switch_dest_gated")
+
+            # Toggle back off, return, and confirm the path is blocked again.
+            db.update_character(user_id, chat_id, current_location="fx_switch_room")
+            await bot._do_skill_check(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), "dexterity", "hit the crystal")
+            sink3 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink3, chat_id=chat_id), "go to beyond the switch")
+            character = db.get_character(user_id, chat_id)
+            self.assertEqual(character["current_location"], "fx_switch_room")
+
+    async def test_breakable_wall_hit_opens_permanently(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961004, -961004
+            make_basic_character(user_id, "BreakHitTester", chat_id=chat_id, current_location="fx_break_room")
+            sink = []
+            await bot._do_skill_check(FakeUpdate(user_id, "smash the cracked wall", sink, chat_id=chat_id), "dexterity", "smash the cracked wall")
+            self.assertIn("fx_break_wall_1", bot._chat_scoped_set(bot._UNLOCKED, chat_id))
+            self.assertTrue(any("gives way" in s for s in sink))
+
+            # Already broken -- a second attempt says so, doesn't toggle back.
+            sink2 = []
+            await bot._do_skill_check(FakeUpdate(user_id, "smash the cracked wall", sink2, chat_id=chat_id), "dexterity", "smash the cracked wall")
+            self.assertTrue(any("already broken open" in s for s in sink2))
+
+    async def test_breakable_wall_magic_requires_fire_or_force(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961005, -961005
+            make_basic_character(
+                user_id, "BreakMageTester", chat_id=chat_id, current_location="fx_break_room",
+                char_class="Wizard", known_spells=["ray_of_frost", "fireball"],
+            )
+            db.update_character(user_id, chat_id, spell_slots_current=5, spell_slots_max=5)
+
+            # Cold isn't fire/force -- no effect.
+            sink = []
+            await bot._do_cast_spell(FakeUpdate(user_id, "cast ray of frost at the cracked wall", sink, chat_id=chat_id), "cast ray of frost at the cracked wall")
+            self.assertNotIn("fx_break_wall_1", bot._chat_scoped_set(bot._UNLOCKED, chat_id))
+
+            # Fire opens it.
+            sink2 = []
+            await bot._do_cast_spell(FakeUpdate(user_id, "cast fireball at the cracked wall", sink2, chat_id=chat_id), "cast fireball at the cracked wall")
+            self.assertIn("fx_break_wall_1", bot._chat_scoped_set(bot._UNLOCKED, chat_id))
+
+    async def test_jump_down_a_visible_pit_moves_directly_to_the_real_destination(self):
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961006, -961006
+            make_basic_character(user_id, "PitJumperTester", chat_id=chat_id, current_location="fx_pit_room")
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "I jump down into the gap")
+            character = db.get_character(user_id, chat_id)
+            self.assertEqual(character["current_location"], "fx_pit_dest")
+
+    def test_jump_down_intent_routes_through_the_real_parser(self):
+        intent = _keyword_fallback("I jump down into the gap", [])
+        self.assertEqual(intent["action"], "move")
 
 
 if __name__ == "__main__":

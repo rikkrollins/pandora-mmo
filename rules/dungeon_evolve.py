@@ -334,6 +334,33 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     branch_idx = num_branches  # the last branch generated is always the boss branch, same convention as before
     branch_leaf_ids = [b["tail_id"] for b in branches]
 
+    # Elemental switch gate (2026-09-01, per Coffee's own ALTTP-inspired
+    # ask). Roughly half the time, one non-boss branch's own hub edge
+    # gets gated behind a real elemental switch instead of staying a
+    # freely open corridor -- real variety beyond every branch always
+    # being a plain walk from the hub. Same "convert a plain connection
+    # into a locked_connections + lockables entry" shape the boss
+    # branch already uses below, just with kind="switch" -- it becomes
+    # its own separate grid island the same way the boss branch does
+    # (confirmed safe by extensive real testing, see evolve_dungeon's
+    # own grid-placement retry step).
+    if rng.random() < 0.5:
+        switch_branch = rng.choice([b for b in branches if b["idx"] != branch_idx])
+        switch_branch_first_id = f"{new_dungeon_id}_b{switch_branch['idx']}_r0"
+        _, hub_room_for_switch = _find_room(campaign, hub_id)
+        _, switch_gate_far_room = _find_room(campaign, switch_branch_first_id)
+        hub_room_for_switch["connections"].remove(switch_branch_first_id)
+        switch_gate_far_room["connections"].remove(hub_id)
+        switch_gate_far_room.setdefault("connections", []).append(hub_id)
+        element = rng.choice(["fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical"])
+        switch_id = f"{new_dungeon_id}_switch_{switch_branch['idx']}"
+        # A fire switch is sometimes flavored as a torch/brazier instead
+        # of a crystal -- same mechanic either way (kind="switch",
+        # element="fire"), purely cosmetic naming.
+        switch_name = "a lit brazier" if element == "fire" and rng.random() < 0.5 else f"a {element} crystal"
+        hub_room_for_switch.setdefault("lockables", []).append({"id": switch_id, "kind": "switch", "name": switch_name, "element": element})
+        hub_room_for_switch.setdefault("locked_connections", {})[switch_branch_first_id] = switch_id
+
     # Extra chest lockables -- comfortable lock_density padding, real
     # loot from items already known-good elsewhere in this same
     # catalog. Real bug found testing this fix: a fixed 1-2 chests was
@@ -386,6 +413,55 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     if boss_monster not in boss_room["monsters"]:
         boss_room["monsters"].append(boss_monster)
 
+    # Miniboss (2026-09-01, per the ALTTP research: dungeons almost
+    # always have one "you're not ready yet" encounter partway through,
+    # distinct from both trash and the real climax). A non-boss
+    # branch's own leaf gets one monster from the UPPER half of
+    # target_band -- stronger than ordinary trash, still meaningfully
+    # below the real boss, since it draws from the same pool bounded by
+    # the same target_band ceiling rather than reaching above it.
+    non_boss_leaves = branch_leaf_ids[:-1]
+    if non_boss_leaves:
+        band_lo, band_hi = target_band
+        mid_lo = band_lo + (band_hi - band_lo) // 2
+        miniboss_candidates = _candidate_monsters(campaign, (mid_lo, band_hi), boss=False) or trash_candidates
+        if miniboss_candidates:
+            miniboss_room_id = rng.choice(non_boss_leaves)
+            miniboss = rng.choice(miniboss_candidates)
+            _, miniboss_room = _find_room(campaign, miniboss_room_id)
+            miniboss_room.setdefault("monsters", [])
+            if miniboss not in miniboss_room["monsters"]:
+                miniboss_room["monsters"].append(miniboss)
+
+    # Bonus/optional room (2026-09-01, ALTTP research: reward exploration
+    # off the critical path). Extends a random NON-BOSS branch one room
+    # further, in that branch's own already-established direction (so
+    # it can't introduce a new cross-branch grid collision) -- no gate
+    # at all, so it's automatically exempt from check_boss_gated/
+    # reachability requirements, just a free chest for wandering off
+    # the main line.
+    bonus_branch = rng.choice([b for b in branches if b["idx"] != branch_idx])
+    bonus_room_id = _new_room(bonus_branch["idx"], bonus_branch["next_step"])
+    connect(campaign, bonus_branch["tail_id"], bonus_room_id, direction=bonus_branch["direction"])
+    _, bonus_room = _find_room(campaign, bonus_room_id)
+    bonus_room["name"] = f"{display_name} -- A Quiet Alcove"
+    bonus_room["description"] = "Off the main path, easy to miss -- exactly the kind of place worth a second look."
+    bonus_room["monsters"] = []
+    bonus_room.setdefault("lockables", []).append({
+        "id": f"{new_dungeon_id}_bonus_cache", "kind": "chest", "name": "an unguarded stash",
+        "loot": {"greater_healing_potion": 1}, "gold": rng.randint(60, 180),
+    })
+
+    # Dungeon shop for larger dungeons only (2026-09-01) -- the shop
+    # system already exists and works end-to-end; the only real gap was
+    # that every existing shop is tied to a specific named overworld
+    # NPC, none of which fit turning up inside a random dungeon. Reuses
+    # the one reusable "wandering trader" NPC/shop authored for exactly
+    # this, placed in the hub of any evolve past a real size threshold.
+    if len(room_ids) >= 18:
+        hub_room.setdefault("npcs", []).append("wandering_dungeon_trader")
+        hub_room["shop"] = "wandering_traders_pack"
+
     # Real, explicit opt-out from check_level_band's arc-ownership
     # lookup -- see that check's own docstring for exactly why a
     # quest-less generated dungeon needs this (the same principle as
@@ -407,6 +483,8 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         "boss_monster": boss_monster,
         "rebirth_gate": rebirth_gate,
         "source_hub_id": source_hub_id,
+        "bonus_room_id": bonus_room_id,
+        "has_shop": len(room_ids) >= 18,
     }
 
 

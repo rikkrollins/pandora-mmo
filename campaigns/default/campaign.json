@@ -8658,6 +8658,14 @@
       "recruitable": false,
       "alignment": "True Neutral",
       "disposition": "neutral"
+    },
+    "wandering_dungeon_trader": {
+      "name": "A Wandering Trader",
+      "role": "shopkeeper",
+      "personality": "impossible to place -- always a little too calm for wherever they've turned up, with wares that always seem to fit exactly what's needed this deep in",
+      "shop": "wandering_traders_pack",
+      "alignment": "True Neutral",
+      "disposition": "friendly"
     }
   },
   "shops": {
@@ -8731,6 +8739,18 @@
         "vocal_tonic",
         "clarifying_drops",
         "torch"
+      ]
+    },
+    "wandering_traders_pack": {
+      "owner_npc": "wandering_dungeon_trader",
+      "description": "A trader's pack, unrolled right here in the depths, stocked like they knew exactly who'd be passing through.",
+      "inventory": [
+        "healing_potion",
+        "greater_healing_potion",
+        "antitoxin",
+        "rations",
+        "torch",
+        "scroll_magic_missile"
       ]
     }
   },
