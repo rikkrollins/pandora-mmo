@@ -12,6 +12,7 @@ take minutes each under load; run these when you have time to spare,
 or when touching code they cover directly.
 """
 import os
+import random
 import re
 import shutil
 import time
@@ -40,6 +41,7 @@ from ai.text_cleanup import strip_think_tags
 from rules.combat import resolve_attack, reaction_precheck
 from rules.crafting import RECIPES
 import rules.dungeon_audit as dungeon_audit
+import rules.dungeon_evolve as dungeon_evolve
 from tests.helpers import (
     DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
     make_basic_character, use_test_db, complete_arcs_1_through_7,
@@ -31184,10 +31186,11 @@ class DungeonAuditTests(unittest.TestCase):
     def test_all_eight_shipped_dungeons_pass_every_real_check(self):
         """
         The real, live payoff: running this checker against every one
-        of the 8 already-shipped, hand-built redesigned dungeons.
-        Confirmed clean by hand while building this checker (2026-08-31)
-        -- if a future edit ever regresses one of them, this is the
-        test that catches it.
+        of the 8 already-shipped, hand-built redesigned dungeons, PLUS
+        (2026-09-01) the first real Phase 3 evolve output,
+        wrathflame_vault_evolved. Confirmed clean by hand while building
+        this checker (2026-08-31) -- if a future edit ever regresses
+        one of them, this is the test that catches it.
         """
         import json
         campaign_path = os.path.join(os.path.dirname(__file__), "..", "campaigns", "default", "campaign.json")
@@ -31199,11 +31202,171 @@ class DungeonAuditTests(unittest.TestCase):
             for loc in layer.values()
             if loc.get("dungeon_id")
         })
-        self.assertEqual(len(dungeon_ids), 8, dungeon_ids)
+        self.assertEqual(len(dungeon_ids), 9, dungeon_ids)
         for dungeon_id in dungeon_ids:
             results = dungeon_audit.audit_dungeon(real_campaign, dungeon_id)
             for check_name, failures in results.items():
                 self.assertEqual(failures, [], f"{dungeon_id}/{check_name}: {failures}")
+
+
+class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
+    """
+    Real Phase 3 tests (2026-09-01, per Coffee: "start phase 3" -- the
+    RNG-driven "evolve this dungeon" pass deferred when Phase 1/2
+    shipped). Uses a deep copy of the real bot.CAMPAIGN throughout,
+    never the shared module-level object itself -- evolve_dungeon
+    genuinely mutates whatever `campaign` dict it's given once a valid
+    attempt is found, and bot.CAMPAIGN is a shared singleton every
+    other test in this same process also reads.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        use_test_db("tests/tmp/dungeon_evolve_test.db")
+
+    def test_harder_target_band_returns_the_next_arcs_band(self):
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        band = dungeon_evolve._harder_target_band(campaign, "goblin_warrens")
+        self.assertEqual(band, dungeon_audit.CHAPTER_LEVEL_BANDS["arc_6_sunken_root_caverns"])
+
+    def test_harder_target_band_raises_for_the_last_banded_chapter(self):
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        with self.assertRaises(ValueError):
+            dungeon_evolve._harder_target_band(campaign, "greymoor_downs")
+
+    def test_harder_target_band_raises_for_a_bonus_vault_with_no_owning_arc(self):
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        with self.assertRaises(ValueError):
+            dungeon_evolve._harder_target_band(campaign, "wrathflame_vault")
+
+    def test_harder_target_band_honors_an_explicit_override(self):
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        band = dungeon_evolve._harder_target_band(campaign, "wrathflame_vault", explicit_band=(35, 50))
+        self.assertEqual(band, (35, 50))
+
+    def test_evolve_dungeon_produces_a_result_that_passes_every_structural_check(self):
+        """
+        Reuses Phase 1's checker completely unchanged as the acceptance
+        bar, all 7 checks -- including level_band, which self-exempts
+        the generated dungeon via campaign["evolved_dungeon_ids"] (see
+        check_level_band's own docstring for why an evolved dungeon
+        needs the same opt-out the two hardcoded bonus vaults get: its
+        one new connection to the source dungeon would otherwise let
+        the seeded-BFS-flood fallback in _owning_arc_id attribute it to
+        the SOURCE dungeon's own lower arc/band, wrongly flagging every
+        monster this pass deliberately placed at the harder target).
+        """
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(1234)
+        dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_test", "underground", rebirth_gate=1, rng=rng,
+        )
+        self.assertIn("goblin_warrens_evolved_test", campaign.get("evolved_dungeon_ids", []))
+        results = dungeon_audit.audit_dungeon(campaign, "goblin_warrens_evolved_test")
+        for check_name, failures in results.items():
+            self.assertEqual(failures, [], f"{check_name}: {failures}")
+
+    def test_evolve_dungeon_registry_is_the_real_reason_level_band_is_skipped(self):
+        """Directly proves the exemption is real registry-based logic, not an accident -- removing the entry from evolved_dungeon_ids makes check_level_band flag the same dungeon again."""
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(1234)
+        dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_test7", "underground", rebirth_gate=1, rng=rng,
+        )
+        self.assertEqual(dungeon_audit.check_level_band(campaign, "goblin_warrens_evolved_test7"), [])
+        campaign["evolved_dungeon_ids"].remove("goblin_warrens_evolved_test7")
+        self.assertTrue(dungeon_audit.check_level_band(campaign, "goblin_warrens_evolved_test7"))
+
+    def test_evolve_dungeon_room_count_strictly_exceeds_the_source(self):
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        source_room_count = len(dungeon_audit._dungeon_rooms(campaign, "goblin_warrens"))
+        rng = random.Random(5)
+        summary = dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_test2", "underground", rebirth_gate=1, rng=rng,
+        )
+        self.assertGreater(summary["room_count"], source_room_count)
+
+    def test_evolve_dungeon_never_places_a_permanent_key_item_lock(self):
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(9)
+        dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_test3", "underground", rebirth_gate=1, rng=rng,
+        )
+        for room in dungeon_audit._dungeon_rooms(campaign, "goblin_warrens_evolved_test3").values():
+            for lockable in room.get("lockables", []):
+                self.assertNotIn("requires_key_item", lockable)
+
+    def test_evolve_dungeon_monsters_fall_inside_the_resolved_target_band(self):
+        import copy
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(3)
+        summary = dungeon_evolve.evolve_dungeon(
+            campaign, "goblin_warrens", "goblin_warrens_evolved_test4", "underground", rebirth_gate=1, rng=rng,
+        )
+        lo, hi = summary["target_band"]
+        for room in dungeon_audit._dungeon_rooms(campaign, "goblin_warrens_evolved_test4").values():
+            for monster_key in room.get("monsters", []):
+                template = campaign["monsters"].get(monster_key, {})
+                level = template.get("level")
+                if level is None or template.get("is_boss"):
+                    continue
+                self.assertTrue(lo <= level <= hi, f"{monster_key} is level {level}, outside {summary['target_band']}")
+
+    async def test_evolve_dungeon_new_entrance_is_really_rebirth_gated_end_to_end(self):
+        """Real end-to-end call through bot._do_move -- not just reading the flag -- confirms the EXISTING _meets_rebirth_requirement mechanism actually blocks/admits based on the new entrance's requires_rebirth_count, with zero new bot.py code."""
+        import copy
+        from unittest.mock import patch
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(11)
+        dungeon_evolve.evolve_dungeon(
+            campaign, "wrathflame_vault", "wrathflame_vault_evolved_test5", "underground",
+            rebirth_gate=1, target_band=(35, 50), rng=rng,
+        )
+        entrance = campaign["locations"]["underground"]["wrathflame_vault_evolved_test5_entrance"]
+        self.assertEqual(entrance.get("requires_rebirth_count"), 1)
+
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id = 960900
+            make_basic_character(user_id, "RebirthGateTester", current_location="wrathflame_vault_ember_hall")
+            db.update_character(user_id, -999, rebirth_count=0)
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink), "go to wrathflame vault evolved test5")
+            character = db.get_character(user_id, -999)
+            self.assertNotEqual(character["current_location"], "wrathflame_vault_evolved_test5_entrance")
+
+            db.update_character(user_id, -999, rebirth_count=1)
+            sink2 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink2), "go to wrathflame vault evolved test5")
+            character = db.get_character(user_id, -999)
+            self.assertEqual(character["current_location"], "wrathflame_vault_evolved_test5_entrance")
+
+    def test_evolve_dungeon_is_deterministic_with_the_same_seed(self):
+        import copy
+        campaign_a = copy.deepcopy(bot.CAMPAIGN)
+        campaign_b = copy.deepcopy(bot.CAMPAIGN)
+        summary_a = dungeon_evolve.evolve_dungeon(
+            campaign_a, "goblin_warrens", "goblin_warrens_evolved_test6", "underground",
+            rebirth_gate=1, rng=random.Random(777),
+        )
+        summary_b = dungeon_evolve.evolve_dungeon(
+            campaign_b, "goblin_warrens", "goblin_warrens_evolved_test6", "underground",
+            rebirth_gate=1, rng=random.Random(777),
+        )
+        self.assertEqual(summary_a["room_ids"], summary_b["room_ids"])
+        self.assertEqual(summary_a["boss_monster"], summary_b["boss_monster"])
+        for room_id in summary_a["room_ids"]:
+            room_a = campaign_a["locations"]["underground"][room_id]
+            room_b = campaign_b["locations"]["underground"][room_id]
+            self.assertEqual(room_a.get("monsters", []), room_b.get("monsters", []))
+            self.assertEqual(room_a.get("connections", []), room_b.get("connections", []))
 
 
 if __name__ == "__main__":

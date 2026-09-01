@@ -2,6 +2,59 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.448] — feature: Phase 3 dungeon evolve pass, first real evolved dungeon
+
+Real request (2026-09-01, Coffee: "start phase 3" -- the RNG-driven
+"evolve this dungeon" pass deferred back when the dungeon quality
+checker/authoring toolkit shipped, per his original 2026-08-31 ask:
+"i have plans after chapter 8 to use this to rework dungeons to evolve
+them or get harder... you can even add some RNG to the generator, that
+would be awesome for evolving maps!").
+
+New offline tool, `rules/dungeon_evolve.py` + `scripts/evolve_dungeon.py`:
+given an existing dungeon, RNG-generates a NEW, harder variant (more
+rooms than the source, always) alongside it -- new hub-and-spoke
+layout, a lever shortcut back to its own hub, a boss gated behind a
+plain DC13 door (no permanent key items), and monster/boss picks drawn
+from the existing 135-entry catalog filtered to a "harder target band"
+(the next story chapter's level band past the source dungeon's own).
+Every generated candidate is validated against Phase 1's real checker
+(`rules/dungeon_audit.py`, unchanged) before being accepted; a failing
+roll is discarded and retried with fresh RNG draws. The evolved
+dungeon's entrance connects from the source dungeon's own hub, gated
+by `requires_rebirth_count` -- reusing the EXISTING rebirth-gate
+mechanism (`_meets_rebirth_requirement`, bot.py) with zero new bot.py
+code. The original dungeon is completely untouched.
+
+Real design-quality findings caught while building this (not assumed
+clean going in): an early version let the RNG hand out a headline,
+one-of-a-kind story-climax boss (e.g. The Unbegun) to a side replay
+dungeon -- fixed by excluding level-less catalog bosses from the pool
+(this catalog's handful of "no level field" is_boss entries are
+consistently the hand-tuned final-arc climaxes, never generic reusable
+threats). Separately, a generated dungeon's one new connection back to
+its source let `check_level_band`'s arc-ownership lookup misattribute
+it to the SOURCE dungeon's own (lower) band -- fixed with a small,
+explicit registry (`campaign["evolved_dungeon_ids"]`), the same kind
+of no-guessing opt-out the two hardcoded bonus vaults already had, so
+the full, real Phase 1 checker (all 7 checks, unchanged) is still the
+genuine acceptance bar.
+
+First real output, hand-polished and shipped: **Wrathflame Vault,
+Unbound Deeper** (`wrathflame_vault_evolved`) -- 22 rooms (up from the
+original 13), 7 branches, level 35-50 monsters, boss **The Last
+Glyph**, reachable from the Ember Hall for any rebirthed character.
+
+Tested: 10 new real tests (target-band resolution incl. frontier
+cases, structural-check pass, room-count growth, no-key-item
+invariant, monster-band correctness, real end-to-end rebirth-gate
+enforcement through `bot._do_move`, seeded determinism, the
+evolved-dungeon-ids registry itself) -- all via real fail-then-pass
+verification, using deep copies of the real campaign so no test
+pollutes the shared object other tests read. Existing Phase 1 tests
+(15) and the real 8-dungeon audit test (now 9, including the new
+evolved dungeon) still pass unchanged.
+
 ## [1.27.447] — fix: Choked Reliquary riddle read as a grave, not water
 
 Real live incident (2026-09-01, dev-bridge screenshot, reported live

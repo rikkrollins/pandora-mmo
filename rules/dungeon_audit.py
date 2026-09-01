@@ -399,8 +399,20 @@ def check_level_band(campaign: dict, dungeon_id: str) -> list[str]:
     reachable from an early zone via plain connections, which the BFS
     ownership lookup would otherwise misattribute to whatever arc
     happens to flood-reach them first. Skipped outright, not scored.
+
+    Real gap found building Phase 3 (rules/dungeon_evolve.py, 2026-09-01):
+    a generated evolve-pass dungeon has the exact same problem as the
+    two bonus vaults -- it carries no quest of its own, so it always
+    falls to the same BFS-flood fallback, and its one new connection to
+    the SOURCE dungeon lets the source's own (lower) arc bleed into it,
+    wrongly flagging every monster the evolve pass deliberately placed
+    at a HARDER band. `campaign["evolved_dungeon_ids"]` (stamped by
+    evolve_dungeon itself) is the same kind of explicit, no-guessing
+    opt-out as the hardcoded bonus-vault set above -- not a hack, the
+    identical principle applied to a dungeon that didn't exist yet when
+    the original set was written.
     """
-    if dungeon_id in _BONUS_VAULT_DUNGEON_IDS:
+    if dungeon_id in _BONUS_VAULT_DUNGEON_IDS or dungeon_id in campaign.get("evolved_dungeon_ids", []):
         return []
     rooms = _dungeon_rooms(campaign, dungeon_id)
     arc_id = _owning_arc_id(campaign, set(rooms.keys()))
