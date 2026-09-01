@@ -5077,6 +5077,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Known real fact: this is a d20 roll", prompt)
         self.assertIn("never a d12", prompt)
 
+    def test_puzzle_next_step_hint_prompt_requires_naming_the_real_location(self):
+        """
+        Real live report (2026-09-01, dev-bridge screenshot + caption,
+        a player on "What Was Buried"): the puzzle-mode "What's Next...
+        A Riddle" hint came back as pure mood text with zero actionable
+        info -- "Within hushed depths where silence breathes, discern
+        the whisper that stirs" -- no location, no lead, nothing a
+        "lost" player could act on, even though the real quest's own
+        Location fact (Watcher's Walk) was already in the prompt the
+        whole time. The old preamble told the model it "may" evoke mood
+        but never required it to actually surface the given Location by
+        name, so the model treated it as skippable. Naming the location
+        is not a spoiler -- only the puzzle's own answer is -- so the
+        preamble now makes stating it mandatory.
+        """
+        import ai.dm_agent as dm_agent_module
+        next_step = {
+            "is_puzzle": True,
+            "location_name": "Watcher's Walk",
+            "clue": "The Watching Glyph at the end of Watcher's Walk poses a real riddle.",
+        }
+        prompt = dm_agent_module._build_next_step_hint_prompt(next_step)
+        self.assertIn("Location: Watcher's Walk", prompt)
+        self.assertIn("MUST plainly name the real Location", prompt)
+        self.assertIn("NEVER state or imply the actual answer", prompt)
+
     def test_gathering_tools_stocked_at_marens_wares(self):
         shop = bot.CAMPAIGN["shops"]["marens_wares"]
         for tool_id in ("fishing_pole", "bait", "woodcutters_axe", "pickaxe", "shears"):

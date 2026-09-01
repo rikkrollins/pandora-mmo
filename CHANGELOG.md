@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.446] — fix: puzzle "What's Next" hints gave zero actionable info
+
+Real live report (2026-09-01, dev-bridge screenshot + caption, a
+player on "What Was Buried"): the puzzle-mode "What's Next... A
+Riddle" hint came back as pure mood text — "Within hushed depths where
+silence breathes, discern the whisper that stirs" — no location, no
+lead, nothing a genuinely lost player could act on. The real quest's
+own Location fact (Watcher's Walk) was already in the prompt the whole
+time; the old preamble only ever told the model it "may" evoke mood
+around the puzzle, never that it had to actually surface the given
+Location by name, so the small local model treated naming it as
+optional and skipped it entirely.
+
+Naming a location was never the spoiler here — only the puzzle's own
+answer is, and that guard was already solid (never touched). The
+preamble now makes stating the real Location mandatory for puzzle-mode
+hints too, so a lost player is always told where to go even when
+what's waiting there stays deliberately vague and ominous.
+
+Tested: real fail-then-pass repro on `_build_next_step_hint_prompt`
+confirms the new instruction is present; existing next-step-hint
+grounding test still passes unchanged.
+
 ## [1.27.445] — feature: unlocked paths now stay open in "look around" forever
 
 Real live feature request (2026-09-01, Coffee: "if we gain access to a
