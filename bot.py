@@ -24161,13 +24161,43 @@ def _dungeon_locations(dungeon_id: str) -> dict:
     return merged
 
 
-def _dungeon_map_keyboard(layer_name: str) -> InlineKeyboardMarkup:
-    """One button back to the whole layer map -- reuses map_menu_callback/_send_layer_map exactly as the layer-switch buttons already do."""
-    return InlineKeyboardMarkup([[InlineKeyboardButton(f"🗺️ Full {layer_name.title()} Map", callback_data=f"map|{layer_name}")]])
+def _dungeon_map_keyboard(
+    layer_name: str, dungeon_id: str | None = None, available_floors: list[int] | None = None, current_floor: int | None = None,
+) -> InlineKeyboardMarkup:
+    """
+    One button back to the whole layer map -- reuses map_menu_callback/
+    _send_layer_map exactly as the layer-switch buttons already do.
+
+    Real floor-switcher (2026-09-02, per Coffee: "do that for the
+    overworld dungeons too" -- extending the Labyrinth's own floor
+    buttons to real, persistent multi-floor dungeons like Greymoor
+    Downs). Only ever shown once `available_floors` (map_render.
+    available_floors, real attained floor levels) has more than one
+    entry -- a single-floor dungeon's keyboard is completely unaffected.
+    """
+    rows = []
+    if dungeon_id and available_floors and len(available_floors) > 1:
+        floor_label = lambda f: "Ground" if f == 0 else (f"F{f}" if f > 0 else f"B{-f}")
+        rows.append([
+            InlineKeyboardButton(f"{'📍 ' if f == current_floor else ''}{floor_label(f)}", callback_data=f"dungeonmap|{dungeon_id}|{f}")
+            for f in available_floors
+        ])
+    rows.append([InlineKeyboardButton(f"🗺️ Full {layer_name.title()} Map", callback_data=f"map|{layer_name}")])
+    return InlineKeyboardMarkup(rows)
 
 
-async def _send_dungeon_map(update: Update, character: dict, dungeon_id: str) -> None:
-    """Real render (map_render.render_dungeon_map), scoped to just one dungeon's rooms -- see _send_layer_map for the whole-layer equivalent this mirrors."""
+async def _send_dungeon_map(update: Update, character: dict, dungeon_id: str, floor: int | None = None) -> None:
+    """
+    Real render (map_render.render_dungeon_map), scoped to just one
+    dungeon's rooms -- see _send_layer_map for the whole-layer
+    equivalent this mirrors.
+
+    floor (2026-09-02, Phase L3 follow-up): when the dungeon has more
+    than one real attained floor (map_render.available_floors), only
+    that one floor is rendered at a time, with a real floor-switcher
+    row -- defaults to whichever floor the character is CURRENTLY
+    standing on if they're inside this dungeon, else Ground (0).
+    """
     dungeon_locations = _dungeon_locations(dungeon_id)
     visited = set(character.get("visited_locations") or [])
     revealed = set(character.get("map_revealed_locations") or [])
@@ -24177,10 +24207,19 @@ async def _send_dungeon_map(update: Update, character: dict, dungeon_id: str) ->
         (layer for layer, locs in CAMPAIGN["locations"].items() if current_location_id in locs),
         "surface",
     )
+    available = map_render.available_floors(dungeon_locations, visited)
+    floor_filter = None
+    if len(available) > 1:
+        if floor is not None and floor in available:
+            floor_filter = floor
+        elif current_location_id in dungeon_locations:
+            floor_filter = map_render.floor_of(dungeon_locations, visited, current_location_id)
+        else:
+            floor_filter = 0
     try:
         png_bytes = await asyncio.to_thread(
             map_render.render_dungeon_map, dungeon_id, display_name, dungeon_locations, visited, revealed,
-            current_location_id, CAMPAIGN["monsters"], CAMPAIGN["quests"],
+            current_location_id, CAMPAIGN["monsters"], CAMPAIGN["quests"], floor_filter,
         )
     except Exception as e:
         logger.warning(f"[map_render] dungeon map failed: {e!r}")
@@ -24191,8 +24230,26 @@ async def _send_dungeon_map(update: Update, character: dict, dungeon_id: str) ->
     await update.effective_chat.send_photo(
         photo=png_bytes, caption=f"🗺️ {display_name} — explored so far.",
         message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        reply_markup=_dungeon_map_keyboard(layer_name),
+        reply_markup=_dungeon_map_keyboard(layer_name, dungeon_id, available, floor_filter),
     )
+
+
+async def dungeon_map_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _dungeon_map_keyboard's floor-switch row -- re-renders the same dungeon map at a different real, attained floor."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    await _safe_answer(query)
+    if len(parts) < 3:
+        return
+    dungeon_id = parts[1]
+    try:
+        floor = int(parts[2])
+    except ValueError:
+        return
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        return
+    await _send_dungeon_map(update, character, dungeon_id, floor)
 
 
 async def _send_layer_map(update: Update, character: dict, layer_name: str) -> None:
@@ -35763,6 +35820,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(hybrid_menu_callback, pattern=r"^hybrid\|"))
     application.add_handler(CallbackQueryHandler(title_menu_callback, pattern=r"^title\|"))
     application.add_handler(CallbackQueryHandler(map_menu_callback, pattern=r"^map\|"))
+    application.add_handler(CallbackQueryHandler(dungeon_map_menu_callback, pattern=r"^dungeonmap\|"))
     application.add_handler(CallbackQueryHandler(reaction_prompt_callback, pattern=r"^reaction\|"))
 
     application.add_error_handler(_log_unhandled_error)

@@ -79,6 +79,16 @@ _BG_COLOR = (30, 26, 22)
 _CELL_BLACK = (10, 10, 10)
 _CELL_OUTLINE = (235, 235, 235)
 _CELL_OUTLINE_CURRENT = (214, 40, 40)
+# Real floor-switcher support (2026-09-02, per Coffee: "list the floors
+# in push buttons... if players are not on that floor but above or
+# below that location, mark it with a dotted grey box"). A cell that's
+# real and genuinely attained (already fog-of-war-visited) but belongs
+# to a DIFFERENT floor than the one currently being viewed -- never
+# drawn with its real name/icons (that belongs to ITS OWN floor's own
+# view), just a plain grey dashed box hinting "something real is here,
+# on another floor you can switch to."
+_OTHER_FLOOR_FILL = (35, 35, 38)
+_OTHER_FLOOR_OUTLINE = (150, 150, 150)
 _LABEL_BG = (0, 0, 0, 170)
 _LABEL_COLOR = (255, 255, 255)
 _TITLE_COLOR = (235, 235, 235)
@@ -198,6 +208,17 @@ def _draw_background(draw: ImageDraw.ImageDraw, width: int, height: int) -> None
     draw.rectangle([0, 0, width, height], fill=_BG_COLOR)
 
 
+def _draw_dashed_rect(draw: ImageDraw.ImageDraw, box: list[int], color, width: int = 2, dash: int = 8, gap: int = 6) -> None:
+    """PIL has no native dashed-rectangle primitive -- draws one as short line segments around the perimeter, used for the real 'attained, but on another floor' cell marker."""
+    x0, y0, x1, y1 = box
+    for x in range(x0, x1, dash + gap):
+        draw.line([(x, y0), (min(x + dash, x1), y0)], fill=color, width=width)
+        draw.line([(x, y1), (min(x + dash, x1), y1)], fill=color, width=width)
+    for y in range(y0, y1, dash + gap):
+        draw.line([(x0, y), (x0, min(y + dash, y1))], fill=color, width=width)
+        draw.line([(x1, y), (x1, min(y + dash, y1))], fill=color, width=width)
+
+
 def _visible_nodes_and_edges(
     layer_locations: dict, visited_ids: set[str], revealed_ids: set[str],
 ) -> tuple[list[str], list[str], list[tuple[str, str]], dict[str, int]]:
@@ -272,6 +293,27 @@ def _floor_levels(layer_locations: dict, visited_here: set[str]) -> dict[str, in
     return levels
 
 
+def floor_of(layer_locations: dict, visited_ids: set[str], location_id: str) -> int:
+    """Public wrapper over _floor_levels for one specific location (2026-09-02) -- real floor level relative to its own vertical chain, 0 if it isn't part of one or isn't visited."""
+    visited_here = {lid for lid in layer_locations if lid in visited_ids}
+    return _floor_levels(layer_locations, visited_here).get(location_id, 0)
+
+
+def available_floors(layer_locations: dict, visited_ids: set[str]) -> list[int]:
+    """
+    Real, public helper (2026-09-02, per Coffee: "list the floors in
+    push buttons... only show floors or basements when they have
+    attained them like in zelda") -- the distinct real floor numbers a
+    character has actually visited within one dungeon/layer, for
+    building a floor-switcher keyboard. 0 (ground level) is always
+    included even if _floor_levels never mentions it explicitly (every
+    node not part of a real vertical chain implicitly sits at floor 0).
+    """
+    visited_here = {lid for lid in layer_locations if lid in visited_ids}
+    levels = _floor_levels(layer_locations, visited_here)
+    return sorted({0} | set(levels.values()))
+
+
 def _grid_cell_owners(layer_locations: dict, visited_here: list[str]) -> dict[tuple[int, int], list[str]]:
     """{(x, y): [loc_id, ...]} for every VISITED location that has a real grid_position -- multiple ids share a cell only when they're vertically stacked (same lateral cell, different floor, e.g. a cellar/upstairs pair)."""
     owners: dict[tuple[int, int], list[str]] = {}
@@ -340,6 +382,7 @@ def render_layer_map(
     quests: dict | None = None,
     title_override: str | None = None,
     exclude_dungeon_interiors: bool = False,
+    floor_filter: int | None = None,
 ) -> bytes:
     """
     layer_locations: CAMPAIGN["locations"][layer_name] verbatim.
@@ -365,6 +408,21 @@ def render_layer_map(
     itself is deliberately left FULL either way (only `visited_here`/
     `edges` are filtered) so _location_icons can still see a retained
     entrance room's interior neighbor to draw its real "dungeon" badge.
+
+    floor_filter (2026-09-02, per Coffee: "list the floors in push
+    buttons... if players are not on that floor but above or below
+    that location, mark it with a dotted grey box... only show floors
+    or basements when they have attained them like in zelda"): when
+    given, only rooms at this real floor level (see _floor_levels,
+    defaulting any node with no real vertical membership to 0) get
+    their own name/icons drawn -- a cell that's real, attained, but
+    belongs to a DIFFERENT floor is drawn as a plain dashed grey box
+    (see _draw_dashed_rect) instead, never its real name (that belongs
+    to ITS OWN floor's view). None (the default) renders every visited
+    room on one flat grid regardless of floor, unchanged from before
+    this parameter existed -- only real callers that know a location
+    has more than one attained floor (bot.py's own available_floors
+    check) ever pass a real value.
     """
     monsters = monsters or {}
     quests = quests or {}
@@ -391,6 +449,8 @@ def render_layer_map(
     cols = max_x - min_x + 1
     rows = max_y - min_y + 1
     legend_lines = _build_legend_lines(revealed_here, layer_locations, bool(floor_levels))
+    if floor_filter is not None:
+        legend_lines.append("dashed grey = a real room here, on another floor you've reached")
     legend_row_count = len(legend_lines) + 1  # +1 for the icon-swatch line, drawn separately
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
     height = min(
@@ -404,6 +464,8 @@ def render_layer_map(
 
     title_font = _load_font(24, bold=True)
     title = title_override or f"MAP — {layer_name.title()}"
+    if floor_filter is not None:
+        title += f" ({'Ground' if floor_filter == 0 else (f'F{floor_filter}' if floor_filter > 0 else f'B{-floor_filter}')})"
     title_bbox = draw.textbbox((0, 0), title, font=title_font)
     draw.text(((width - (title_bbox[2] - title_bbox[0])) / 2, 10), title, font=title_font, fill=_TITLE_COLOR)
 
@@ -421,6 +483,13 @@ def render_layer_map(
             if not cell_ids:
                 draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_CELL_BLACK)
                 continue
+            if floor_filter is not None:
+                on_floor = [lid for lid in cell_ids if floor_levels.get(lid, 0) == floor_filter]
+                if not on_floor:
+                    draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_OTHER_FLOOR_FILL)
+                    _draw_dashed_rect(draw, [px, py, px + CELL_SIZE, py + CELL_SIZE], _OTHER_FLOOR_OUTLINE)
+                    continue
+                cell_ids = on_floor
             primary = _pick_primary(cell_ids, floor_levels, current_location_id)
             _draw_cell(
                 draw, image, layer_name, primary, layer_locations[primary], px, py,
@@ -544,6 +613,7 @@ def render_dungeon_map(
     current_location_id: str | None,
     monsters: dict | None = None,
     quests: dict | None = None,
+    floor_filter: int | None = None,
 ) -> bytes:
     """
     Real live request (2026-08-30, Coffee: "i want each dungeon to have
@@ -557,10 +627,15 @@ def render_dungeon_map(
     collision-free among each other (confirmed for all 8 real dungeons),
     not against the rest of that dungeon's real layer, which is exactly
     what scoping the render to just this dungeon's rooms buys.
+
+    floor_filter: see render_layer_map's own docstring -- bot.py's
+    _send_dungeon_map only ever passes a real value once it's confirmed
+    (via available_floors) this dungeon has more than one real attained
+    floor; a single-floor dungeon's map is completely unaffected.
     """
     return render_layer_map(
         dungeon_id, dungeon_locations, visited_ids, revealed_ids, current_location_id,
-        monsters=monsters, quests=quests, title_override=f"MAP — {display_name}",
+        monsters=monsters, quests=quests, title_override=f"MAP — {display_name}", floor_filter=floor_filter,
     )
 
 

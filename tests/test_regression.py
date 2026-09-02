@@ -29095,7 +29095,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         photo = update.effective_chat.sent_photos[0]
         self.assertIn("wrathflame vault", photo["caption"].lower())
         callback_data = [btn.callback_data for row in photo["reply_markup"].inline_keyboard for btn in row]
-        self.assertEqual(callback_data, ["map|underground"])
+        # Real floor-switcher row (2026-09-02 follow-up, per Coffee: "do
+        # that for the overworld dungeons too") -- Wrathflame Vault
+        # genuinely has multiple real attained floors, so real
+        # dungeonmap|<id>|<floor> buttons now appear alongside the
+        # existing "back to full map" button.
+        self.assertIn("map|underground", callback_data)
+        self.assertTrue(any(cd.startswith("dungeonmap|wrathflame_vault|") for cd in callback_data))
         sessions.end_session(-984)
 
     async def test_visual_map_outside_a_dungeon_still_renders_the_whole_layer_map(self):
@@ -29114,6 +29120,78 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         photo = update.effective_chat.sent_photos[0]
         self.assertIn("explored world", photo["caption"].lower())
         sessions.end_session(-983)
+
+    def test_available_floors_finds_real_multi_floor_dungeons(self):
+        """Phase L3 follow-up (2026-09-02, per Coffee: "do that for the overworld dungeons too") -- map_render.available_floors surfaces real, already-existing floor structure (Wrathflame Vault, Greymoor Downs), not just the one hand-authored Crossroads Tavern cellar/upstairs pair."""
+        import map_render
+        wrathflame = bot._dungeon_locations("wrathflame_vault")
+        floors = map_render.available_floors(wrathflame, set(wrathflame.keys()))
+        self.assertGreater(len(floors), 1)
+        self.assertIn(0, floors)
+
+        greymoor = bot._dungeon_locations("greymoor_downs")
+        floors2 = map_render.available_floors(greymoor, set(greymoor.keys()))
+        self.assertGreater(len(floors2), 1)
+
+    def test_available_floors_only_counts_real_attained_floors(self):
+        """"only show floors or basements when they have attained them like in zelda" -- an unvisited floor never appears."""
+        import map_render
+        wrathflame = bot._dungeon_locations("wrathflame_vault")
+        entry_only = {"wrathflame_vault_ember_font"}
+        floors = map_render.available_floors(wrathflame, entry_only)
+        self.assertEqual(floors, [0])
+
+    def test_render_dungeon_map_floor_filter_produces_a_real_distinct_png_per_floor(self):
+        """Each real, attained floor renders as its own valid, genuinely distinct PNG -- confirms floor_filter actually changes what's drawn, not a no-op."""
+        from unittest.mock import patch
+        import io
+        import map_render
+        from PIL import Image
+        dungeon_locations = bot._dungeon_locations("wrathflame_vault")
+        visited = set(dungeon_locations.keys())
+        floors = map_render.available_floors(dungeon_locations, visited)
+        self.assertGreater(len(floors), 1)
+        renders = {}
+        with patch("map_render._fetch_location_tile", return_value=None):
+            for f in floors:
+                png = map_render.render_dungeon_map(
+                    "wrathflame_vault", "The Wrathflame Vault", dungeon_locations, visited, set(),
+                    "wrathflame_vault_ember_font", floor_filter=f,
+                )
+                image = Image.open(io.BytesIO(png))
+                self.assertEqual(image.format, "PNG")
+                renders[f] = png
+        # Every real floor's own render is genuinely different from every other's.
+        self.assertEqual(len(set(renders.values())), len(floors))
+
+
+    async def test_dungeon_map_keyboard_offers_real_floor_buttons_only_when_more_than_one_floor_exists(self):
+        """The floor-switcher row is completely absent for a single-floor dungeon, and offers one real button per attained floor for a real multi-floor one."""
+        single_floor_kb = bot._dungeon_map_keyboard("underground", "sunken_root_caverns", [0], 0)
+        single_floor_datas = [btn.callback_data for row in single_floor_kb.inline_keyboard for btn in row]
+        self.assertFalse(any(cd.startswith("dungeonmap|") for cd in single_floor_datas))
+
+        multi_floor_kb = bot._dungeon_map_keyboard("underground", "wrathflame_vault", [-1, 0, 1], 0)
+        multi_floor_datas = [btn.callback_data for row in multi_floor_kb.inline_keyboard for btn in row]
+        self.assertEqual(
+            {cd for cd in multi_floor_datas if cd.startswith("dungeonmap|")},
+            {"dungeonmap|wrathflame_vault|-1", "dungeonmap|wrathflame_vault|0", "dungeonmap|wrathflame_vault|1"},
+        )
+
+    async def test_dungeon_map_floor_button_callback_switches_the_rendered_floor(self):
+        """Real end-to-end: tapping a floor button re-renders the same dungeon at that real floor via the actual handler, not just the keyboard data."""
+        from unittest.mock import patch
+        user_id, chat_id = 900947, -900947
+        make_basic_character(user_id, "DungeonFloorSwitchTester", chat_id=chat_id, current_location="wrathflame_vault_ember_font")
+        dungeon_locations = bot._dungeon_locations("wrathflame_vault")
+        db.update_character(user_id, chat_id, visited_locations=list(dungeon_locations.keys()))
+
+        sink = []
+        query_update = FakeCallbackUpdate(user_id, "dungeonmap|wrathflame_vault|1", sink, chat_id=chat_id)
+        with patch("map_render._fetch_location_tile", return_value=None):
+            await bot.dungeon_map_menu_callback(query_update, DummyContext())
+        self.assertEqual(len(query_update.effective_chat.sent_photos), 1)
+        self.assertIn("wrathflame vault", query_update.effective_chat.sent_photos[0]["caption"].lower())
 
     # -- Battle-menu formation submenu only showed the tapper's own row
     #    (2026-08-09, Coffee, dev-topic screenshot: "I wanted to show

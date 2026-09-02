@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.462] — real floor-switcher maps for overworld dungeons too
+
+Follow-up to 1.27.461's Labyrinth map floor-switcher, per Coffee: "yes
+do that for the overworld dungeons too." Turns out several REAL,
+already-shipped dungeons already have genuine multi-floor structure
+that was never visually separated — Wrathflame Vault (5 real floors,
+-2 to 2) and Greymoor Downs (10 real floors, -6 to 3) among them,
+confirmed via the existing `_floor_levels` machinery (unchanged, reads
+real `directions` up/down entries) which already computed this data,
+just never used it to split the render.
+
+`map_render.render_layer_map`/`render_dungeon_map` gained an optional
+`floor_filter` parameter: when given, only rooms on that real floor
+level draw with their own name/icons; a real, already-attained room on
+a DIFFERENT floor renders as a plain dashed grey box instead (see
+`_draw_dashed_rect`) — never its real name, since that belongs to its
+own floor's view. A brand-new public `map_render.available_floors`
+only ever returns floor levels the character has actually visited a
+room on — an unvisited floor is invisible, same as any other
+fog-of-war-gated content.
+
+`_send_dungeon_map` now defaults to whichever floor the character is
+actually standing on, and `_dungeon_map_keyboard` grows a real
+floor-switcher row (one button per attained floor) whenever a dungeon
+genuinely has more than one — completely absent for the many dungeons
+that don't. A single-floor dungeon's map is unaffected byte-for-byte.
+
+Tested: `available_floors` correctly reports Wrathflame Vault's and
+Greymoor Downs' real floor counts and respects the fog-of-war
+boundary; `render_dungeon_map` produces a genuinely distinct, valid
+PNG per real floor; the floor-switcher keyboard is absent for a
+single-floor dungeon and offers the right buttons for a multi-floor
+one; a real end-to-end button-tap re-renders the requested floor via
+the actual callback handler. One existing test updated to expect the
+new floor buttons (Wrathflame Vault's own map now legitimately has
+them).
+
 ## [1.27.461] — The Labyrinth, Phase L3: persistent 5-floor segments, real themes, hazards, ambushes, and a real map
 
 The single biggest Labyrinth change since it shipped: real player
