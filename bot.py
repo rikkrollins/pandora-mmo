@@ -11577,6 +11577,15 @@ def _lockable_is_open(location: dict, lockable_id: str, chat_id: int) -> bool:
     lockable = next((lk for lk in location.get("lockables", []) if lk["id"] == lockable_id), None)
     if lockable and lockable.get("kind") in ("switch", "pressure_plate"):
         return _chat_scoped_dict(_SWITCH_STATE, chat_id).get(lockable_id, False)
+    # Multi-switch puzzles (2026-09-02, Labyrinth Phase L2): a real
+    # AND over several INDEPENDENT switch ids (never itself a real
+    # _SWITCH_STATE key of its own) -- open only while every one of
+    # them is currently active, closing again the instant any single
+    # one is toggled back off, same "current state, not one-time use"
+    # semantics as a plain switch.
+    if lockable and lockable.get("kind") == "multi_switch_gate":
+        state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
+        return all(state.get(req_id, False) for req_id in lockable.get("requires", []))
     return lockable_id in _chat_scoped_set(_UNLOCKED, chat_id)
 
 
@@ -21421,6 +21430,21 @@ _DIRECTION_EMOJI = {
     "north": "⬆️", "south": "⬇️", "east": "➡️", "west": "⬅️", "up": "🔼", "down": "🔽",
 }
 
+# Real live report (2026-09-02, Coffee, dev-bridge screenshot: a room
+# with north AND south exits showed the South button ABOVE the North
+# button -- "north button shud be above south button"). The underlying
+# grid_position/directions DATA was never the problem here (that's
+# what the map-coordinate fixes above this are for) -- this is a
+# SEPARATE bug: travel rows were always built by iterating `connections`
+# in whatever order they happen to be stored/generated in, with zero
+# regard for compass meaning. A player reading buttons top-to-bottom
+# expects them to read like a real compass -- north above south, same
+# "up means up" intuition the map image itself already honors via its
+# own real y-axis inversion (map_render.py's `y = max_y - gy`). Sorted
+# before building rows so the visual STACK matches real-world geometry,
+# not authoring/generation order.
+_COMPASS_BUTTON_ORDER = {"north": 0, "east": 1, "south": 2, "west": 3, "up": 4, "down": 5}
+
 
 def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id: int) -> InlineKeyboardMarkup | None:
     """
@@ -21480,6 +21504,9 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id:
         d for d in already_unlocked_dests if d not in location.get("connections", [])
     ]
     direction_for_dest = {dest: word for word, dest in location.get("directions", {}).items()}
+    connections.sort(key=lambda dest_id: _COMPASS_BUTTON_ORDER.get(
+        (direction_for_dest.get(dest_id) or "").lower(), 6
+    ))
     for dest_id in connections:
         dest = cl.get_location(CAMPAIGN, dest_id)
         if dest is None:
@@ -22351,6 +22378,48 @@ async def _do_look(update: Update) -> None:
     await _maybe_send_location_image(update, location, character["current_location"], already_visited)
 
 
+def _lockable_callout_lines(location: dict, chat_id: int) -> list[str]:
+    """
+    Shared room-description callout for every lockable present, used by
+    both the overworld's own `_location_extra_detail` and the
+    Labyrinth's `_do_labyrinth_look` (2026-09-02, Phase L2) -- generic
+    over a plain `location: dict`, confirmed CAMPAIGN-agnostic, exactly
+    like `_lockable_is_open`/`_find_lockable` already are.
+    """
+    lines = []
+    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "pressure_plate": "⚖️", "breakable_wall": "💥", "breakable_floor": "💥", "multi_switch_gate": "🔶"}
+    for lockable in location.get("lockables", []):
+        if lockable.get("hidden"):
+            continue
+        kind = lockable.get("kind")
+        # switch/pressure_plate/multi_switch_gate are deliberately
+        # NEVER skipped here even once used -- all three can be
+        # toggled back off, so they're still real, present objects (or
+        # a real fact about the gate) either way, unlike every other
+        # kind which "resolves" into an open path once picked.
+        if kind not in ("switch", "pressure_plate", "multi_switch_gate") and _lockable_is_open(location, lockable["id"], chat_id):
+            continue
+        emoji = lockable_emoji.get(kind, "🔒")
+        if kind == "lever":
+            state = "waiting to be pulled"
+        elif kind == "switch":
+            active = _lockable_is_open(location, lockable["id"], chat_id)
+            element = lockable.get("element", "")
+            state = f"{'glowing' if active else 'dark'}{f' {element}' if element else ''}, {'active' if active else 'inactive'}"
+        elif kind == "pressure_plate":
+            active = _lockable_is_open(location, lockable["id"], chat_id)
+            state = "pressed down, active" if active else "raised, waiting for something heavy or the right liquid"
+        elif kind == "multi_switch_gate":
+            active = _lockable_is_open(location, lockable["id"], chat_id)
+            state = "every switch answering it, active" if active else "still waiting on one or more of its switches"
+        elif kind in ("breakable_wall", "breakable_floor"):
+            state = "cracked, looks breakable"
+        else:
+            state = "locked"
+        lines.append(f"{emoji} {lockable['name'].capitalize()} is here, {state}.")
+    return lines
+
+
 def _location_extra_detail(character: dict, location: dict, location_id: str, chat_id: int) -> tuple[list[str], "InlineKeyboardMarkup | None"]:
     """
     Everything "look around" shows beyond the location's own name and
@@ -22469,33 +22538,7 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     # Once unlocked, the ordinary connections/travel-button listing
     # already covers the now-open path -- no need to keep calling out a
     # lockable that no longer blocks anything.
-    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "pressure_plate": "⚖️", "breakable_wall": "💥", "breakable_floor": "💥"}
-    for lockable in location.get("lockables", []):
-        if lockable.get("hidden"):
-            continue
-        kind = lockable.get("kind")
-        # switch/pressure_plate are deliberately NEVER skipped here
-        # even once used -- both can be toggled back off, so they're
-        # still real, present objects in the room either way, unlike
-        # every other kind which "resolves" into an open path once
-        # picked.
-        if kind not in ("switch", "pressure_plate") and _lockable_is_open(location, lockable["id"], chat_id):
-            continue
-        emoji = lockable_emoji.get(kind, "🔒")
-        if kind == "lever":
-            state = "waiting to be pulled"
-        elif kind == "switch":
-            active = _lockable_is_open(location, lockable["id"], chat_id)
-            element = lockable.get("element", "")
-            state = f"{'glowing' if active else 'dark'}{f' {element}' if element else ''}, {'active' if active else 'inactive'}"
-        elif kind == "pressure_plate":
-            active = _lockable_is_open(location, lockable["id"], chat_id)
-            state = "pressed down, active" if active else "raised, waiting for something heavy or the right liquid"
-        elif kind in ("breakable_wall", "breakable_floor"):
-            state = "cracked, looks breakable"
-        else:
-            state = "locked"
-        lines.append(f"{emoji} {lockable['name'].capitalize()} is here, {state}.")
+    lines.extend(_lockable_callout_lines(location, chat_id))
     resource_nodes = location.get("resource_nodes", [])
     if resource_nodes:
         node_names = [n["name"] for n in resource_nodes]
@@ -25219,6 +25262,7 @@ async def _do_move(update: Update, text: str) -> None:
             "pressure_plate": "pushing something heavy onto it, or filling it with the right liquid",
             "breakable_wall": "breaking through it",
             "breakable_floor": "breaking through it",
+            "multi_switch_gate": "activating every one of the switches feeding into it",
         }.get(lockable.get("kind") if lockable else None, "picking the lock")
         await update.effective_chat.send_message(
             f"The way to {destination['name']} is blocked by {name}. Try {verb_hint} first.",
@@ -25799,6 +25843,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
             "pressure_plate": "pushing something heavy onto it, or filling it with the right liquid",
             "breakable_wall": "breaking through it",
             "breakable_floor": "breaking through it",
+            "multi_switch_gate": "activating every one of the switches feeding into it",
         }.get(lockable.get("kind") if lockable else None, "picking the lock")
         await update.effective_chat.send_message(
             f"The way to {destination['name']} is blocked by {name}. Try {verb_hint} first.",

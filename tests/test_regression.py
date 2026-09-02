@@ -30656,6 +30656,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🔼", labels_by_data["travel|go|tavern_upstairs"])
         self.assertIn("🔽", labels_by_data["travel|go|tavern_cellar"])
 
+    def test_look_action_travel_buttons_are_ordered_like_a_real_compass(self):
+        """
+        Real live report (2026-09-02, Coffee, dev-bridge screenshot):
+        a room with both a north and south exit showed South ABOVE
+        North -- "north button shud be above south button". Rows must
+        read top-to-bottom in real compass order regardless of
+        whatever order `connections`/`directions` happen to store them
+        in. crossroads_tavern's own real `connections` list is already
+        stored in a non-compass order (east, south, north, down, up,
+        west) -- a real fixture, no synthetic CAMPAIGN mutation needed.
+        """
+        location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        self.assertNotEqual(
+            [d for d in location["connections"]],
+            ["market_row", "whispering_wood", "stonearch_bridge", "the_colosseum", "tavern_upstairs", "tavern_cellar"],
+            "fixture assumption broken -- connections are already in compass order, this test would prove nothing",
+        )
+        kb = bot._look_action_keyboard(location, [], 999999)
+        order = [btn.callback_data for row in kb.inline_keyboard for btn in row if btn.callback_data.startswith("travel|go|")]
+        self.assertEqual(order, [
+            "travel|go|market_row", "travel|go|whispering_wood", "travel|go|stonearch_bridge",
+            "travel|go|the_colosseum", "travel|go|tavern_upstairs", "travel|go|tavern_cellar",
+        ])
+
     def test_look_action_travel_button_falls_back_to_walking_emoji_with_no_named_direction(self):
         """A real connection with no matching entry in the location's own "directions" dict must never guess a direction -- keeps the old generic 🚶."""
         real_location = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")

@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.455] — fix: real map-coordinate + travel-button orientation bugs, campaign-wide
+
+Real live report (2026-09-02, Coffee, dev-bridge screenshot: The
+Forgotten Cistern showed "South" ABOVE "North"). Two distinct bugs,
+confirmed and fixed separately:
+
+**1. Travel button ORDER never matched compass meaning.**
+`_look_action_keyboard` built rows by iterating `connections` in
+whatever order they happened to be authored/generated in -- the
+underlying direction DATA could be perfectly correct and the buttons
+would still stack in a confusing order (South above North, etc). New
+`_COMPASS_BUTTON_ORDER` sorts every travel row into real compass order
+(north, east, south, west, then up/down, then unlabeled) before
+building the keyboard, so the visual stack now reads top-to-bottom
+like an actual map regardless of storage order.
+
+**2. The underlying map DATA had real, campaign-wide inconsistencies**
+-- not just the 2 rooms fixed by hand in v1.27.453. A full audit
+(every `directions` edge checked against both rooms' real
+`grid_position`) found 18 more genuine mismatches across Greymoor
+Downs, Goblin Warrens, The First City, Stonearch Bridge, Wrathflame
+Vault (including the evolved dungeon's own entrance edge), and the
+Unmoored Isle -- rooms labeled "east"/"north"/etc. of a neighbor whose
+real stored coordinate didn't match that direction at all. A hand-
+written incremental repair script was tried first and found to be
+buggy (verified it didn't actually reduce the inconsistency count --
+caught before it was ever committed), so this went through the
+existing authoritative `scripts/build_location_grid.py --apply`
+instead -- the real, already-tested BFS-from-`connections` engine,
+run for real this time (a narrower per-dungeon patch was tried in
+v1.27.453 and it's now clear the bug was bigger than that scope).
+Confirmed via a real post-apply audit: zero remaining direction/
+coordinate mismatches campaign-wide. `connections` itself (the only
+field gameplay/movement actually reads) was never touched -- this is
+a map-display-and-button-order correction only, no gameplay change.
+
+Tested: the same real check I used to find these bugs is now the
+verification (0 inconsistencies, 0 unexpected duplicate cells besides
+the deliberate tavern cellar/upstairs pairing); every dungeon passes
+`dungeon_audit.audit_dungeon` with zero failures; full 66-test
+dungeon-related suite plus every existing Sunken Root Caverns/Greymoor
+Downs quest/lever/vault-door test still passes; a new real test
+(`test_look_action_travel_buttons_are_ordered_like_a_real_compass`)
+locks in the button-order fix using crossroads_tavern's own real,
+already-non-compass-ordered `connections` list as the fixture.
+
 ## [1.27.454] — feature: The Labyrinth, Phase L1 (real architecture, first playable slice)
 
 Real request (2026-09-02, Coffee: "start the labyrinth architecture"),
