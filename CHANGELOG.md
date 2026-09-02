@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.471] — fix: a whole systemic class of Labyrinth actions silently broken (examine, lockpicking/skill checks) + map showed locked rooms as reachable
+
+Found live, escalating fast (2026-09-02, Coffee: "Is looking for a
+switch supposed to work?" → "its not letting me pick a lock in
+labyrinth" → "none of my natural language commands were working"). A
+whole CLASS of handlers independently re-derive `location = cl.
+get_location(CAMPAIGN, character["current_location"])` at their own
+top — always `None` for the Labyrinth's sentinel location, so each one
+silently degraded to something meaningless or replied with a
+confusing generic rejection, discovered one broken action at a time.
+
+- New shared `_location_or_labyrinth_room(character, chat_id)`: the
+  real Labyrinth room dict for a labyrinth character, the ordinary
+  CAMPAIGN location otherwise — a structurally compatible drop-in,
+  since Labyrinth rooms already work with the same lockable/monster
+  machinery. `_do_skill_check` and `_do_lockpick` (lockpicking chests,
+  the actual reported bug) now use it instead of their own broken
+  lookups.
+- New `_do_labyrinth_examine`: "examine"/"look for X" was never on the
+  allowlist at all, and simply adding it wasn't enough either — the
+  ordinary `_do_examine` would have replied with an even more
+  confusing "seems to be nowhere in particular" error. Real,
+  Labyrinth-aware equivalent describing actual switches/chests/
+  monsters in the current room.
+- `"examine"` and `"skill_check"` added to the Labyrinth action
+  allowlist.
+- Separately: the Labyrinth map was drawing a room gated behind an
+  unsolved switch puzzle identically to a genuinely reachable one (real
+  live confusion: "the map is showing a north location but its not
+  available to travel too"). `render_labyrinth_map` now takes a real
+  `locked_room_ids` set and draws those with a dashed border (same
+  convention the overworld's own "attained but not reachable" cell
+  already uses) instead of a plain 🔒 emoji prefix (this server has no
+  color-emoji font — would've rendered as an empty tofu box, caught and
+  fixed in the same pass before shipping).
+
+6 new tests; full 55-test LabyrinthTests suite passes.
+
 ## [1.27.470] — fix: leaving the Labyrinth mid-combat desynced current_location from the still-active fight
 
 Found live minutes after v1.27.469 shipped (Coffee: "i was standing in

@@ -33339,6 +33339,139 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(png_bytes), 100)
         self.assertTrue(png_bytes.startswith(b"\x89PNG"))
 
+    def test_render_labyrinth_map_marks_a_locked_room_without_crashing_or_using_emoji_text(self):
+        """
+        Real live confusion (2026-09-02, Coffee: "the map is showing a
+        north location but its not available to travel too"). A room
+        gated behind an unsolved switch puzzle must render distinctly
+        (real dashed border, matching render_layer_map's own "attained
+        but not reachable" convention) instead of looking identical to
+        a genuinely reachable one. Also confirms no raw emoji glyph
+        leaked into the drawn label text -- this server has no
+        color-emoji font, so that would show as an empty tofu box
+        (real mistake caught and fixed in this same pass).
+        """
+        import map_render
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(2))
+        rooms = floor_data["rooms"]
+        any_side_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        png_locked = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"], {any_side_room_id})
+        png_unlocked = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"], set())
+        self.assertTrue(png_locked.startswith(b"\x89PNG"))
+        self.assertNotEqual(png_locked, png_unlocked, "a locked room must render visibly differently from an unlocked one")
+
+    async def test_labyrinth_map_dashes_a_real_multi_switch_gate_room_end_to_end(self):
+        """Real end-to-end: _do_show_labyrinth_map actually computes locked_room_ids from the run's own real locked_connections/lockables, not just the renderer supporting the parameter in isolation."""
+        user_id, chat_id = 962035, -962035
+        make_basic_character(user_id, "LabyrinthLockedMapTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        gate_room_id = "f1_gate_reward_test"
+        hub.setdefault("locked_connections", {})[gate_room_id] = "test_multi_gate"
+        hub.setdefault("lockables", []).append({
+            "id": "test_multi_gate", "kind": "multi_switch_gate", "name": "a test archway", "requires": ["switch_a", "switch_b"],
+        })
+        run["rooms"][gate_room_id] = {
+            "id": gate_room_id, "floor": run["floor"], "name": "A Test Gated Room",
+            "connections": [], "monsters": [], "grid_position": {"x": 5, "y": 5},
+        }
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        from unittest.mock import patch
+        with patch("map_render.render_labyrinth_map") as mock_render:
+            mock_render.return_value = b"\x89PNGfake"
+            await bot._do_show_labyrinth_map(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        call_kwargs = mock_render.call_args
+        locked_ids_arg = call_kwargs[0][3]
+        self.assertIn(gate_room_id, locked_ids_arg)
+
+    async def test_labyrinth_examine_describes_a_real_switch_instead_of_refusing(self):
+        """
+        Real live gap (2026-09-02, Coffee: "Is looking for a switch
+        supposed to work?... this is also being unclear saying it
+        doesn't work in the labyrinth"). "examine"/"look for X" was
+        never on the Labyrinth allowlist at all; adding it wasn't
+        enough either, since the ordinary _do_examine's CAMPAIGN lookup
+        returns None for the sentinel location and replies with an even
+        more confusing error. Confirms the real, Labyrinth-aware
+        _do_labyrinth_examine actually describes a real switch's state.
+        """
+        user_id, chat_id = 962036, -962036
+        make_basic_character(user_id, "LabyrinthExamineTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub.setdefault("lockables", []).append({"id": "test_switch", "kind": "switch", "name": "a fire crystal", "element": "fire"})
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "look for a switch", sink, chat_id=chat_id), DummyContext(),
+            {"action": "examine", "target": "switch", "raw_text": "look for a switch"}, "look for a switch",
+        )
+        self.assertFalse(any("doesn't work this deep in the Labyrinth" in s for s in sink))
+        self.assertFalse(any("nowhere in particular" in s for s in sink), "must never fall through to the CAMPAIGN-dependent _do_examine")
+        self.assertTrue(any("fire crystal" in s for s in sink))
+
+    async def test_labyrinth_examine_with_no_target_lists_real_things_present(self):
+        user_id, chat_id = 962037, -962037
+        make_basic_character(user_id, "LabyrinthExamineListTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub.setdefault("lockables", []).append({"id": "test_switch2", "kind": "switch", "name": "a cold crystal", "element": "cold"})
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._do_labyrinth_examine(FakeUpdate(user_id, "", sink, chat_id=chat_id), "")
+        self.assertTrue(any("cold crystal" in s for s in sink))
+
+    async def test_labyrinth_skill_check_actually_picks_a_real_chest_lock(self):
+        """
+        Real live bug (2026-09-02, Coffee: "its not letting me pick a
+        lock in labyrinth" -> escalated to "none of my natural language
+        commands were working"). _do_skill_check/_do_lockpick each
+        independently re-derived `location` via
+        cl.get_location(CAMPAIGN, ...), always None for the sentinel
+        location, so lockpicking silently fell through to a meaningless
+        generic ability check that never actually opened anything. Both
+        now go through the shared _location_or_labyrinth_room helper.
+        Forces a guaranteed roll so the real success path (loot granted,
+        gold added) is exercised deterministically.
+        """
+        from unittest.mock import patch
+        user_id, chat_id = 962038, -962038
+        make_basic_character(user_id, "LabyrinthLockpickTester", chat_id=chat_id, current_location="the_colosseum", gold=0)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub.setdefault("lockables", []).append({
+            "id": "test_chest", "kind": "chest", "name": "a hastily-buried cache",
+            "loot": {"healing_potion": 2}, "gold": 50,
+        })
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        with patch("rules.dice.roll_d20", return_value=20):
+            await bot._dispatch_intent(
+                FakeUpdate(user_id, "pick the lock", sink, chat_id=chat_id), DummyContext(),
+                {"action": "skill_check", "ability": "dexterity", "raw_text": "pick the lock"}, "pick the lock",
+            )
+        self.assertFalse(any("doesn't work this deep in the Labyrinth" in s for s in sink))
+        self.assertTrue(any("You find" in s for s in sink), f"expected real loot to be granted, got: {sink}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["gold"], 50)
+        self.assertEqual(character_after["inventory"].get("healing_potion", 0), 2)
+
     async def test_map_intent_while_in_labyrinth_renders_the_real_current_segment(self):
         user_id, chat_id = 962021, -962021
         make_basic_character(user_id, "LabyrinthMapTester", chat_id=chat_id, current_location="the_colosseum")

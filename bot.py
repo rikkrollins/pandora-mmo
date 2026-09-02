@@ -9068,6 +9068,34 @@ def _labyrinth_party_key(character: dict) -> str:
     return f"party:{party_id}" if party_id else f"solo:{character['telegram_user_id']}"
 
 
+def _location_or_labyrinth_room(character: dict, chat_id: int) -> dict | None:
+    """
+    Real systemic gap (2026-09-02, Coffee, live and escalating: "not
+    letting me pick a lock in labyrinth" -> "none of my natural
+    language commands were working"). A whole class of handlers
+    (_do_skill_check/_do_lockpick and others) independently re-derive
+    `location = cl.get_location(CAMPAIGN, character["current_location"])`
+    at their own top, which always returns None for the Labyrinth's
+    sentinel location -- each one either silently degrades to a
+    meaningless generic result or crashes downstream on a None
+    location, one call site at a time, discovered only as each new
+    real action got reported broken (examine, then skill_check/
+    lockpick). This is the single shared fix instead of continuing to
+    patch each call site's own CAMPAIGN lookup individually: a
+    Labyrinth room dict already carries every field the generic
+    lockable/examine machinery needs (name, description, connections,
+    lockables, locked_connections, monsters -- confirmed CAMPAIGN-
+    agnostic by _find_lockable/_lockable_is_open/_lockable_callout_
+    lines already working on one directly), so it's a structurally
+    compatible drop-in for `location` in any handler that switches to
+    calling this instead of `cl.get_location` directly.
+    """
+    if character.get("current_location") != LABYRINTH_LOCATION_SENTINEL:
+        return cl.get_location(CAMPAIGN, character["current_location"])
+    run = db.get_labyrinth_run(chat_id, _labyrinth_party_key(character))
+    return run["rooms"].get(run["current_room_id"]) if run else None
+
+
 def _build_labyrinth_enemy(monster_key: str, floor: int, index: int, total: int, world_avg_rebirth: float = 0.0, modifier: str | None = None) -> dict | None:
     """
     A real catalog monster template, scaled by depth ALONE (never the
@@ -9516,6 +9544,57 @@ async def _do_labyrinth_look(update: Update) -> None:
         reply_markup=_labyrinth_room_keyboard(room, run["rooms"], chat_id),
     )
     await _maybe_send_labyrinth_room_image(update, character, room, chat_id)
+
+
+async def _do_labyrinth_examine(update: Update, target_text: str) -> None:
+    """
+    Real live gap (2026-09-02, Coffee: "Is looking for a switch
+    supposed to work? I feel like it's a valid action, but this is
+    also being unclear saying it doesn't work in the labyrinth"). Just
+    adding "examine" to _dispatch_intent's Labyrinth allowlist wasn't
+    enough on its own -- the ordinary _do_examine immediately does
+    cl.get_location(CAMPAIGN, ...), which returns None for the
+    sentinel location and replies with an even MORE confusing "seems
+    to be nowhere in particular" error instead. This is a real,
+    Labyrinth-aware equivalent: reuses the exact same _find_lockable/
+    _lockable_callout_lines machinery the room's own "look" text and
+    the overworld's examine already share (both confirmed CAMPAIGN-
+    agnostic), scoped to the current room's real lockables and monsters.
+    """
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        return
+    run = db.get_labyrinth_run(chat_id, _labyrinth_party_key(character))
+    if run is None:
+        return
+    room = run["rooms"].get(run["current_room_id"])
+    if room is None:
+        return
+
+    lowered = target_text.lower().strip()
+    if lowered:
+        lockable = _find_lockable(room, target_text)
+        if lockable:
+            lines = _lockable_callout_lines({"lockables": [lockable]}, chat_id)
+            if lines:
+                await _safe_send(update, f"🔍 **{character['name']}** examines it closely. {lines[0]}")
+                return
+        for mk in room.get("monsters", []):
+            template = cl.get_monster_template(CAMPAIGN, mk)
+            if template and lowered in template["name"].lower():
+                await _safe_send(update, f"🔍 **{character['name']}** studies **{template['name']}**, wary and ready.")
+                return
+        await _safe_send(update, f"🔍 **{character['name']}** doesn't spot anything like that here.")
+        return
+
+    lockable_names = [lk["name"] for lk in room.get("lockables", []) if not lk.get("hidden")]
+    monster_names = [cl.get_monster_template(CAMPAIGN, mk)["name"] for mk in room.get("monsters", []) if cl.get_monster_template(CAMPAIGN, mk)]
+    things = lockable_names + monster_names
+    if things:
+        await _safe_send(update, f"🔍 **{character['name']}**, examine what, exactly? Things worth a closer look here: {', '.join(things)}")
+    else:
+        await _safe_send(update, f"🔍 **{character['name']}** finds nothing here that catches the eye for a closer look.")
 
 
 async def _resolve_labyrinth_pit_fall(update: Update, member: dict) -> str:
@@ -12515,7 +12594,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     connections-with-a-lock pattern, chosen instead of a real one-way
     edge so the existing whole-campaign reciprocity invariant/tests hold).
     """
-    location = cl.get_location(CAMPAIGN, character["current_location"])
+    location = _location_or_labyrinth_room(character, update.effective_chat.id)
 
     # switch/pressure_plate/breakable_wall/breakable_floor are
     # deliberately excluded from this early generic "already unlocked"
@@ -12831,7 +12910,7 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
         )
         return
 
-    location = cl.get_location(CAMPAIGN, character["current_location"])
+    location = _location_or_labyrinth_room(character, update.effective_chat.id)
     lockable = _find_lockable(location, action_text) if location else None
 
     # Physical-dice mode checked here, BEFORE branching into lockpicking
@@ -24567,9 +24646,22 @@ async def _do_show_labyrinth_map(update: Update, floor: int | None = None) -> No
     # anything in floor_rooms, so render_labyrinth_map's is_current
     # check simply never fires).
     current_room_id = run["current_room_id"] if target_floor == current_floor else None
+    # Real live confusion (2026-09-02, Coffee: "the map is showing a
+    # north location but its not available to travel too") -- a real,
+    # honestly-revealed room gated behind a still-unsolved switch
+    # puzzle was drawn identically to every genuinely reachable one.
+    # Any room that's the target of some OTHER room's locked_
+    # connections, whose lockable isn't open yet, gets marked so the
+    # renderer can show it dashed instead of solid.
+    locked_room_ids = {
+        dest_id
+        for room in floor_rooms.values()
+        for dest_id, lockable_id in room.get("locked_connections", {}).items()
+        if dest_id in floor_rooms and not _lockable_is_open(room, lockable_id, update.effective_chat.id)
+    }
     try:
         png_bytes = await asyncio.to_thread(
-            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id,
+            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id, locked_room_ids,
         )
     except Exception as e:
         logger.warning(f"[map_render] labyrinth map failed: {e!r}")
@@ -32156,7 +32248,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "move", "look", "attack", "leave_labyrinth", "descend_labyrinth", "check_inventory", "check_party",
         "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
-        "divine_smite", "wild_shape",
+        "divine_smite", "wild_shape", "examine", "skill_check",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
@@ -32239,7 +32331,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         else:
             await _do_look(update)
     elif action == "examine":
-        await _do_examine(update, intent.get("target") or "")
+        if _in_labyrinth:
+            await _do_labyrinth_examine(update, intent.get("target") or "")
+        else:
+            await _do_examine(update, intent.get("target") or "")
     elif action == "check_inventory":
         await _do_check_inventory(update)
     elif action == "check_party":

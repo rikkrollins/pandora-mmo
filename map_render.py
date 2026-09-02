@@ -671,7 +671,7 @@ def _labyrinth_room_icons(room: dict) -> list[str]:
     return icons
 
 
-def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str) -> bytes:
+def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str, locked_room_ids: set[str] | None = None) -> bytes:
     """
     rooms: a live run's own `rooms` dict verbatim, every entry already
     carrying a real `grid_position` (rules.labyrinth._assign_grid_
@@ -679,7 +679,19 @@ def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str) -> bytes
     it's generated -- there is no partial/fog-of-war state to track for
     content that never outlives one visit, so unlike render_layer_map
     this never filters by a visited/revealed set at all.
+
+    locked_room_ids (2026-09-02, real live confusion, Coffee: "the map
+    is showing a north location but its not available to travel too" --
+    a real, honest room the map already revealed, gated behind a
+    multi-switch puzzle he hadn't solved yet, drawn IDENTICALLY to
+    every genuinely reachable room). Rooms in this set get the same
+    real dashed-border convention render_layer_map already uses for an
+    "attained but not currently reachable" cell, plus a 🔒 prefix on
+    the label -- still honestly shown (never hidden, this game never
+    hides a real discovered room), just visually distinct from a room
+    the party can actually walk into right now.
     """
+    locked_room_ids = locked_room_ids or set()
     positions = {rid: (r["grid_position"]["x"], r["grid_position"]["y"]) for rid, r in rooms.items()}
     xs = [p[0] for p in positions.values()]
     ys = [p[1] for p in positions.values()]
@@ -688,6 +700,8 @@ def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str) -> bytes
     grid_rows = max_y - min_y + 1
 
     legend_lines = ["red outline = you are here"]
+    if locked_room_ids & set(rooms.keys()):
+        legend_lines.append("dashed outline = seen, not yet reachable")
     legend_row_count = len(legend_lines) + 1
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
     height = min(
@@ -719,10 +733,18 @@ def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str) -> bytes
                 continue
             room = rooms[room_id]
             is_current = room_id == current_room_id
+            is_locked = room_id in locked_room_ids
             draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_LABYRINTH_ROOM_FILL)
-            outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
-            draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=outline, width=4 if is_current else 2)
+            if is_locked:
+                _draw_dashed_rect(draw, [px, py, px + CELL_SIZE, py + CELL_SIZE], _OTHER_FLOOR_OUTLINE)
+            else:
+                outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
+                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=outline, width=4 if is_current else 2)
 
+            # No emoji prefix here -- this server has no color-emoji
+            # font (see this module's own established note above), so
+            # a 🔒 glyph would just render as an empty tofu box. The
+            # dashed border plus the legend line is the real signal.
             label = _fit_label_to_width(draw, room["name"], name_font, CELL_SIZE - 8)
             label_bbox = draw.textbbox((0, 0), label, font=name_font)
             lw, lh = label_bbox[2] - label_bbox[0], label_bbox[3] - label_bbox[1]
