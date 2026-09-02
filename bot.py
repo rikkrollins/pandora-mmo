@@ -9391,6 +9391,18 @@ async def _do_leave_labyrinth(update: Update) -> None:
     character = db.get_character(update.effective_user.id, chat_id)
     if character is None:
         return
+    # Real live bug (2026-09-02, Coffee: "i was standing in the
+    # colosseum and then i was in battle"): this used to unconditionally
+    # delete the run and reset current_location to the Colosseum with
+    # NO check for an active combat session -- a real ambush's session
+    # lived on completely disconnected from current_location, so the
+    # party looked like they'd safely left while still actually being
+    # mid-fight from the game's own perspective, resurfacing later as
+    # an inexplicable "why am I in battle?" Same real block
+    # _do_fast_travel already applies for the identical reason.
+    if sessions.get_session_for_user(chat_id, update.effective_user.id) is not None:
+        await _safe_send(update, "You can't leave the Labyrinth in the middle of combat -- win the fight or flee first.", speak=False)
+        return
     party_key = _labyrinth_party_key(character)
     run = db.get_labyrinth_run(chat_id, party_key)
     if run is None:

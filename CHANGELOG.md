@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.470] — fix: leaving the Labyrinth mid-combat desynced current_location from the still-active fight
+
+Found live minutes after v1.27.469 shipped (Coffee: "i was standing in
+the colosseum and then i was in battle... i was waiting to go into the
+labyrinth"). `_do_leave_labyrinth` unconditionally deleted the run and
+reset `current_location` to the Colosseum with no check for an active
+combat session — a real ambush's session lived on completely
+disconnected from `current_location`, so leaving LOOKED successful
+while the party was still actually mid-fight from the game's own
+perspective, resurfacing later as an inexplicable "why am I in
+battle?" Now blocked with the same real message `_do_fast_travel`
+already gives for the identical reason ("You can't leave the Labyrinth
+in the middle of combat — win the fight or flee first"). New test
+confirms `current_location`/the run both survive a blocked leave
+attempt untouched.
+
 ## [1.27.469] — fix: real Labyrinth softlock + missing combat actions + missing images/descriptions/directions
 
 Five real bugs found live, same session (2026-09-02, Coffee, dev-bridge

@@ -32771,6 +32771,43 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
         self.assertIsNotNone(db.get_labyrinth_run(chat_id, party_key), "the run itself must survive a flee, not be silently lost")
 
+    async def test_leave_labyrinth_blocked_mid_combat_instead_of_desyncing_the_session(self):
+        """
+        Real live bug (2026-09-02, Coffee: "i was standing in the
+        colosseum and then i was in battle... i was waiting to go into
+        the labyrinth"): _do_leave_labyrinth used to unconditionally
+        delete the run and reset current_location to the Colosseum with
+        NO check for an active combat session -- a real ambush's
+        session lived on completely disconnected from current_location,
+        so leaving LOOKED successful while the party was still actually
+        mid-fight from the game's own perspective, resurfacing later as
+        an inexplicable "why am I in battle?" Same real block
+        _do_fast_travel already applies, for the identical reason.
+        """
+        import sessions
+        user_id, chat_id = 962034, -962034
+        make_basic_character(user_id, "LabyrinthLeaveDuringCombatTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "", [], chat_id=chat_id), "attack")
+        self.assertIsNotNone(sessions.get_session_for_user(chat_id, user_id))
+
+        sink = []
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("middle of combat" in s for s in sink))
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL, "must not desync location from the still-active session")
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, party_key), "the run must survive a blocked leave attempt")
+
+        leftover = sessions.get_session_for_user(chat_id, user_id)
+        if leftover is not None:
+            sessions.end_session(chat_id, leftover)
+
     async def test_cast_spell_and_use_item_are_allowed_mid_labyrinth_fight(self):
         """
         Real live gap (2026-09-02, Coffee, dev-bridge): the Labyrinth's
