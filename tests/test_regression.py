@@ -7452,6 +7452,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 f"{src} -> {dest} should open once {quest_id} is completed",
             )
 
+    def test_shared_zone_dungeons_gate_only_their_own_deeper_subarea(self):
+        """
+        Real follow-up (2026-09-02, Coffee: "make sure even the first
+        two dungeons are fixed") to the chapter-gating fix above.
+        Goblin Warrens and Glimmerdeep Grotto are each reused by TWO
+        arcs at different depths -- arc_1/arc_2 already have real,
+        intentional, early access to just the outer hub room
+        (clear_the_warrens / the_wrong_color), while arc_5/arc_10 own
+        everything deeper. Gating the WHOLE zone would have wrongly
+        blocked that legitimate early content -- only the edge from the
+        hub into its own first deeper room is gated, preserving
+        existing requires_cleared_location gates alongside the new
+        requires_completed_quest (both must pass, same additive-gate
+        shape _check_story_gate already supports).
+        """
+        # arc_1's own real content (clear_the_warrens) is the hub room
+        # itself, which was never gated at all -- only edges FROM the
+        # hub into a deeper sub-room are gated below, so arc_1 access
+        # is untouched by construction, not something to re-assert here.
+        gw_hub = cl.get_location(bot.CAMPAIGN, "goblin_warrens")
+        for dest, quest_id in [
+            ("goblin_warrens_supply_tunnel", "the_suns_thresholds_secret"),
+            ("goblin_warrens_collapsed_tunnel", "the_suns_thresholds_secret"),
+        ]:
+            self.assertIsNotNone(
+                bot._check_story_gate({"completed_quests": [], "cleared_locations": ["goblin_warrens"]}, gw_hub, dest),
+                f"goblin_warrens -> {dest} should be blocked before arc_4 is done",
+            )
+            self.assertIsNone(
+                bot._check_story_gate({"completed_quests": [quest_id], "cleared_locations": ["goblin_warrens"]}, gw_hub, dest),
+                f"goblin_warrens -> {dest} should open once {quest_id} is completed",
+            )
+
+        gg_hub = cl.get_location(bot.CAMPAIGN, "glimmerdeep_grotto")
+        self.assertIsNotNone(
+            bot._check_story_gate({"completed_quests": [], "cleared_locations": ["glimmerdeep_grotto"]}, gg_hub, "glimmerdeep_grotto_glimmering_pool"),
+            "glimmerdeep_grotto -> glimmering_pool should be blocked before arc_9 is done",
+        )
+        self.assertIsNone(
+            bot._check_story_gate(
+                {"completed_quests": ["the_deep_root_chambers_warden"], "cleared_locations": ["glimmerdeep_grotto"]},
+                gg_hub, "glimmerdeep_grotto_glimmering_pool",
+            ),
+            "glimmerdeep_grotto -> glimmering_pool should open once the_deep_root_chambers_warden is completed",
+        )
+
     def test_the_keeps_warden_uses_the_real_new_systems_not_a_generic_statstick(self):
         boss = bot.CAMPAIGN["monsters"]["the_keeps_warden"]
         self.assertTrue(boss["is_boss"])

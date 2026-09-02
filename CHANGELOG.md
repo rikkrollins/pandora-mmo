@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.457] — feature: chapter gating extended to the two "shared zone" dungeons
+
+Real follow-up to v1.27.456 (per Coffee: "use the self improvement
+logic to improve our editor/generator make sure even the first two
+dungeons are fixed"). Goblin Warrens and Glimmerdeep Grotto were
+deliberately left out of that pass -- each is reused by TWO arcs at
+different depths (arc_1's/arc_2's own real content is just the outer
+hub room via `clear_the_warrens`/`the_wrong_color`; arc_5/arc_10 own
+everything deeper), so gating the WHOLE zone the same way the other
+six dungeons were would have wrongly blocked that already-legitimate
+early content.
+
+Fixed with the same `requires_completed_quest` story_gates mechanism,
+scoped precisely to the edge from each hub into its own first deeper
+room (`goblin_warrens → goblin_warrens_supply_tunnel` /
+`goblin_warrens_collapsed_tunnel`, requiring arc_4's `the_suns_
+thresholds_secret`; `glimmerdeep_grotto → glimmerdeep_grotto_
+glimmering_pool`, requiring arc_9's `the_deep_root_chambers_warden`) --
+merged alongside each edge's existing real `requires_cleared_location`
+gate rather than replacing it, since both conditions are meant to
+apply together.
+
+Tested: a new fast, direct test confirms both sub-area gates block
+with no quest completed and open once the right one is done; existing
+Goblin Warrens structure/hub tests (28-room count, both real forks,
+connectivity) all still pass unchanged.
+
 ## [1.27.456] — feature: chapter dungeons now gated behind the prior chapter's climax quest
 
 Real live report (2026-09-02, Coffee, after finding Elduinn deep in

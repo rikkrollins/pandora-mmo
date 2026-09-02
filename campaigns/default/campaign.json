@@ -1968,10 +1968,14 @@
         },
         "story_gates": {
           "goblin_warrens_supply_tunnel": {
-            "requires_cleared_location": "goblin_warrens"
+            "requires_cleared_location": "goblin_warrens",
+            "requires_completed_quest": "the_suns_thresholds_secret"
           },
           "sunken_root_caverns": {
             "requires_completed_quest": "the_true_paymasters_reckoning"
+          },
+          "goblin_warrens_collapsed_tunnel": {
+            "requires_completed_quest": "the_suns_thresholds_secret"
           }
         },
         "combat_environment": {
@@ -2020,7 +2024,8 @@
         },
         "story_gates": {
           "glimmerdeep_grotto_glimmering_pool": {
-            "requires_cleared_location": "glimmerdeep_grotto"
+            "requires_cleared_location": "glimmerdeep_grotto",
+            "requires_completed_quest": "the_deep_root_chambers_warden"
           },
           "sunken_root_caverns": {
             "requires_completed_quest": "the_true_paymasters_reckoning"
