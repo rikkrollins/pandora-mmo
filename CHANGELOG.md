@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.464] — fix: fast travel could crash silently during a Telegram flood-control blip
+
+Found proactively via `scripts/check_error_log.py` (not a player
+report): 5 identical `RetryAfter: Flood control exceeded` crashes
+inside a 57ms window, all from `_do_fast_travel`.
+
+`_do_fast_travel` had roughly 9 raw `send_message` calls instead of
+`_safe_send` (this game's own real 3-retry, honor-the-requested-wait
+wrapper, built specifically for this exact failure mode after it hit
+`_do_attack` and `_spend_cast_resource` in the past). A real Telegram
+flood-control 429 during a burst — several party members
+fast-traveling in quick succession is the likely real trigger — would
+propagate as an unhandled exception and silently eat the reply.
+
+Every send in `_do_fast_travel` now goes through `_safe_send`. Tested
+with the same real "first send raises RetryAfter" simulation already
+used to catch this bug class elsewhere — confirms the real arrival
+message still reaches the player instead of crashing, and that a
+retry actually happens rather than the exception being swallowed.
+
 ## [1.27.463] — fix: examining a real interactable could wrongly trigger combat
 
 Real live report (2026-09-01/02, Coffee, dev-bridge screenshots):

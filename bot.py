@@ -26454,9 +26454,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     telegram_user_id = update.effective_user.id
     character = db.get_character(telegram_user_id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
 
     # Real live bug (2026-07-22, Sugar: "I'm not in battle why can't I
@@ -26471,10 +26469,7 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     # session -- someone else's fight elsewhere no longer stops you.
     active_session = sessions.get_session_for_user(update.effective_chat.id, telegram_user_id)
     if active_session is not None and telegram_user_id in active_session.turn_order:
-        await update.effective_chat.send_message(
-            "You can't fast-travel in the middle of combat.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, "You can't fast-travel in the middle of combat.", speak=False)
         return
 
     # Phase L3 (2026-09-02, per Coffee: "add the way points/safe places
@@ -26507,30 +26502,29 @@ async def _do_fast_travel(update: Update, text: str) -> None:
         for loc_id in character["visited_locations"]:
             loc = cl.get_location(CAMPAIGN, loc_id)
             if loc and not _is_fast_travel_eligible(loc) and (loc_id.replace("_", " ") in lowered or loc["name"].lower() in lowered):
-                await update.effective_chat.send_message(
+                await _safe_send(
+                    update,
                     f"You can't fast-travel directly to {loc['name']} — it's deep inside a real dungeon. "
                     f"Travel there on foot, or warp to that dungeon's own safe waypoint if you've found it.",
-                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+                    speak=False,
                 )
                 return
         known_names = ", ".join(cl.get_location(CAMPAIGN, loc_id)["name"] for loc_id in visited)
-        await update.effective_chat.send_message(
-            f"You can only fast-travel somewhere you've actually been. Waypoints you've discovered: {known_names}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        await _safe_send(
+            update, f"You can only fast-travel somewhere you've actually been. Waypoints you've discovered: {known_names}",
+            speak=False,
         )
         return
 
     if destination_id == character["current_location"]:
-        await update.effective_chat.send_message(
-            "You're already there.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You're already there.", speak=False)
         return
 
     destination = cl.get_location(CAMPAIGN, destination_id)
     if destination.get("requires_item") and destination["requires_item"] not in character["inventory"]:
-        await update.effective_chat.send_message(
-            f"Something stops **{character['name']}** from going any further — missing something needed first.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        await _safe_send(
+            update, f"Something stops **{character['name']}** from going any further — missing something needed first.",
+            speak=False,
         )
         return
 
@@ -26549,14 +26543,12 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     if lockable_id:
         block_message = _lockable_block_message(current, destination["name"], lockable_id, update.effective_chat.id)
         if block_message:
-            await update.effective_chat.send_message(
-                block_message, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, block_message, speak=False)
             return
 
     story_gate_message = _check_story_gate(character, current, destination_id)
     if story_gate_message:
-        await update.effective_chat.send_message(story_gate_message, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"))
+        await _safe_send(update, story_gate_message, speak=False)
         return
 
     db.move_character(telegram_user_id, update.effective_chat.id, destination_id)

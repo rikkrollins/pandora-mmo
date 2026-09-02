@@ -24884,6 +24884,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("NamedFastTraveler", text_messages[0])
         self.assertNotIn("You fast-travel", text_messages[0])
 
+    async def test_fast_travel_survives_a_flood_control_blip_instead_of_crashing(self):
+        """
+        Real live crash (error-log finding, code_location bot.py:25086
+        in _do_fast_travel, 5 identical RetryAfter hits inside a 57ms
+        window): every real reply in _do_fast_travel used a raw
+        update.effective_chat.send_message with none of _safe_send's
+        real 3-retry/honor-requested-wait handling -- a real Telegram
+        flood-control 429 during a burst (e.g. several party members
+        fast-traveling in quick succession) propagated as an unhandled
+        exception and silently ate the reply. Every send in this
+        function is now routed through _safe_send; simulates the same
+        blip (the very first send raises RetryAfter) and confirms the
+        real arrival message still reaches the player instead of
+        crashing.
+        """
+        from telegram.error import RetryAfter
+        user_id = 900564
+        character = make_basic_character(user_id, "FloodBlipTraveler", current_location="crossroads_tavern")
+        db.update_character_by_id(
+            character["character_id"],
+            visited_locations=list(set((character.get("visited_locations") or []) + ["market_row"])),
+        )
+        update = FakeUpdate(user_id, "", [])
+        real_send = update.effective_chat.send_message
+        calls = {"n": 0}
+
+        async def flaky_send(text, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RetryAfter(1)
+            return await real_send(text, **kwargs)
+
+        update.effective_chat.send_message = flaky_send
+        await bot._do_fast_travel(update, "fast travel to market row")  # must not raise
+        combined = "\n".join(update.effective_chat._sink)
+        self.assertIn("fast-travels to", combined)
+        self.assertGreaterEqual(calls["n"], 2, "the send must have actually been retried, not just swallowed")
+
     async def test_people_here_does_not_double_list_a_recruited_companion(self):
         """
         Real live bug (2026-08-13, same dev-topic screenshot): "People
