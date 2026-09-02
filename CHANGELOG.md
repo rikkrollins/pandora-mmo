@@ -2,6 +2,81 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.454] — feature: The Labyrinth, Phase L1 (real architecture, first playable slice)
+
+Real request (2026-09-02, Coffee: "start the labyrinth architecture"),
+turning Phase D of the dungeon-toolkit plan from an architecture note
+into real, working code. A live, procedurally-generated, ever-
+deepening dungeon, unlocked by defeating `colosseum_champion` (reuses
+the existing `defeated_monsters` list, no new flag needed) and entered
+by saying so at the Colosseum ("enter the labyrinth").
+
+Real research before building this confirmed three things that shaped
+the design: (1) `rules/dungeon_evolve.evolve_dungeon` is never invoked
+live in bot.py today, and its `build_location_grid`/`dungeon_audit`
+retry loop is far too heavy to regenerate on every descent; (2)
+`cl.get_location` only ever scans `CAMPAIGN`, which is never mutated
+at runtime anywhere in this codebase, so a synthesized floor must
+never be injected into it; (3) Labyrinth runs are **shared per party**
+(confirmed directly with Coffee), which doesn't fit a per-character
+column -- it needed its own table.
+
+**New:**
+- `rules/labyrinth.py` — `generate_floor()`: a small, fast, ephemeral
+  floor (hub + stairs + 3-5 side rooms, no forced-clear gating, no map
+  coordinates) reusing `dungeon_evolve._candidate_monsters` for a wide,
+  catalog-agnostic monster pool. Depth is unbounded, so monster
+  *choice* never depends on a level band — that's what depth scaling
+  is for.
+- `rules/leveling.py` — `labyrinth_depth_multiplier`/
+  `labyrinth_depth_resistance_pct`: a genuinely separate axis from
+  rebirth (+5%/floor, compounding), applied fresh every time a fight
+  starts, never baked into floor data. Stacks multiplicatively with
+  the existing rebirth-based world scaling.
+- `db.py` — new `labyrinth_runs` table (`chat_id` + `party_key`
+  indexed, `party_key` = `"party:<id>"` or `"solo:<user_id>"`) holding
+  the live floor/room state; new `labyrinth_best_floor` character
+  column (permanent, never-decreasing, same shape as `echo_trial_tier`).
+  Living in the database rather than sessions.py's in-memory model
+  means a run survives a bot restart for free.
+- `bot.py` — a character standing in an active run gets
+  `current_location = "__labyrinth__"`, a fixed sentinel never used by
+  any real location. A dispatch-level short-circuit in
+  `_dispatch_intent` routes only a curated, safe set of actions
+  (move/look/attack/leave/descend) to dedicated `_do_labyrinth_*`
+  handlers while inside, refusing anything else outright rather than
+  risking a downstream `cl.get_location(CAMPAIGN, "__labyrinth__")`
+  silently returning `None`. Combat is its own dedicated path
+  (`_do_labyrinth_attack` + `_build_labyrinth_enemy`, mirroring
+  `_build_echo_enemy`'s proven scale-a-real-template shape) rather than
+  the normal location-triggered pipeline, which is too deeply tied to
+  `cl.get_location` to safely reuse here.
+- `ai/intent_parser.py` — `enter_labyrinth`/`leave_labyrinth`/
+  `descend_labyrinth`, checked *before* the existing generic
+  `move_words` list (a real conflict found writing this: "enter the"
+  would otherwise misclassify "I enter the labyrinth" as an ordinary
+  move).
+
+**Explicitly out of scope for this pass** (captured in the plan file,
+none of them block a real first descent): floor modifiers, milestone
+floors, environmental hazards, multi-switch puzzles/mirrored rooms
+(natural next step once the shipped switch/pressure-plate mechanics
+get folded in), a real "Enter" button (text/intent-only for now,
+matching Echo Trials' own precedent), map_render.py z-axis for the
+Labyrinth specifically.
+
+Tested: 9 new real handler-driven tests (unlock gate, floor generation
+structure, depth scaling, full enter→look→move→auto-descend→leave
+flow, party-shared state across two members, restart-survival via a
+fresh independent DB read, a real combat trigger resolved cleanly, and
+both the intent-parser routing and the dispatch-level safety
+short-circuit) plus a real fail-then-pass check proving that
+short-circuit is load-bearing. One real bug found and fixed while
+writing these: `_do_labyrinth_move` was calling `_do_descend_labyrinth`
+before persisting the move onto the stairs room, so the descend's own
+guard incorrectly rejected it. Full 56-test dungeon-toolkit suite
+(evolve + audit + switch/breakable/pit + labyrinth) still passes.
+
 ## [1.27.453] — fix: real map-coordinate bugs in Sunken Root Caverns & Greymoor Downs
 
 Real report (2026-09-01, Coffee: "is the map suppose to look like that

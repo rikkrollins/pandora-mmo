@@ -44,6 +44,7 @@ import map_render
 import board_quests as board_quests_module
 import guild_curriculum as guild_curriculum_module
 import remnants as remnants_module
+import rules.labyrinth as labyrinth_module
 import campaign_loader as cl
 import config
 import version
@@ -124,6 +125,7 @@ from rules.leveling import (
     rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
     MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier, describe_subclass_effect,
     world_resistance_pct, world_damage_multiplier,
+    labyrinth_depth_multiplier, labyrinth_depth_resistance_pct,
     formation_target_discipline, formation_target_weight_floor,
     rebirth_power_multiplier, extra_monster_actions,
 )
@@ -8941,6 +8943,322 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "damage_bonus": round(template.get("damage_bonus", 0) * stat_mult),
         "damage_type": template.get("damage_type", "physical"),
     }
+
+
+# --- The Labyrinth (2026-09-01, Phase L1, per Coffee: "start the
+# labyrinth architecture" -- a live, procedurally-generated,
+# ever-deepening dungeon unlocked by defeating colosseum_champion).
+# Real research confirmed before building this: `cl.get_location`
+# only ever scans CAMPAIGN["locations"], and CAMPAIGN is never mutated
+# at runtime anywhere in this codebase -- a synthesized Labyrinth room
+# must never be injected into it. Every character actually inside a
+# run gets `current_location = LABYRINTH_LOCATION_SENTINEL`, a fixed
+# id that is deliberately never a real CAMPAIGN location; the REAL
+# current room lives in the run's own `rooms` dict (rules/labyrinth.py
+# generates it, db.py's labyrinth_runs table persists it). Runs are
+# SHARED per party (confirmed directly with Coffee) -- see
+# _labyrinth_party_key.
+LABYRINTH_LOCATION_SENTINEL = "__labyrinth__"
+
+
+def _labyrinth_unlocked(character: dict) -> bool:
+    """Permanent, per-character -- reuses the existing generic defeated_monsters list, same as the one other ad-hoc per-boss check already in this file (the unfleeable-boss list), rather than a new dedicated flag."""
+    return "colosseum_champion" in (character.get("defeated_monsters") or [])
+
+
+def _labyrinth_party_key(character: dict) -> str:
+    """A solo character is just a 'party of one' for run-sharing purposes -- unifies partied/solo lookups into one indexed db.py column."""
+    party_id = character.get("party_id")
+    return f"party:{party_id}" if party_id else f"solo:{character['telegram_user_id']}"
+
+
+def _build_labyrinth_enemy(monster_key: str, floor: int, index: int, total: int, world_avg_rebirth: float = 0.0) -> dict | None:
+    """
+    A real catalog monster template, scaled by depth ALONE (never the
+    party's own level/rebirth/gear -- Coffee's explicit requirement),
+    same stat_mult-on-a-template shape _build_echo_enemy already
+    proves safe. Depth is unbounded, so monster CHOICE stays
+    catalog-agnostic (rules.labyrinth.generate_floor already filters
+    to a wide, non-Remnant, non-headline-boss pool) -- ALL of the
+    difficulty comes from this multiplier, applied fresh every time a
+    fight actually starts, never baked into the floor data itself.
+    """
+    template = cl.get_monster_template(CAMPAIGN, monster_key)
+    if template is None:
+        return None
+    stat_mult = labyrinth_depth_multiplier(floor)
+    enemy_id = -4_000_000 - (abs(hash((monster_key, floor, index))) % 100_000) - index
+    name = f"{template['name']} {index + 1}" if total > 1 else template["name"]
+    base_resist = world_resistance_pct(world_avg_rebirth)
+    depth_resist = labyrinth_depth_resistance_pct(floor)
+    return {
+        "telegram_user_id": enemy_id, "name": name,
+        "formation_row": _enemy_formation_row(monster_key, template),
+        "known_spells": list(template.get("known_spells", [])),
+        "dexterity": template["dexterity"], "strength": template["strength"],
+        "armor_class": int(template["armor_class"] * stat_mult),
+        "hp_current": int(template["hp_max"] * stat_mult), "hp_max": int(template["hp_max"] * stat_mult),
+        "proficiency_bonus": template["proficiency_bonus"],
+        "is_ai": 1, "xp_reward": int(template.get("xp_reward", 0) * stat_mult),
+        "on_hit_condition": template.get("on_hit_condition"),
+        "monster_key": monster_key, "is_boss": False,
+        "damage_dice": template.get("damage_dice"),
+        # Same square-root damage curve as the main encounter-build
+        # loop's own undertuned-growth path (UNDERTUNED_DAMAGE_SCALE_
+        # EXPONENT) -- matching HP's full ratio badly overshot Coffee's
+        # own explicit damage ceiling there, and the same risk applies
+        # here across many compounding floors.
+        "damage_bonus": round(template.get("damage_bonus", 0) * (stat_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT)),
+        "damage_type": template.get("damage_type", "physical"),
+        # Stacks with the party's own rebirth-based world_resistance_pct
+        # (same real types Echo Trials already use) -- a second,
+        # independent axis on top, per Coffee's own "can also be
+        # amplified... by evolutions" note.
+        "elemental_resistance_pct": {dtype: base_resist + depth_resist for dtype in ECHO_TRIAL_RESISTANT_TYPES},
+        "is_labyrinth_run": True,
+    }
+
+
+def _labyrinth_room_keyboard(room: dict, rooms: dict) -> InlineKeyboardMarkup | None:
+    """Mirrors _look_action_keyboard's shape, but reads neighbors from the run's own `rooms` dict instead of CAMPAIGN -- cl.get_location would return None for every synthetic room id."""
+    rows = []
+    for dest_id in room.get("connections", []):
+        dest = rooms.get(dest_id)
+        if dest is None:
+            continue
+        emoji = "⬇️" if dest_id == labyrinth_module.STAIRS_ROOM_ID else "🚶"
+        rows.append([InlineKeyboardButton(f"{emoji} {dest['name']}", callback_data=f"labyrinth|go|{dest_id}")])
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def _do_enter_labyrinth(update: Update) -> None:
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(chat_id, "adventure")
+        )
+        return
+    if character["current_location"] != "the_colosseum":
+        await update.effective_chat.send_message(
+            "The Labyrinth only opens from the Colosseum.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    if not _labyrinth_unlocked(character):
+        await update.effective_chat.send_message(
+            "Something here waits on the Colosseum Champion falling first.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    party_key = _labyrinth_party_key(character)
+    run = db.get_labyrinth_run(chat_id, party_key)
+    if run is None:
+        seed = random.randint(0, 2**31 - 1)
+        floor_data = labyrinth_module.generate_floor(CAMPAIGN, 1, random.Random(seed))
+        run = db.create_labyrinth_run(
+            chat_id, party_key, floor=1, seed=seed,
+            current_room_id=floor_data["hub_room_id"], rooms=floor_data["rooms"],
+        )
+
+    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    for m in members:
+        db.update_character_by_id(m["character_id"], current_location=LABYRINTH_LOCATION_SENTINEL)
+
+    room = run["rooms"][run["current_room_id"]]
+    await _safe_send(
+        update,
+        f"🌀 The way opens. **Floor {run['floor']}** of the Labyrinth closes in behind you.\n\n"
+        f"**{room['name']}**\n{room['description']}",
+        reply_markup=_labyrinth_room_keyboard(room, run["rooms"]),
+    )
+
+
+async def _do_leave_labyrinth(update: Update) -> None:
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        return
+    party_key = _labyrinth_party_key(character)
+    run = db.get_labyrinth_run(chat_id, party_key)
+    if run is None:
+        await update.effective_chat.send_message(
+            "You're not in the Labyrinth right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    db.delete_labyrinth_run(chat_id, party_key)
+    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    for m in members:
+        db.update_character_by_id(m["character_id"], current_location="the_colosseum")
+    await _safe_send(update, f"🌀 The Labyrinth releases your party, {int(run['floor'])} floors down. You're back at the Colosseum.")
+
+
+async def _do_descend_labyrinth(update: Update) -> None:
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None or character["current_location"] != LABYRINTH_LOCATION_SENTINEL:
+        await update.effective_chat.send_message(
+            "You're not in the Labyrinth right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    party_key = _labyrinth_party_key(character)
+    run = db.get_labyrinth_run(chat_id, party_key)
+    if run is None:
+        return
+    if run["current_room_id"] != labyrinth_module.STAIRS_ROOM_ID:
+        await update.effective_chat.send_message(
+            "You need to find the way down first.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+
+    new_floor = run["floor"] + 1
+    floor_data = labyrinth_module.generate_floor(CAMPAIGN, new_floor, random.Random(run["seed"] + new_floor))
+    run = db.update_labyrinth_run(
+        chat_id, party_key, floor=new_floor,
+        current_room_id=floor_data["hub_room_id"], rooms=floor_data["rooms"],
+    )
+    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    for m in members:
+        db.bump_labyrinth_best_floor(m["telegram_user_id"], chat_id, new_floor)
+
+    room = run["rooms"][run["current_room_id"]]
+    await _safe_send(
+        update,
+        f"⬇️ You descend. **Floor {new_floor}** — the path behind you is already gone.\n\n"
+        f"**{room['name']}**\n{room['description']}",
+        reply_markup=_labyrinth_room_keyboard(room, run["rooms"]),
+    )
+
+
+async def _do_labyrinth_look(update: Update) -> None:
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        return
+    run = db.get_labyrinth_run(chat_id, _labyrinth_party_key(character))
+    if run is None:
+        await update.effective_chat.send_message(
+            "You're not in the Labyrinth right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    room = run["rooms"][run["current_room_id"]]
+    monsters_line = ""
+    if room.get("monsters"):
+        names = [cl.get_monster_template(CAMPAIGN, mk)["name"] for mk in room["monsters"] if cl.get_monster_template(CAMPAIGN, mk)]
+        if names:
+            monsters_line = f"\n\n⚔️ Here: {', '.join(names)}"
+    await _safe_send(
+        update, f"**{room['name']}** (Floor {run['floor']})\n{room['description']}{monsters_line}",
+        reply_markup=_labyrinth_room_keyboard(room, run["rooms"]),
+    )
+
+
+async def _do_labyrinth_move(update: Update, text: str) -> None:
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        return
+    party_key = _labyrinth_party_key(character)
+    run = db.get_labyrinth_run(chat_id, party_key)
+    if run is None:
+        await update.effective_chat.send_message(
+            "You're not in the Labyrinth right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    room = run["rooms"][run["current_room_id"]]
+    lowered = text.lower()
+    destination_id = None
+    for dest_id in room.get("connections", []):
+        dest = run["rooms"].get(dest_id)
+        if dest and (dest_id in lowered or dest["name"].lower() in lowered):
+            destination_id = dest_id
+            break
+    if destination_id is None:
+        await update.effective_chat.send_message(
+            "Nothing that way — try one of the paths you can already see.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    db.update_labyrinth_run(chat_id, party_key, current_room_id=destination_id)
+    if destination_id == labyrinth_module.STAIRS_ROOM_ID:
+        await _do_descend_labyrinth(update)
+        return
+    destination = run["rooms"][destination_id]
+    await _safe_send(
+        update, f"🚶 You move to **{destination['name']}**.\n{destination['description']}",
+        reply_markup=_labyrinth_room_keyboard(destination, run["rooms"]),
+    )
+
+
+async def _do_labyrinth_attack(update: Update, text: str) -> None:
+    chat_id = update.effective_chat.id
+    async with sessions.get_start_lock(chat_id):
+        if sessions.get_session_for_user(chat_id, update.effective_user.id) is not None:
+            await update.effective_chat.send_message(
+                "You're already in a fight!", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+        requester = db.get_character(update.effective_user.id, chat_id)
+        if requester is None:
+            return
+        run = db.get_labyrinth_run(chat_id, _labyrinth_party_key(requester))
+        if run is None:
+            await update.effective_chat.send_message(
+                "You're not in the Labyrinth right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+        room = run["rooms"].get(run["current_room_id"])
+        monster_keys = list(room.get("monsters", [])) if room else []
+        if not monster_keys:
+            await update.effective_chat.send_message(
+                "Nothing here to fight.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+
+        all_characters = _get_real_party_combatants(requester)
+        party = [p for p in all_characters if p["hp_current"] > 0]
+        downed = [p for p in all_characters if p["hp_current"] <= 0 and not p.get("is_ai")]
+        if not party:
+            if downed:
+                await update.effective_chat.send_message(
+                    "Everyone here has fallen — say \"I rest\" to recover before continuing.",
+                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+                )
+            else:
+                await update.effective_chat.send_message(
+                    "No one here is in a fit state to fight right now.",
+                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+                )
+            return
+
+        world_avg_rebirth = sum(p.get("rebirth_count", 0) for p in party) / len(party) if party else 0
+        enemies = [
+            enemy for i, mk in enumerate(monster_keys)
+            if (enemy := _build_labyrinth_enemy(mk, run["floor"], i, len(monster_keys), world_avg_rebirth)) is not None
+        ]
+        if not enemies:
+            await update.effective_chat.send_message(
+                "Nothing here to fight.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+
+        sides = {p["telegram_user_id"]: "party" for p in party}
+        for enemy in enemies:
+            sides[enemy["telegram_user_id"]] = "enemy"
+        session = sessions.start_session(chat_id, party + enemies, sides=sides)
+        if session is None:
+            await update.effective_chat.send_message(
+                "Someone in your party is already in another fight right now.",
+                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+            )
+            return
+        initiative_line = ", ".join(f"{p['name']} ({p['initiative']})" for p in session.participants)
+        header = (
+            f"⚔️ **Combat Begins!**\n"
+            f"Your party ({_format_party_names(party)}) is set upon in the Labyrinth's depths!\n\n"
+            f"🎯 **Initiative order:** {initiative_line}"
+        )
+        await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
 
 
 async def _do_start_echo_trial(update: Update, text: str) -> None:
@@ -21234,6 +21552,26 @@ async def travel_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await _do_move(update, dest["name"])
 
 
+async def labyrinth_travel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _labyrinth_room_keyboard's rows -- dispatches through the exact same _do_labyrinth_move a typed destination name already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "go" or len(parts) < 3:
+        return
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        return
+    run = db.get_labyrinth_run(update.effective_chat.id, _labyrinth_party_key(character))
+    if run is None:
+        return
+    dest = run["rooms"].get(parts[2])
+    if dest is None:
+        return
+    await _do_labyrinth_move(update, dest["name"])
+
+
 async def look_action_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles taps on _look_action_keyboard's Shop/Quest Board rows -- dispatches through the exact same real handlers free text already uses."""
     query = update.callback_query
@@ -30799,8 +31137,33 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     """
     action = intent["action"]
     text = intent.get("raw_text") or text
+
+    # The Labyrinth (2026-09-01) -- a character standing inside a run
+    # gets LABYRINTH_LOCATION_SENTINEL as their current_location, which
+    # is never a real CAMPAIGN id. Only a small, curated set of actions
+    # are safe there (everything else risks a cl.get_location(CAMPAIGN,
+    # ...) call somewhere downstream silently getting None back) --
+    # checked once here rather than auditing every one of this
+    # dispatch's many branches individually.
+    _labyrinth_requester = db.get_character(update.effective_user.id, update.effective_chat.id)
+    _in_labyrinth = bool(_labyrinth_requester) and _labyrinth_requester.get("current_location") == LABYRINTH_LOCATION_SENTINEL
+    if _in_labyrinth and action not in (
+        "move", "look", "attack", "leave_labyrinth", "descend_labyrinth", "check_inventory", "check_party",
+    ):
+        await update.effective_chat.send_message(
+            "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+
     if action == "create_character":
         await _begin_character_creation(update, context)
+    elif action == "enter_labyrinth":
+        await _do_enter_labyrinth(update)
+    elif action == "leave_labyrinth":
+        await _do_leave_labyrinth(update)
+    elif action == "descend_labyrinth":
+        await _do_descend_labyrinth(update)
     elif action == "start_combat":
         monster_key = None
         lowered = text.lower()
@@ -30832,15 +31195,24 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         enemy_count = _parse_enemy_count(lowered)
         await _do_start_combat(update, monster_key, count=enemy_count)
     elif action == "attack":
-        await _do_attack(update, intent.get("raw_text", text))
+        if _in_labyrinth:
+            await _do_labyrinth_attack(update, intent.get("raw_text", text))
+        else:
+            await _do_attack(update, intent.get("raw_text", text))
     elif action == "throw_weapon":
         await _do_throw_weapon(update, intent.get("raw_text", text))
     elif action == "move":
-        await _do_move(update, text)
+        if _in_labyrinth:
+            await _do_labyrinth_move(update, text)
+        else:
+            await _do_move(update, text)
     elif action == "push_down_pit":
         await _do_push_object_down_pit(update, text)
     elif action == "look":
-        await _do_look(update)
+        if _in_labyrinth:
+            await _do_labyrinth_look(update)
+        else:
+            await _do_look(update)
     elif action == "examine":
         await _do_examine(update, intent.get("target") or "")
     elif action == "check_inventory":
@@ -34605,6 +34977,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(party_menu_callback, pattern=r"^party\|"))
     application.add_handler(CallbackQueryHandler(affinity_menu_callback, pattern=r"^affinity\|"))
     application.add_handler(CallbackQueryHandler(travel_menu_callback, pattern=r"^travel\|"))
+    application.add_handler(CallbackQueryHandler(labyrinth_travel_callback, pattern=r"^labyrinth\|"))
     application.add_handler(CallbackQueryHandler(look_action_menu_callback, pattern=r"^lookact\|"))
     application.add_handler(CallbackQueryHandler(shrine_menu_callback, pattern=r"^shrine\|"))
     application.add_handler(CallbackQueryHandler(creation_menu_callback, pattern=r"^create\|"))

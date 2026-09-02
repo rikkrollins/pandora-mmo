@@ -42,6 +42,7 @@ from rules.combat import resolve_attack, reaction_precheck
 from rules.crafting import RECIPES
 import rules.dungeon_audit as dungeon_audit
 import rules.dungeon_evolve as dungeon_evolve
+import rules.labyrinth as labyrinth_module
 import scripts.build_location_grid as build_location_grid
 from tests.helpers import (
     DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
@@ -31816,6 +31817,169 @@ class SwitchAndBreakableAndPitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(intent["action"], "push_down_pit")
         jump_intent = _keyword_fallback("I jump down into the pit", [])
         self.assertEqual(jump_intent["action"], "move")
+
+
+class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
+    """
+    Real Phase L1 tests (2026-09-01, per Coffee: "start the labyrinth
+    architecture") -- a live, procedurally-generated, ever-deepening
+    dungeon unlocked by defeating colosseum_champion. Uses the REAL
+    bot.CAMPAIGN (not a synthetic fixture, unlike SwitchAndBreakableAnd
+    PitTests above) since generate_floor draws from the real monster
+    catalog and _labyrinth_unlocked checks a real monster_key.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        use_test_db("tests/tmp/labyrinth_test.db")
+
+    async def test_unlock_gate_blocks_without_the_boss_kill_allows_with_it(self):
+        user_id, chat_id = 962001, -962001
+        make_basic_character(user_id, "LabyrinthLockedTester", chat_id=chat_id, current_location="the_colosseum")
+        sink = []
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("Champion" in s for s in sink))
+        self.assertIsNone(db.get_labyrinth_run(chat_id, f"solo:{user_id}"))
+
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        sink2 = []
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink2, chat_id=chat_id))
+        self.assertTrue(any("Floor 1" in s for s in sink2))
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, f"solo:{user_id}"))
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+    def test_generate_floor_produces_a_real_hub_stairs_and_reachable_side_rooms(self):
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(7))
+        rooms = floor_data["rooms"]
+        self.assertIn(floor_data["hub_room_id"], rooms)
+        self.assertIn(floor_data["stairs_room_id"], rooms)
+        hub = rooms[floor_data["hub_room_id"]]
+        self.assertIn(floor_data["stairs_room_id"], hub["connections"])
+        # Every side room is reachable from the hub, and reciprocally connects back.
+        for room_id, room in rooms.items():
+            if room_id == floor_data["hub_room_id"]:
+                continue
+            self.assertIn(floor_data["hub_room_id"], room["connections"])
+            self.assertIn(room_id, hub["connections"])
+
+    def test_labyrinth_depth_multiplier_strictly_increases_monster_stats(self):
+        floor1 = bot._build_labyrinth_enemy("goblin", 1, 0, 1)
+        floor20 = bot._build_labyrinth_enemy("goblin", 20, 0, 1)
+        self.assertGreater(floor20["hp_max"], floor1["hp_max"])
+        self.assertGreaterEqual(floor20["damage_bonus"], floor1["damage_bonus"])
+
+    async def test_enter_look_move_descend_leave_end_to_end(self):
+        user_id, chat_id = 962002, -962002
+        make_basic_character(user_id, "LabyrinthFlowTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+        sink = []
+        await bot._do_labyrinth_look(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("Floor 1" in s for s in sink))
+
+        # Moving onto the stairs room auto-descends in the same move -- no separate action needed.
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to a stair down")
+        run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        self.assertEqual(run["floor"], 2)
+        self.assertEqual(run["current_room_id"], labyrinth_module.HUB_ROOM_ID)
+        self.assertTrue(any("Floor 2" in s for s in sink2))
+        character_after_descend = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after_descend["labyrinth_best_floor"], 2)
+
+        sink4 = []
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", sink4, chat_id=chat_id))
+        self.assertIsNone(db.get_labyrinth_run(chat_id, f"solo:{user_id}"))
+        character_after_leave = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after_leave["current_location"], "the_colosseum")
+        # Best floor is a permanent, never-decreasing stat -- still 2 after leaving.
+        self.assertEqual(character_after_leave["labyrinth_best_floor"], 2)
+
+    async def test_run_is_shared_across_party_members(self):
+        leader_id, follower_id, chat_id = 962003, 962004, -962003
+        party_id = 88003
+        make_basic_character(leader_id, "LabyrinthLeaderTester", chat_id=chat_id, current_location="the_colosseum")
+        make_basic_character(follower_id, "LabyrinthFollowerTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(leader_id, chat_id, defeated_monsters=["colosseum_champion"], party_id=party_id)
+        db.update_character(follower_id, chat_id, party_id=party_id)
+
+        await bot._do_enter_labyrinth(FakeUpdate(leader_id, "", [], chat_id=chat_id))
+        follower_after_entry = db.get_character(follower_id, chat_id)
+        self.assertEqual(follower_after_entry["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+        await bot._do_labyrinth_move(FakeUpdate(leader_id, "", [], chat_id=chat_id), "go to a stair down")
+        run_seen_by_leader = db.get_labyrinth_run(chat_id, f"party:{party_id}")
+        run_seen_by_follower = db.get_labyrinth_run(chat_id, bot._labyrinth_party_key(follower_after_entry))
+        self.assertEqual(run_seen_by_leader["current_room_id"], run_seen_by_follower["current_room_id"])
+        self.assertEqual(run_seen_by_leader["floor"], 2)
+
+    def test_run_survives_a_fresh_refetch_no_in_memory_state(self):
+        """The run lives in the database (db.py's labyrinth_runs table), not sessions.py's in-memory model -- a fresh, independent read must see the exact same state."""
+        chat_id, party_key = -962005, "solo:962005"
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(3))
+        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=3, current_room_id=floor_data["hub_room_id"], rooms=floor_data["rooms"])
+        first_read = db.get_labyrinth_run(chat_id, party_key)
+        second_read = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(first_read["rooms"], second_read["rooms"])
+        self.assertEqual(first_read["current_room_id"], second_read["current_room_id"])
+        db.delete_labyrinth_run(chat_id, party_key)
+
+    async def test_combat_trigger_starts_and_resolves_a_real_session(self):
+        import sessions
+        user_id, chat_id = 962006, -962006
+        make_basic_character(user_id, "LabyrinthFighterTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        # Force a real, known monster into the current room so the fight is deterministic.
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "", sink, chat_id=chat_id), "attack")
+        self.assertTrue(any("Combat Begins" in s for s in sink))
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session)
+        self.assertTrue(any(p.get("is_labyrinth_run") for p in session.participants))
+        # Resolve it cleanly -- confirms nothing downstream tries to re-fetch a synthetic room id from CAMPAIGN and crashes.
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        sessions.end_session(chat_id, session)
+        self.assertIsNone(sessions.get_session_for_user(chat_id, user_id))
+
+    def test_enter_leave_descend_intents_route_through_the_real_parser(self):
+        self.assertEqual(_keyword_fallback("I enter the labyrinth", [])["action"], "enter_labyrinth")
+        self.assertEqual(_keyword_fallback("I leave the labyrinth", [])["action"], "leave_labyrinth")
+        self.assertEqual(_keyword_fallback("descend deeper into the labyrinth", [])["action"], "descend_labyrinth")
+
+    async def test_dispatch_blocks_unsafe_actions_while_in_the_labyrinth(self):
+        """A real, dispatch-level short-circuit -- not just the individual _do_labyrinth_* handlers -- confirms an action with no labyrinth-aware equivalent (e.g. casting a spell) is refused rather than falling through to code that would try to cl.get_location(CAMPAIGN, '__labyrinth__') and get None back."""
+        user_id, chat_id = 962007, -962007
+        make_basic_character(user_id, "LabyrinthGuardedTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "cast fireball", sink, chat_id=chat_id), DummyContext(),
+            {"action": "cast_spell", "raw_text": "cast fireball"}, "cast fireball",
+        )
+        self.assertTrue(any("doesn't work this deep in the Labyrinth" in s for s in sink))
+
+        # A safe action (look) still works through the same dispatch path.
+        sink2 = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "look around", sink2, chat_id=chat_id), DummyContext(), {"action": "look"}, "look around",
+        )
+        self.assertTrue(any("Floor 1" in s for s in sink2))
 
 
 if __name__ == "__main__":

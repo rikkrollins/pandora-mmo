@@ -211,6 +211,34 @@ CREATE TABLE IF NOT EXISTS game_settings (
 );
 """
 
+# The Labyrinth (2026-09-01, per Coffee: "start the labyrinth
+# architecture" -- a live, procedurally-generated, ever-deepening
+# dungeon unlocked by defeating colosseum_champion). Runs are SHARED
+# per party, not per character -- confirmed with Coffee directly, same
+# as how every other real dungeon/combat already works -- so this is
+# its own table, one row per active run, rather than a character
+# column (two party members' own JSON blobs would drift out of sync).
+# party_key unifies partied ("party:<party_id>") and solo
+# ("solo:<telegram_user_id>") lookups into one indexed column, avoiding
+# NULL-handling special cases a nullable party_id would need. Because
+# this lives in the database (not sessions.py's in-memory-only model),
+# a run survives a bot restart for free -- no snapshot-file safety net
+# needed, unlike combat sessions.
+CREATE_LABYRINTH_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS labyrinth_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    party_key TEXT NOT NULL,
+    floor INTEGER NOT NULL DEFAULT 1,
+    seed INTEGER NOT NULL,
+    current_room_id TEXT NOT NULL,
+    rooms_json TEXT NOT NULL DEFAULT '{}',
+    entered_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(chat_id, party_key)
+);
+"""
+
 # Multi-tenant scaling Phase 3 (2026-08-02): a real registry of every
 # Telegram group that has ever run /set_topic, so another group can add
 # this bot and get its own working topic routing without touching
@@ -320,6 +348,7 @@ def init_db() -> None:
         conn.execute(CREATE_GAME_SETTINGS_TABLE)
         conn.execute(CREATE_CHATS_TABLE)
         conn.execute(CREATE_CHAT_TOPIC_CONFIG_TABLE)
+        conn.execute(CREATE_LABYRINTH_RUNS_TABLE)
 
         # Older DBs created before fog-of-war/character-slots/proficiency
         # may already have the new characters table but be missing later
@@ -882,6 +911,14 @@ def init_db() -> None:
         # the 4 real buckets -- see bot.py's _INVENTORY_SORT_CATEGORY_*).
         if "inventory_sort_mode" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN inventory_sort_mode TEXT NOT NULL DEFAULT 'off'")
+
+        # labyrinth_best_floor (2026-09-01, per Coffee: "start the
+        # labyrinth architecture") -- permanent, per-character bragging
+        # rights, same shape as echo_trial_tier above. Never decreases;
+        # bumped by db.bump_labyrinth_best_floor whenever a live run's
+        # floor exceeds whatever this character already has on record.
+        if "labyrinth_best_floor" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_best_floor INTEGER NOT NULL DEFAULT 0")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -3485,6 +3522,67 @@ def add_ai_companion_to_party(telegram_user_id: int, chat_id: int, party_id: int
         conn.execute(
             "UPDATE characters SET party_id = ? WHERE telegram_user_id = ? AND chat_id = ?",
             (party_id, telegram_user_id, chat_id),
+        )
+
+
+# --- The Labyrinth (see CREATE_LABYRINTH_RUNS_TABLE's own comment for
+# why this is a table, not a character column) ---
+
+def _labyrinth_run_row_to_dict(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["rooms"] = json.loads(d.pop("rooms_json"))
+    return d
+
+
+def get_labyrinth_run(chat_id: int, party_key: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM labyrinth_runs WHERE chat_id = ? AND party_key = ?", (chat_id, party_key),
+        ).fetchone()
+    return _labyrinth_run_row_to_dict(row) if row else None
+
+
+def create_labyrinth_run(chat_id: int, party_key: str, floor: int, seed: int, current_room_id: str, rooms: dict) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO labyrinth_runs (chat_id, party_key, floor, seed, current_room_id, rooms_json, entered_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (chat_id, party_key, floor, seed, current_room_id, json.dumps(rooms), now, now),
+        )
+    return get_labyrinth_run(chat_id, party_key)
+
+
+def update_labyrinth_run(chat_id: int, party_key: str, **fields) -> dict | None:
+    if not fields:
+        return get_labyrinth_run(chat_id, party_key)
+    if "rooms" in fields:
+        fields["rooms_json"] = json.dumps(fields.pop("rooms"))
+    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+    columns = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values())
+    with get_connection() as conn:
+        conn.execute(
+            f"UPDATE labyrinth_runs SET {columns} WHERE chat_id = ? AND party_key = ?",
+            values + [chat_id, party_key],
+        )
+    return get_labyrinth_run(chat_id, party_key)
+
+
+def delete_labyrinth_run(chat_id: int, party_key: str) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM labyrinth_runs WHERE chat_id = ? AND party_key = ?", (chat_id, party_key))
+
+
+def bump_labyrinth_best_floor(telegram_user_id: int, chat_id: int, floor: int) -> None:
+    """Permanent, never-decreasing bragging-rights stat -- only writes if `floor` is a new personal best."""
+    with get_connection() as conn:
+        character_id = _active_character_id(telegram_user_id, chat_id, conn)
+        if character_id is None:
+            return
+        conn.execute(
+            "UPDATE characters SET labyrinth_best_floor = ? WHERE character_id = ? AND labyrinth_best_floor < ?",
+            (floor, character_id, floor),
         )
 
 

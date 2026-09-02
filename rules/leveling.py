@@ -198,6 +198,35 @@ def world_damage_multiplier(party_rebirth_count: float) -> float:
     return REBIRTH_POWER_GROWTH_RATE ** max(party_rebirth_count, 0)
 
 
+# The Labyrinth (2026-09-01, per Coffee: "start the labyrinth
+# architecture" -- unlocked by defeating colosseum_champion, a live,
+# procedurally-generated, ever-deepening dungeon). A genuinely
+# SEPARATE axis from rebirth above -- per Coffee's own explicit
+# direction, floor difficulty must be a pure function of depth alone,
+# never the player's own level/rebirth/gear, so any party willing and
+# able to travel there can always attempt any floor; it just gets
+# progressively harder the deeper they go. Stacks MULTIPLICATIVELY
+# with world_damage_multiplier/world_resistance_pct above (both get
+# applied to the same monster instance), which is what satisfies
+# Coffee's "can also be amplified... by evolutions" note -- rebirth is
+# already such an axis, this is a second, independent one on top of it.
+# A much gentler per-step rate than rebirth's 1.5 (floors accumulate
+# far faster than rebirths ever will) -- a real tuning constant, kept
+# named and isolated here so it's cheap to retune without touching the
+# functions below.
+LABYRINTH_FLOOR_GROWTH_RATE = 1.05  # +5%/floor, compounding
+
+
+def labyrinth_depth_multiplier(floor: int) -> float:
+    """Floor 1 is baseline (1.0x); every floor past it compounds by LABYRINTH_FLOOR_GROWTH_RATE."""
+    return LABYRINTH_FLOOR_GROWTH_RATE ** max(floor - 1, 0)
+
+
+def labyrinth_depth_resistance_pct(floor: int) -> float:
+    """Same curve as labyrinth_depth_multiplier, expressed as a resistance percentage (mirrors world_resistance_pct's own relationship to world_damage_multiplier)."""
+    return (LABYRINTH_FLOOR_GROWTH_RATE ** max(floor - 1, 0) - 1.0) * 100
+
+
 # Turn-based equivalent of Noita's exponential "attacks faster" NG+
 # axis (real-time attack-rate scaling has no direct analog in turn-
 # based combat) -- generalizes the existing extra_attack_when_enraged

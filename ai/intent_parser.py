@@ -1884,6 +1884,28 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # natural "-ing" form of each existing verb here; every other entry
     # (enter/descend/leave/etc., already covering their own forms or not
     # naturally used in progressive tense for this purpose) is untouched.
+    # enter_labyrinth / leave_labyrinth / descend_labyrinth (2026-09-01,
+    # Phase L1: "start the labyrinth architecture"). Checked BEFORE
+    # move_words just below -- a real conflict found writing this:
+    # move_words' own "enter the" entry (for ordinary movement phrasing
+    # like "enter the tavern") would otherwise win first and misclassify
+    # "I enter the labyrinth" as a plain move. "labyrinth" is distinctive
+    # enough in this game's vocabulary (never used for anything else)
+    # that a bare mention alongside a clear verb is unambiguous, same
+    # convention as the echo-trial check above. "descend"/"go deeper"
+    # alone stays ambiguous outside this context -- only fires here when
+    # "labyrinth" is also named; the CORE way to descend is simply
+    # walking to the floor's own stairs room via an ordinary move, which
+    # bot.py's _do_labyrinth_move already detects on its own regardless
+    # of this regex.
+    if "labyrinth" in lowered:
+        if any(w in lowered for w in ["enter", "start", "begin", "go into", "go in", "step into"]):
+            return {**base, "action": "enter_labyrinth"}
+        if any(w in lowered for w in ["leave", "exit", "abandon", "retreat", "flee"]):
+            return {**base, "action": "leave_labyrinth"}
+        if any(w in lowered for w in ["descend", "go down", "go deeper", "stairs down"]):
+            return {**base, "action": "descend_labyrinth"}
+
     move_words = ["go to", "goto", "head to", "heading to", "walk to", "walking to",
                   "travel to", "traveling to", "travelling to", "move to", "moving to",
                   "enter the", "descend", "ascend",
@@ -2707,6 +2729,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon", "push_down_pit",
+                "enter_labyrinth", "leave_labyrinth", "descend_labyrinth",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
                 "check_remnants", "check_story", "check_magic", "check_affinity",
                 "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
