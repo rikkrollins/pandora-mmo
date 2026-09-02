@@ -2,6 +2,53 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.469] — fix: real Labyrinth softlock + missing combat actions + missing images/descriptions/directions
+
+Five real bugs found live, same session (2026-09-02, Coffee, dev-bridge
+screenshots): a real ambush froze his party mid-fight, and no image/
+description/direction reports followed right after.
+
+1. **The freeze, root-caused.** `_dispatch_intent` always routed a
+   labyrinth character's "attack" to `_do_labyrinth_attack` — which
+   only knows how to START a fresh encounter and refuses outright once
+   a session already exists. `_in_labyrinth` stays true for the WHOLE
+   rest of combat too, so every "Attack" on every turn of a real ambush
+   replied "You're already in a fight!" and did nothing. Now only
+   starts a new encounter when no session exists yet; an already-active
+   fight always goes through the same `_do_attack` every other fight in
+   the game uses.
+2. **Tutorial over-promised.** The Labyrinth's own tutorial says
+   "Everything else works like the surface: look, move, attack, cast,
+   use items" — but `cast_spell`/`use_item`/`flee`/`throw_weapon`/
+   class-ability actions were never on the dispatch allowlist at all,
+   so each silently refused with "That doesn't work this deep in the
+   Labyrinth." All added, each confirmed safe for the sentinel location
+   first. Fleeing specifically needed one more real fix:
+   `_resolve_flee_attempt`'s destination (`_nearest_safe_waypoint`) had
+   no concept of the Labyrinth and would have silently teleported a
+   fleeing character out to a real overworld waypoint, desyncing them
+   from a run their party might still be in — a break-away inside the
+   Labyrinth now correctly stays exactly where it is.
+3. **No compass directions.** Every room already carries a real
+   `grid_position`; a real compass direction (north/south/east/west,
+   computed from it, never invented) now appears both as a button
+   label and in the plain room TEXT (`🧭 Exits: ...`) — a text-only
+   reader or an AI player only ever parses the narration string, so a
+   button-only version wasn't enough on its own.
+4. **Duplicate descriptions.** Every side room in a theme shared one
+   single `room_flavor` sentence regardless of its own distinct name.
+   Each of the 5 themes now has a `room_descriptions` list the same
+   length as `room_names`, indexed identically — 25 real, distinct
+   sentences total.
+5. **No images at all.** Confirmed the Labyrinth never called anything
+   like the overworld's `_maybe_send_location_image` on any of its
+   enter/move/look/descend paths. `_maybe_send_labyrinth_room_image`
+   now sends real Pollinations art on every arrival, grounded only in
+   the room's own (now-distinct) description text, skipped in a real
+   dark room exactly like the overworld's own darkness gate.
+
+6 new tests cover all of this; full 49-test LabyrinthTests suite passes.
+
 ## [1.27.468] — content: a real uploaded animation for The Wrathflame Unbound's summon
 
 Real request (2026-09-02, Coffee, dev-bridge): sent a real video and

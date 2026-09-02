@@ -32377,13 +32377,24 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # template instead -- this class's whole point is "no real
         # Ollama calls," same contract FastRegressionTests already
         # documents for itself.
-        from unittest.mock import patch
+        from unittest.mock import patch, AsyncMock
         cls._ollama_patcher = patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("no Ollama in tests"))
         cls._ollama_patcher.start()
+        # Real regression (2026-09-02, added alongside the new
+        # _maybe_send_labyrinth_room_image calls on every enter/move/
+        # look/descend): without this, every one of this class's real
+        # room arrivals would hit the exact same live Pollinations.ai
+        # network call the overworld's own image tests already mock via
+        # this file's established "patch bot._send_generated_image"
+        # convention -- class-wide here since so many tests below touch
+        # a real room arrival, not just the ones actually testing images.
+        cls._image_patcher = patch("bot._send_generated_image", new=AsyncMock(return_value=False))
+        cls._image_patcher.start()
 
     @classmethod
     def tearDownClass(cls):
         cls._ollama_patcher.stop()
+        cls._image_patcher.stop()
 
     async def _walk_to_checkpoint(self, user_id: int, chat_id: int) -> dict:
         """
@@ -32643,7 +32654,17 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("descend deeper into the labyrinth", [])["action"], "descend_labyrinth")
 
     async def test_dispatch_blocks_unsafe_actions_while_in_the_labyrinth(self):
-        """A real, dispatch-level short-circuit -- not just the individual _do_labyrinth_* handlers -- confirms an action with no labyrinth-aware equivalent (e.g. casting a spell) is refused rather than falling through to code that would try to cl.get_location(CAMPAIGN, '__labyrinth__') and get None back."""
+        """
+        A real, dispatch-level short-circuit -- not just the individual
+        _do_labyrinth_* handlers -- confirms an action with genuinely no
+        labyrinth-aware equivalent (e.g. crafting, which needs a real
+        CAMPAIGN shop location) is refused rather than falling through
+        to code that would try to cl.get_location(CAMPAIGN,
+        '__labyrinth__') and get None back. cast_spell/use_item/flee/
+        throw_weapon/class abilities are deliberately NOT tested here
+        any more -- they're now real, allowed, labyrinth-aware actions
+        (2026-09-02 fix), covered by their own dedicated tests below.
+        """
         user_id, chat_id = 962007, -962007
         make_basic_character(user_id, "LabyrinthGuardedTester", chat_id=chat_id, current_location="the_colosseum")
         db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
@@ -32651,8 +32672,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
         sink = []
         await bot._dispatch_intent(
-            FakeUpdate(user_id, "cast fireball", sink, chat_id=chat_id), DummyContext(),
-            {"action": "cast_spell", "raw_text": "cast fireball"}, "cast fireball",
+            FakeUpdate(user_id, "craft a healing potion", sink, chat_id=chat_id), DummyContext(),
+            {"action": "craft", "raw_text": "craft a healing potion"}, "craft a healing potion",
         )
         self.assertTrue(any("doesn't work this deep in the Labyrinth" in s for s in sink))
 
@@ -32662,6 +32683,227 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(user_id, "look around", sink2, chat_id=chat_id), DummyContext(), {"action": "look"}, "look around",
         )
         self.assertTrue(any("Floor 1" in s for s in sink2))
+
+    async def test_attack_dispatch_continues_an_active_labyrinth_fight_instead_of_refusing(self):
+        """
+        Real live softlock (2026-09-02, Coffee, dev-bridge screenshots):
+        a real ambush fired, and every following "Attack" replied
+        "You're already in a fight!" and did nothing at all --
+        _dispatch_intent always routed a labyrinth character's "attack"
+        to _do_labyrinth_attack (which only knows how to START a fresh
+        encounter, refusing outright once a session exists), even
+        mid-fight, since _in_labyrinth stays true for the character's
+        ENTIRE time in combat. Confirms the real dispatch path (not
+        _do_attack directly) actually resolves the turn once a session
+        already exists, instead of refusing.
+        """
+        import sessions
+        user_id, chat_id = 962030, -962030
+        make_basic_character(user_id, "LabyrinthAttackContinueTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session, "combat must have actually started")
+
+        sink = []
+        # Attack rolls resolve through rules.combat's own imported
+        # roll_d20 (not bot.roll_d20), so hit/miss is genuinely random
+        # here -- deliberately not forced. "Combat Resolution" appears
+        # on either outcome, so it's a reliable, RNG-agnostic signal
+        # that a real turn actually resolved instead of being refused.
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "attack", sink, chat_id=chat_id), DummyContext(),
+            {"action": "attack", "raw_text": "attack"}, "attack",
+        )
+        self.assertFalse(any("already in a fight" in s for s in sink), "the real softlock -- attack must continue the turn, not refuse")
+        self.assertTrue(any("Combat Resolution" in s for s in sink), "a real attack must have actually resolved")
+
+        # Real cleanup -- leaving a live session dangling risks
+        # contaminating whichever test happens to run next.
+        leftover = sessions.get_session_for_user(chat_id, user_id)
+        if leftover is not None:
+            sessions.end_session(chat_id, leftover)
+
+    async def test_fleeing_a_labyrinth_fight_keeps_the_character_inside_the_labyrinth(self):
+        """
+        Real gap found alongside the attack softlock (2026-09-02):
+        _resolve_flee_attempt's destination (_nearest_safe_waypoint)
+        has no concept of the Labyrinth -- cl.get_location(CAMPAIGN,
+        '__labyrinth__') returns None, so a successful flee would have
+        silently teleported the fleeing character out to some real
+        overworld waypoint, desyncing them from a run their party might
+        still be in. A break-away inside the Labyrinth must leave
+        current_location and the live run itself completely untouched.
+        """
+        from unittest.mock import patch
+        import sessions
+        user_id, chat_id = 962031, -962031
+        make_basic_character(user_id, "LabyrinthFleeTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "", [], chat_id=chat_id), "attack")
+        self.assertIsNotNone(sessions.get_session_for_user(chat_id, user_id))
+
+        sink = []
+        # The flee roll goes through rules.dice's own roll_ability_check
+        # (which calls roll_d20 from WITHIN rules/dice.py's own module
+        # namespace) -- patching bot.roll_d20 has no effect on it, only
+        # patching rules.dice.roll_d20 itself does.
+        with patch("rules.dice.roll_d20", return_value=20):
+            await bot._dispatch_intent(
+                FakeUpdate(user_id, "run away", sink, chat_id=chat_id), DummyContext(),
+                {"action": "flee", "raw_text": "run away"}, "run away",
+            )
+        self.assertFalse(any("doesn't work this deep in the Labyrinth" in s for s in sink))
+        self.assertTrue(any("breaks away" in s for s in sink))
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, party_key), "the run itself must survive a flee, not be silently lost")
+
+    async def test_cast_spell_and_use_item_are_allowed_mid_labyrinth_fight(self):
+        """
+        Real live gap (2026-09-02, Coffee, dev-bridge): the Labyrinth's
+        own tutorial text explicitly promises "Everything else works
+        like the surface: look, move, attack, cast, use items" -- but
+        cast_spell/use_item were never on the dispatch allowlist at all,
+        so both silently refused with "That doesn't work this deep in
+        the Labyrinth," directly contradicting the tutorial. Confirms
+        both real handlers now actually run mid-fight instead of being
+        blocked at the dispatch level.
+        """
+        import sessions
+        user_id, chat_id = 962032, -962032
+        character = make_basic_character(
+            user_id, "LabyrinthCasterTester", chat_id=chat_id, current_location="the_colosseum",
+            hp_max=200, char_class="Wizard",
+        )
+        db.update_character(
+            user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=150,
+            known_spells=["magic_missile"], spell_slots_current=2, spell_slots_max=2,
+        )
+        db.add_item(user_id, chat_id, "healing_potion", 1)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "", [], chat_id=chat_id), "attack")
+        self.assertIsNotNone(sessions.get_session_for_user(chat_id, user_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "cast magic missile", sink, chat_id=chat_id), DummyContext(),
+            {"action": "cast_spell", "raw_text": "cast magic missile"}, "cast magic missile",
+        )
+        self.assertFalse(any("doesn't work this deep in the Labyrinth" in s for s in sink))
+        character_after = db.get_character(user_id, chat_id)
+        self.assertLess(character_after["spell_slots_current"], 2, "a real spell slot must have actually been spent")
+
+        # A fresh session for the use_item half -- the spell may have already ended the fight above.
+        rooms2 = run["rooms"]
+        rooms2[run["current_room_id"]]["monsters"] = []
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms2)
+        db.update_character(user_id, chat_id, hp_current=50)
+        sink2 = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "drink the healing potion", sink2, chat_id=chat_id), DummyContext(),
+            {"action": "use_item", "raw_text": "drink the healing potion"}, "drink the healing potion",
+        )
+        self.assertFalse(any("doesn't work this deep in the Labyrinth" in s for s in sink2))
+        character_final = db.get_character(user_id, chat_id)
+        self.assertGreater(character_final["hp_current"], 50, "the potion must have actually healed")
+
+        leftover = sessions.get_session_for_user(chat_id, user_id)
+        if leftover is not None:
+            sessions.end_session(chat_id, leftover)
+
+    async def test_labyrinth_room_text_lists_real_compass_exits(self):
+        """
+        Real live gap (2026-09-02, Coffee, dev-bridge: "The labyrinth
+        isn't showing north south east or west orientations... the
+        player needs to be able to read to see/understand"). A real
+        compass direction, computed from each room's own real
+        grid_position (never invented), must appear in the plain TEXT
+        body -- not just as an unlabeled button -- since a text-only
+        reader or an AI player only ever parses the narration string.
+        """
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(3))
+        rooms = floor_data["rooms"]
+        hub = rooms[floor_data["hub_room_id"]]
+        run = {"rooms": rooms, "floor": 1}
+        character = {"current_location": bot.LABYRINTH_LOCATION_SENTINEL}
+        text = bot._labyrinth_room_text(character, hub, run, -1)
+        self.assertIn("🧭 Exits:", text)
+        self.assertTrue(
+            any(word in text for word in ("North", "South", "East", "West")),
+            f"expected a real compass word in the exits line, got: {text}",
+        )
+
+    def test_labyrinth_side_rooms_have_distinct_descriptions_not_one_shared_flavor_line(self):
+        """
+        Real live report (2026-09-02, Coffee, dev-bridge: "not giving
+        good enough descriptions on the locations"). Root cause: every
+        side room in a theme used to share the exact same theme["room_
+        flavor"] sentence regardless of its own distinct name. Each
+        theme's room_descriptions is now the SAME LENGTH as room_names
+        and indexed identically -- two differently-named side rooms on
+        the same floor must show genuinely different description text.
+        """
+        for theme in labyrinth_module.LABYRINTH_THEMES:
+            self.assertEqual(
+                len(theme["room_names"]), len(theme["room_descriptions"]),
+                f"{theme['id']}: room_names and room_descriptions must stay the same length",
+            )
+            self.assertEqual(
+                len(set(theme["room_descriptions"])), len(theme["room_descriptions"]),
+                f"{theme['id']}: every room_description must be genuinely distinct, not repeated",
+            )
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(9))
+        rooms = floor_data["rooms"]
+        side_rooms = [r for rid, r in rooms.items() if rid.endswith(("_r0", "_r1", "_r2"))]
+        self.assertGreaterEqual(len(side_rooms), 2)
+        descriptions = {r["description"] for r in side_rooms}
+        self.assertGreater(len(descriptions), 1, "distinct side rooms must not all share one identical description")
+
+    async def test_labyrinth_room_image_sent_on_entry_and_skipped_when_lightless_and_dark(self):
+        """
+        Real live gap (2026-09-02, Coffee: "i also am not seeing images
+        in the labyrinth - does the generator include all of that?").
+        Confirmed it did not -- no equivalent of _maybe_send_location_
+        image existed anywhere on the Labyrinth's own paths at all.
+        _send_generated_image is class-wide mocked (see setUpClass) so
+        this only proves the call actually happens/is skipped, not that
+        a real image comes back -- same scoping every other image test
+        in this file uses.
+        """
+        from unittest.mock import AsyncMock
+        user_id, chat_id = 962033, -962033
+        make_basic_character(user_id, "LabyrinthImageTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        bot._send_generated_image.reset_mock()
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        self.assertTrue(bot._send_generated_image.await_count >= 1)
+
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["modifier"] = "lightless"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        bot._send_generated_image.reset_mock()
+        await bot._do_labyrinth_look(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        self.assertEqual(bot._send_generated_image.await_count, 0, "a dark, unlit room must not generate an image either")
 
     async def test_map_action_is_allowed_and_dispatches_to_the_labyrinth_map_while_inside(self):
         """Phase L2h dispatch wiring: show_map/visual_map are real, allowed exceptions to the blanket 'doesn't work this deep' refusal above."""

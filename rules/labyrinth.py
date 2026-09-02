@@ -83,7 +83,13 @@ LABYRINTH_THEMES = [
         "hub_description": "Fractured light bends through the air here, throwing a dozen almost-right versions of the room across every wall.",
         "checkpoint_description": "The cracks stop spreading here -- a single unbroken pane, calm at the center of all this wrongness.",
         "room_names": ["A Cracked Reflection", "The Wrong Angle", "A Doubled Hallway", "The Silvered Room", "A Recursive Corner"],
-        "room_flavor": "The reflection in here doesn't quite match what's casting it.",
+        "room_descriptions": [
+            "A tall pane of broken glass stands freestanding in the middle of the floor, showing you a version of this room that isn't quite the one you're standing in.",
+            "The corners here don't meet the way corners should -- every angle is a few degrees off from what your eyes expect.",
+            "The same stretch of hallway repeats twice, mirrored, with no visible seam where one copy ends and the other begins.",
+            "Every wall is silvered like an old mirror's backing, and your own reflection lags a half-second behind your real movements.",
+            "The room curls back on itself at the far end, so that walking straight eventually brings you back to where you started.",
+        ],
         "signature_hazard": "drowning",
     },
     {
@@ -93,7 +99,13 @@ LABYRINTH_THEMES = [
         "hub_description": "A wide, grey nowhere, lit by no source anyone can point to.",
         "checkpoint_description": "The grey finally holds still here, just long enough to feel like an actual room again.",
         "room_names": ["A Room That Shouldn't Fit", "The Quiet Gap", "An Unfinished Space", "The In-Between Landing", "A Forgotten Threshold"],
-        "room_flavor": "The walls here feel more like an idea of walls than the real thing.",
+        "room_descriptions": [
+            "The proportions here are wrong in a way you can't quite name -- this room is bigger on the inside than the space it sits in from outside.",
+            "A narrow gap of nothing splits the room in two; crossing it takes a step too long, like the distance quietly grows as you walk it.",
+            "Half the walls here trail off into flat grey nothing before they ever reach a real corner.",
+            "This landing exists between two places that no longer connect to it -- neither one remembers building it.",
+            "A threshold stands with no door in it and nothing obvious on either side, like something meant to be walked through was forgotten.",
+        ],
         "signature_hazard": "freezing",
     },
     {
@@ -103,7 +115,13 @@ LABYRINTH_THEMES = [
         "hub_description": "Brass housing and slow-turning gearwork line every surface, all of it moving to a rhythm no one asked for.",
         "checkpoint_description": "The gears here have wound down to a stop -- whatever this place used to measure, it isn't measuring it anymore.",
         "room_names": ["A Gear-Locked Chamber", "The Ticking Vault", "A Stalled Mechanism", "The Brass Landing", "A Wound Spring Room"],
-        "room_flavor": "Something in the walls keeps ticking, patient and mechanical, whether or not anyone's listening.",
+        "room_descriptions": [
+            "A massive interlocking gear fills most of the far wall, its teeth taller than a person, turning so slowly you can't quite tell it's moving until you look away and back.",
+            "Rows of brass-plated lockers line this vault, each one ticking faintly, like something inside is still being wound.",
+            "A huge mechanism sits frozen mid-motion here, one gear jammed against another -- whatever it was building toward, it never finished.",
+            "Pipework and pressure gauges cover every surface of this landing, needles twitching toward numbers that mean nothing to you.",
+            "A tightly coiled spring, thick as a tree trunk, strains visibly against its housing in the corner, tensioned and never released.",
+        ],
         "signature_hazard": "arcing_current",
     },
     {
@@ -113,7 +131,13 @@ LABYRINTH_THEMES = [
         "hub_description": "Ash drifts in from nowhere, settling over floors that were never actually on fire.",
         "checkpoint_description": "The ash doesn't fall here -- the only still, clean air anywhere in this stretch.",
         "room_names": ["An Ember-Lit Hollow", "The Smoldering Passage", "A Grey Ash Room", "The Cinder Landing", "An Ashen Threshold"],
-        "room_flavor": "Everything in here is the color of something recently, quietly, burned.",
+        "room_descriptions": [
+            "Embers glow faintly in the cracks of the floor here, throwing just enough orange light to see the shape of the room by.",
+            "A narrow passage stretches ahead, smoke curling along the ceiling with nowhere obvious to vent to.",
+            "Fine grey ash coats every surface in here, undisturbed until your own footprints cut through it.",
+            "Charred beams cross overhead on this landing, blackened but still somehow holding the weight above them.",
+            "The threshold here is scorched black on both sides, as if something passed through it burning, more than once.",
+        ],
         "signature_hazard": "lava",
         "secondary_hazard": "overheating",
     },
@@ -124,7 +148,13 @@ LABYRINTH_THEMES = [
         "hub_description": "Vines thick as rope hold up stonework that looks like it should have collapsed centuries ago.",
         "checkpoint_description": "The green here has gone still and orderly, almost tended, almost deliberate.",
         "room_names": ["A Root-Bound Chamber", "The Overgrown Landing", "A Reclaimed Hall", "The Living Threshold", "An Unpruned Room"],
-        "room_flavor": "Something green is quietly taking this room apart, one stone at a time.",
+        "room_descriptions": [
+            "Thick roots have pushed up through the floor here, bracing the ceiling like they grew that way on purpose.",
+            "Moss and creeping vine cover this landing so completely that the original stonework barely shows through anymore.",
+            "Whatever this hall was built for, the green growing through every seam has clearly made other plans for it.",
+            "Living vines form the actual doorframe of this threshold now, thick enough that stone underneath is only a guess.",
+            "Nothing in this room has been pruned or tended in what feels like a very long time -- growth here answers to no one.",
+        ],
         "signature_hazard": "acid",
     },
 ]
@@ -372,9 +402,15 @@ def _new_side_room(floor: int, hub_id: str, index: int, pool: list[str], modifie
     # a deep floor's side-room count exceeds the theme's own name pool
     # (real bug precedent: two identically-named mirror-pair rooms once
     # made a typed destination genuinely ambiguous -- never repeat that).
+    # room_descriptions is the SAME LENGTH as room_names and indexed
+    # identically (2026-09-02, real live report, Coffee: descriptions
+    # weren't "good enough" -- root cause was every side room in a theme
+    # sharing one single flavor sentence regardless of its own distinct
+    # name; each name now has its own matching, distinct description).
+    name_index = index % len(theme["room_names"])
     room = {
-        "id": room_id, "floor": floor, "name": f"{theme['room_names'][index % len(theme['room_names'])]} {index + 1}",
-        "description": theme["room_flavor"],
+        "id": room_id, "floor": floor, "name": f"{theme['room_names'][name_index]} {index + 1}",
+        "description": theme["room_descriptions"][name_index],
         "connections": [hub_id], "monsters": monsters, "modifier": modifier,
     }
     # L2d/L3: a visible hazard, honestly stated in the description

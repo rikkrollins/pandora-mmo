@@ -9125,6 +9125,59 @@ def _build_labyrinth_enemy(monster_key: str, floor: int, index: int, total: int,
     }
 
 
+def _labyrinth_direction(from_room: dict, to_room: dict) -> str:
+    """
+    Real live gap (2026-09-02, Coffee, dev-bridge: "The labyrinth isn't
+    showing north south east or west orientations... especially in a
+    text-based environment, the player needs to be able to read to
+    see/understand"). Every room on the SAME floor already carries a
+    real, honest `grid_position` (rules.labyrinth._assign_grid_positions
+    -- the same data map_render.render_labyrinth_map draws from), so a
+    real compass direction is computed here, never invented: reuses the
+    exact same axis convention scripts/build_location_grid.py's own
+    DELTA already established for the overworld (north = +y, east =
+    +x). Only meaningful for two rooms on the SAME floor -- a cross-
+    floor descends_to/ascends_to neighbor is already labeled with its
+    own ⬇️/⬆️ instead of a compass word.
+    """
+    from_pos, to_pos = from_room.get("grid_position") or {}, to_room.get("grid_position") or {}
+    dx = to_pos.get("x", 0) - from_pos.get("x", 0)
+    dy = to_pos.get("y", 0) - from_pos.get("y", 0)
+    ns = "north" if dy > 0 else ("south" if dy < 0 else "")
+    ew = "east" if dx > 0 else ("west" if dx < 0 else "")
+    return (ns + ew) if (ns and ew) else (ns or ew or "nearby")
+
+
+def _labyrinth_exits(room: dict, rooms: dict, chat_id: int) -> list[tuple[str, str, dict]]:
+    """
+    Shared exit list for both the room keyboard and the room TEXT
+    (2026-09-02, Coffee: "especially in a text-based environment, the
+    player needs to be able to read to see/understand" -- a button
+    label alone doesn't help a text-only reader or an AI player, which
+    only ever parses the narration string). One real entry per reachable
+    neighbor: (emoji, label, dest_room) -- a same-floor lateral
+    connection gets a real computed compass word via _labyrinth_direction,
+    a cross-floor descends_to/ascends_to neighbor keeps its own distinct
+    arrow instead (a compass word would be meaningless across floors).
+    """
+    already_open_dests = {
+        dest_id for dest_id, lockable_id in room.get("locked_connections", {}).items()
+        if _lockable_is_open(room, lockable_id, chat_id)
+    }
+    dest_ids = list(room.get("connections", [])) + [d for d in already_open_dests if d not in room.get("connections", [])]
+    exits = []
+    for dest_id in dest_ids:
+        dest = rooms.get(dest_id)
+        if dest is None:
+            continue
+        exits.append(("🚶", _labyrinth_direction(room, dest).title(), dest))
+    if room.get("descends_to") and rooms.get(room["descends_to"]):
+        exits.append(("⬇️", "Down", rooms[room["descends_to"]]))
+    if room.get("ascends_to") and rooms.get(room["ascends_to"]):
+        exits.append(("⬆️", "Up", rooms[room["ascends_to"]]))
+    return exits
+
+
 def _labyrinth_room_keyboard(room: dict, rooms: dict, chat_id: int) -> InlineKeyboardMarkup | None:
     """
     Mirrors _look_action_keyboard's shape, but reads neighbors from the
@@ -9141,21 +9194,10 @@ def _labyrinth_room_keyboard(room: dict, rooms: dict, chat_id: int) -> InlineKey
     marked row, and a checkpoint room gets one extra, distinct
     "go deeper" row that breaks the segment instead of an ordinary move.
     """
-    rows = []
-    already_open_dests = {
-        dest_id for dest_id, lockable_id in room.get("locked_connections", {}).items()
-        if _lockable_is_open(room, lockable_id, chat_id)
-    }
-    dest_ids = list(room.get("connections", [])) + [d for d in already_open_dests if d not in room.get("connections", [])]
-    for dest_id in dest_ids:
-        dest = rooms.get(dest_id)
-        if dest is None:
-            continue
-        rows.append([InlineKeyboardButton(f"🚶 {dest['name']}", callback_data=f"labyrinth|go|{dest_id}")])
-    if room.get("descends_to") and rooms.get(room["descends_to"]):
-        rows.append([InlineKeyboardButton(f"⬇️ {rooms[room['descends_to']]['name']}", callback_data=f"labyrinth|go|{room['descends_to']}")])
-    if room.get("ascends_to") and rooms.get(room["ascends_to"]):
-        rows.append([InlineKeyboardButton(f"⬆️ {rooms[room['ascends_to']]['name']}", callback_data=f"labyrinth|go|{room['ascends_to']}")])
+    rows = [
+        [InlineKeyboardButton(f"{emoji} {label}: {dest['name']}", callback_data=f"labyrinth|go|{dest['id']}")]
+        for emoji, label, dest in _labyrinth_exits(room, rooms, chat_id)
+    ]
     if room.get("is_checkpoint"):
         rows.append([InlineKeyboardButton("🌀 Go Deeper (leave this floor behind)", callback_data="labyrinth|deeper")])
     return InlineKeyboardMarkup(rows) if rows else None
@@ -9191,9 +9233,52 @@ def _labyrinth_room_text(character: dict, room: dict, run: dict, chat_id: int, a
         if names:
             lines.append(f"⚔️ Here: {', '.join(names)}")
     lines.extend(_lockable_callout_lines(room, chat_id))
+    exits = _labyrinth_exits(room, run["rooms"], chat_id)
+    if exits:
+        lines.append("🧭 Exits: " + ", ".join(f"{label} ({dest['name']})" for _, label, dest in exits))
     if announce_modifier and modifier:
         lines.append(labyrinth_module.MODIFIER_ANNOUNCEMENT[modifier])
     return "\n".join(lines)
+
+
+def _labyrinth_room_image_prompt(room: dict) -> str:
+    """
+    Grounded only in this room's own real, generated description text --
+    same discipline as _location_image_prompt, never invented detail.
+    Framed as its own alternate-dimension anomaly, matching Coffee's own
+    original Labyrinth-theme direction ("something like an alternate
+    universe or another dimension"), never the overworld's real-world
+    framing.
+    """
+    return (
+        f"{room['description']}, alternate-dimension fantasy dungeon environment concept art, "
+        "atmospheric lighting, detailed digital painting, no text or labels"
+    )
+
+
+async def _maybe_send_labyrinth_room_image(update: Update, character: dict, room: dict, chat_id: int) -> None:
+    """
+    Real gap (2026-09-02, Coffee: "i also am not seeing images in the
+    labyrinth - does the generator include all of that?") -- confirmed
+    it did not: every overworld room gets real Pollinations art via
+    _maybe_send_location_image, but no equivalent call existed anywhere
+    on the Labyrinth's own enter/move/look/descend paths. Same service,
+    same seed-determinism discipline -- but keyed on the room's own
+    DESCRIPTION text rather than its structural id (e.g. "f3_r0"),
+    since that id names a genuinely different real room every time a
+    fresh segment happens to roll a different theme; the description
+    text (now real and distinct per room concept, not theme-shared) is
+    the actual stable thing worth a consistent depiction. Skipped
+    entirely in a real lightless room with no light source -- same "you
+    can't see it, so no image either" rule _do_move's own darkness gate
+    already enforces for the overworld.
+    """
+    if room.get("modifier") == "lightless" and not _has_light_source(character, chat_id):
+        return
+    await _send_generated_image(
+        update, _labyrinth_room_image_prompt(room), f"📍 {room['name']}", width=768, height=512,
+        seed=_deterministic_image_seed(f"labyrinth_room:{room['description']}"), log_key=f"labyrinth:{room['id']}",
+    )
 
 
 async def _resolve_labyrinth_checkpoint(update: Update, character: dict, room: dict, run: dict, chat_id: int, party_key: str) -> str:
@@ -9296,6 +9381,7 @@ async def _do_enter_labyrinth(update: Update) -> None:
         f"🌀 The way opens. **Floor {run['floor']}** of the Labyrinth closes in behind you.\n\n{tutorial}{body}",
         reply_markup=_labyrinth_room_keyboard(room, run["rooms"], chat_id),
     )
+    await _maybe_send_labyrinth_room_image(update, character, room, chat_id)
     if new_segment_theme is not None:
         await _send_labyrinth_segment_flavor_when_ready(update, new_segment_theme, run["floor"])
 
@@ -9371,6 +9457,7 @@ async def _do_descend_labyrinth(update: Update) -> None:
         f"🌀 **The waypoint breaks behind you.** Floor {entry_room['floor']} — a whole new stretch of the Labyrinth, never seen before.\n\n{body}",
         reply_markup=_labyrinth_room_keyboard(entry_room, run["rooms"], chat_id),
     )
+    await _maybe_send_labyrinth_room_image(update, character, entry_room, chat_id)
     await _send_labyrinth_segment_flavor_when_ready(update, segment_data["theme"], entry_room["floor"])
 
 
@@ -9416,6 +9503,7 @@ async def _do_labyrinth_look(update: Update) -> None:
         update, body,
         reply_markup=_labyrinth_room_keyboard(room, run["rooms"], chat_id),
     )
+    await _maybe_send_labyrinth_room_image(update, character, room, chat_id)
 
 
 async def _resolve_labyrinth_pit_fall(update: Update, member: dict) -> str:
@@ -9650,6 +9738,7 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
         update, f"🚶 You move to **{destination['name']}**.{floor_note}\n{body}{checkpoint_line}{hazard_line}",
         reply_markup=_labyrinth_room_keyboard(destination, run["rooms"], chat_id),
     )
+    await _maybe_send_labyrinth_room_image(update, character, destination, chat_id)
 
 
 async def _start_labyrinth_combat(update: Update, requester: dict, run: dict, room: dict, monster_keys: list[str], surprise: bool = False) -> bool:
@@ -13272,10 +13361,25 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         return
 
     character = db.get_character(user_id, update.effective_chat.id)
-    destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
-    destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
-    if character:
-        db.update_character(user_id, update.effective_chat.id, current_location=destination_id)
+    # Real gap (2026-09-02): _nearest_safe_waypoint has no concept of the
+    # Labyrinth at all -- cl.get_location(CAMPAIGN, LABYRINTH_LOCATION_
+    # SENTINEL) returns None, so this fell through to the character's
+    # own visited_locations and would have silently teleported a fleeing
+    # party member straight out of the Labyrinth to some real overworld
+    # waypoint, desyncing them from a run their party might still be in.
+    # A break-away here stays exactly where they already are (there's no
+    # "nearest inn" this deep down) -- current_location genuinely doesn't
+    # change, so no DB write is needed at all.
+    if character and character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        run = db.get_labyrinth_run(update.effective_chat.id, _labyrinth_party_key(character))
+        room = run["rooms"].get(run["current_room_id"]) if run else None
+        flee_clause = f"breaks away from the fight, still deep in **{room['name']}**" if room else "breaks away from the fight"
+    else:
+        destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
+        destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
+        if character:
+            db.update_character(user_id, update.effective_chat.id, current_location=destination_id)
+        flee_clause = f"breaks away and flees to {destination_name}"
 
     session.remove_dead_player(user_id)
     combat_over = session.is_combat_over()
@@ -13294,7 +13398,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     # AI companion's turn.
     await _safe_send(
         update,
-        f"{message}\n\n🏃 **{fleeing['name']} breaks away and flees to {destination_name}!**"
+        f"{message}\n\n🏃 **{fleeing['name']} {flee_clause}!**"
         + ("\n\n🏳️ With them gone, the fight has no one left to finish — it ends here." if combat_over else ""),
     )
     if combat_over:
@@ -32024,9 +32128,23 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # dispatch's many branches individually.
     _labyrinth_requester = db.get_character(update.effective_user.id, update.effective_chat.id)
     _in_labyrinth = bool(_labyrinth_requester) and _labyrinth_requester.get("current_location") == LABYRINTH_LOCATION_SENTINEL
+    # Real live gap (2026-09-02, Coffee, dev-bridge): the Labyrinth's own
+    # tutorial text explicitly promises "Everything else works like the
+    # surface: look, move, attack, cast, use items" -- but cast_spell/
+    # use_item/flee/throw_weapon/class-ability actions were never on
+    # this allowlist at all, so every one of them silently refused with
+    # "That doesn't work this deep in the Labyrinth," directly
+    # contradicting what the tutorial had just told the player (and,
+    # for flee specifically, leaving a real ambush fight with no way out
+    # besides winning it outright). Each of these was confirmed safe for
+    # the sentinel location first (every cl.get_location(CAMPAIGN, ...)
+    # call on these paths already degrades to None/no-op gracefully,
+    # never crashes) before being added here.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "leave_labyrinth", "descend_labyrinth", "check_inventory", "check_party",
-        "show_map", "visual_map", "give_offering",
+        "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
+        "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
+        "divine_smite", "wild_shape",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
@@ -32076,7 +32194,21 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         enemy_count = _parse_enemy_count(lowered)
         await _do_start_combat(update, monster_key, count=enemy_count)
     elif action == "attack":
-        if _in_labyrinth:
+        # Real live softlock (2026-09-02, Coffee, dev-bridge screenshots:
+        # a real ambush fired, "Attack" replied "You're already in a
+        # fight!" every time and did nothing). _do_labyrinth_attack only
+        # ever knows how to START a fresh encounter -- it refuses
+        # outright once a session already exists. _in_labyrinth stays
+        # true for the character's ENTIRE time in combat too (current_
+        # location doesn't change), so every attack on every turn of a
+        # real ambush was wrongly routed here instead of to _do_attack,
+        # which already correctly continues an existing turn. Only start
+        # a NEW labyrinth encounter when there's genuinely no session
+        # yet; an already-active fight (ambush or otherwise) always goes
+        # through the same real _do_attack every other fight in the game
+        # uses -- confirmed safe for the labyrinth sentinel location
+        # (its own CAMPAIGN lookup gracefully degrades to None there).
+        if _in_labyrinth and sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id) is None:
             await _do_labyrinth_attack(update, intent.get("raw_text", text))
         else:
             await _do_attack(update, intent.get("raw_text", text))
