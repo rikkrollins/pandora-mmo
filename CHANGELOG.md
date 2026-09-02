@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.463] — fix: examining a real interactable could wrongly trigger combat
+
+Real live report (2026-09-01/02, Coffee, dev-bridge screenshots):
+"Look at the shallow offshoot" (a real interactable at The Side Pool,
+Sunken Root Caverns) returned "No combat is active right now" instead
+of describing it. "Look closer" and "Look at the offshoot" hit the
+same wrong reply.
+
+Root-caused live: `ai/intent_parser.py`'s keyword fallback classified
+these as an ATTACK, not an examine — its `attack_words` list did a
+plain substring check, and "shoot" is a literal substring of
+"off**shoot**". This is the exact same class of bug "fight" inside the
+Fighter class name was already fixed for. The misclassified "attack"
+got routed into `_do_attack`, found no real monster to match, and hit
+the generic no-active-session guard — a reply with nothing to do with
+what was actually typed.
+
+Fixed by checking single-word `attack_words` entries against the
+message's real word set (not a raw substring) — the two genuine
+multi-word phrases ("cast at", "fire at") keep substring matching,
+since they can't be single words and don't collide with anything real.
+Also added bare "look closer" (previously silently ignored) as a
+trigger for examine. Confirmed via a real scan of every location,
+interactable, monster, quest, and item name in the game that
+"offshoot" was the only actual collision.
+
+Tested: the exact reported phrasing now classifies as `examine`; real
+"shoot" attacks ("I shoot the goblin with my bow") still classify as
+`attack`, unaffected.
+
 ## [1.27.462] — real floor-switcher maps for overworld dungeons too
 
 Follow-up to 1.27.461's Labyrinth map floor-switcher, per Coffee: "yes

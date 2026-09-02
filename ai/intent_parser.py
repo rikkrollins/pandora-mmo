@@ -1403,7 +1403,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
             and not any(p in lowered for p in negated_fight_phrases)):
         return {**base, "action": "attack"}
 
-    if any(w in lowered for w in attack_words) and not any(c in lowered for c in conditional_words):
+    # Real live bug (2026-09-01/02, dev-bridge screenshots): "Look at
+    # the shallow offshoot" (a real interactable at The Side Pool) got
+    # misclassified as "attack" and routed into _do_attack, which then
+    # found no matching monster and failed with "No combat is active
+    # right now" -- utterly unrelated to what the player actually typed.
+    # Root cause: attack_words' plain substring check matched "shoot"
+    # inside "off-SHOOT", exactly the same class of bug "fight" inside
+    # "Fighter" was already fixed for right above (word-boundary set
+    # match, not substring). Single-word entries now check against the
+    # real word set; the two genuine multi-word phrases ("cast at",
+    # "fire at") stay substring-checked since a word-set can't hold them
+    # and they're specific enough to not collide with anything real.
+    attack_phrases = [w for w in attack_words if " " in w]
+    attack_single_words = [w for w in attack_words if " " not in w]
+    if ((any(w in fight_words for w in attack_single_words) or any(p in lowered for p in attack_phrases))
+            and not any(c in lowered for c in conditional_words)):
         return {**base, "action": "attack"}
 
     if any(w in lowered for w in COMBAT_START_WORDS):
@@ -1960,7 +1975,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # 'examine' (the specific object actually named) -- the exact same
     # non-silent-but-wrong misclassification shape as the "touch" gap
     # documented below.
-    for trigger in ["examine the ", "examine ", "look at the ", "look closer at ", "look under the ", "look under ",
+    for trigger in ["examine the ", "examine ", "look at the ", "look closer at ", "look closer", "look under the ", "look under ",
                      "inspect the ", "inspect ", "check out the ", "search the ", "look at "]:
         if trigger in lowered:
             target = text[lowered.index(trigger) + len(trigger):].strip()

@@ -21038,6 +21038,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # A real attack containing "not" elsewhere must still work.
         self.assertEqual(_keyword_fallback("fight the goblin, not the spider", [])["action"], "attack")
 
+    def test_shoot_substring_in_offshoot_no_longer_misclassifies_as_attack(self):
+        """
+        Real live bug (2026-09-01/02, dev-bridge screenshots): "Look at
+        the shallow offshoot" (a real interactable at The Side Pool) was
+        classified as "attack" instead of "examine" -- attack_words'
+        plain substring check matched "shoot" inside "off-SHOOT", the
+        exact same class of bug "fight" inside "Fighter" was already
+        fixed for. Routed into _do_attack with no matching monster, it
+        failed with the confusing, unrelated "No combat is active right
+        now." Fixed the same way: single-word attack_words entries now
+        check the real word set, not a raw substring -- "cast at"/"fire
+        at" (genuine two-word phrases) still use substring matching
+        since they can't be single words and don't collide with
+        anything real (confirmed via a scan of every real location/
+        interactable/monster/quest/item name in the game).
+        """
+        self.assertEqual(_keyword_fallback("Look at the shallow offshoot", [])["action"], "examine")
+        self.assertEqual(_keyword_fallback("Look at the offshoot", [])["action"], "examine")
+        self.assertEqual(_keyword_fallback("Look closer", [])["action"], "examine")
+        # Real "shoot" attacks must still classify correctly.
+        self.assertEqual(_keyword_fallback("I shoot the goblin with my bow", [])["action"], "attack")
+        self.assertEqual(_keyword_fallback("shoot the wolf", [])["action"], "attack")
+
     def test_bare_rest_classifies_as_rest_without_misfiring_on_interest_or_arrest(self):
         """
         Real live bug (2026-08-27, topic-activity log: two different
