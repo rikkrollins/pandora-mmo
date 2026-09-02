@@ -23627,7 +23627,7 @@ async def _send_layer_map(update: Update, character: dict, layer_name: str) -> N
     try:
         png_bytes = await asyncio.to_thread(
             map_render.render_layer_map, layer_name, layer_locations, visited, revealed, character.get("current_location"),
-            CAMPAIGN["monsters"], CAMPAIGN["quests"],
+            CAMPAIGN["monsters"], CAMPAIGN["quests"], None, True,
         )
     except Exception as e:
         logger.warning(f"[map_render] layer map failed: {e!r}")

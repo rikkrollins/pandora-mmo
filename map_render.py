@@ -111,6 +111,7 @@ ICON_LEGEND = [
     ("shop", (70, 150, 80)),
     ("npc", (70, 110, 190)),
     ("quest", (160, 90, 190)),
+    ("dungeon", (120, 80, 40)),
 ]
 
 # Same obfuscated-cache-directory convention as ai/narration_cache.py
@@ -296,7 +297,7 @@ def _pick_primary(cell_ids: list[str], floor_levels: dict[str, int], current_loc
     return min(cell_ids, key=lambda lid: abs(floor_levels.get(lid, 0)))
 
 
-def _location_icons(location: dict, monsters: dict, quests: dict, location_id: str) -> list[str]:
+def _location_icons(location: dict, monsters: dict, quests: dict, location_id: str, layer_locations: dict | None = None) -> list[str]:
     """Real per-location icon categories present, grounded only in fields that already exist -- see ICON_LEGEND for what each one means and its color."""
     icons = []
     monster_keys = location.get("monsters") or []
@@ -310,6 +311,22 @@ def _location_icons(location: dict, monsters: dict, quests: dict, location_id: s
         icons.append("npc")
     if any((q or {}).get("location") == location_id for q in quests.values()):
         icons.append("quest")
+    # Real live request (2026-09-02, Coffee: "Do not put dungeon maps
+    # onto the main map -- it clutters the main world -- have them only
+    # on thier own seperate maps, but mark the dungeon entrances on the
+    # main map"). A room counts as a real dungeon entrance if it has an
+    # actual edge (connections/ascends_to/descends_to) leading to a
+    # `dungeon_interior: true` room -- more reliable than checking this
+    # room's OWN dungeon_id, since some zones (e.g. Whispering Wood)
+    # never tag their own outer hub with dungeon_id at all, only their
+    # interior sub-rooms.
+    if layer_locations is not None:
+        neighbor_ids = list(location.get("connections") or [])
+        for k in ("ascends_to", "descends_to"):
+            if location.get(k):
+                neighbor_ids.append(location[k])
+        if any(layer_locations.get(nid, {}).get("dungeon_interior") for nid in neighbor_ids):
+            icons.append("dungeon")
     return icons
 
 
@@ -322,6 +339,7 @@ def render_layer_map(
     monsters: dict | None = None,
     quests: dict | None = None,
     title_override: str | None = None,
+    exclude_dungeon_interiors: bool = False,
 ) -> bytes:
     """
     layer_locations: CAMPAIGN["locations"][layer_name] verbatim.
@@ -336,12 +354,29 @@ def render_layer_map(
 
     title_override: used by render_dungeon_map below to show a real
     dungeon display name instead of the raw layer_name.
+
+    exclude_dungeon_interiors (2026-09-02, per Coffee: "Do not put
+    dungeon maps onto the main map -- it clutters the main world --
+    have them only on thier own seperate maps, but mark the dungeon
+    entrances"): the real WORLD map (bot.py's _send_layer_map) passes
+    True so every `dungeon_interior: true` room is dropped from the
+    grid entirely -- render_dungeon_map below never sets this, so a
+    dungeon's own map is completely unaffected. `layer_locations`
+    itself is deliberately left FULL either way (only `visited_here`/
+    `edges` are filtered) so _location_icons can still see a retained
+    entrance room's interior neighbor to draw its real "dungeon" badge.
     """
     monsters = monsters or {}
     quests = quests or {}
     visited_here, revealed_here, edges, unexplored_counts = _visible_nodes_and_edges(
         layer_locations, visited_ids, revealed_ids,
     )
+    if exclude_dungeon_interiors:
+        interior_ids = {lid for lid in visited_here if layer_locations[lid].get("dungeon_interior")}
+        visited_here = [lid for lid in visited_here if lid not in interior_ids]
+        revealed_here = [lid for lid in revealed_here if lid not in interior_ids]
+        edges = [e for e in edges if e[0] not in interior_ids and e[1] not in interior_ids]
+        unexplored_counts = {k: v for k, v in unexplored_counts.items() if k not in interior_ids}
     visited_set = set(visited_here)
     floor_levels = _floor_levels(layer_locations, visited_set)
     owners = _grid_cell_owners(layer_locations, visited_here)
@@ -394,7 +429,7 @@ def render_layer_map(
                 unexplored=unexplored_counts.get(primary),
                 floor_level=floor_levels.get(primary),
                 stacked_levels=sorted({floor_levels.get(lid, 0) for lid in cell_ids} - {floor_levels.get(primary, 0)}),
-                icons=_location_icons(layer_locations[primary], monsters, quests, primary),
+                icons=_location_icons(layer_locations[primary], monsters, quests, primary, layer_locations),
             )
 
     legend_font = _load_font(13)

@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.458] — feature: dungeon interiors no longer clutter the world map
+
+Real live request (2026-09-02, Coffee: "Do not put dungeon maps onto
+the main map - it clutters the main world - have them only on thier
+own seperate maps, but mark the dungeon entrances on the main map but
+dont let them gain access until they are supposed to be in the
+dungeon" -- the access part shipped in v1.27.456/457).
+
+Root cause: `render_layer_map` drew every VISITED location with a real
+`grid_position` in a layer, including every `dungeon_interior: true`
+room a character had ever explored -- a fully-explored 35-room dungeon
+like Sunken Root Caverns showed up as 35 extra cells scattered across
+the world map.
+
+- New `render_layer_map(..., exclude_dungeon_interiors=True)` param
+  (`map_render.py`) drops every `dungeon_interior: true` room from the
+  grid entirely -- `bot.py`'s `_send_layer_map` (the real WORLD map)
+  now passes it; `render_dungeon_map` (the existing, separate per-
+  dungeon view) never sets it, so a dungeon's own map is completely
+  unaffected.
+- New "dungeon" map icon (`_location_icons`): any room with a real edge
+  (`connections`/`ascends_to`/`descends_to`) leading to a
+  `dungeon_interior: true` neighbor gets marked, regardless of whether
+  that room happens to carry its own `dungeon_id` tag (several zones,
+  e.g. Whispering Wood, never tag their own outer hub, only their
+  interior sub-rooms) -- so a dungeon's real-world entrance is always
+  visible even though its interior no longer is.
+
+Tested: a real fail-then-pass check on the exclusion logic itself,
+plus new tests confirming the world map's canvas actually shrinks once
+Sunken Root Caverns' 35 interior rooms are dropped, the dungeon icon
+fires on a real entrance (Hollow Stump Shrine) and not on an unrelated
+shop room, and `render_dungeon_map`'s own source never sets the new
+exclusion flag. Full existing 10-test map_render suite still passes
+unchanged.
+
 ## [1.27.457] — feature: chapter gating extended to the two "shared zone" dungeons
 
 Real follow-up to v1.27.456 (per Coffee: "use the self improvement

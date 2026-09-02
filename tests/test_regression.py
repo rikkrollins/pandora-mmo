@@ -28802,6 +28802,65 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("shop", market_icons)
         self.assertIn("npc", market_icons)
 
+    def test_location_icons_flag_a_real_dungeon_entrance(self):
+        """
+        Real live request (2026-09-02, Coffee: "mark the dungeon
+        entrances on the main map"). A room with a real edge leading to
+        a `dungeon_interior: true` neighbor gets the new "dungeon" icon
+        -- checked against hollow_stump_shrine (Wrathflame Vault's own
+        real entrance) and, deliberately, that a room with NO such edge
+        (market_row) does not.
+        """
+        import map_render
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        surface = bot.CAMPAIGN["locations"]["surface"]
+        shrine = surface["hollow_stump_shrine"]
+        icons = map_render._location_icons(shrine, bot.CAMPAIGN["monsters"], bot.CAMPAIGN["quests"], "hollow_stump_shrine", surface | underground)
+        self.assertIn("dungeon", icons)
+        market_icons = map_render._location_icons(surface["market_row"], bot.CAMPAIGN["monsters"], bot.CAMPAIGN["quests"], "market_row", surface | underground)
+        self.assertNotIn("dungeon", market_icons)
+
+    def test_world_map_excludes_dungeon_interiors_but_keeps_the_real_entrance(self):
+        """
+        Real live request (2026-09-02, Coffee: "Do not put dungeon maps
+        onto the main map -- it clutters the main world -- have them
+        only on thier own seperate maps"). exclude_dungeon_interiors
+        drops every `dungeon_interior: true` room from the WORLD grid
+        entirely while keeping the real, non-interior entrance/hub room
+        (e.g. sunken_root_caverns itself) exactly as before.
+        """
+        import io
+        from unittest.mock import patch
+        import map_render
+        from PIL import Image
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        visited = {
+            lid for lid in underground
+            if lid == "sunken_root_caverns" or lid.startswith("sunken_root_caverns_")
+        }
+        with patch("map_render._fetch_location_tile", return_value=None):
+            without_exclusion = map_render.render_layer_map(
+                "underground", underground, visited, set(), "sunken_root_caverns",
+                exclude_dungeon_interiors=False,
+            )
+            with_exclusion = map_render.render_layer_map(
+                "underground", underground, visited, set(), "sunken_root_caverns",
+                exclude_dungeon_interiors=True,
+            )
+        # A real interior-heavy dungeon (35 rooms) produces a visibly
+        # smaller canvas once every dungeon_interior room is dropped --
+        # confirms real cells were actually excluded, not a no-op.
+        image_without = Image.open(io.BytesIO(without_exclusion))
+        image_with = Image.open(io.BytesIO(with_exclusion))
+        self.assertLess(image_with.size[0] * image_with.size[1], image_without.size[0] * image_without.size[1])
+
+    def test_render_dungeon_map_never_excludes_its_own_interior(self):
+        """render_dungeon_map (bot.py's per-dungeon view) must show a dungeon's own interior in full -- it never sets exclude_dungeon_interiors, unlike the world map above."""
+        import map_render
+        import inspect
+        source = inspect.getsource(map_render.render_dungeon_map)
+        self.assertNotIn("exclude_dungeon_interiors", source)
+
     def test_character_layer_content_groups_by_layer_and_skips_empty_ones(self):
         import sessions
         sessions.end_session(-989)
