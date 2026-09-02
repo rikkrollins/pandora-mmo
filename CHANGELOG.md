@@ -2,6 +2,62 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.456] — feature: chapter dungeons now gated behind the prior chapter's climax quest
+
+Real live report (2026-09-02, Coffee, after finding Elduinn deep in
+Sunken Root Caverns while still on arc 3): "we shudnt be able to even
+access [mandatory-chapter dungeons]!! ... there shud be quests to
+unlock the dungeons entry when the time is right." Confirmed root
+cause: dungeon ENTRY has never been arc-gated in this game -- only
+each dungeon's own local quest OFFERS were (`_offerable_quest_at_
+location`'s real arc-currency check). A character could always
+physically walk into a later chapter's dungeon at any point; only its
+own quests stayed hidden until story-appropriate.
+
+Fixed using the exact mechanism already proven for the two bonus
+vaults (`requires_completed_quest` on a location's `story_gates`,
+checked by the existing `_check_story_gate`) -- not a new gate type.
+Audited the whole campaign for every real edge (including `ascends_to`/
+`descends_to`, not just plain `connections`) crossing from one arc's
+zone into the next one's, and gated each one behind the immediately
+preceding arc's own final quest:
+
+- The First City → Unmoored Isle: already properly gated by the real
+  `requires_item: shard_of_dim_light` mechanism -- left alone (adding a
+  second, redundant gate here would have conflicted with existing,
+  correct, tested behavior).
+- Sunken Root Caverns (3 real entrances: Goblin Warrens, Glimmerdeep
+  Grotto, and a `descends_to` edge from The Weeping Well that a purely
+  `connections`-based audit would have missed), Stonearch Gorge (4
+  entrances), Greymoor Downs (2), Whispering Wood (4, including a
+  `descends_to` edge from Deep Root Vault), Hollow Verge (1), Wordless
+  Choir (1) -- 15 real gates added, each requiring the prior arc's own
+  last quest.
+
+Also applied directly to Elduinn and Charvenna (both mid-arc-3, found
+deep inside Sunken Root Caverns): the Remnant quest picked up there
+was removed from Elduinn's active quests, and every Sunken-Root-
+Caverns visited/cleared-location entry was stripped from both
+characters, with Elduinn moved back to Crossroads Tavern.
+
+Not yet done (explicitly deferred, tracked as follow-up): the two
+"shared zone" dungeons where a LATER arc reuses an EARLIER arc's own
+zone at a deeper sub-area (Goblin Warrens: arc_1's outer rooms +
+arc_5's own deeper cluster; Glimmerdeep Grotto: arc_2's outer rooms +
+arc_10's own deeper cluster) need a sub-area-specific gate rather than
+a whole-zone one, since arc_1/arc_2 already have legitimate access to
+the outer part of each -- gating the whole zone would incorrectly
+block that earlier, already-intended content.
+
+Tested: a new fast, direct test (`_check_story_gate` called directly,
+not through the full `_do_move` pipeline -- a real move to a
+brand-new location also triggers genuine Ollama narration + Pollinations
+image generation, ~167s measured live on this box, unrelated to what's
+actually being verified) confirms all 15 gates block with no completed
+quests and admit once the right one is done; one pre-existing test
+(`test_stonearch_bridge_hub_entry_fires_the_teaser_reveal`) updated to
+satisfy its new real prerequisite. Full 62-test relevant suite passes.
+
 ## [1.27.455] — fix: real map-coordinate + travel-button orientation bugs, campaign-wide
 
 Real live report (2026-09-02, Coffee, dev-bridge screenshot: The

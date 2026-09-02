@@ -7384,12 +7384,73 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_stonearch_bridge_hub_entry_fires_the_teaser_reveal(self):
         user_id = 960285
         make_basic_character(user_id, "SBTeaserHubTester", current_location="crossroads_tavern")
+        # Real story-gate (2026-09-02, per Coffee: "we shudnt be able to
+        # even access [later-chapter dungeons]... there shud be quests
+        # to unlock the dungeons entry when the time is right") --
+        # crossroads_tavern -> stonearch_bridge now requires arc_6's own
+        # climax quest completed first, same real requires_completed_quest
+        # mechanism the bonus vaults already use. Satisfied directly here
+        # since this test is about the teaser reveal, not arc gating.
+        db.update_character(user_id, -999, completed_quests=["the_sources_reckoning"])
         db.update_character(user_id, -999, visited_locations=["crossroads_tavern"], map_revealed_locations=[])
         sink = []
         await bot._do_move(FakeUpdate(user_id, "", sink), "go to stonearch bridge")
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "stonearch_bridge")
         self.assertEqual(set(character["map_revealed_locations"]), {"stonearch_bridge_the_old_keep", "stonearch_bridge_the_old_vault"})
+
+    def test_later_chapter_dungeons_are_blocked_until_the_prior_chapters_climax_is_done(self):
+        """
+        Real live report (2026-09-02, Coffee: "we shudnt be able to even
+        access [mandatory-chapter dungeons]... there shud be quests to
+        unlock the dungeons entry when the time is right"). A dungeon
+        belonging to a later story arc must be physically unreachable --
+        not just have its own local quests hidden -- until the
+        immediately preceding arc's own climax quest is completed. Real,
+        already-working requires_completed_quest story_gates mechanism
+        (same one the bonus vaults already use), just newly applied to
+        every real chapter-dungeon entrance found by auditing the whole
+        campaign for edges crossing into a later arc's own zone.
+
+        Calls _check_story_gate directly (the same real, pure function
+        _do_move itself calls) rather than the full _do_move pipeline --
+        a successful move into a brand-new location also triggers real
+        Ollama narration + Pollinations image generation (confirmed live,
+        ~167s for one call on this CPU-only box, competing with the live
+        bot for the same single Ollama slot) that has nothing to do with
+        what this test is actually verifying.
+        """
+        current = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
+        blocked = bot._check_story_gate({"completed_quests": []}, current, "stonearch_bridge")
+        self.assertIsNotNone(blocked)
+        admitted = bot._check_story_gate({"completed_quests": ["the_sources_reckoning"]}, current, "stonearch_bridge")
+        self.assertIsNone(admitted)
+
+        # Every other real chapter-dungeon entrance gate added in the same pass.
+        for src, dest, quest_id in [
+            ("goblin_warrens", "sunken_root_caverns", "the_true_paymasters_reckoning"),
+            ("glimmerdeep_grotto", "sunken_root_caverns", "the_true_paymasters_reckoning"),
+            ("the_weeping_well", "sunken_root_caverns", "the_true_paymasters_reckoning"),
+            ("the_weeping_well", "stonearch_bridge", "the_sources_reckoning"),
+            ("hollow_verge_threshold", "stonearch_bridge_far_end", "the_sources_reckoning"),
+            ("whispering_wood", "greymoor_downs", "the_scouting_grounds_warning"),
+            ("stonearch_bridge", "greymoor_downs", "the_scouting_grounds_warning"),
+            ("crossroads_tavern", "whispering_wood", "the_downs_last_watchs_reckoning"),
+            ("hollow_stump_shrine", "whispering_wood", "the_downs_last_watchs_reckoning"),
+            ("greymoor_downs", "whispering_wood", "the_downs_last_watchs_reckoning"),
+            ("deep_root_vault_threshold", "whispering_wood_deep_glade", "the_downs_last_watchs_reckoning"),
+            ("stonearch_bridge_far_end", "hollow_verge_threshold", "the_buried_glows_elder"),
+            ("the_first_city_forgotten_depth", "wordless_choir_gate", "the_verge_wardens_toll"),
+        ]:
+            src_loc = cl.get_location(bot.CAMPAIGN, src)
+            self.assertIsNotNone(
+                bot._check_story_gate({"completed_quests": []}, src_loc, dest),
+                f"{src} -> {dest} should still be blocked with no completed quests",
+            )
+            self.assertIsNone(
+                bot._check_story_gate({"completed_quests": [quest_id]}, src_loc, dest),
+                f"{src} -> {dest} should open once {quest_id} is completed",
+            )
 
     def test_the_keeps_warden_uses_the_real_new_systems_not_a_generic_statstick(self):
         boss = bot.CAMPAIGN["monsters"]["the_keeps_warden"]

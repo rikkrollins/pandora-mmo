@@ -52,6 +52,14 @@
         "grid_position": {
           "x": 0,
           "y": 0
+        },
+        "story_gates": {
+          "stonearch_bridge": {
+            "requires_completed_quest": "the_sources_reckoning"
+          },
+          "whispering_wood": {
+            "requires_completed_quest": "the_downs_last_watchs_reckoning"
+          }
         }
       },
       "market_row": {
@@ -175,6 +183,9 @@
         "story_gates": {
           "whispering_wood_deep_glade": {
             "requires_cleared_location": "whispering_wood"
+          },
+          "greymoor_downs": {
+            "requires_completed_quest": "the_scouting_grounds_warning"
           }
         },
         "grid_position": {
@@ -381,6 +392,9 @@
         "story_gates": {
           "wrathflame_vault_threshold": {
             "requires_defeated_monster": "wolf"
+          },
+          "whispering_wood": {
+            "requires_completed_quest": "the_downs_last_watchs_reckoning"
           }
         },
         "real_shrine": true
@@ -431,6 +445,12 @@
           },
           "greymoor_downs_sunken_barrow": {
             "requires_cleared_location": "greymoor_downs"
+          },
+          "stonearch_bridge": {
+            "requires_completed_quest": "the_sources_reckoning"
+          },
+          "whispering_wood": {
+            "requires_completed_quest": "the_downs_last_watchs_reckoning"
           }
         },
         "grid_position": {
@@ -618,7 +638,12 @@
             "name": "a rusted old gate",
             "requires_key_item": "the_old_watch_key"
           }
-        ]
+        ],
+        "story_gates": {
+          "greymoor_downs": {
+            "requires_completed_quest": "the_scouting_grounds_warning"
+          }
+        }
       },
       "stonearch_bridge_far_end": {
         "name": "The Far End of the Span",
@@ -645,7 +670,12 @@
           "y": -8
         },
         "dungeon_id": "stonearch_bridge",
-        "dungeon_interior": true
+        "dungeon_interior": true,
+        "story_gates": {
+          "hollow_verge_threshold": {
+            "requires_completed_quest": "the_buried_glows_elder"
+          }
+        }
       },
       "the_weeping_well": {
         "name": "The Weeping Well",
@@ -695,7 +725,15 @@
           "y": -1
         },
         "dungeon_id": "stonearch_bridge",
-        "dungeon_interior": true
+        "dungeon_interior": true,
+        "story_gates": {
+          "sunken_root_caverns": {
+            "requires_completed_quest": "the_true_paymasters_reckoning"
+          },
+          "stonearch_bridge": {
+            "requires_completed_quest": "the_sources_reckoning"
+          }
+        }
       },
       "tavern_cellar": {
         "name": "The Tavern Cellar",
@@ -812,6 +850,11 @@
         "grid_position": {
           "x": -1,
           "y": -9
+        },
+        "story_gates": {
+          "stonearch_bridge_far_end": {
+            "requires_completed_quest": "the_sources_reckoning"
+          }
         }
       },
       "hollow_verge_bonefield": {
@@ -1926,6 +1969,9 @@
         "story_gates": {
           "goblin_warrens_supply_tunnel": {
             "requires_cleared_location": "goblin_warrens"
+          },
+          "sunken_root_caverns": {
+            "requires_completed_quest": "the_true_paymasters_reckoning"
           }
         },
         "combat_environment": {
@@ -1975,6 +2021,9 @@
         "story_gates": {
           "glimmerdeep_grotto_glimmering_pool": {
             "requires_cleared_location": "glimmerdeep_grotto"
+          },
+          "sunken_root_caverns": {
+            "requires_completed_quest": "the_true_paymasters_reckoning"
           }
         },
         "grid_position": {
@@ -2506,6 +2555,11 @@
         "grid_position": {
           "x": -1,
           "y": -61
+        },
+        "story_gates": {
+          "wordless_choir_gate": {
+            "requires_completed_quest": "the_verge_wardens_toll"
+          }
         }
       },
       "whispering_wood_root_hollow": {
@@ -3782,7 +3836,12 @@
           "y": -10
         },
         "dungeon_interior": true,
-        "dungeon_id": "deep_root_vault"
+        "dungeon_id": "deep_root_vault",
+        "story_gates": {
+          "whispering_wood_deep_glade": {
+            "requires_completed_quest": "the_downs_last_watchs_reckoning"
+          }
+        }
       },
       "deep_root_vault_spore_hollow": {
         "name": "The Spore Hollow",
