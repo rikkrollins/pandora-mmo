@@ -29304,6 +29304,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(query_update.effective_chat.sent_photos), 1)
         self.assertIn("wrathflame vault", query_update.effective_chat.sent_photos[0]["caption"].lower())
 
+    async def test_walking_into_a_dungeon_announces_it_but_moving_within_it_does_not(self):
+        """
+        Real live request (2026-09-02, Coffee: "when we enter any
+        dungeon, make a message or a prompt so players know its a
+        dungeon"). Fires only on the real threshold crossing (a
+        non-dungeon or different-dungeon room -> a dungeon_id room),
+        never on ordinary movement once already inside one.
+        """
+        user_id, chat_id = 900948, -900948
+        make_basic_character(user_id, "DungeonEntryWalker", chat_id=chat_id, current_location="hollow_stump_shrine")
+        db.update_character(
+            user_id, chat_id, visited_locations=["hollow_stump_shrine"],
+            completed_quests=["wrens_trial_by_fire"],  # satisfies the real story gate on this dungeon's entrance
+        )
+
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "enter the sealed threshold", sink, chat_id=chat_id), "enter the sealed threshold")
+        combined = "\n".join(sink)
+        self.assertIn("entered a dungeon", combined)
+        self.assertIn("Wrathflame Vault", combined)
+
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "go to the ember hall", sink2, chat_id=chat_id), "go to the ember hall")
+        combined2 = "\n".join(sink2)
+        self.assertNotIn("entered a dungeon", combined2)
+
+    async def test_fast_travel_into_a_dungeon_checkpoint_also_announces_it(self):
+        """Same real threshold check applies to warping straight to a dungeon's own safe checkpoint room."""
+        user_id, chat_id = 900949, -900949
+        make_basic_character(user_id, "DungeonEntryWarper", chat_id=chat_id, current_location="hollow_stump_shrine")
+        db.update_character(
+            user_id, chat_id,
+            visited_locations=["hollow_stump_shrine", "wrathflame_vault_ember_font"],
+        )
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "", sink, chat_id=chat_id), "fast travel to the ember font")
+        combined = "\n".join(sink)
+        self.assertIn("entered a dungeon", combined)
+        self.assertIn("Wrathflame Vault", combined)
+
     # -- Battle-menu formation submenu only showed the tapper's own row
     #    (2026-08-09, Coffee, dev-topic screenshot: "I wanted to show
     #    all of my party that is in battle so I can actively move
@@ -32953,7 +32993,12 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lookact|labyrinth", unlocked_datas)
 
     async def test_enter_labyrinth_button_callback_drives_the_real_handler(self):
-        """The callback dispatches through the exact same _do_enter_labyrinth free text already uses."""
+        """
+        Per Coffee (2026-09-02): entering now stops on a real atmospheric
+        confirmation first -- the button tap shows the warning + Yes/No,
+        and only the "Yes, I'm ready" tap actually drives the exact same
+        _do_enter_labyrinth free text already uses.
+        """
         user_id, chat_id = 962013, -962013
         make_basic_character(user_id, "LabyrinthButtonTester", chat_id=chat_id, current_location="the_colosseum")
         db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
@@ -32961,7 +33006,41 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         query_update = FakeCallbackUpdate(user_id, "lookact|labyrinth", sink, chat_id=chat_id)
         await bot.look_action_menu_callback(query_update, DummyContext())
         character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["current_location"], "the_colosseum")  # not in yet -- just the warning
+        self.assertTrue(any("Are you ready to enter the Labyrinth" in s for s in sink))
+
+        sink2 = []
+        confirm_update = FakeCallbackUpdate(user_id, "labyrinth|confirm_enter", sink2, chat_id=chat_id)
+        await bot.labyrinth_travel_callback(confirm_update, DummyContext())
+        character = db.get_character(user_id, chat_id)
         self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        self.assertTrue(any("First time here" in s for s in sink2), "a genuine first entry must include the tutorial")
+
+    async def test_labyrinth_entry_prompt_rejects_before_the_boss_kill(self):
+        """The confirmation gate reuses the exact same unlock check -- no teaser warning for a party that can't actually enter yet."""
+        user_id, chat_id = 962014, -962014
+        make_basic_character(user_id, "LabyrinthLockedButtonTester", chat_id=chat_id, current_location="the_colosseum")
+        sink = []
+        query_update = FakeCallbackUpdate(user_id, "lookact|labyrinth", sink, chat_id=chat_id)
+        await bot.look_action_menu_callback(query_update, DummyContext())
+        self.assertTrue(any("Champion" in s for s in sink))
+        self.assertFalse(any("Are you ready to enter the Labyrinth" in s for s in sink))
+
+    async def test_labyrinth_tutorial_shown_once_then_never_again(self):
+        """Per Coffee: "if its the first time, can u give them a brief rundown" -- a real, permanent per-character flag, not shown on a later re-entry."""
+        user_id, chat_id = 962015, -962015
+        make_basic_character(user_id, "LabyrinthTutorialTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        sink = []
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("First time here" in s for s in sink))
+        character = db.get_character(user_id, chat_id)
+        self.assertTrue(character["labyrinth_intro_seen"])
+
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        sink2 = []
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink2, chat_id=chat_id))
+        self.assertFalse(any("First time here" in s for s in sink2))
 
     def test_achievements_screen_shows_real_labyrinth_progress(self):
         """Phase L3, per Coffee: "under achievements you can list there progress in the labarythn"."""

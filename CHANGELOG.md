@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.467] — feature: a real Labyrinth entrance ritual + dungeon-entry callouts
+
+Per Coffee, live: a real confirmation before entering the Labyrinth,
+plus a first-time tutorial, a non-spoiler hint at the Colosseum, and
+a "you've entered a dungeon" callout for every real overworld dungeon.
+
+- Entering the Labyrinth (button or free text) now stops on a real,
+  atmospheric warning ("Everyone who enters seems to come back...
+  different...") with "Yes, I'm ready" / "Not yet" buttons — actual
+  entry only happens after tapping through. Fast-travel back to an
+  already-claimed waystation skips this (it's a return trip, not a
+  first step through the door).
+- A genuine first-ever entry (tracked per-character, permanent) now
+  appends a short real rundown on segments, waystations, hidden
+  ambushes, and hazards — shown exactly once per character, never
+  again on later entries.
+- The Colosseum's own description now hints at something ancient
+  beneath the sand, without ever naming the Labyrinth — pure
+  foreshadowing, since the real gate (defeating the Champion) was
+  already there regardless.
+- Walking or fast-traveling across a real dungeon's threshold (any
+  location carrying a `dungeon_id` different from where you just
+  were — Wrathflame Vault, Greymoor Downs, Stonearch Gorge, The First
+  City, etc.) now shows a clear "You've entered a dungeon" callout.
+  Ordinary room-to-room movement once already inside one stays silent,
+  exactly as before.
+
 ## [1.27.466] — fix: item-use/shrine/holy-water replies could crash on a Telegram flood-control blip
 
 Found proactively while re-checking `bot_live_tmp.log` for the same bug

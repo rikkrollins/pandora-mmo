@@ -106,7 +106,7 @@
       "the_colosseum": {
         "name": "The Colosseum",
         "layer": "surface",
-        "description": "A weathered ring of stone stands apart from the market's noise, its sand still dark in patches from bouts nobody talks about after. A challenger's bell hangs by the gate, worn smooth from use.",
+        "description": "A weathered ring of stone stands apart from the market's noise, its sand still dark in patches from bouts nobody talks about after. A challenger's bell hangs by the gate, worn smooth from use. Beneath the sand, past a rusted grate no one has ever managed to force, a cold draft rises from somewhere deeper than any cellar has a right to reach -- and on quiet nights, something down there can be heard shifting, as if it has been waiting a very long time for the right challenger to fall.",
         "connections": [
           "crossroads_tavern"
         ],

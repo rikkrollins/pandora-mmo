@@ -8996,6 +8996,72 @@ def _labyrinth_unlocked(character: dict) -> bool:
     return "colosseum_champion" in (character.get("defeated_monsters") or [])
 
 
+# Per Coffee (2026-09-02): every real entrance now stops on this before
+# actually dropping the party in -- entering is meant to feel like a
+# real, deliberate, dangerous choice, not a side-effect of tapping a
+# button or typing a phrase. Wording is Coffee's own, typo-fixed.
+LABYRINTH_ENTRY_WARNING = (
+    "🌀 **The Labyrinth**\n\n"
+    "*This is a dangerous, unexplored place. Everyone who enters seems "
+    "to come back... different. Changed, somehow. Some don't come back "
+    "at all.*\n\n"
+    "*This is a void — another dimension. What happens here is entirely "
+    "separate, its own universe. What you collect and learn within it "
+    "becomes part of you forever... whether that turns out to be a "
+    "privilege, or a burden.*\n\n"
+    "**Are you ready to enter the Labyrinth?**"
+)
+
+# Shown once per character, appended to their real first arrival
+# message (never a separate message -- see _do_enter_labyrinth).
+LABYRINTH_TUTORIAL_TEXT = (
+    "📖 **First time here? A quick word on how this works:**\n"
+    "• Built in **5-floor segments** — clear one and you reach a real "
+    "**waystation**: a full heal, spell slots restored, a permanent "
+    "stat and skill point, and a shrine + shop you can waypoint back to "
+    "later.\n"
+    "• Between waystations, footsteps aren't always safe — monsters can "
+    "**ambush** you without warning. Stay sharp.\n"
+    "• Every segment rolls its own theme and real **hazards** (fire, "
+    "cold, acid, and worse) — if a room is dangerous, it'll tell you "
+    "honestly; trust what you're told.\n"
+    "• Say **\"leave the labyrinth\"** anytime to retreat to the "
+    "Colosseum — your last cleared waystation is always saved, so real "
+    "progress is never lost.\n"
+    "• Everything else works like the surface: look, move, attack, "
+    "cast, use items."
+)
+
+
+async def _do_labyrinth_entry_prompt(update: Update) -> None:
+    """
+    The real gate in front of _do_enter_labyrinth -- shares its exact
+    unlock/location checks so a player who genuinely can't enter yet
+    gets the honest rejection message instead of a teaser they can't
+    act on, but stops short of actually creating/resuming a run until
+    the player taps through the real warning below.
+    """
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!", speak=False)
+        return
+    if character["current_location"] != "the_colosseum":
+        await _safe_send(update, "The Labyrinth only opens from the Colosseum.", speak=False)
+        return
+    if not _labyrinth_unlocked(character):
+        await _safe_send(update, "Something here waits on the Colosseum Champion falling first.", speak=False)
+        return
+    await _safe_send(
+        update,
+        LABYRINTH_ENTRY_WARNING,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌀 Yes, I'm ready", callback_data="labyrinth|confirm_enter")],
+            [InlineKeyboardButton("Not yet", callback_data="labyrinth|cancel_enter")],
+        ]),
+    )
+
+
 def _labyrinth_party_key(character: dict) -> str:
     """A solo character is just a 'party of one' for run-sharing purposes -- unifies partied/solo lookups into one indexed db.py column."""
     party_id = character.get("party_id")
@@ -9176,21 +9242,22 @@ async def _do_enter_labyrinth(update: Update) -> None:
     chat_id = update.effective_chat.id
     character = db.get_character(update.effective_user.id, chat_id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(chat_id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
     if character["current_location"] != "the_colosseum":
-        await update.effective_chat.send_message(
-            "The Labyrinth only opens from the Colosseum.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-        )
+        await _safe_send(update, "The Labyrinth only opens from the Colosseum.", speak=False)
         return
     if not _labyrinth_unlocked(character):
-        await update.effective_chat.send_message(
-            "Something here waits on the Colosseum Champion falling first.",
-            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-        )
+        await _safe_send(update, "Something here waits on the Colosseum Champion falling first.", speak=False)
         return
+
+    # Per Coffee (2026-09-02): a real, one-time tutorial rundown on this
+    # character's own genuine first entry -- permanent per-character
+    # flag so a later party member who's never been in gets their own
+    # copy even if the rest of the party is deep in already.
+    first_time = not character.get("labyrinth_intro_seen")
+    if first_time:
+        db.update_character_by_id(character["character_id"], labyrinth_intro_seen=1)
 
     party_key = _labyrinth_party_key(character)
     run = db.get_labyrinth_run(chat_id, party_key)
@@ -9223,9 +9290,10 @@ async def _do_enter_labyrinth(update: Update) -> None:
 
     room = run["rooms"][run["current_room_id"]]
     body = _labyrinth_room_text(character, room, run, chat_id, announce_modifier=True)
+    tutorial = f"{LABYRINTH_TUTORIAL_TEXT}\n\n" if first_time else ""
     await _safe_send(
         update,
-        f"🌀 The way opens. **Floor {run['floor']}** of the Labyrinth closes in behind you.\n\n{body}",
+        f"🌀 The way opens. **Floor {run['floor']}** of the Labyrinth closes in behind you.\n\n{tutorial}{body}",
         reply_markup=_labyrinth_room_keyboard(room, run["rooms"], chat_id),
     )
     if new_segment_theme is not None:
@@ -22153,6 +22221,12 @@ async def labyrinth_travel_callback(update: Update, context: ContextTypes.DEFAUL
     if action == "deeper":
         await _do_descend_labyrinth(update)
         return
+    if action == "confirm_enter":
+        await _do_enter_labyrinth(update)
+        return
+    if action == "cancel_enter":
+        await _safe_send(update, "You hang back at the Colosseum's edge, for now.", speak=False)
+        return
     if action == "mapfloor" and len(parts) >= 3:
         try:
             await _do_show_labyrinth_map(update, int(parts[2]))
@@ -22186,7 +22260,7 @@ async def look_action_menu_callback(update: Update, context: ContextTypes.DEFAUL
     elif action == "pray":
         await _do_shrine_offering_menu(update)
     elif action == "labyrinth":
-        await _do_enter_labyrinth(update)
+        await _do_labyrinth_entry_prompt(update)
 
 
 async def _send_generated_image(
@@ -26031,14 +26105,30 @@ async def _do_move(update: Update, text: str) -> None:
     # location image -- same rule _do_look already applies, just also
     # covering the OTHER place a location's real detail gets revealed.
     updated_character_for_light = db.get_character(update.effective_user.id, update.effective_chat.id)
+
+    # Real live request (2026-09-02, Coffee: "when we enter any dungeon,
+    # make a message or a prompt so players know its a dungeon") --
+    # fires only on the real THRESHOLD crossing (arriving somewhere with
+    # a dungeon_id from somewhere that had none, or a DIFFERENT one),
+    # never on ordinary room-to-room movement once already inside one.
+    # Reuses the exact same dungeon_id/display-name convention the real
+    # dungeon minimap already established (_DUNGEON_DISPLAY_NAMES).
+    dungeon_entry_note = ""
+    if destination.get("dungeon_id") and destination.get("dungeon_id") != current.get("dungeon_id"):
+        dungeon_display_name = _DUNGEON_DISPLAY_NAMES.get(
+            destination["dungeon_id"], destination["dungeon_id"].replace("_", " ").title()
+        )
+        dungeon_entry_note = f"\n\n🏰 **You've entered a dungeon: {dungeon_display_name}.** Tread carefully."
+
     if _location_is_dark(destination, updated_character_for_light, update.effective_chat.id):
         await _safe_send(
             update,
             f"🚶 **{character['name']}** travels to **{destination['name']}**.\n"
-            f"🌑 **It is too dark. You cannot see...** (equip a torch, or cast a spell like Dancing Lights, to see here.)",
+            f"🌑 **It is too dark. You cannot see...** (equip a torch, or cast a spell like Dancing Lights, to see here.)"
+            f"{dungeon_entry_note}",
         )
     else:
-        await _safe_send(update, f"🚶 **{character['name']}** travels to **{destination['name']}**.\n{destination['description']}")
+        await _safe_send(update, f"🚶 **{character['name']}** travels to **{destination['name']}**.\n{destination['description']}{dungeon_entry_note}")
         await _maybe_send_location_image(update, destination, destination_id, destination_already_visited)
         # Auto "look around" on arrival (2026-08-07, per Coffee: "prompt
         # 'look around' in that area once we arrive there to keep the
@@ -26572,7 +26662,13 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     # this waypoint-warp path was the one place left still saying the
     # generic "You" instead, inconsistent with every other arrival/
     # action message in this game.
-    await _safe_send(update, f"🌀 **{character['name']}** fast-travels to **{destination['name']}**.\n{destination['description']}")
+    dungeon_entry_note = ""
+    if destination.get("dungeon_id") and destination.get("dungeon_id") != current.get("dungeon_id"):
+        dungeon_display_name = _DUNGEON_DISPLAY_NAMES.get(
+            destination["dungeon_id"], destination["dungeon_id"].replace("_", " ").title()
+        )
+        dungeon_entry_note = f"\n\n🏰 **You've entered a dungeon: {dungeon_display_name}.** Tread carefully."
+    await _safe_send(update, f"🌀 **{character['name']}** fast-travels to **{destination['name']}**.\n{destination['description']}{dungeon_entry_note}")
 
     updated_character = db.get_character(telegram_user_id, update.effective_chat.id)
     # Auto "look around" on arrival (2026-08-07, per Coffee: "prompt
@@ -31944,7 +32040,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     if action == "create_character":
         await _begin_character_creation(update, context)
     elif action == "enter_labyrinth":
-        await _do_enter_labyrinth(update)
+        await _do_labyrinth_entry_prompt(update)
     elif action == "leave_labyrinth":
         await _do_leave_labyrinth(update)
     elif action == "descend_labyrinth":

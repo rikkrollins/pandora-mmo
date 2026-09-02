@@ -933,6 +933,14 @@ def init_db() -> None:
         if "labyrinth_checkpoint_floor" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_checkpoint_floor INTEGER NOT NULL DEFAULT 0")
 
+        # labyrinth_intro_seen (2026-09-02, per Coffee: "if its the first
+        # time, can u give them a brief rundown on what the labarynth is
+        # and how to play it") -- permanent, per-character, so each real
+        # player gets the tutorial exactly once on their own first entry,
+        # regardless of what the rest of their party has already seen.
+        if "labyrinth_intro_seen" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_intro_seen INTEGER NOT NULL DEFAULT 0")
+
         # labyrinth_runs.modifier (2026-09-02, Phase L2 floor modifiers)
         # -- a real DB already running Phase L1's CREATE TABLE IF NOT
         # EXISTS won't pick up a column added to that CREATE statement
