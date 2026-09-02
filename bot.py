@@ -26759,9 +26759,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
 
     chat_id = update.effective_chat.id
@@ -26770,10 +26768,7 @@ async def _do_use_item(update: Update, text: str) -> None:
     in_combat = session is not None and user_id in session.turn_order
     if in_combat and session.current_participant_id() != user_id:
         current_name = session.current_participant()["name"]
-        await update.effective_chat.send_message(
-            f"It's not your turn — it's **{current_name}**'s turn.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, f"It's not your turn — it's **{current_name}**'s turn.", speak=False)
         return
 
     # Task #141: map items (type "map") are usable the same way a
@@ -26808,10 +26803,7 @@ async def _do_use_item(update: Update, text: str) -> None:
                 f"applies on its own.",
             )
             return
-        await update.effective_chat.send_message(
-            "Use what, exactly? Name a consumable you're actually carrying.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, "Use what, exactly? Name a consumable you're actually carrying.", speak=False)
         return
 
     item = items_module.get_item(item_id)
@@ -26882,9 +26874,7 @@ async def _do_use_item(update: Update, text: str) -> None:
 
     removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
     if not removed:
-        await update.effective_chat.send_message(
-            f"You don't have a {item['name']} to use.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, f"You don't have a {item['name']} to use.", speak=False)
         return
 
     combat_ended_by_undead_kill = False
@@ -26925,10 +26915,7 @@ async def _do_use_item(update: Update, text: str) -> None:
                 await _check_guild_quest_completion(update, session)
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
-            await update.effective_chat.send_message(
-                f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
             sessions.end_session(chat_id, session)
@@ -27188,15 +27175,11 @@ async def _do_drink_water(update: Update) -> None:
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None or not location.get("healing_water"):
-        await update.effective_chat.send_message(
-            "There's no water to drink here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "There's no water to drink here.", speak=False)
         return
     if db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "healing_water") < 1:
         db.use_feature(update.effective_user.id, update.effective_chat.id, "healing_water")
@@ -27230,18 +27213,13 @@ async def _do_labyrinth_checkpoint_offering(update: Update, text: str) -> None:
         return
     room = run["rooms"].get(run["current_room_id"])
     if room is None or not room.get("is_checkpoint"):
-        await update.effective_chat.send_message(
-            "There's no shrine to pray at here.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-        )
+        await _safe_send(update, "There's no shrine to pray at here.", speak=False)
         return
     members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
     wants_offering = bool(re.search(r"\b(water|offer|offering)\b", text.lower()))
     if wants_offering:
         if character["inventory"].get("spring_water", 0) < 1:
-            await update.effective_chat.send_message(
-                "You don't have any spring water to offer. The trader here sells it.",
-                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-            )
+            await _safe_send(update, "You don't have any spring water to offer. The trader here sells it.", speak=False)
             return
         db.remove_item(update.effective_user.id, chat_id, "spring_water", 1)
         for m in members:
@@ -27276,9 +27254,7 @@ async def _do_give_offering(update: Update, text: str) -> None:
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
     if character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
         await _do_labyrinth_checkpoint_offering(update, text)
@@ -27296,10 +27272,7 @@ async def _do_give_offering(update: Update, text: str) -> None:
     # needing this function touched again.
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None or not location.get("real_shrine"):
-        await update.effective_chat.send_message(
-            "There's no shrine to give an offering at here.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, "There's no shrine to give an offering at here.", speak=False)
         return
     # Real bug caught live (2026-07-24, Coffee: "she's currently dead"
     # but the shrine kept saying nobody was): _find_party_target_by_name
@@ -27361,10 +27334,7 @@ async def _do_give_offering(update: Update, text: str) -> None:
             await _apply_shrine_blessing(update, character)
             return
         else:
-            await update.effective_chat.send_message(
-                "Name a dead party member to pray for — there's no one to bring back right now.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, "Name a dead party member to pray for — there's no one to bring back right now.", speak=False)
             return
     await _apply_shrine_offering(update, character, target)
 
@@ -27379,16 +27349,11 @@ async def _do_shrine_offering_menu(update: Update) -> None:
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!", speak=False)
         return
     location = cl.get_location(CAMPAIGN, character["current_location"])
     if location is None or not location.get("real_shrine"):
-        await update.effective_chat.send_message(
-            "There's no shrine to give an offering at here.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, "There's no shrine to give an offering at here.", speak=False)
         return
     # Same real bug/fix as _do_give_offering above -- _get_party_members
     # only ever shows a player's currently active character, so a dead

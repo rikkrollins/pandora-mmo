@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.466] — fix: item-use/shrine/holy-water replies could crash on a Telegram flood-control blip
+
+Found proactively while re-checking `bot_live_tmp.log` for the same bug
+class as v1.27.464 (not a fresh player report): a real crash on
+2026-08-29, "Use a Greater Healing Potion on Wren" → `429 Too Many
+Requests` → unhandled exception, predating that fix. `_do_use_item`
+(plus the neighboring `_do_drink_water`, `_do_labyrinth_checkpoint_
+offering`, `_do_give_offering`, and `_do_shrine_offering_menu`) had the
+exact same gap `_do_fast_travel` had: raw `send_message` calls with
+none of `_safe_send`'s real 3-retry/honor-requested-wait handling, so a
+flood-control 429 on any of these replies (potion use, drinking holy
+water, praying/offering at a shrine, the Labyrinth checkpoint shrine)
+would silently eat the reply instead of surviving it.
+
+Every send in all five of these functions is now routed through
+`_safe_send`, matching the established `_do_fast_travel` fix exactly.
+New test confirms a simulated flood-control blip on a potion-use reply
+still reaches the player instead of crashing.
+
 ## [1.27.465] — fix: a regression from the v1.27.463 "offshoot" fix
 
 Found proactively (this file's own "keep digging for more" pass, not
