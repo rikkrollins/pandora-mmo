@@ -2,6 +2,188 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.461] — The Labyrinth, Phase L3: persistent 5-floor segments, real themes, hazards, ambushes, and a real map
+
+The single biggest Labyrinth change since it shipped: real player
+direction, live, during this session, to replace the original
+"discard-on-descend" single-floor model with real, persistent,
+walkable 5-floor "segments" ("5 levels of honeycombing"), plus a long
+list of concrete follow-on requests built the same session. Summarized
+by area:
+
+**Persistent segments.** A live run now holds SEGMENT_SIZE (5) real,
+interconnected floors at once (`rules/labyrinth.py`'s new
+`generate_segment`), linked by the same `descends_to`/`ascends_to`
+convention the overworld's own multi-story buildings already use — a
+party can freely walk up and down within a segment, real backtracking,
+for the first time. The segment's 5th floor is a real checkpoint room
+(full party heal, full spell-slot refill, +1 ability point, +1 skill
+point, a wandering trader's shop, a real achievement — fires exactly
+once, guarded by a persisted `checkpoint_claimed` flag). Choosing to
+go deeper from the checkpoint "breaks the waypoint": the whole segment
+is discarded and a fresh one generated, so depth still never caps
+while only one segment's worth of rooms ever lives in storage.
+`character["labyrinth_checkpoint_floor"]` is the new, permanent,
+load-bearing resume point — leaving mid-segment abandons that
+segment's live state, but re-entering always starts the segment right
+after the last one actually cleared, never back at floor 1.
+
+**Real themes.** Five hand-authored "alternate dimension" themes (The
+Shattered Mirror, The Hollow Between, The Clockwork Fold, The Ashen
+Verge, The Verdant Undoing) — deliberately NOT tied to the main
+campaign's own Pandora's Box lore, per explicit direction. One theme
+is chosen per segment and flavors every room name/description across
+all 5 floors so a segment reads as one coherent place. Each theme
+carries its own signature environmental hazard (see below). An
+OPTIONAL, fire-and-forget Ollama call (`narrate_labyrinth_segment_
+flavor`) adds a real atmosphere line per new segment, in the voice of
+a brand-new, Labyrinth-exclusive antagonist ("the Errant Cartographer")
+blamed in-fiction for the endless reshaping — never a real campaign
+NPC/boss, confirmed by test, so it can never be confused with (or
+spoil) the actual story's own antagonists.
+
+**Real hazards, including two lethal tiers.** `spike_pit` (failed
+DC13 save → real KO, recoverable) and `bottomless_pit` (failed save →
+the exact real death-save sequence a downed combatant already faces
+in combat — genuine odds of death, stabilizing, or a miracle survival,
+gated to floor 10+). New theme-signature hazards check the SAME real
+resistance system combat damage already uses
+(`rules.combat.apply_damage_type_modifier` + real equipped-gear/racial
+resistances): `freezing` (cold), `overheating`/`lava` (fire — lava
+without real fire resistance runs the same real death-save sequence as
+bottomless_pit), `acid`, and `arcing_current` (lightning). A character
+with real matching resistance takes real, reduced damage or none at
+all — never a flat, un-mitigatable number.
+
+**Real ambushes.** A hidden, server-side-only countdown (never shown
+to the player) can trigger a genuine surprise encounter on an ordinary
+move — the encounter starts immediately, no "attack" needed, with its
+own distinct "⚡ AMBUSH!" header, exactly the surprise the request
+asked for.
+
+**Cross-floor puzzles.** Segments can place two switches on two
+different early floors that jointly gate one bonus room on the
+checkpoint floor — reuses the exact same chat-scoped `_SWITCH_STATE`
+the single-floor version already proved works this way, no new
+plumbing needed.
+
+**Harder deeper.** Generation odds themselves now climb with depth
+(hazard/modifier/multi-switch chance, side-room and monster counts) —
+not just the existing raw stat-multiplier scaling — so a floor 80
+segment genuinely feels different to generate, not just to fight in.
+
+**A real Labyrinth map (Phase L2h).** `map_render.render_labyrinth_map`
+— a lean, purpose-built renderer, no network calls, no fog-of-war
+(a floor is fully revealed the instant it's generated) — wired into
+`/map` and `/visual_map` (both the slash commands and the natural-
+language intents) while inside a run. A real floor-switcher shows a
+button for every floor the party has actually attained, never a
+spoiler for a deeper, ungenerated-to-them floor in the same segment.
+
+**A repeatable shrine, separate from the one-time checkpoint reward.**
+Per explicit follow-up direction, the checkpoint's full heal/refill/
+points now fire ONLY once, not on every visit — a real shrine action
+(free "pray" for a partial heal, or "offer spring water" — a new real
+item, sold by the checkpoint's own trader — for a full party refill)
+covers repeat visits instead.
+
+**Waypoint integration.** The Labyrinth's checkpoint now appears as a
+real row in the `/waypoints` menu and is recognized by free-text fast
+travel ("warp to the labyrinth waystation"), both routing through the
+same real resume logic `_do_enter_labyrinth` already uses.
+
+**Achievements.** Four new permanent milestones
+(`labyrinth_waystation_1/5/10/20`, tiered at checkpoint floors 5/25/
+50/100) plus a real Labyrinth progress line on the achievements screen
+showing deepest floor reached and last checkpoint cleared.
+
+**Separately, a real "What's Next" hint fix** (2026-09-02, Coffee,
+dev-bridge: "too vague... doesn't show the location... should also
+mention the quest"): `_next_step_hint_facts` now also returns the real
+quest's own title (`quest_name`), fed into the narration prompt
+alongside location/clue with the same "naming it is not a spoiler"
+instruction. Since the model doesn't reliably follow that instruction
+every time (confirmed live: a real hint named neither), a new
+deterministic backstop (`_ensure_next_step_facts_present`) appends the
+real location/quest name to the model's own text whenever it's
+actually missing — a no-op whenever the model did name them.
+
+Tested: 41 real, handler-driven tests in `LabyrinthTests` (up from 9 at
+Phase L1), run 20+ consecutive times with zero flakiness after fixing
+two real issues caught this way — a stale-object-reference bug where a
+first-arrival checkpoint/hazard flag could mutate a dict that was
+never actually written back to the database, and a genuinely flaky
+resistance test comparing two independent random damage rolls instead
+of a pinned one. Also fixed: a real regression where the new
+fire-and-forget segment-flavor Ollama call, unmocked, turned every
+Labyrinth test into a real 46-200s live network call (this Ollama
+instance is genuinely reachable on this box) — now a class-wide test
+patch, matching this file's own established convention.
+
+## [1.27.460] — fix: the "What's Next" riddle hint could spill the literal riddle question on an Ollama hiccup
+
+Real live report (2026-09-02, Coffee, dev-bridge screenshot): a
+player's "What's Next... A Riddle" section showed the puzzle's actual
+riddle question verbatim -- not the answer, but far more literal than
+the feature is meant to be ("be vague and ominous" for a puzzle,
+confirmed via a second player's own screenshot the same day showing
+the intended vague phrasing for the identical underlying quest).
+
+Root-caused live: `narrate_next_step_hint`'s fallback template (used
+only when the real Ollama call itself fails/times out) included
+`next_step["clue"]` -- the quest's own real, deterministic clue field
+-- verbatim regardless of whether the quest was a puzzle. The real
+narration call already respects "stay vague for a puzzle" via its own
+prompt instructions; the fallback simply never got the same rule, so
+an Ollama hiccup (not rare on this CPU-only box) could silently spill
+the literal riddle question purely by accident of which code path
+happened to run that time.
+
+Fallback now stays exactly as vague for a puzzle as real narration is
+meant to be (no clue text at all, just the honest "something unsolved"
+flavor); the non-puzzle case is unchanged (showing the clue plainly
+there was always the real, intended design).
+
+Tested: a new test forces the Ollama call to fail and confirms the
+puzzle fallback no longer contains any part of the real clue text,
+while the non-puzzle fallback still does.
+
+## [1.27.459] — fix: a correct riddle answer looked identical to a wrong one when no puzzle was active
+
+Real live report (2026-09-02, Coffee: solved a riddle correctly
+before ("an echo"), tried the same correct answer again, and got the
+exact same rejection a genuinely wrong answer would). Root-caused live
+by tracing `_do_answer_puzzle` against the real dev-bridge screenshot
+and log history: the quest carrying that riddle (`the_archives_recess`)
+wasn't in the character's active quests at all -- they'd moved away
+from its location since solving a related riddle earlier, so it was
+never re-offered. With no active `solve_puzzle` quest to check the
+answer against at all, the loop fell through to the same generic
+"That's not it — think it over some more." a real wrong answer to a
+real active puzzle would also produce -- genuinely indistinguishable
+from the player's side, even though the answer was correct.
+
+`_do_answer_puzzle` now tracks whether ANY active quest actually has a
+`solve_puzzle` trigger; if none does, it says "You don't have an
+unsolved riddle to answer right now." instead of the misleading
+generic rejection. The original message is completely unchanged for
+its real, intended case (a genuinely active puzzle, genuinely wrong
+answer).
+
+Checked Charvenna too, per the request -- she has no `solve_puzzle`
+quest active at all right now (both her active quests are
+defeat-monster triggers), so there's nothing to additionally fix for
+her specifically; the code fix is general and covers her automatically
+if she ever hits the same situation.
+
+Tested: 2 new tests confirm the two messages are genuinely distinct
+(no active puzzle vs. a real wrong answer to a real one); the matching
+logic itself was already confirmed correct (no changes needed there --
+"echo" already matches this riddle's real accepted answers in every
+phrasing tested). Full 12-test puzzle/riddle-related suite still
+passes, including the 2026-08-30 natural-language-phrasing fix this
+same riddle originally surfaced.
+
 ## [1.27.458] — feature: dungeon interiors no longer clutter the world map
 
 Real live request (2026-09-02, Coffee: "Do not put dungeon maps onto

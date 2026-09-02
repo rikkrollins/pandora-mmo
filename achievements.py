@@ -17,7 +17,9 @@ count of character["bound_remnants"]), has_secondary_guild (a real
 "doubled up" Promotion guild beyond the primary -- character["secondary_
 guilds"] non-empty), reached_location (a single named location_id in
 character["visited_locations"] -- used for the Chapter 3-8 expansion's
-per-dungeon safe-waypoint achievements).
+per-dungeon safe-waypoint achievements), min_labyrinth_checkpoint (real
+character["labyrinth_checkpoint_floor"], the Labyrinth's own permanent
+segment-checkpoint progress).
 See bot.py's _achievement_condition_met for how each is evaluated.
 """
 
@@ -215,6 +217,28 @@ ACHIEVEMENTS = {
     "greymoor_downs_waypoint": {
         "name": "The Sheltered Camp", "description": "Reach Greymoor Downs' own safe waypoint.",
         "title": "the Downs-Warded", "check": {"type": "reached_location", "location_id": "greymoor_downs_the_sheltered_camp"},
+    },
+    # The Labyrinth, Phase L3 (2026-09-02) -- real, permanent milestones
+    # tied to labyrinth_checkpoint_floor (the same field that decides
+    # where a fresh Labyrinth run actually resumes), not a separate
+    # counter invented for this feature. One per segment-checkpoint
+    # tier the Labyrinth is genuinely unbounded past, so these keep
+    # meaning something at any real depth a party reaches.
+    "labyrinth_waystation_1": {
+        "name": "First Waystation", "description": "Clear the Labyrinth's first waystation (floor 5).",
+        "title": "the Labyrinth-Touched", "check": {"type": "min_labyrinth_checkpoint", "value": 5},
+    },
+    "labyrinth_waystation_5": {
+        "name": "Deep Waystation", "description": "Clear the Labyrinth's 5th waystation (floor 25).",
+        "title": "the Labyrinth-Bound", "check": {"type": "min_labyrinth_checkpoint", "value": 25},
+    },
+    "labyrinth_waystation_10": {
+        "name": "Honeycomb Wanderer", "description": "Clear the Labyrinth's 10th waystation (floor 50).",
+        "title": "the Honeycomb Wanderer", "check": {"type": "min_labyrinth_checkpoint", "value": 50},
+    },
+    "labyrinth_waystation_20": {
+        "name": "Unbroken Descent", "description": "Clear the Labyrinth's 20th waystation (floor 100).",
+        "title": "the Unbroken", "check": {"type": "min_labyrinth_checkpoint", "value": 100},
     },
 }
 

@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS labyrinth_runs (
     seed INTEGER NOT NULL,
     current_room_id TEXT NOT NULL,
     rooms_json TEXT NOT NULL DEFAULT '{}',
+    modifier TEXT,
     entered_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(chat_id, party_key)
@@ -919,6 +920,50 @@ def init_db() -> None:
         # floor exceeds whatever this character already has on record.
         if "labyrinth_best_floor" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_best_floor INTEGER NOT NULL DEFAULT 0")
+
+        # labyrinth_checkpoint_floor (2026-09-02, Phase L3, per Coffee:
+        # "make this a safe spot with a waypoint to fast travel to
+        # later on") -- the highest SEGMENT-END checkpoint floor this
+        # character has actually reached and claimed the rewards of.
+        # Permanent, never decreases. Unlike labyrinth_best_floor (pure
+        # bragging rights), this one is load-bearing: _do_enter_
+        # labyrinth uses it to decide which segment a fresh run starts
+        # in, so leaving and re-entering resumes past what's already
+        # been cleared instead of restarting at floor 1 every time.
+        if "labyrinth_checkpoint_floor" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_checkpoint_floor INTEGER NOT NULL DEFAULT 0")
+
+        # labyrinth_runs.modifier (2026-09-02, Phase L2 floor modifiers)
+        # -- a real DB already running Phase L1's CREATE TABLE IF NOT
+        # EXISTS won't pick up a column added to that CREATE statement
+        # alone, same reasoning as every ALTER TABLE above. Superseded
+        # by Phase L3's per-ROOM "modifier" field (a live segment holds
+        # 5 real floors, each rolling its own) -- column kept, just
+        # unused going forward, not worth a destructive drop.
+        labyrinth_runs_columns = _existing_columns(conn, "labyrinth_runs")
+        if "modifier" not in labyrinth_runs_columns:
+            conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN modifier TEXT")
+
+        # labyrinth_runs.visited_floors_json (2026-09-02, Phase L3) --
+        # which of the CURRENT live segment's real floors this party has
+        # actually physically stood on, not just generated. Drives the
+        # real map floor-switcher (only ever show a floor button for one
+        # a party has "attained," never a spoiler for what's deeper in
+        # the same segment) and the achievements screen's own progress
+        # line.
+        if "visited_floors_json" not in labyrinth_runs_columns:
+            conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN visited_floors_json TEXT NOT NULL DEFAULT '[]'")
+
+        # labyrinth_runs.steps_until_encounter (2026-09-02, Phase L3,
+        # per Coffee: "i like the idea of enemies spawning and
+        # attacking after so many RNG footsteps in the labarynth...
+        # like an ambush... players shudnt know when they are being
+        # encountered") -- a real, hidden, server-side-only countdown,
+        # never surfaced in any player-facing text. 0 means "not yet
+        # rolled" (a fresh run/segment picks a real threshold on first
+        # move, see bot._do_labyrinth_move).
+        if "steps_until_encounter" not in labyrinth_runs_columns:
+            conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN steps_until_encounter INTEGER NOT NULL DEFAULT 0")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -3531,6 +3576,7 @@ def add_ai_companion_to_party(telegram_user_id: int, chat_id: int, party_id: int
 def _labyrinth_run_row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["rooms"] = json.loads(d.pop("rooms_json"))
+    d["visited_floors"] = json.loads(d.pop("visited_floors_json", "[]") or "[]")
     return d
 
 
@@ -3542,13 +3588,16 @@ def get_labyrinth_run(chat_id: int, party_key: str) -> dict | None:
     return _labyrinth_run_row_to_dict(row) if row else None
 
 
-def create_labyrinth_run(chat_id: int, party_key: str, floor: int, seed: int, current_room_id: str, rooms: dict) -> dict:
+def create_labyrinth_run(
+    chat_id: int, party_key: str, floor: int, seed: int, current_room_id: str, rooms: dict,
+    modifier: str | None = None, visited_floors: list[int] | None = None,
+) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO labyrinth_runs (chat_id, party_key, floor, seed, current_room_id, rooms_json, entered_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (chat_id, party_key, floor, seed, current_room_id, json.dumps(rooms), now, now),
+            "INSERT INTO labyrinth_runs (chat_id, party_key, floor, seed, current_room_id, rooms_json, modifier, visited_floors_json, entered_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (chat_id, party_key, floor, seed, current_room_id, json.dumps(rooms), modifier, json.dumps(visited_floors or [floor]), now, now),
         )
     return get_labyrinth_run(chat_id, party_key)
 
@@ -3558,6 +3607,8 @@ def update_labyrinth_run(chat_id: int, party_key: str, **fields) -> dict | None:
         return get_labyrinth_run(chat_id, party_key)
     if "rooms" in fields:
         fields["rooms_json"] = json.dumps(fields.pop("rooms"))
+    if "visited_floors" in fields:
+        fields["visited_floors_json"] = json.dumps(fields.pop("visited_floors"))
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     columns = ", ".join(f"{k} = ?" for k in fields)
     values = list(fields.values())

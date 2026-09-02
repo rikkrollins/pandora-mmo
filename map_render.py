@@ -562,3 +562,130 @@ def render_dungeon_map(
         dungeon_id, dungeon_locations, visited_ids, revealed_ids, current_location_id,
         monsters=monsters, quests=quests, title_override=f"MAP — {display_name}",
     )
+
+
+# The Labyrinth (2026-09-02, Phase L2h, per Coffee: "Do not put dungeon
+# maps onto the main map... have them only on thier own seperate maps"
+# -- extended to the Labyrinth's own live, ephemeral floors, which were
+# never on any map at all until now). Deliberately its own small,
+# purpose-built renderer, NOT a call into render_layer_map above: that
+# engine assumes real, persistent CAMPAIGN locations with real
+# generated art worth fetching-once-and-caching-forever and a real
+# fog-of-war built up across many real-world sessions -- none of which
+# applies to a floor that's fully synthesized on arrival and discarded
+# wholesale on the next descend. No network calls at all here.
+_LABYRINTH_ICON_COLORS = {
+    "monster": (190, 60, 60),
+    "chest": (200, 170, 60),
+    "hazard": (200, 100, 20),
+    "switch": (80, 160, 200),
+}
+_LABYRINTH_ROOM_FILL = (55, 48, 68)
+
+
+def _labyrinth_room_icons(room: dict) -> list[str]:
+    icons = []
+    if room.get("monsters"):
+        icons.append("monster")
+    if any(lk.get("kind") == "chest" for lk in room.get("lockables", [])):
+        icons.append("chest")
+    if room.get("hazard"):
+        icons.append("hazard")
+    if any(lk.get("kind") in ("switch", "multi_switch_gate") for lk in room.get("lockables", [])):
+        icons.append("switch")
+    return icons
+
+
+def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str) -> bytes:
+    """
+    rooms: a live run's own `rooms` dict verbatim, every entry already
+    carrying a real `grid_position` (rules.labyrinth._assign_grid_
+    positions). An entire floor is always fully "revealed" the instant
+    it's generated -- there is no partial/fog-of-war state to track for
+    content that never outlives one visit, so unlike render_layer_map
+    this never filters by a visited/revealed set at all.
+    """
+    positions = {rid: (r["grid_position"]["x"], r["grid_position"]["y"]) for rid, r in rooms.items()}
+    xs = [p[0] for p in positions.values()]
+    ys = [p[1] for p in positions.values()]
+    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+    cols = max_x - min_x + 1
+    grid_rows = max_y - min_y + 1
+
+    legend_lines = ["red outline = you are here"]
+    legend_row_count = len(legend_lines) + 1
+    width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
+    height = min(
+        _MARGIN * 2 + _TITLE_HEIGHT + grid_rows * CELL_SIZE + legend_row_count * _LEGEND_LINE_HEIGHT + 10,
+        _MAX_CANVAS_HEIGHT,
+    )
+
+    image = Image.new("RGB", (width, height), _BG_COLOR)
+    draw = ImageDraw.Draw(image, "RGBA")
+    _draw_background(draw, width, height)
+
+    title_font = _load_font(24, bold=True)
+    title = f"THE LABYRINTH — Floor {floor}"
+    title_bbox = draw.textbbox((0, 0), title, font=title_font)
+    draw.text(((width - (title_bbox[2] - title_bbox[0])) / 2, 10), title, font=title_font, fill=_TITLE_COLOR)
+
+    name_font = _load_font(12, bold=True)
+    by_cell = {pos: rid for rid, pos in positions.items()}
+    grid_top = _MARGIN + _TITLE_HEIGHT
+    for gy in range(grid_rows):
+        for gx in range(cols):
+            x = min_x + gx
+            y = max_y - gy  # same north-at-top convention as render_layer_map
+            px = _MARGIN + gx * CELL_SIZE
+            py = grid_top + gy * CELL_SIZE
+            room_id = by_cell.get((x, y))
+            if room_id is None:
+                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_CELL_BLACK)
+                continue
+            room = rooms[room_id]
+            is_current = room_id == current_room_id
+            draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_LABYRINTH_ROOM_FILL)
+            outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
+            draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=outline, width=4 if is_current else 2)
+
+            label = _fit_label_to_width(draw, room["name"], name_font, CELL_SIZE - 8)
+            label_bbox = draw.textbbox((0, 0), label, font=name_font)
+            lw, lh = label_bbox[2] - label_bbox[0], label_bbox[3] - label_bbox[1]
+            draw.rectangle([px, py + CELL_SIZE - lh - 8, px + CELL_SIZE, py + CELL_SIZE], fill=_LABEL_BG)
+            draw.text((px + (CELL_SIZE - lw) / 2, py + CELL_SIZE - lh - 5), label, font=name_font, fill=_LABEL_COLOR)
+
+            icons = _labyrinth_room_icons(room)
+            if icons:
+                swatch_r = 6
+                pad = 4
+                swatch_span = swatch_r * 2 + 3
+                strip_w = len(icons) * swatch_span + pad
+                draw.rectangle([px + 2, py + 2, px + 2 + strip_w, py + 2 + swatch_r * 2 + pad], fill=_LABEL_BG)
+                cx = px + 2 + pad // 2 + swatch_r
+                cy = py + 2 + pad // 2 + swatch_r
+                for category in icons:
+                    color = _LABYRINTH_ICON_COLORS.get(category, (200, 200, 200))
+                    draw.ellipse([cx - swatch_r, cy - swatch_r, cx + swatch_r, cy + swatch_r], fill=color, outline=(0, 0, 0))
+                    cx += swatch_span
+
+    legend_font = _load_font(13)
+    legend_y = height - legend_row_count * _LEGEND_LINE_HEIGHT - 8
+    cursor_x = _MARGIN
+    for label, color in _LABYRINTH_ICON_COLORS.items():
+        swatch_r = 5
+        cy = legend_y + 8
+        draw.ellipse([cursor_x, cy - swatch_r, cursor_x + swatch_r * 2, cy + swatch_r], fill=color)
+        cursor_x += swatch_r * 2 + 5
+        text = f"{label}   "
+        draw.text((cursor_x, legend_y), text, font=legend_font, fill=_LEGEND_COLOR)
+        bbox = draw.textbbox((0, 0), text, font=legend_font)
+        cursor_x += bbox[2] - bbox[0]
+    legend_y += _LEGEND_LINE_HEIGHT
+    for line in legend_lines:
+        fitted = _fit_label_to_width(draw, line, legend_font, width - 2 * _MARGIN)
+        draw.text((_MARGIN, legend_y), fitted, font=legend_font, fill=_LEGEND_COLOR)
+        legend_y += _LEGEND_LINE_HEIGHT
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()

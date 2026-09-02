@@ -143,6 +143,16 @@ ITEMS = {
         "price": 100, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+999",
         "description": "Heals 1d1+999 HP (1,000 flat). Thicker and darker than the common brew, and it goes down just as badly.",
     },
+    # Labyrinth waystation shrine (2026-09-02, Phase L3, per Coffee: "a
+    # shrine there for us to pray or give an offering of spring water")
+    # -- deliberately no generic "effect"/"heal_dice" here, unlike an
+    # ordinary potion: its real effect (a full party HP/spell-slot
+    # refill) only ever fires through _do_labyrinth_checkpoint_offering,
+    # gated to standing at a real checkpoint room, not a plain "use item".
+    "spring_water": {
+        "name": "Vial of Spring Water", "type": "material", "rarity": "uncommon", "price": 40, "weight": 0.2,
+        "description": "Drawn from someplace deep and still, this deep in the Labyrinth. Tastes like nothing at all -- but a waystation's shrine seems to want it.",
+    },
     "supreme_healing_potion": {
         "name": "Supreme Healing Potion", "type": "consumable", "rarity": "rare",
         "price": 500, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+9999",

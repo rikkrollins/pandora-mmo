@@ -808,13 +808,17 @@ def _build_story_so_far_prompt(
     )
 
 
-def _next_step_hint_preamble(is_puzzle: bool) -> str:
+def _next_step_hint_preamble(is_puzzle: bool, quest_name: str | None) -> str:
+    quest_clause = (
+        f" You are also given the real Quest name, \"{quest_name}\" -- naming it plainly is NOT a spoiler either."
+        if quest_name else ""
+    )
     if is_puzzle:
         return (
             "You are the Dungeon Master giving a player a short, in-character "
             "hint about what comes next in their Dungeons & Dragons 5th "
             "Edition game. What comes next is a PUZZLE -- you are given its "
-            "real Location and its real riddle text as a Clue. A player "
+            "real Location and its real riddle text as a Clue." + quest_clause + " A player "
             "reading this because they feel lost needs to be able to actually "
             "act on it, so you MUST plainly name the real Location given "
             "below somewhere in your answer, so they know where to go -- "
@@ -833,7 +837,7 @@ def _next_step_hint_preamble(is_puzzle: bool) -> str:
         "You are the Dungeon Master giving a player a short, in-character "
         "hint about what comes next in their Dungeons & Dragons 5th Edition "
         "game. You are given a real location and a real clue about what "
-        f"waits there. Write {scaled_sentences(1, 2)} that are clear and "
+        "waits there." + quest_clause + f" Write {scaled_sentences(1, 2)} that are clear and "
         "confident about WHERE to go and, in broad strokes, what to do when "
         "they get there — clear enough to act on immediately — without "
         f"spelling out plot specifics beyond that. {style_directive()} Output "
@@ -846,10 +850,12 @@ def _build_next_step_hint_prompt(next_step: dict) -> str:
     facts = ""
     if next_step.get("location_name"):
         facts += f"Location: {next_step['location_name']}\n"
+    if next_step.get("quest_name"):
+        facts += f"Quest: {next_step['quest_name']}\n"
     if next_step.get("clue"):
         facts += f"Clue: {next_step['clue']}"
     return (
-        f"{_next_step_hint_preamble(next_step['is_puzzle'])}\n\n"
+        f"{_next_step_hint_preamble(next_step['is_puzzle'], next_step.get('quest_name'))}\n\n"
         f"Real facts (narrate ONLY these, faithfully):\n{facts}\n\n"
         f"Write the hint now:"
     )
@@ -879,13 +885,52 @@ def narrate_next_step_hint(next_step: dict) -> str:
         data = response.json()
         text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
         if text and not is_placeholder_text(text):
-            return text
+            return _ensure_next_step_facts_present(text, next_step)
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] next-step-hint narration call failed, falling back to template: {e}")
+    # Real live report (2026-09-02, Coffee): this fallback used to
+    # include next_step["clue"] verbatim even for a puzzle -- for a
+    # normal quest that's the intended, deterministic hint text, but
+    # for a puzzle it's the literal riddle question, spilled in full
+    # the moment Ollama times out, contradicting the real narration
+    # call's own explicit "be vague and ominous for a puzzle"
+    # instruction (_build_next_step_hint_prompt) purely by accident of
+    # WHICH path happened to run. The fallback now stays exactly as
+    # vague for a puzzle as the real narration is meant to be -- no
+    # clue text at all, just the honest "something unsolved" flavor --
+    # and only includes the real clue for the non-puzzle case, where
+    # showing it plainly was always the actual design.
     if next_step["is_puzzle"]:
-        return f"Something unanswered still waits, patient and unwilling to make itself easy. {next_step.get('clue', '')}"
-    where = f" toward {next_step['location_name']}" if next_step.get("location_name") else ""
-    return f"The path ahead leads{where}. {next_step.get('clue', '')}"
+        base = "Something unanswered still waits, patient and unwilling to make itself easy."
+    else:
+        where = f" toward {next_step['location_name']}" if next_step.get("location_name") else ""
+        base = f"The path ahead leads{where}. {next_step.get('clue', '')}"
+    return _ensure_next_step_facts_present(base, next_step)
+
+
+def _ensure_next_step_facts_present(text: str, next_step: dict) -> str:
+    """
+    Real live report (2026-09-02, Coffee, dev-bridge): a live puzzle
+    hint came back as "The enigmatic site whispers its truth through
+    shadows" -- no location named anywhere, despite the prompt's own
+    explicit "you MUST plainly name the real Location" instruction.
+    `lfm2.5-thinking` doesn't reliably follow that instruction every
+    time, and there's no retry budget for a call already this slow
+    (see CLAUDE.md) -- so this is a deterministic backstop, not a
+    replacement for the prompt: if the model's own text doesn't
+    actually contain the real location/quest name, append them
+    plainly rather than trusting compliance alone. A no-op whenever
+    the model DID name them (the normal, hoped-for case).
+    """
+    lowered = text.lower()
+    missing = []
+    if next_step.get("location_name") and next_step["location_name"].lower() not in lowered:
+        missing.append(f"📍 {next_step['location_name']}")
+    if next_step.get("quest_name") and next_step["quest_name"].lower() not in lowered:
+        missing.append(f"📜 {next_step['quest_name']}")
+    if not missing:
+        return text
+    return text + "\n(" + " — ".join(missing) + ")"
 
 
 def narrate_story_so_far(
@@ -1426,6 +1471,50 @@ def narrate_remnant_summon(remnant_name: str, remnant_lore: str, target_name: st
     except (requests.RequestException, ValueError) as e:
         print(f"[dm_agent] remnant summon narration failed, falling back to template: {e}")
     return f"**{remnant_name}** turns its full attention on **{target_name}**."
+
+
+def narrate_labyrinth_segment_flavor(theme_name: str, theme_intro: str, antagonist_name: str, antagonist_lore: str, segment: int) -> str:
+    """
+    Phase L3 (2026-09-02, per Coffee: "the labyrinth generator can use
+    a[n] AI to make themes and storylines for the levels... but don't
+    use characters that are in the storyline, make sure they are
+    separate from the actual game"). A real, OPTIONAL flavor line for
+    a brand new segment -- grounded ONLY in the segment's own real
+    theme name/intro (rules.labyrinth.LABYRINTH_THEMES) and the one
+    real, Labyrinth-exclusive antagonist entity (never a main-story
+    NPC/boss, confirmed by rules.labyrinth's own module docstring).
+    Fired fire-and-forget, same pattern as narrate_remnant_summon
+    above -- the deterministic entry message already covers the real
+    mechanical facts (floor number, room description); this only ever
+    adds atmosphere on top, arriving whenever Ollama finishes.
+    """
+    prompt = (
+        "You are the Dungeon Master narrating a player's arrival in a brand new stretch of a "
+        "vast, ever-shifting Labyrinth -- a pocket dimension, not the main world. You are given "
+        f"this stretch's real Theme name and its own real Intro flavor, plus one real, recurring "
+        f"in-fiction entity blamed for the Labyrinth's endless, malfunctioning reshaping: "
+        f"{antagonist_name} ({antagonist_lore}).\n\n"
+        f"Theme: {theme_name}\nIntro: {theme_intro}\n\n"
+        f"Write {scaled_sentences(1, 2)} of atmospheric flavor for arriving here, in the voice of "
+        f"the Dungeon Master. You may reference {antagonist_name} obliquely (its handiwork, not a "
+        f"direct confrontation) but never invent a new named character, faction, or plot detail "
+        f"beyond what's given. {style_directive()} Output ONLY the line itself, no preamble, no "
+        "quotation marks."
+    )
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
+        if text and not is_placeholder_text(text):
+            return text
+    except (requests.RequestException, ValueError) as e:
+        print(f"[dm_agent] labyrinth segment flavor narration failed, falling back to template: {e}")
+    return theme_intro
 
 
 def _arc_opening_preamble() -> str:

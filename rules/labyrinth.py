@@ -6,34 +6,285 @@ architecture" -- a live, procedurally-generated, ever-deepening
 dungeon unlocked by defeating colosseum_champion, run by bot.py at
 request time, never authored offline).
 
-Deliberately NOT rules/dungeon_evolve.py's heavier pipeline: no grid
-coordinates (a Labyrinth floor is never part of the real minimap --
-same already-accepted scope as map_render.py's own deferred z-axis
-work), no build_location_grid/dungeon_audit retry loop (this needs to
-run in well under a second on every descent, not retry against 7
-structural checks meant for permanent, hand-polishable content).
-Reuses only dungeon_evolve._candidate_monsters, for a wide,
-non-Remnant, non-headline-boss monster pool -- floor depth is
-unbounded, so unlike evolve_dungeon's finite next-chapter-band lookup,
-monster CHOICE here stays catalog-agnostic; ALL of the difficulty
-comes from a multiplicative scale bot.py's own _build_labyrinth_enemy
-applies to whichever real monster template gets picked (same
-stat_mult-on-a-template shape bot.py's _build_echo_enemy already
-proves safe), never baked into this module's own room data.
+Deliberately NOT rules/dungeon_evolve.py's heavier pipeline: no
+build_location_grid/dungeon_audit retry loop (this needs to run in
+well under a second, not retry against 7 structural checks meant for
+permanent, hand-polishable content). Reuses only dungeon_evolve.
+_candidate_monsters, for a wide, non-Remnant, non-headline-boss monster
+pool -- depth is unbounded, so unlike evolve_dungeon's finite
+next-chapter-band lookup, monster CHOICE here stays catalog-agnostic;
+ALL of the difficulty comes from a multiplicative scale bot.py's own
+_build_labyrinth_enemy applies to whichever real monster template gets
+picked (same stat_mult-on-a-template shape bot.py's _build_echo_enemy
+already proves safe), never baked into this module's own room data.
 
-Room ids are fixed constants, NOT floor-namespaced -- only one floor's
-rooms are ever live in a run's `rooms_json` at a time (db.py's
-labyrinth_runs table), the previous floor discarded wholesale on
-descend. A real, deliberate "no backtracking across floors" roguelike
-constraint, not an oversight.
+Phase L3 (2026-09-02, per Coffee, live and explicit: "make floors
+persistent and interconnected... make each level segments 5 levels
+then the waypoints break... generate a new one when characters choose
+to go further... 5 levels of honeycombing") REPLACES Phase L1/L2's
+single-floor-at-a-time, discard-on-descend model. The old model's own
+"no backtracking across floors" was a real, deliberate constraint at
+the time -- Coffee's own later ask explicitly reverses it. The new
+unit of generation is a SEGMENT: SEGMENT_SIZE (5) real floors,
+generated together, genuinely interconnected via the same descends_to/
+ascends_to convention the real overworld already uses for multi-story
+buildings -- a party can freely walk up and down between any of a
+live segment's 5 floors, real backtracking, real cross-floor puzzles
+(a switch on one floor can gate a reward on another -- `_SWITCH_STATE`
+was already chat-scoped, never room-scoped, so this needs zero new
+plumbing beyond generating the rooms that way). Depth still never
+caps -- what caps is how much lives in storage at once: reaching a
+segment's own checkpoint floor (its 5th, a real safe waypoint: full
+heal, full spell-slot refill, an ASI point, a wandering trader's shop,
+a real achievement) and choosing to go deeper "breaks the waypoint" --
+the whole segment is discarded and a brand new one generated -- so the
+game can go infinitely deep while only ever storing one segment's
+worth of rooms per active run. Room ids are now floor-namespaced
+(`f{floor}_...`) since multiple floors are genuinely alive in storage
+at once, unlike the old single-floor model.
 """
+import math
 import random
 
 from rules.dungeon_evolve import _candidate_monsters
 
-HUB_ROOM_ID = "laby_hub"
-STAIRS_ROOM_ID = "laby_stairs"
 _SIDE_ROOM_COUNT_RANGE = (3, 5)
+
+# L3: one segment = this many real, interconnected floors. Reuses the
+# exact number Phase L2c's milestone interval already used, per
+# Coffee's own "5 levels of honeycombing" framing -- the OLD milestone
+# vault on every 5th floor IS this segment's own checkpoint floor now,
+# just upgraded (see _build_checkpoint_room) rather than a separate concept.
+SEGMENT_SIZE = 5
+MILESTONE_FLOOR_INTERVAL = SEGMENT_SIZE  # kept as an alias -- older code/tests reference this name
+
+# L3, real theme variety (2026-09-02, per Coffee: "we need lots of
+# themes and area types or scenarios playable in the labarythn...
+# make sure it is something like 'an alternate universe' or 'another
+# dimension'... make sure the generator can handle theme and
+# descriptions and the rng can handle that"). Deliberately code-driven
+# (a small, real, hand-authored pool the RNG picks from and templates
+# real room names/descriptions out of), NOT an AI-narrated invention
+# per room -- this generator has to run in well under a second, and
+# this game's own grounding rule is "never invent lore the AI layer
+# doesn't already have real facts for." Per Coffee's explicit
+# direction, none of these reuse "Pandora's Box" or any other real
+# main-story lore -- the Labyrinth is framed as its own genuine
+# fracture between worlds, a real "alternate universe/another
+# dimension" anomaly, distinct from the main campaign's own cosmology.
+# One theme is chosen per SEGMENT (not per floor) via RNG, so a whole
+# 5-floor honeycomb feels like one coherent place rather than five
+# unrelated fragments.
+LABYRINTH_THEMES = [
+    {
+        "id": "shattered_mirror",
+        "name": "The Shattered Mirror",
+        "intro": "The way ahead cracks like glass and reassembles wrong -- everything here is a reflection of somewhere real, just slightly, deliberately, off.",
+        "hub_description": "Fractured light bends through the air here, throwing a dozen almost-right versions of the room across every wall.",
+        "checkpoint_description": "The cracks stop spreading here -- a single unbroken pane, calm at the center of all this wrongness.",
+        "room_names": ["A Cracked Reflection", "The Wrong Angle", "A Doubled Hallway", "The Silvered Room", "A Recursive Corner"],
+        "room_flavor": "The reflection in here doesn't quite match what's casting it.",
+        "signature_hazard": "drowning",
+    },
+    {
+        "id": "hollow_between",
+        "name": "The Hollow Between",
+        "intro": "Sound dies a step behind you as you cross over -- this place sits in the gap between where you were and where you're going, and it doesn't want visitors noticed.",
+        "hub_description": "A wide, grey nowhere, lit by no source anyone can point to.",
+        "checkpoint_description": "The grey finally holds still here, just long enough to feel like an actual room again.",
+        "room_names": ["A Room That Shouldn't Fit", "The Quiet Gap", "An Unfinished Space", "The In-Between Landing", "A Forgotten Threshold"],
+        "room_flavor": "The walls here feel more like an idea of walls than the real thing.",
+        "signature_hazard": "freezing",
+    },
+    {
+        "id": "clockwork_fold",
+        "name": "The Clockwork Fold",
+        "intro": "Gears the size of houses turn somewhere out of sight, and the whole place ticks forward around you like it's keeping its own private time.",
+        "hub_description": "Brass housing and slow-turning gearwork line every surface, all of it moving to a rhythm no one asked for.",
+        "checkpoint_description": "The gears here have wound down to a stop -- whatever this place used to measure, it isn't measuring it anymore.",
+        "room_names": ["A Gear-Locked Chamber", "The Ticking Vault", "A Stalled Mechanism", "The Brass Landing", "A Wound Spring Room"],
+        "room_flavor": "Something in the walls keeps ticking, patient and mechanical, whether or not anyone's listening.",
+        "signature_hazard": "arcing_current",
+    },
+    {
+        "id": "ashen_verge",
+        "name": "The Ashen Verge",
+        "intro": "The air goes warm and grey the moment you cross in -- everything here looks like it's already burned, and burns a little more every time you look away.",
+        "hub_description": "Ash drifts in from nowhere, settling over floors that were never actually on fire.",
+        "checkpoint_description": "The ash doesn't fall here -- the only still, clean air anywhere in this stretch.",
+        "room_names": ["An Ember-Lit Hollow", "The Smoldering Passage", "A Grey Ash Room", "The Cinder Landing", "An Ashen Threshold"],
+        "room_flavor": "Everything in here is the color of something recently, quietly, burned.",
+        "signature_hazard": "lava",
+        "secondary_hazard": "overheating",
+    },
+    {
+        "id": "verdant_undoing",
+        "name": "The Verdant Undoing",
+        "intro": "Roots have already grown through walls that, by every sign, were built after them -- whatever this place is, growth here runs backward.",
+        "hub_description": "Vines thick as rope hold up stonework that looks like it should have collapsed centuries ago.",
+        "checkpoint_description": "The green here has gone still and orderly, almost tended, almost deliberate.",
+        "room_names": ["A Root-Bound Chamber", "The Overgrown Landing", "A Reclaimed Hall", "The Living Threshold", "An Unpruned Room"],
+        "room_flavor": "Something green is quietly taking this room apart, one stone at a time.",
+        "signature_hazard": "acid",
+    },
+]
+
+
+def _pick_theme(rng: random.Random) -> dict:
+    return rng.choice(LABYRINTH_THEMES)
+
+
+# L3, real in-fiction framing for WHY the Labyrinth keeps generating
+# new alternate-dimension segments (2026-09-02, per Coffee: "the
+# labyrinth generator can use a[n] AI to make themes and storylines
+# for the levels... but don't use characters that are in the
+# storyline, make sure they are separate from the actual game"). A
+# brand-new, Labyrinth-exclusive entity -- never a real campaign.json
+# NPC/boss, never referenced by any main-story quest -- so it can
+# never be confused with (or spoil) the actual game's own antagonists.
+# Purely narrative/flavor (bot.py's narrate_labyrinth_segment_flavor,
+# a real but OPTIONAL, fire-and-forget Ollama call fired once per new
+# segment, never blocking the deterministic entry message) -- not a
+# mechanical boss fight.
+LABYRINTH_ANTAGONIST_NAME = "the Errant Cartographer"
+LABYRINTH_ANTAGONIST_LORE = (
+    "Something down here keeps redrawing the map, badly, endlessly -- each new stretch a fresh, "
+    "malfunctioning attempt at a whole world, never quite finished before the next one starts."
+)
+
+# L2b. Floor modifiers -- a real, announced, floor-wide condition, never
+# silent (Coffee's "state it if it's visible" discipline, same as the
+# overworld's pits/breakables). 60% of floors have none at all. Now
+# stored PER ROOM (every room on a given floor carries the same
+# "modifier" value) rather than once per run, since a live segment
+# holds 5 real floors at once and each rolls its own independently.
+FLOOR_MODIFIERS = ("frenzied", "lightless", "bountiful", "dangerous")
+_MODIFIER_CHANCE = 0.4
+MODIFIER_ANNOUNCEMENT = {
+    "frenzied": "The air here feels frenzied -- whatever's alive moves faster than it should.",
+    "lightless": "No natural light reaches this deep. You'll need your own.",
+    "bountiful": "Something about this floor feels generous.",
+    "dangerous": "This floor feels wrong -- dangerous in a way the last one didn't.",
+}
+
+_MILESTONE_ITEM_BANDS = (
+    (1, 10, "greater_healing_potion"),
+    (11, 25, "superior_healing_potion"),
+    (26, 1_000_000, "scroll_magic_missile"),
+)
+
+# L2d. Environmental hazards -- a visible, telegraphed obstacle, same
+# "state it honestly" rule as the overworld's own pits/breakables.
+_HAZARD_CHANCE = 0.15
+HAZARD_KINDS = (
+    "collapsing_floor", "gas_vent", "spike_pit", "bottomless_pit",
+    "acid", "freezing", "overheating", "arcing_current", "lava", "drowning",
+)
+HAZARD_FLAVOR = {
+    "collapsing_floor": "The floor here looks half-rotted through -- one wrong step and it's a long way down.",
+    "gas_vent": "A faint hiss comes from a crack in the wall -- something in the air here isn't right.",
+    "spike_pit": "A row of corroded spikes juts up through cracks in the floor -- landing on those wrong would knock anyone flat.",
+    "bottomless_pit": "The floor gives way to a real pit here, deep enough that a dropped stone never seems to land.",
+    # L3, real theme-signature hazards (2026-09-02, per Coffee: "themes
+    # shud have hazards for them, lava, acid, drowning..., freezing...,
+    # overheating..."). Each one honestly telegraphed, same discipline
+    # as every other hazard here -- see HAZARD_DAMAGE_TYPE/
+    # _LETHAL_HAZARD_KINDS below for exactly how each resolves.
+    "acid": "A film of corrosive sap coats everything within reach, hissing faintly wherever it touches bare stone.",
+    "freezing": "The cold here isn't ordinary cold -- it settles into the joints, deeper with every breath.",
+    "overheating": "The heat here climbs steadily, well past anything a real fire alone would explain.",
+    "arcing_current": "Current jumps between exposed brass fittings, arcing wherever something metal gets too close.",
+    "lava": "The floor gives way to real, slow-moving lava here -- bright, silent, and very obviously final.",
+    "drowning": "A still, black pool fills the low half of this room -- deep enough, the way it sits, that going under here doesn't feel like it would end the normal way.",
+}
+# Elemental hazards check the SAME real resistance/vulnerability system
+# combat damage already uses (rules.combat.apply_damage_type_modifier)
+# -- a character with real fire resistance shrugs off "overheating"
+# far more than one without, never a flat, un-mitigatable number.
+HAZARD_DAMAGE_TYPE = {
+    "acid": "acid", "freezing": "cold", "overheating": "fire", "arcing_current": "lightning", "lava": "fire",
+}
+# L3 (2026-09-02, per Coffee: "add pits with holes we can plunge to our
+# death, and spikes we can land on, if we fall or jump on them, KO").
+# Real, distinct severity tiers, both still a single honest DC13 DEX
+# save like every other hazard here -- never a silent gotcha:
+# - spike_pit: a failed save is a real KO (hp_current -> 0, the exact
+#   same "downed, unconscious, recoverable by healing/rest" state
+#   combat already uses) -- never permanent on its own.
+# - bottomless_pit: a failed save runs the party member through the
+#   EXACT same real death-save sequence (rules.combat.resolve_death_
+#   save) a downed combatant already faces turn-by-turn in combat,
+#   just resolved all at once since there's no combat round to spread
+#   it across -- genuinely real odds of dying (is_dead=1, revivable
+#   only by the same Revivify path any other real death already uses),
+#   not an unavoidable instant kill, and small but real odds of
+#   catching a ledge and walking away basically fine (a natural 20).
+#   Rare, and only ever appears from floor _BOTTOMLESS_PIT_MIN_FLOOR
+#   onward -- brand-new Labyrinth-goers on floor 1 don't instantly meet
+#   a real permadeath trap.
+_MUNDANE_HAZARD_KINDS = ("collapsing_floor", "gas_vent")
+_LETHAL_HAZARD_KINDS = ("spike_pit", "bottomless_pit")
+_THEME_LETHAL_HAZARDS = ("lava", "drowning")  # theme-specific -- see HAZARD_DAMAGE_TYPE/_new_side_room
+_BOTTOMLESS_PIT_MIN_FLOOR = 10
+_LETHAL_HAZARD_CHANCE = 0.05
+
+# L3, theme-signature hazards (2026-09-02, per Coffee: "themes shud
+# have hazards for them"). A SEPARATE, independent roll from the
+# generic hazard pool above -- checked first, per room, using the
+# segment's own theme.  "lava" resolves through the SAME real
+# death-save path bottomless_pit/drowning use, but ONLY for a
+# character with no real fire resistance/immunity (rules.combat.
+# apply_damage_type_modifier's own resistance set) -- a fire-resistant
+# character instead just takes real, reduced fire damage and walks
+# away, exactly matching Coffee's own "freezing... without frost or
+# ice resistences, over heating... with out fire resistences" framing
+# (the hazard checks the SAME real resistance system combat already
+# has, never a new one invented for this).
+_THEME_HAZARD_CHANCE = 0.12
+
+# L2e. Multi-switch puzzle -- a second, independent switch-gated reward
+# room on the SAME floor, requiring EVERY switch active at once
+# (bot.py's own `multi_switch_gate` kind, shared with the overworld
+# evolve pass).
+_MULTI_SWITCH_CHANCE = 0.25
+_SWITCH_ELEMENTS = ("fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical")
+
+# L2f. Mirror pairs -- a real, Labyrinth-scoped reading of ALTTP's
+# Light/Dark World idea: two rooms on the SAME floor, same connection
+# shape, deliberately inverted contents.
+_MIRROR_PAIR_CHANCE = 0.2
+
+# L3: a real CROSS-floor puzzle -- per Coffee: "intertwined with
+# puzzles in all levels... lets players work with their party to get
+# to the next level." Two switches, each on a DIFFERENT one of the
+# segment's first 4 floors, jointly gate one bonus room on the
+# checkpoint (5th) floor. Uses the exact same multi_switch_gate/
+# _SWITCH_STATE plumbing L2e already proved chat-scoped, not
+# room-scoped -- a switch flipped on floor 2 is visible to a gate on
+# floor 5 with no new mechanism at all.
+_CROSS_FLOOR_PUZZLE_CHANCE = 0.6
+
+# L3: "each level in the honeycomb being harder and each RNG being
+# harder" (Coffee, live) -- raw monster stats already strictly
+# increase with floor via bot.py's labyrinth_depth_multiplier, but the
+# GENERATION odds themselves stay flat at floor 1's values forever
+# without this: a floor 80 side room shouldn't roll hazards/monster
+# counts/modifiers at the exact same rate floor 1 does. Every rate
+# below grows linearly with floor and caps well short of certainty, so
+# early floors keep their original, already-tuned feel.
+def _scaled_chance(base: float, floor: int, per_floor: float, cap: float) -> float:
+    return min(base + per_floor * (floor - 1), cap)
+
+
+def _depth_weighted_modifier(floor: int, rng: random.Random) -> str | None:
+    if rng.random() >= _scaled_chance(_MODIFIER_CHANCE, floor, 0.004, 0.75):
+        return None
+    # Weights shift from flat (floor 1) toward "dangerous"/"frenzied"
+    # as depth grows -- deeper floors are more often the harsher
+    # modifiers, never exclusively (still real variety at any depth).
+    lean = min(0.01 * (floor - 1), 3.0)
+    weights = [1.0 + lean, 1.0, 1.0, 1.0 + lean]  # frenzied, lightless, bountiful, dangerous
+    return rng.choices(FLOOR_MODIFIERS, weights=weights, k=1)[0]
 
 
 def _labyrinth_monster_pool(campaign: dict) -> list[str]:
@@ -41,46 +292,366 @@ def _labyrinth_monster_pool(campaign: dict) -> list[str]:
     return _candidate_monsters(campaign, (0, 10_000), boss=False)
 
 
-def generate_floor(campaign: dict, floor: int, rng: random.Random) -> dict:
+def segment_number_for_floor(floor: int) -> int:
+    return (floor - 1) // SEGMENT_SIZE + 1
+
+
+def segment_start_floor(segment: int) -> int:
+    return (segment - 1) * SEGMENT_SIZE + 1
+
+
+def is_checkpoint_floor(floor: int) -> bool:
+    """The last floor of its segment -- the real safe waypoint (see _build_checkpoint_room)."""
+    return floor % SEGMENT_SIZE == 0
+
+
+def _hub_id(floor: int) -> str:
+    return f"f{floor}_hub"
+
+
+def _stairs_id(floor: int) -> str:
+    return f"f{floor}_stairs"
+
+
+def _checkpoint_id(floor: int) -> str:
+    return f"f{floor}_checkpoint"
+
+
+def _spiral_cells():
     """
-    Returns {"rooms": {room_id: {...}}, "hub_room_id": HUB_ROOM_ID,
-    "stairs_room_id": STAIRS_ROOM_ID}. No forced-clear gating -- the
-    stairs down are always reachable from the hub immediately, per
-    Coffee's explicit direction that depth must never be gated by
-    strength, only "willing and able to travel."
+    Yields (0, 0), then every integer cell at Chebyshev distance 1, then
+    distance 2, and so on, each ring ordered by angle -- a simple,
+    deterministic, collision-free way to place an arbitrary number of
+    rooms around a hub with no risk of ever running out of cells. Each
+    floor gets its OWN independent spiral (its own hub at its own
+    local (0, 0)) -- floors are real, separately-drawn maps (see
+    map_render.render_labyrinth_map's floor switcher), not one shared
+    coordinate space.
     """
-    pool = _labyrinth_monster_pool(campaign)
+    yield (0, 0)
+    radius = 1
+    while True:
+        ring = [
+            (x, y)
+            for x in range(-radius, radius + 1)
+            for y in range(-radius, radius + 1)
+            if max(abs(x), abs(y)) == radius
+        ]
+        ring.sort(key=lambda c: math.atan2(c[1], c[0]))
+        yield from ring
+        radius += 1
+
+
+def _assign_grid_positions(rooms: dict, hub_room_id: str) -> None:
+    """Hub at the origin, every other room on the SAME floor placed outward in a real, collision-free spiral -- insertion order gives a stable, reproducible layout for the same seed."""
+    spiral = _spiral_cells()
+    rooms[hub_room_id]["grid_position"] = {"x": 0, "y": 0}
+    next(spiral)
+    for room_id, room in rooms.items():
+        if room_id == hub_room_id:
+            continue
+        x, y = next(spiral)
+        room["grid_position"] = {"x": x, "y": y}
+
+
+def _milestone_item_for_floor(floor: int) -> str:
+    for lo, hi, item_id in _MILESTONE_ITEM_BANDS:
+        if lo <= floor <= hi:
+            return item_id
+    return _MILESTONE_ITEM_BANDS[-1][2]
+
+
+def _new_side_room(floor: int, hub_id: str, index: int, pool: list[str], modifier: str | None, rng: random.Random, theme: dict) -> dict:
+    room_id = f"f{floor}_r{index}"
+    monster_cap = min(2 + floor // 10, 5)  # depth-scaled RNG: floor 1-9 rolls 0-2, floor 40+ rolls 0-5
+    monsters = rng.sample(pool, k=min(rng.randint(0, monster_cap), len(pool))) if pool else []
+    # Real theme variety (2026-09-02, per Coffee): the room's own name
+    # and base description come from the segment's chosen theme's own
+    # real pool, cycled deterministically by index -- always suffixed
+    # with a real room number so names stay genuinely unique even once
+    # a deep floor's side-room count exceeds the theme's own name pool
+    # (real bug precedent: two identically-named mirror-pair rooms once
+    # made a typed destination genuinely ambiguous -- never repeat that).
+    room = {
+        "id": room_id, "floor": floor, "name": f"{theme['room_names'][index % len(theme['room_names'])]} {index + 1}",
+        "description": theme["room_flavor"],
+        "connections": [hub_id], "monsters": monsters, "modifier": modifier,
+    }
+    # L2d/L3: a visible hazard, honestly stated in the description
+    # itself. Checked in a fixed priority order, mutually exclusive
+    # (one hazard per room keeps the room text simple and keeps any
+    # single lethal trap always genuinely rare):
+    # 1. the segment's own theme-signature hazard (lava/acid/freezing/
+    #    overheating/arcing_current/drowning) -- real per-theme flavor.
+    # 2. the generic lethal pool (spike_pit/bottomless_pit).
+    # 3. the generic mundane pool (collapsing_floor/gas_vent).
+    theme_hazard = theme.get("signature_hazard") if rng.random() < 0.6 else theme.get("secondary_hazard", theme.get("signature_hazard"))
+    if theme_hazard and rng.random() < _scaled_chance(_THEME_HAZARD_CHANCE, floor, 0.0015, 0.35):
+        if theme_hazard != "drowning" or floor >= _BOTTOMLESS_PIT_MIN_FLOOR:
+            room["hazard"] = theme_hazard
+            room["description"] += " " + HAZARD_FLAVOR[theme_hazard]
+    if "hazard" not in room and rng.random() < _scaled_chance(_LETHAL_HAZARD_CHANCE, floor, 0.001, 0.18):
+        lethal_pool = [k for k in _LETHAL_HAZARD_KINDS if k != "bottomless_pit" or floor >= _BOTTOMLESS_PIT_MIN_FLOOR]
+        hazard = rng.choice(lethal_pool)
+        room["hazard"] = hazard
+        room["description"] += " " + HAZARD_FLAVOR[hazard]
+    elif "hazard" not in room and rng.random() < _scaled_chance(_HAZARD_CHANCE, floor, 0.003, 0.45):
+        hazard = rng.choice(_MUNDANE_HAZARD_KINDS)
+        room["hazard"] = hazard
+        room["description"] += " " + HAZARD_FLAVOR[hazard]
+    # Real chest, doubled loot/gold under a "bountiful" floor.
+    if rng.random() < 0.3:
+        bountiful = modifier == "bountiful"
+        room.setdefault("lockables", []).append({
+            "id": f"f{floor}_cache_{index}", "kind": "chest", "name": "a real, hastily-buried cache",
+            "loot": {"healing_potion": rng.randint(2, 4) if bountiful else rng.randint(1, 2)},
+            "gold": (rng.randint(20, 80) * floor) * (2 if bountiful else 1),
+        })
+    return room, room_id
+
+
+def _build_checkpoint_room(floor: int, hub_id: str, rng: random.Random, theme: dict) -> dict:
+    """
+    L3: the segment's own real safe waypoint (Coffee: "make this a safe
+    spot with a waypoint to fast travel to later on"). bot.py's
+    _resolve_labyrinth_checkpoint fires the actual one-time rewards
+    (full heal, full spell-slot refill, an ASI point, an achievement)
+    the first time a party arrives; this room's own data just marks it
+    `is_checkpoint` and gives it a real wandering-trader shop (the
+    exact same reusable NPC/shop dungeon_evolve.py's own Part B4
+    already authored for large overworld dungeons).
+    """
+    item_id = _milestone_item_for_floor(floor)
+    return {
+        "id": _checkpoint_id(floor), "floor": floor, "is_checkpoint": True,
+        "name": f"{theme['name']} -- A Waystation (Floor {floor})",
+        "description": theme["checkpoint_description"],
+        "connections": [hub_id], "monsters": [],
+        "npcs": ["wandering_dungeon_trader"], "shop": "wandering_traders_pack",
+        "lockables": [{
+            "id": f"f{floor}_checkpoint_cache", "kind": "chest", "name": "a real, heavily reinforced vault",
+            "loot": {item_id: 1}, "gold": rng.randint(100, 300) * floor,
+        }],
+    }
+
+
+def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[str] | None = None, theme: dict | None = None) -> dict:
+    """
+    Builds ONE floor's own rooms (hub + a stairs-or-checkpoint room +
+    side rooms + this floor's own single-floor extras: L2c's vault no
+    longer lives here -- see _build_checkpoint_room -- but L2e's
+    same-floor multi-switch and L2f's mirror pair still do). Returns
+    {"rooms": {...}, "hub_room_id": ..., "connector_room_id": ...,
+    "modifier": ..., "is_checkpoint": bool}. `connector_room_id` is a
+    plain "Stair Down" room for a non-checkpoint floor, or the real
+    checkpoint room for the segment's 5th floor -- generate_segment
+    below is what actually links `connector_room_id` onward to the
+    next floor (or, for a checkpoint, leaves it for bot.py's own
+    "go deeper" action to break the segment and build the next one).
+
+    `theme` (2026-09-02, Phase L3, per Coffee: "lots of themes and area
+    types... an alternate universe/another dimension"): one of
+    LABYRINTH_THEMES, normally chosen ONCE per segment by generate_
+    segment below and passed down to every one of its floors so a
+    whole 5-floor honeycomb reads as one coherent place. Defaults to a
+    real random pick only for direct/standalone calls (e.g. tests) --
+    generate_segment never relies on this default itself.
+    """
+    theme = theme or _pick_theme(rng)
+    pool = pool if pool is not None else _labyrinth_monster_pool(campaign)
     rooms: dict[str, dict] = {}
+    modifier = _depth_weighted_modifier(floor, rng)
+    checkpoint = is_checkpoint_floor(floor)
 
+    hub_id = _hub_id(floor)
     hub = {
-        "id": HUB_ROOM_ID, "name": f"Labyrinth -- Floor {floor}",
-        "description": "The paths here shift with every descent -- nothing about this floor existed a moment before you arrived.",
-        "connections": [STAIRS_ROOM_ID], "monsters": [],
+        "id": hub_id, "floor": floor, "name": f"{theme['name']} -- Floor {floor}",
+        "description": theme["hub_description"],
+        "connections": [], "monsters": [], "modifier": modifier,
     }
-    rooms[HUB_ROOM_ID] = hub
+    rooms[hub_id] = hub
 
-    stairs = {
-        "id": STAIRS_ROOM_ID, "name": "A Stair Down",
-        "description": "A real stairway, always open -- however far you've come, the way deeper never asks permission.",
-        "connections": [HUB_ROOM_ID], "monsters": [],
-    }
-    rooms[STAIRS_ROOM_ID] = stairs
-
-    num_side_rooms = rng.randint(*_SIDE_ROOM_COUNT_RANGE)
-    for i in range(num_side_rooms):
-        room_id = f"laby_r{i}"
-        monsters = rng.sample(pool, k=min(rng.randint(0, 2), len(pool))) if pool else []
-        room = {
-            "id": room_id, "name": f"Labyrinth -- Chamber {i + 1}",
-            "description": "A real chamber, same shape as the last, except for what's waiting in it.",
-            "connections": [HUB_ROOM_ID], "monsters": monsters,
+    if checkpoint:
+        connector = _build_checkpoint_room(floor, hub_id, rng, theme)
+    else:
+        connector = {
+            "id": _stairs_id(floor), "floor": floor, "name": "A Stair Down",
+            "description": "A real stairway, always open -- however far you've come, the way deeper never asks permission.",
+            "connections": [hub_id], "monsters": [], "modifier": modifier,
         }
-        if rng.random() < 0.3:
-            room.setdefault("lockables", []).append({
-                "id": f"laby_cache_{i}", "kind": "chest", "name": "a real, hastily-buried cache",
-                "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(20, 80) * floor,
-            })
+    hub["connections"].append(connector["id"])
+    rooms[connector["id"]] = connector
+
+    side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 15, 3)  # depth-scaled RNG: more chambers per floor, deeper in
+    num_side_rooms = rng.randint(_SIDE_ROOM_COUNT_RANGE[0], side_room_max)
+    room_ids = []
+    for i in range(num_side_rooms):
+        room, room_id = _new_side_room(floor, hub_id, i, pool, modifier, rng, theme)
         hub["connections"].append(room_id)
         rooms[room_id] = room
+        room_ids.append(room_id)
 
-    return {"rooms": rooms, "hub_room_id": HUB_ROOM_ID, "stairs_room_id": STAIRS_ROOM_ID}
+    # L2e: a second, independent switch-gated reward, requiring EVERY
+    # switch active at once -- deliberately placed in two side rooms
+    # that already exist, never the hub/connector.
+    if room_ids and len(room_ids) >= 2 and rng.random() < _scaled_chance(_MULTI_SWITCH_CHANCE, floor, 0.003, 0.6):
+        switch_room_ids = rng.sample(room_ids, 2)
+        switch_lockable_ids = []
+        for j, rid in enumerate(switch_room_ids):
+            element = rng.choice(_SWITCH_ELEMENTS)
+            switch_id = f"f{floor}_switch_{j}"
+            rooms[rid].setdefault("lockables", []).append({
+                "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+            })
+            switch_lockable_ids.append(switch_id)
+        gate_room_id = f"f{floor}_gate_reward"
+        gate_room = {
+            "id": gate_room_id, "floor": floor, "name": "Labyrinth -- A Sealed Archway",
+            "description": "The archway won't budge -- whatever opens it isn't here in this room.",
+            "connections": [hub_id], "monsters": [], "modifier": modifier,
+            "lockables": [{
+                "id": f"f{floor}_gate_cache", "kind": "chest", "name": "a real cache behind the archway",
+                "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
+            }],
+        }
+        rooms[gate_room_id] = gate_room
+        hub.setdefault("locked_connections", {})[gate_room_id] = f"f{floor}_multi_gate"
+        hub.setdefault("lockables", []).append({
+            "id": f"f{floor}_multi_gate", "kind": "multi_switch_gate", "name": "a real sealed archway",
+            "requires": switch_lockable_ids,
+        })
+
+    # L2f: a real mirror pair -- same connection shape (both are plain
+    # hub-adjacent side rooms already), deliberately inverted contents.
+    if pool and len(room_ids) >= 2 and rng.random() < _MIRROR_PAIR_CHANCE:
+        monster_room_id, chest_room_id = rng.sample(room_ids, 2)
+        strongest = max(pool, key=lambda mk: (campaign["monsters"].get(mk) or {}).get("hp_max", 0))
+        # Numbered so both stay thematically identical but are always
+        # individually nameable -- two rooms sharing the exact same
+        # name made a typed "go to A Mirrored Chamber" genuinely
+        # ambiguous (real bug, found live 2026-09-02).
+        monster_room = rooms[monster_room_id]
+        monster_room["monsters"] = [strongest]
+        monster_room["mirror_twin"] = chest_room_id
+        monster_room["name"] = "Labyrinth -- A Mirrored Chamber (I)"
+        monster_room["description"] = "This room feels like it's happening twice, somewhere else on this same floor."
+        chest_room = rooms[chest_room_id]
+        chest_room["monsters"] = []
+        chest_room["mirror_twin"] = monster_room_id
+        chest_room["name"] = "Labyrinth -- A Mirrored Chamber (II)"
+        chest_room["description"] = "This room feels like it's happening twice, somewhere else on this same floor."
+        chest_room["lockables"] = [{
+            "id": f"f{floor}_mirror_cache", "kind": "chest", "name": "an unguarded, matching cache",
+            "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
+        }]
+
+    _assign_grid_positions(rooms, hub_id)
+    return {
+        "rooms": rooms, "hub_room_id": hub_id, "connector_room_id": connector["id"],
+        "modifier": modifier, "is_checkpoint": checkpoint,
+    }
+
+
+def generate_segment(campaign: dict, segment: int, rng: random.Random) -> dict:
+    """
+    L3: builds SEGMENT_SIZE (5) real, interconnected floors at once --
+    the actual unit of persistence (db.labyrinth_runs' rooms_json holds
+    every room from every floor of the CURRENT live segment, all at
+    once, discarded together only when the party breaks the waypoint
+    at the checkpoint floor and moves on). Floor k's connector room
+    (a plain stairs room, floors 1-4) `descends_to` floor k+1's hub,
+    and floor k+1's hub `ascends_to` back to it -- real, walkable,
+    reusing the exact same field names the overworld's own multi-story
+    buildings already use, so bot.py's movement code barely has to
+    change to support it.
+
+    Returns {"rooms": {...every room, every floor...}, "entry_room_id":
+    <floor start's hub>, "checkpoint_room_id": <floor end's checkpoint>,
+    "segment": segment, "theme": <the one LABYRINTH_THEMES dict chosen
+    for every floor in this segment>}.
+    """
+    pool = _labyrinth_monster_pool(campaign)
+    start_floor = segment_start_floor(segment)
+    floors = list(range(start_floor, start_floor + SEGMENT_SIZE))
+    theme = _pick_theme(rng)
+
+    all_rooms: dict[str, dict] = {}
+    floor_data_by_floor: dict[int, dict] = {}
+    for floor in floors:
+        floor_data = generate_floor(campaign, floor, rng, pool=pool, theme=theme)
+        all_rooms.update(floor_data["rooms"])
+        floor_data_by_floor[floor] = floor_data
+
+    for floor in floors[:-1]:
+        this_connector = all_rooms[floor_data_by_floor[floor]["connector_room_id"]]
+        next_hub = all_rooms[floor_data_by_floor[floor + 1]["hub_room_id"]]
+        this_connector["descends_to"] = next_hub["id"]
+        next_hub["ascends_to"] = this_connector["id"]
+
+    # L3: a real cross-floor puzzle -- two switches, each on a
+    # DIFFERENT one of this segment's first 4 floors, jointly gate one
+    # bonus room on the checkpoint floor. Reuses the exact same
+    # multi_switch_gate kind/plumbing L2e already proved chat-scoped.
+    if len(floors) >= 3 and rng.random() < _CROSS_FLOOR_PUZZLE_CHANCE:
+        source_floors = rng.sample(floors[:-1], 2)
+        switch_lockable_ids = []
+        for j, floor in enumerate(source_floors):
+            side_room_ids = [
+                rid for rid, room in floor_data_by_floor[floor]["rooms"].items()
+                if room is not all_rooms[floor_data_by_floor[floor]["hub_room_id"]]
+                and room["id"] != floor_data_by_floor[floor]["connector_room_id"]
+            ]
+            if not side_room_ids:
+                continue
+            target_room = all_rooms[rng.choice(side_room_ids)]
+            element = rng.choice(_SWITCH_ELEMENTS)
+            switch_id = f"seg{segment}_switch_{j}"
+            target_room.setdefault("lockables", []).append({
+                "id": switch_id, "kind": "switch", "name": f"a distant {element} crystal, humming faintly", "element": element,
+            })
+            switch_lockable_ids.append(switch_id)
+        if len(switch_lockable_ids) == 2:
+            checkpoint_hub = all_rooms[floor_data_by_floor[floors[-1]]["hub_room_id"]]
+            gate_room_id = f"seg{segment}_gate_reward"
+            gate_room = {
+                "id": gate_room_id, "floor": floors[-1], "name": "Labyrinth -- A Waystation Vault",
+                "description": (
+                    "A second vault, sealed tight -- whatever opens it is scattered across the floors "
+                    "above, not in this room."
+                ),
+                "connections": [checkpoint_hub["id"]], "monsters": [],
+                "lockables": [{
+                    "id": f"seg{segment}_gate_cache", "kind": "chest", "name": "a real cache, shared by the whole party's effort",
+                    "loot": {"superior_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(200, 500) * floors[-1],
+                }],
+            }
+            # This room was added AFTER _assign_grid_positions already
+            # ran once per floor inside generate_floor -- give it a
+            # real, collision-free cell on the checkpoint floor's own
+            # local grid too, or map_render.render_labyrinth_map's
+            # {x, y} lookup crashes on this one room (real bug, caught
+            # by this file's own map test).
+            occupied = {
+                (r["grid_position"]["x"], r["grid_position"]["y"])
+                for r in floor_data_by_floor[floors[-1]]["rooms"].values()
+            }
+            spiral = _spiral_cells()
+            next(spiral)
+            for x, y in spiral:
+                if (x, y) not in occupied:
+                    gate_room["grid_position"] = {"x": x, "y": y}
+                    break
+            all_rooms[gate_room_id] = gate_room
+            checkpoint_hub.setdefault("locked_connections", {})[gate_room_id] = f"seg{segment}_multi_gate"
+            checkpoint_hub.setdefault("lockables", []).append({
+                "id": f"seg{segment}_multi_gate", "kind": "multi_switch_gate", "name": "a real, second sealed archway",
+                "requires": switch_lockable_ids,
+            })
+
+    return {
+        "rooms": all_rooms,
+        "entry_room_id": floor_data_by_floor[start_floor]["hub_room_id"],
+        "checkpoint_room_id": floor_data_by_floor[floors[-1]]["connector_room_id"],
+        "segment": segment,
+        "theme": theme,
+    }

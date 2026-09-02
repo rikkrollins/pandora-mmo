@@ -445,6 +445,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(uid, -999)
         self.assertIn("marens_locked_ledger", character.get("completed_quests") or [])
 
+    async def test_do_answer_puzzle_says_so_when_no_puzzle_is_active_at_all(self):
+        """
+        Real live bug (2026-09-02, Coffee: solved a riddle correctly
+        before, got the exact same rejection a wrong answer would when
+        trying it again -- root cause: the quest carrying that riddle
+        wasn't active anymore since he'd moved away from its location,
+        so there was nothing to check the answer against at all). A
+        correct-but-no-active-puzzle case and a genuinely wrong answer
+        to a real active puzzle must produce different messages.
+        """
+        uid, chat_id = 800303, -800303
+        make_basic_character(uid, "NoActivePuzzleTester", chat_id=chat_id, current_location="market_row")
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "an echo")
+        self.assertTrue(any("don't have an unsolved riddle" in s for s in sink))
+
+    async def test_do_answer_puzzle_still_says_think_it_over_for_a_real_wrong_answer(self):
+        """The original message is unchanged for the real case it was always meant for -- a genuinely active puzzle, genuinely wrong answer."""
+        uid, chat_id = 800304, -800304
+        make_basic_character(uid, "RealWrongAnswerTester", chat_id=chat_id, current_location="market_row")
+        db.accept_quest(uid, chat_id, "marens_locked_ledger")
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "a mountain")
+        self.assertTrue(any("think it over some more" in s for s in sink))
+        self.assertFalse(any("don't have an unsolved riddle" in s for s in sink))
+
     async def test_stray_space_slash_menu_still_opens_the_menu(self):
         """
         Real live bug (2026-08-11, topic-monitor report): a player typed
@@ -5106,6 +5132,77 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Location: Watcher's Walk", prompt)
         self.assertIn("MUST plainly name the real Location", prompt)
         self.assertIn("NEVER state or imply the actual answer", prompt)
+
+    def test_next_step_hint_fallback_stays_vague_for_a_puzzle(self):
+        """
+        Real live report (2026-09-02, Coffee, dev-bridge screenshot): a
+        player saw the literal riddle question in the "What's Next... A
+        Riddle" section. Root cause: the real Ollama call had failed
+        that time, falling back to a template that included
+        next_step["clue"] verbatim regardless of is_puzzle -- spilling
+        the riddle question the real narration call is instructed to
+        stay vague about, purely by accident of which path ran. The
+        fallback must now stay just as vague as real narration is meant
+        to be for a puzzle, and still show the real clue for the
+        ordinary non-puzzle case (where that was always the design).
+        """
+        import ai.dm_agent as dm_agent_module
+        from unittest.mock import patch
+        with patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("boom")):
+            puzzle_hint = dm_agent_module.narrate_next_step_hint({
+                "is_puzzle": True, "location_name": "The Sunken Archive",
+                "clue": "The words carved at the recess's edge read: \"I speak without a mouth...\"",
+            })
+            self.assertNotIn("recess's edge", puzzle_hint)
+            self.assertNotIn("mouth", puzzle_hint)
+
+            quest_hint = dm_agent_module.narrate_next_step_hint({
+                "is_puzzle": False, "location_name": "The Sunken Archive",
+                "clue": "Borin needs a favor.",
+            })
+            self.assertIn("Borin needs a favor.", quest_hint)
+
+    def test_next_step_hint_appends_location_and_quest_name_when_the_model_omits_them(self):
+        """
+        Real live report (2026-09-02, Coffee, dev-bridge screenshot): a
+        real (non-fallback) narrated puzzle hint came back as "The
+        enigmatic site whispers its truth through shadows" -- no
+        location named anywhere, despite the prompt's own explicit
+        "you MUST plainly name the real Location" instruction.
+        lfm2.5-thinking doesn't reliably follow that instruction every
+        time; _ensure_next_step_facts_present is a deterministic
+        backstop that appends the real location/quest name whenever the
+        model's own text doesn't already contain them, and is a no-op
+        when it does.
+        """
+        import ai.dm_agent as dm_agent_module
+        next_step = {"is_puzzle": True, "location_name": "The Sunken Archive", "quest_name": "The Archive's Recess", "clue": "riddle text"}
+        missing_both = dm_agent_module._ensure_next_step_facts_present(
+            "The enigmatic site whispers its truth through shadows.", next_step,
+        )
+        self.assertIn("The Sunken Archive", missing_both)
+        self.assertIn("The Archive's Recess", missing_both)
+
+        already_named = dm_agent_module._ensure_next_step_facts_present(
+            "At the Sunken Archive, whispers of The Archive's Recess linger in the dark.", next_step,
+        )
+        self.assertEqual(already_named, "At the Sunken Archive, whispers of The Archive's Recess linger in the dark.")
+
+    def test_next_step_hint_facts_include_the_real_quest_title(self):
+        """Phase L3, per Coffee: "should also mention the quest I either need or have" -- _next_step_hint_facts now grounds the AI narration in the quest's own real title field, not just location/clue. Same real setup as test_next_step_hint_surfaces_the_bridge_quest_once_its_arc_mates_are_done above, minus the puzzle quest itself, so it's the real next one."""
+        user_id = 999935
+        make_basic_character(user_id, "NextStepQuestNameTester", current_location="the_first_city")
+        for qid in (
+            "welcome_to_the_crossroads", "the_hollow_stump", "clear_the_warrens",
+            "the_wrong_color", "the_hush_stage1_signs", "the_hush_stage2_the_wisp",
+            "the_hush_stage3_the_unspoken", "first_city_arrival", "the_first_city_quest",
+        ):
+            db.complete_quest(user_id, -999, qid)
+        character = db.get_character(user_id, -999)
+        hint = bot._next_step_hint_facts(character)
+        self.assertIsNotNone(hint)
+        self.assertEqual(hint["quest_name"], "The Archive's Recess")
+        self.assertTrue(hint["is_puzzle"])
 
     def test_gathering_tools_stocked_at_marens_wares(self):
         shop = bot.CAMPAIGN["shops"]["marens_wares"]
@@ -32017,11 +32114,84 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
     bot.CAMPAIGN (not a synthetic fixture, unlike SwitchAndBreakableAnd
     PitTests above) since generate_floor draws from the real monster
     catalog and _labyrinth_unlocked checks a real monster_key.
+
+    Phase L3 (2026-09-02, per Coffee, live: "make floors persistent and
+    interconnected... 5 levels of honeycombing... the waypoints
+    break... generate a new one when characters choose to go further")
+    replaced L1/L2's single-floor-at-a-time model with real, persistent
+    5-floor segments -- most tests below were rewritten to match (a
+    "descend" no longer regenerates a brand new floor on every stairs
+    move; that's now real cross-floor movement via descends_to/
+    ascends_to within one live segment, and _do_descend_labyrinth is
+    reserved for breaking the waypoint at a segment's own checkpoint).
     """
 
     @classmethod
     def setUpClass(cls):
         use_test_db("tests/tmp/labyrinth_test.db")
+        # Real regression (2026-09-02, found running THIS class right
+        # after Phase L3's segment-flavor narration was wired in):
+        # _do_enter_labyrinth/_do_descend_labyrinth now fire a real,
+        # fire-and-forget Ollama call (narrate_labyrinth_segment_flavor,
+        # asyncio.create_task + asyncio.to_thread) on every new segment
+        # -- this class calls those two functions dozens of times.
+        # unittest.IsolatedAsyncioTestCase's per-test event loop
+        # teardown (asyncio.run's own default executor shutdown) BLOCKS
+        # on that background thread finishing, so every single test
+        # that enters/descends the Labyrinth silently turned into a
+        # real 46-200s live Ollama call (confirmed live: this Ollama
+        # instance IS actually running and reachable on this box, so it
+        # wasn't even a fast connection-refused). A class-wide patch,
+        # matching this file's own established "with patch(ai.dm_agent.
+        # requests.post, ...)" convention elsewhere, forces the real
+        # narration call to fail fast and fall back to the deterministic
+        # template instead -- this class's whole point is "no real
+        # Ollama calls," same contract FastRegressionTests already
+        # documents for itself.
+        from unittest.mock import patch
+        cls._ollama_patcher = patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("no Ollama in tests"))
+        cls._ollama_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._ollama_patcher.stop()
+
+    async def _walk_to_checkpoint(self, user_id: int, chat_id: int) -> dict:
+        """
+        Real, handler-driven walk from a fresh segment's entry floor
+        down through every connector to its checkpoint floor -- shared
+        by several tests below instead of each hand-rolling the same
+        descent. Phase L3's real hidden ambush countdown
+        (_maybe_trigger_labyrinth_ambush) can genuinely fire during any
+        of these moves (real, unseeded RNG, exactly as intended live)
+        -- rather than suppressing that real mechanic for test
+        convenience, an ambush encountered mid-walk is fought to a
+        real, clean resolution (same win-condition every other combat
+        test in this class already uses) before the walk continues.
+        """
+        import sessions
+        party_key = f"solo:{user_id}"
+        for _ in range(3 * labyrinth_module.SEGMENT_SIZE):
+            run = db.get_labyrinth_run(chat_id, party_key)
+            room = run["rooms"][run["current_room_id"]]
+            if room.get("is_checkpoint"):
+                return run
+            if room.get("descends_to"):
+                await bot._do_labyrinth_move(FakeUpdate(user_id, "go down", [], chat_id=chat_id), "go down")
+            else:
+                target_id = next(
+                    cid for cid in room.get("connections", [])
+                    if run["rooms"][cid].get("descends_to") or run["rooms"][cid].get("is_checkpoint")
+                )
+                target_name = run["rooms"][target_id]["name"]
+                await bot._do_labyrinth_move(FakeUpdate(user_id, target_name, [], chat_id=chat_id), target_name)
+            session = sessions.get_session_for_user(chat_id, user_id)
+            if session is not None:
+                for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+                    enemy["hp_current"] = 0
+                await bot._check_labyrinth_progress(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+                sessions.end_session(chat_id, session)
+        self.fail("never reached the checkpoint room")
 
     async def test_unlock_gate_blocks_without_the_boss_kill_allows_with_it(self):
         user_id, chat_id = 962001, -962001
@@ -32039,19 +32209,51 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, chat_id)
         self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
 
-    def test_generate_floor_produces_a_real_hub_stairs_and_reachable_side_rooms(self):
+    def test_generate_floor_produces_a_real_hub_connector_and_reachable_side_rooms(self):
         floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(7))
         rooms = floor_data["rooms"]
         self.assertIn(floor_data["hub_room_id"], rooms)
-        self.assertIn(floor_data["stairs_room_id"], rooms)
+        self.assertIn(floor_data["connector_room_id"], rooms)
+        self.assertFalse(floor_data["is_checkpoint"])
         hub = rooms[floor_data["hub_room_id"]]
-        self.assertIn(floor_data["stairs_room_id"], hub["connections"])
-        # Every side room is reachable from the hub, and reciprocally connects back.
+        self.assertIn(floor_data["connector_room_id"], hub["connections"])
         for room_id, room in rooms.items():
-            if room_id == floor_data["hub_room_id"]:
+            if room_id == floor_data["hub_room_id"] or room_id in hub.get("locked_connections", {}):
                 continue
             self.assertIn(floor_data["hub_room_id"], room["connections"])
             self.assertIn(room_id, hub["connections"])
+
+    def test_generate_segment_produces_five_real_interconnected_floors(self):
+        """Phase L3: the actual unit of persistence -- 5 real floors, all genuinely walkable from the entry hub down to the checkpoint via real descends_to/ascends_to edges."""
+        data = labyrinth_module.generate_segment(bot.CAMPAIGN, 1, random.Random(11))
+        rooms = data["rooms"]
+        floors = sorted({r["floor"] for r in rooms.values()})
+        self.assertEqual(floors, [1, 2, 3, 4, 5])
+        self.assertTrue(rooms[data["checkpoint_room_id"]]["is_checkpoint"])
+
+        # Real, walkable from the entry hub all the way to the checkpoint.
+        visited = set()
+        frontier = [data["entry_room_id"]]
+        while frontier:
+            rid = frontier.pop()
+            if rid in visited:
+                continue
+            visited.add(rid)
+            room = rooms[rid]
+            frontier.extend(room.get("connections", []))
+            frontier.extend(room.get("locked_connections", {}).keys())
+            if room.get("descends_to"):
+                frontier.append(room["descends_to"])
+            if room.get("ascends_to"):
+                frontier.append(room["ascends_to"])
+        self.assertIn(data["checkpoint_room_id"], visited)
+
+        # Bidirectional: floor 3's hub can climb back to floor 2's connector.
+        floor3_hub = next(r for r in rooms.values() if r["floor"] == 3 and r["id"].endswith("_hub"))
+        self.assertIn("ascends_to", floor3_hub)
+        back = rooms[floor3_hub["ascends_to"]]
+        self.assertEqual(back["floor"], 2)
+        self.assertEqual(back["descends_to"], floor3_hub["id"])
 
     def test_labyrinth_depth_multiplier_strictly_increases_monster_stats(self):
         floor1 = bot._build_labyrinth_enemy("goblin", 1, 0, 1)
@@ -32059,10 +32261,22 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(floor20["hp_max"], floor1["hp_max"])
         self.assertGreaterEqual(floor20["damage_bonus"], floor1["damage_bonus"])
 
-    async def test_enter_look_move_descend_leave_end_to_end(self):
+    def test_generation_odds_get_harder_with_depth(self):
+        """Phase L3, per Coffee live: "each level in the honeycomb being harder and each RNG being harder" -- generation odds themselves (not just raw stat scaling) must climb with floor, not stay flat at floor 1's tuning forever."""
+        shallow_hazards = 0
+        deep_hazards = 0
+        trials = 300
+        for seed in range(trials):
+            shallow = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(seed))
+            deep = labyrinth_module.generate_floor(bot.CAMPAIGN, 90, random.Random(seed))
+            shallow_hazards += sum(1 for r in shallow["rooms"].values() if r.get("hazard"))
+            deep_hazards += sum(1 for r in deep["rooms"].values() if r.get("hazard"))
+        self.assertGreater(deep_hazards, shallow_hazards)
+
+    async def test_enter_walk_checkpoint_deeper_leave_end_to_end(self):
         user_id, chat_id = 962002, -962002
-        make_basic_character(user_id, "LabyrinthFlowTester", chat_id=chat_id, current_location="the_colosseum")
-        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        make_basic_character(user_id, "LabyrinthFlowTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
 
         await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
         character = db.get_character(user_id, chat_id)
@@ -32072,23 +32286,68 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_labyrinth_look(FakeUpdate(user_id, "", sink, chat_id=chat_id))
         self.assertTrue(any("Floor 1" in s for s in sink))
 
-        # Moving onto the stairs room auto-descends in the same move -- no separate action needed.
-        sink2 = []
-        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to a stair down")
-        run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
-        self.assertEqual(run["floor"], 2)
-        self.assertEqual(run["current_room_id"], labyrinth_module.HUB_ROOM_ID)
-        self.assertTrue(any("Floor 2" in s for s in sink2))
-        character_after_descend = db.get_character(user_id, chat_id)
-        self.assertEqual(character_after_descend["labyrinth_best_floor"], 2)
+        run = await self._walk_to_checkpoint(user_id, chat_id)
+        self.assertEqual(run["floor"], 5)
+        character_at_checkpoint = db.get_character(user_id, chat_id)
+        self.assertEqual(character_at_checkpoint["labyrinth_best_floor"], 5)
+        self.assertEqual(character_at_checkpoint["labyrinth_checkpoint_floor"], 5)
 
-        sink4 = []
-        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", sink4, chat_id=chat_id))
+        sink2 = []
+        await bot._do_descend_labyrinth(FakeUpdate(user_id, "", sink2, chat_id=chat_id))
+        self.assertTrue(any("waypoint breaks" in s for s in sink2))
+        run_after = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        self.assertEqual(run_after["floor"], 6)
+        self.assertEqual(sorted({r["floor"] for r in run_after["rooms"].values()}), [6, 7, 8, 9, 10])
+
+        sink3 = []
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", sink3, chat_id=chat_id))
         self.assertIsNone(db.get_labyrinth_run(chat_id, f"solo:{user_id}"))
         character_after_leave = db.get_character(user_id, chat_id)
         self.assertEqual(character_after_leave["current_location"], "the_colosseum")
-        # Best floor is a permanent, never-decreasing stat -- still 2 after leaving.
-        self.assertEqual(character_after_leave["labyrinth_best_floor"], 2)
+        self.assertEqual(character_after_leave["labyrinth_best_floor"], 6)
+
+        # Re-entering resumes past the last CLEARED checkpoint (floor 5), never back at floor 1.
+        sink4 = []
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink4, chat_id=chat_id))
+        run_resumed = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        self.assertEqual(run_resumed["floor"], 6)
+
+    async def test_checkpoint_grants_full_heal_asi_skill_point_and_achievement_once_only(self):
+        user_id, chat_id = 962014, -962014
+        make_basic_character(user_id, "LabyrinthCheckpointTester", chat_id=chat_id, current_location="the_colosseum", hp_max=300)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=1, spell_slots_max=4, spell_slots_current=0, pending_asi_points=0, skill_points=0)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["hp_current"], 300)
+        self.assertEqual(character["spell_slots_current"], 4)
+        self.assertEqual(character["pending_asi_points"], 1)
+        self.assertEqual(character["skill_points"], 1)
+        self.assertEqual(character["labyrinth_checkpoint_floor"], 5)
+        self.assertIn("labyrinth_waystation_1", character.get("achievements") or [])
+
+        # Re-arriving at the same claimed checkpoint must NOT grant a second time.
+        db.update_character(user_id, chat_id, hp_current=1, pending_asi_points=0, skill_points=0)
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub_id = next(rid for rid, r in run["rooms"].items() if r["floor"] == 5 and rid.endswith("_hub"))
+        checkpoint_id = run["current_room_id"]
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=hub_id)
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", [], chat_id=chat_id), run["rooms"][checkpoint_id]["name"])
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["hp_current"], 1)
+        self.assertEqual(character_after["pending_asi_points"], 0)
+
+    async def test_go_deeper_is_refused_away_from_the_checkpoint_room(self):
+        user_id, chat_id = 962015, -962015
+        make_basic_character(user_id, "LabyrinthNoShortcutTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        sink = []
+        await bot._do_descend_labyrinth(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("waystation" in s for s in sink))
+        self.assertEqual(db.get_labyrinth_run(chat_id, f"solo:{user_id}")["floor"], 1)
 
     async def test_run_is_shared_across_party_members(self):
         leader_id, follower_id, chat_id = 962003, 962004, -962003
@@ -32102,7 +32361,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         follower_after_entry = db.get_character(follower_id, chat_id)
         self.assertEqual(follower_after_entry["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
 
-        await bot._do_labyrinth_move(FakeUpdate(leader_id, "", [], chat_id=chat_id), "go to a stair down")
+        run = db.get_labyrinth_run(chat_id, f"party:{party_id}")
+        hub = run["rooms"][run["current_room_id"]]
+        connector_name = run["rooms"][hub["connections"][0]]["name"]
+        await bot._do_labyrinth_move(FakeUpdate(leader_id, connector_name, [], chat_id=chat_id), connector_name)
+        await bot._do_labyrinth_move(FakeUpdate(leader_id, "go down", [], chat_id=chat_id), "go down")
         run_seen_by_leader = db.get_labyrinth_run(chat_id, f"party:{party_id}")
         run_seen_by_follower = db.get_labyrinth_run(chat_id, bot._labyrinth_party_key(follower_after_entry))
         self.assertEqual(run_seen_by_leader["current_room_id"], run_seen_by_follower["current_room_id"])
@@ -32111,8 +32374,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
     def test_run_survives_a_fresh_refetch_no_in_memory_state(self):
         """The run lives in the database (db.py's labyrinth_runs table), not sessions.py's in-memory model -- a fresh, independent read must see the exact same state."""
         chat_id, party_key = -962005, "solo:962005"
-        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(3))
-        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=3, current_room_id=floor_data["hub_room_id"], rooms=floor_data["rooms"])
+        segment_data = labyrinth_module.generate_segment(bot.CAMPAIGN, 1, random.Random(3))
+        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=3, current_room_id=segment_data["entry_room_id"], rooms=segment_data["rooms"])
         first_read = db.get_labyrinth_run(chat_id, party_key)
         second_read = db.get_labyrinth_run(chat_id, party_key)
         self.assertEqual(first_read["rooms"], second_read["rooms"])
@@ -32170,6 +32433,581 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(user_id, "look around", sink2, chat_id=chat_id), DummyContext(), {"action": "look"}, "look around",
         )
         self.assertTrue(any("Floor 1" in s for s in sink2))
+
+    async def test_map_action_is_allowed_and_dispatches_to_the_labyrinth_map_while_inside(self):
+        """Phase L2h dispatch wiring: show_map/visual_map are real, allowed exceptions to the blanket 'doesn't work this deep' refusal above."""
+        user_id, chat_id = 962016, -962016
+        make_basic_character(user_id, "LabyrinthMapDispatchTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "show me the map", sink, chat_id=chat_id), DummyContext(), {"action": "show_map"}, "show me the map",
+        )
+        self.assertTrue(any(s.startswith("<photo:") for s in sink))
+
+    async def test_labyrinth_switch_gate_blocks_and_admits_based_on_current_toggle_state(self):
+        """
+        Phase L2a (2026-09-02): the same real lockable/switch machinery
+        the overworld dungeons already use, wired into Labyrinth
+        movement for the first time -- generate_floor doesn't place any
+        lockables on a plain side room itself (that's L2e), so this
+        synthesizes one directly onto a real generated floor's hub,
+        exactly the shape a future generator pass would produce.
+        """
+        user_id, chat_id = 962008, -962008
+        make_basic_character(user_id, "LabyrinthSwitchTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub = rooms[run["current_room_id"]]
+        # hub["connections"][0] is always the floor's own connector room (stairs/checkpoint) -- pick a real side room instead.
+        gated_dest_id = hub["connections"][1]
+        hub["connections"].remove(gated_dest_id)
+        hub.setdefault("lockables", []).append({"id": "laby_switch_1", "kind": "switch", "name": "a real crystal", "element": "fire"})
+        hub.setdefault("locked_connections", {})[gated_dest_id] = "laby_switch_1"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        gated_dest_name = rooms[gated_dest_id]["name"]
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {gated_dest_name}")
+        run_after = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after["current_room_id"], run["current_room_id"])
+        self.assertTrue(any("blocked" in s for s in sink))
+
+    def test_labyrinth_dangerous_modifier_scales_enemies_higher_than_baseline(self):
+        """Phase L2b: "dangerous" is a real, extra flat bonus on top of depth alone, never baked into the base curve."""
+        baseline = bot._build_labyrinth_enemy("goblin", 5, 0, 1)
+        dangerous = bot._build_labyrinth_enemy("goblin", 5, 0, 1, modifier="dangerous")
+        self.assertGreater(dangerous["hp_max"], baseline["hp_max"])
+
+    def test_labyrinth_frenzied_modifier_sets_a_real_flag_enemy_ai_reads(self):
+        """Phase L2b: "frenzied" doesn't touch stat_mult at all -- it's a plain flag the live per-turn attack-count code reads directly (that scaling happens during real combat resolution, not at build time)."""
+        plain = bot._build_labyrinth_enemy("goblin", 1, 0, 1)
+        frenzied = bot._build_labyrinth_enemy("goblin", 1, 0, 1, modifier="frenzied")
+        self.assertFalse(plain["frenzied_floor"])
+        self.assertTrue(frenzied["frenzied_floor"])
+
+    async def test_labyrinth_lightless_modifier_hides_the_description_without_a_light_source(self):
+        """Phase L2b/L3: modifier now lives on the ROOM itself (a live segment holds 5 independently-rolled floors at once), reused directly by _has_light_source (not _location_is_dark, whose own layer=='underground' gating doesn't fit a per-floor modifier flag)."""
+        user_id, chat_id = 962009, -962009
+        make_basic_character(user_id, "LabyrinthLightlessTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["modifier"] = "lightless"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_look(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("too dark to see" in s for s in sink))
+
+        db.add_item(user_id, chat_id, "torch", 1)
+        sink2 = []
+        await bot._do_labyrinth_look(FakeUpdate(user_id, "", sink2, chat_id=chat_id))
+        self.assertFalse(any("too dark to see" in s for s in sink2))
+
+    def test_labyrinth_checkpoint_floor_places_a_real_guarded_waystation(self):
+        """Phase L2c/L3: the OLD standalone milestone vault is now the segment's own real checkpoint room (floor 5, 10, 15...) -- floors NOT divisible by SEGMENT_SIZE never get one."""
+        campaign = bot.CAMPAIGN
+        floor5 = labyrinth_module.generate_floor(campaign, 5, random.Random(1))
+        self.assertTrue(floor5["is_checkpoint"])
+        checkpoint = floor5["rooms"][floor5["connector_room_id"]]
+        self.assertTrue(checkpoint["is_checkpoint"])
+        item_id = next(iter(checkpoint["lockables"][0]["loot"]))
+        self.assertIsNotNone(items_module.get_item(item_id))
+        self.assertEqual(checkpoint["shop"], "wandering_traders_pack")
+
+        floor3 = labyrinth_module.generate_floor(campaign, 3, random.Random(1))
+        self.assertFalse(floor3["is_checkpoint"])
+
+    async def test_labyrinth_hazard_deals_real_damage_on_a_failed_save_once_only(self):
+        """Phase L2d: a real DC13 dex save, real depth-scaled damage on failure, and never re-triggers on a later visit to the same room this same floor."""
+        from unittest.mock import patch
+        user_id, chat_id = 962010, -962010
+        make_basic_character(user_id, "LabyrinthHazardTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        rooms[hazard_room_id]["hazard"] = "collapsing_floor"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        hazard_room_name = rooms[hazard_room_id]["name"]
+
+        with patch("bot.roll_d20", return_value=1):
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertLess(character_after["hp_current"], 200)
+        self.assertTrue(any("takes" in s and "damage" in s for s in sink))
+
+        # Move away and back -- the same hazard must not fire twice.
+        hp_after_first = character_after["hp_current"]
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=hub_id)
+        with patch("bot.roll_d20", return_value=1):
+            sink2 = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), f"go to {hazard_room_name}")
+        character_after2 = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after2["hp_current"], hp_after_first)
+        self.assertFalse(any("damage" in s for s in sink2))
+
+    async def test_spike_pit_hazard_kos_without_permanent_death(self):
+        """Phase L3, per Coffee: "spikes we can land on... KO" -- a failed save drops HP to 0 (the same real, recoverable unconscious state combat already uses), never is_dead."""
+        from unittest.mock import patch
+        user_id, chat_id = 962017, -962017
+        make_basic_character(user_id, "LabyrinthSpikeTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        rooms[hazard_room_id]["hazard"] = "spike_pit"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        hazard_room_name = rooms[hazard_room_id]["name"]
+
+        with patch("bot.roll_d20", return_value=1):
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["hp_current"], 0)
+        self.assertEqual(character_after.get("is_dead", 0), 0)
+        self.assertTrue(any("unconscious" in s for s in sink))
+
+    async def test_bottomless_pit_hazard_can_really_kill_via_the_same_death_save_odds(self):
+        """Phase L3, per Coffee: "pits with holes we can plunge to our death" -- a failed save runs the exact real rules.combat.resolve_death_save sequence a downed combatant already faces, not an unavoidable instant kill."""
+        from unittest.mock import patch
+        user_id, chat_id = 962018, -962018
+        make_basic_character(user_id, "LabyrinthPitDeathTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        rooms[hazard_room_id]["hazard"] = "bottomless_pit"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        hazard_room_name = rooms[hazard_room_id]["name"]
+
+        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=1):
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["hp_current"], 0)
+        self.assertEqual(character_after.get("is_dead"), 1)
+        self.assertTrue(any("doesn't come back" in s for s in sink))
+
+    async def test_bottomless_pit_hazard_can_also_leave_a_survivor_stabilized(self):
+        """Same real death-save odds -- three real successes stabilizes instead of killing, same as any other downed combatant."""
+        from unittest.mock import patch
+        user_id, chat_id = 962019, -962019
+        make_basic_character(user_id, "LabyrinthPitSurviveTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        rooms[hazard_room_id]["hazard"] = "bottomless_pit"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        hazard_room_name = rooms[hazard_room_id]["name"]
+
+        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=15):
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["hp_current"], 0)
+        self.assertEqual(character_after.get("is_dead", 0), 0)
+        self.assertTrue(any("breathing" in s for s in sink))
+
+    def test_bottomless_pit_never_appears_before_its_minimum_floor(self):
+        for seed in range(300):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(seed))
+            hazards = [r.get("hazard") for r in floor_data["rooms"].values()]
+            self.assertNotIn("bottomless_pit", hazards)
+
+    async def test_cross_floor_switches_can_gate_a_reward_on_the_checkpoint_floor(self):
+        """Phase L3, per Coffee: "intertwined with puzzles in all levels... lets players work with their party to get to the next level" -- two switches on two DIFFERENT floors jointly gate one bonus room on the checkpoint floor, reusing the same chat-scoped (never room-scoped) _SWITCH_STATE the single-floor version already proved works this way."""
+        campaign = bot.CAMPAIGN
+        found = None
+        for seed in range(200):
+            data = labyrinth_module.generate_segment(campaign, 1, random.Random(seed))
+            gate_rooms = [r for r in data["rooms"].values() if r["id"].startswith("seg1_gate_reward")]
+            if gate_rooms:
+                found = (data, gate_rooms[0])
+                break
+        self.assertIsNotNone(found, "expected at least one cross-floor puzzle across 200 real seeds")
+        data, gate_room = found
+        rooms = data["rooms"]
+        checkpoint_hub = next(r for r in rooms.values() if r["floor"] == 5 and r["id"].endswith("_hub"))
+        lockable = next(lk for lk in checkpoint_hub["lockables"] if lk["kind"] == "multi_switch_gate")
+        switch_floors = set()
+        for switch_id in lockable["requires"]:
+            for r in rooms.values():
+                if any(lk["id"] == switch_id for lk in r.get("lockables", [])):
+                    switch_floors.add(r["floor"])
+        self.assertEqual(len(switch_floors), 2)
+        self.assertNotIn(5, switch_floors, "the switches must live on EARLIER floors, not the checkpoint floor itself")
+
+        chat_id = -962020
+        block_message = bot._lockable_block_message(checkpoint_hub, gate_room["name"], lockable["id"], chat_id)
+        self.assertIsNotNone(block_message)
+        for switch_id in lockable["requires"]:
+            bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)[switch_id] = True
+        self.assertIsNone(bot._lockable_block_message(checkpoint_hub, gate_room["name"], lockable["id"], chat_id))
+
+    async def test_labyrinth_multi_switch_gate_requires_every_switch_active(self):
+        """Phase L2e: a second, independent gate requiring ALL listed switches active at once -- closes again if any single one is toggled back off."""
+        user_id, chat_id = 962011, -962011
+        make_basic_character(user_id, "LabyrinthMultiSwitchTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub = rooms[run["current_room_id"]]
+        gate_room_id = "laby_test_gate_room"
+        rooms[gate_room_id] = {"id": gate_room_id, "floor": 1, "name": "A Test Gate Room", "description": "A plain test room.", "connections": [hub["id"]], "monsters": []}
+        hub.setdefault("locked_connections", {})[gate_room_id] = "laby_multi_test"
+        hub.setdefault("lockables", []).append({
+            "id": "laby_multi_test", "kind": "multi_switch_gate", "name": "a test archway",
+            "requires": ["laby_sw_a", "laby_sw_b"],
+        })
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "go to A Test Gate Room")
+        self.assertTrue(any("blocked" in s for s in sink))
+
+        bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)["laby_sw_a"] = True
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to A Test Gate Room")
+        self.assertTrue(any("blocked" in s for s in sink2), "only one of two switches active -- must stay blocked")
+
+        bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)["laby_sw_b"] = True
+        sink3 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink3, chat_id=chat_id), "go to A Test Gate Room")
+        run_after = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after["current_room_id"], gate_room_id)
+
+    def test_labyrinth_mirror_pair_has_inverted_contents_and_distinct_names(self):
+        """Phase L2f: same connection shape, deliberately inverted contents -- one holds the floor's strongest monster, the other an unguarded matching chest. Real bug found testing this: identical names made the two genuinely unresolvable by a typed destination -- now numbered (I)/(II)."""
+        campaign = bot.CAMPAIGN
+        found = False
+        for seed in range(200):
+            fd = labyrinth_module.generate_floor(campaign, 3, random.Random(seed))
+            mirrors = [r for r in fd["rooms"].values() if "mirror_twin" in r]
+            if mirrors:
+                found = True
+                self.assertEqual(len(mirrors), 2)
+                names = {r["name"] for r in mirrors}
+                self.assertEqual(len(names), 2, "mirror twins must have distinct names")
+                monster_side = next(r for r in mirrors if r.get("monsters"))
+                chest_side = next(r for r in mirrors if not r.get("monsters"))
+                self.assertTrue(chest_side.get("lockables"))
+                self.assertEqual(monster_side["mirror_twin"], chest_side["id"])
+                self.assertEqual(chest_side["mirror_twin"], monster_side["id"])
+                break
+        self.assertTrue(found, "expected at least one mirror pair across 200 real seeds")
+
+    async def test_labyrinth_mirror_hint_reveals_on_defeating_the_monster_half(self):
+        """Phase L2f: defeating the monster half of a mirror pair reveals a one-time hint pointing at its twin, and clears the room's monster list so it isn't refightable forever (a real, separate pre-existing gap this closes for every Labyrinth room, not just mirrors)."""
+        import sessions
+        user_id, chat_id = 962012, -962012
+        make_basic_character(user_id, "LabyrinthMirrorHintTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        monster_room_id, twin_room_id = "laby_mirror_m", "laby_mirror_c"
+        hub_id = run["current_room_id"]
+        rooms[monster_room_id] = {"id": monster_room_id, "floor": 1, "name": "A Mirror (I)", "connections": [hub_id], "monsters": ["goblin"], "mirror_twin": twin_room_id}
+        rooms[twin_room_id] = {"id": twin_room_id, "floor": 1, "name": "A Mirror (II)", "connections": [hub_id], "monsters": [], "mirror_twin": monster_room_id}
+        rooms[hub_id]["connections"].append(monster_room_id)
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=monster_room_id)
+
+        sink = []
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", sink, chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session)
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+
+        sink2 = []
+        update = FakeUpdate(user_id, "", sink2, chat_id=chat_id)
+        await bot._check_labyrinth_progress(update, session)
+        run_after = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after["rooms"][monster_room_id]["monsters"], [])
+        self.assertTrue(any("A Mirror (II)" in s for s in sink2))
+        sessions.end_session(chat_id, session)
+
+    def test_enter_labyrinth_button_only_shows_once_unlocked(self):
+        """Phase L2g: same hardcoded-location precedent as the hollow_stump_shrine prayer button -- never shown before the real unlock condition is met, a real discoverable tap target once it is."""
+        colosseum = cl.get_location(bot.CAMPAIGN, "the_colosseum")
+        locked_character = {"defeated_monsters": []}
+        kb_locked = bot._look_action_keyboard(colosseum, [], 999999, locked_character)
+        locked_datas = [btn.callback_data for row in kb_locked.inline_keyboard for btn in row] if kb_locked else []
+        self.assertNotIn("lookact|labyrinth", locked_datas)
+
+        unlocked_character = {"defeated_monsters": ["colosseum_champion"]}
+        kb_unlocked = bot._look_action_keyboard(colosseum, [], 999999, unlocked_character)
+        unlocked_datas = [btn.callback_data for row in kb_unlocked.inline_keyboard for btn in row]
+        self.assertIn("lookact|labyrinth", unlocked_datas)
+
+    async def test_enter_labyrinth_button_callback_drives_the_real_handler(self):
+        """The callback dispatches through the exact same _do_enter_labyrinth free text already uses."""
+        user_id, chat_id = 962013, -962013
+        make_basic_character(user_id, "LabyrinthButtonTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        sink = []
+        query_update = FakeCallbackUpdate(user_id, "lookact|labyrinth", sink, chat_id=chat_id)
+        await bot.look_action_menu_callback(query_update, DummyContext())
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+    def test_achievements_screen_shows_real_labyrinth_progress(self):
+        """Phase L3, per Coffee: "under achievements you can list there progress in the labarythn"."""
+        character = {"achievements": [], "labyrinth_best_floor": 0, "labyrinth_checkpoint_floor": 0}
+        self.assertIsNone(bot._labyrinth_progress_line(character))
+        character2 = {"achievements": ["labyrinth_waystation_1"], "labyrinth_best_floor": 7, "labyrinth_checkpoint_floor": 5}
+        line = bot._labyrinth_progress_line(character2)
+        self.assertIn("7", line)
+        self.assertIn("5", line)
+
+    def test_render_labyrinth_map_produces_a_real_png_with_the_current_room_marked(self):
+        """Phase L2h: a lean, purpose-built renderer -- no network calls, no fog-of-war (a floor is fully revealed the moment it's generated)."""
+        import map_render
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(5))
+        rooms = floor_data["rooms"]
+        png_bytes = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"])
+        self.assertGreater(len(png_bytes), 100)
+        self.assertTrue(png_bytes.startswith(b"\x89PNG"))
+
+    async def test_map_intent_while_in_labyrinth_renders_the_real_current_segment(self):
+        user_id, chat_id = 962021, -962021
+        make_basic_character(user_id, "LabyrinthMapTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        sink = []
+        await bot._do_show_labyrinth_map(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any(s.startswith("<photo:") for s in sink))
+
+    async def test_checkpoint_shrine_pray_is_free_partial_offering_is_full_and_costs_spring_water(self):
+        """Phase L3, per Coffee: "we shud not be getting it each time we enter the location, but u can put a shrine there for us to pray or give an offering of spring water" -- the one-time arrival reward is separate from this real, repeatable shrine action."""
+        user_id, chat_id = 962022, -962022
+        make_basic_character(user_id, "LabyrinthShrineTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, spell_slots_max=4, spell_slots_current=0)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+
+        db.update_character(user_id, chat_id, hp_current=50)
+        sink = []
+        await bot._do_give_offering(FakeUpdate(user_id, "I pray", sink, chat_id=chat_id), "I pray")
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["hp_current"], 125)  # half of the 150 missing, free
+
+        sink2 = []
+        await bot._do_give_offering(FakeUpdate(user_id, "I offer spring water", sink2, chat_id=chat_id), "I offer spring water")
+        self.assertTrue(any("don't have any spring water" in s for s in sink2))
+
+        db.add_item(user_id, chat_id, "spring_water", 1)
+        await bot._do_give_offering(FakeUpdate(user_id, "I offer spring water", [], chat_id=chat_id), "I offer spring water")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["hp_current"], 200)
+        self.assertEqual(character_after["spell_slots_current"], 4)
+        self.assertEqual(character_after["inventory"].get("spring_water", 0), 0)
+
+    async def test_labyrinth_waypoint_appears_after_a_real_checkpoint_and_resumes_via_fast_travel(self):
+        """Phase L3, per Coffee: "add the way points/safe places to our waypoints so we can fast travel in and out" / "we need a way they can return"."""
+        user_id, chat_id = 962023, -962023
+        make_basic_character(user_id, "LabyrinthWaypointTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        character = db.get_character(user_id, chat_id)
+        kb = bot._waypoint_keyboard(character["visited_locations"], character["current_location"], character.get("labyrinth_checkpoint_floor", 0))
+        datas = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        self.assertIn("waypoint|labyrinth", datas)
+
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "warp to the labyrinth waystation", sink, chat_id=chat_id), "warp to the labyrinth waystation")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        self.assertEqual(run["floor"], 6)  # resumes past the cleared checkpoint, not back inside the discarded segment
+
+    def test_every_theme_signature_hazard_can_actually_be_generated(self):
+        """Phase L3, per Coffee: "themes shud have hazards for them" -- each theme's real signature_hazard/secondary_hazard shows up in real generated output across enough seeds."""
+        campaign = bot.CAMPAIGN
+        seen_by_theme = {t["id"]: set() for t in labyrinth_module.LABYRINTH_THEMES}
+        for seed in range(600):
+            floor_data = labyrinth_module.generate_floor(campaign, 20, random.Random(seed))
+            theme_id = None
+            for t in labyrinth_module.LABYRINTH_THEMES:
+                if floor_data["rooms"][floor_data["hub_room_id"]]["name"].startswith(t["name"]):
+                    theme_id = t["id"]
+                    break
+            for r in floor_data["rooms"].values():
+                if r.get("hazard"):
+                    seen_by_theme[theme_id].add(r["hazard"])
+        for theme in labyrinth_module.LABYRINTH_THEMES:
+            self.assertIn(theme["signature_hazard"], seen_by_theme[theme["id"]], theme["id"])
+
+    async def test_elemental_hazards_are_reduced_by_real_matching_resistance(self):
+        """Phase L3, per Coffee: "freezing... without frost or ice resistences, over heating... with out fire resistences" -- checks the SAME real equipped-gear/racial resistance system combat damage already uses, never a flat number."""
+        user_id, chat_id = 962024, -962024
+        make_basic_character(user_id, "LabyrinthResistTester", chat_id=chat_id, current_location="the_colosseum", hp_max=500)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=500, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub_id = run["current_room_id"]
+        rooms = run["rooms"]
+        rooms["test_freezing_a"] = {"id": "test_freezing_a", "floor": 1, "name": "Cold Room A", "description": "x", "connections": [hub_id], "monsters": [], "hazard": "freezing"}
+        rooms["test_freezing_b"] = {"id": "test_freezing_b", "floor": 1, "name": "Cold Room B", "description": "x", "connections": [hub_id], "monsters": [], "hazard": "freezing"}
+        rooms[hub_id]["connections"] += ["test_freezing_a", "test_freezing_b"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+
+        # Real cold-resistance source in this game: an equipped item's
+        # elemental_resistances (percent-based -- see items.py's
+        # "the_drowned_reflections_lens", 50% cold), the exact same
+        # field the character sheet's own resistance display reads.
+        cold_resist_item = next(
+            (iid for iid, data in items_module.ITEMS.items()
+             if any(e["damage_type"] == "cold" for e in data.get("elemental_resistances", []))), None,
+        )
+        self.assertIsNotNone(cold_resist_item, "expected at least one real item with cold elemental resistance")
+
+        from unittest.mock import patch
+        # Real damage is itself a random roll (roll_damage("2d6")) --
+        # comparing two INDEPENDENT live rolls is not a reliable way to
+        # prove resistance halves it (a real flaky failure found this
+        # way: a low unresisted roll can beat a high resisted one).
+        # Pinned to a fixed roll so only the resistance math itself varies.
+        with patch("bot.roll_d20", return_value=1), patch("bot.roll_damage", return_value={"total": 12}):
+            db.update_character(user_id, chat_id, hp_current=500)
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "Cold Room A", sink, chat_id=chat_id), "Cold Room A")
+            no_resist_damage = 500 - db.get_character(user_id, chat_id)["hp_current"]
+            self.assertGreater(no_resist_damage, 0)
+
+            db.update_labyrinth_run(chat_id, party_key, current_room_id=hub_id)
+            db.update_character(user_id, chat_id, hp_current=500)
+            db.add_item(user_id, chat_id, cold_resist_item, 1)
+            slot = items_module.get_item(cold_resist_item)["type"]
+            equip_field = {"armor": "equipped_armor", "shield": "equipped_shield", "weapon": "equipped_weapon"}.get(slot)
+            if equip_field:
+                db.update_character(user_id, chat_id, **{equip_field: cold_resist_item})
+            else:
+                db.update_character(user_id, chat_id, equipped_accessories=[cold_resist_item])
+            sink2 = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "Cold Room B", sink2, chat_id=chat_id), "Cold Room B")
+            resisted_damage = 500 - db.get_character(user_id, chat_id)["hp_current"]
+        self.assertLess(resisted_damage, no_resist_damage)
+
+    async def test_lava_hazard_is_survivable_with_fire_resistance_and_lethal_without(self):
+        """Phase L3, per Coffee: "lava... with out fire resistences" -- resistant is real, reduced damage; non-resistant runs the real death-save sequence. Real fire resistance in this game is racial (Dragonborn/Tiefling, races.py) -- reused directly rather than inventing a gear item that doesn't exist."""
+        from unittest.mock import patch
+        # Non-resistant: a real Human takes the real death-save path.
+        user_id, chat_id = 962025, -962025
+        make_basic_character(user_id, "LabyrinthLavaTester", chat_id=chat_id, current_location="the_colosseum", hp_max=500, race="Human")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=500, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub_id = run["current_room_id"]
+        rooms = run["rooms"]
+        rooms["test_lava"] = {"id": "test_lava", "floor": 1, "name": "Lava Room", "description": "x", "connections": [hub_id], "monsters": [], "hazard": "lava"}
+        rooms[hub_id]["connections"].append("test_lava")
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=1):
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "Lava Room", sink, chat_id=chat_id), "Lava Room")
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character.get("is_dead"), 1)
+
+        # Resistant: a real Dragonborn takes real, reduced fire damage and survives.
+        user_id2, chat_id2 = 962035, -962035
+        make_basic_character(user_id2, "LabyrinthLavaResistTester", chat_id=chat_id2, current_location="the_colosseum", hp_max=500, race="Dragonborn")
+        db.update_character(user_id2, chat_id2, defeated_monsters=["colosseum_champion"], hp_current=500, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id2, "", [], chat_id=chat_id2))
+        party_key2 = f"solo:{user_id2}"
+        run2 = db.get_labyrinth_run(chat_id2, party_key2)
+        hub_id2 = run2["current_room_id"]
+        rooms2 = run2["rooms"]
+        rooms2["test_lava"] = {"id": "test_lava", "floor": 1, "name": "Lava Room", "description": "x", "connections": [hub_id2], "monsters": [], "hazard": "lava"}
+        rooms2[hub_id2]["connections"].append("test_lava")
+        db.update_labyrinth_run(chat_id2, party_key2, rooms=rooms2)
+        with patch("bot.roll_d20", return_value=1):
+            sink2 = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id2, "Lava Room", sink2, chat_id=chat_id2), "Lava Room")
+        character2 = db.get_character(user_id2, chat_id2)
+        self.assertGreater(character2["hp_current"], 0)
+        self.assertEqual(character2.get("is_dead", 0), 0)
+
+    async def test_ambush_can_fire_mid_walk_and_is_a_real_auto_started_surprise_combat(self):
+        """Phase L3, per Coffee: "enemies spawning and attacking after so many RNG footsteps... like an ambush... it shud feel like a surprise... the battle shud execute automatically"."""
+        import sessions
+        user_id, chat_id = 962026, -962026
+        make_basic_character(user_id, "LabyrinthAmbushTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        db.update_labyrinth_run(chat_id, party_key, steps_until_encounter=1)
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        empty_room_id = next(
+            cid for cid in hub["connections"]
+            if not run["rooms"][cid].get("monsters") and not run["rooms"][cid].get("is_checkpoint") and not run["rooms"][cid].get("hazard")
+        )
+        target_name = run["rooms"][empty_room_id]["name"]
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, target_name, sink, chat_id=chat_id), target_name)
+        self.assertTrue(any("AMBUSH" in s for s in sink))
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session)
+        self.assertTrue(any(p.get("is_labyrinth_run") for p in session.participants))
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        sessions.end_session(chat_id, session)
+
+    async def test_ambush_never_fires_at_a_checkpoint_room(self):
+        """A checkpoint is meant to feel safe -- the hidden countdown must never spawn an ambush there."""
+        user_id, chat_id = 962027, -962027
+        make_basic_character(user_id, "LabyrinthAmbushSafeTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        party_key = f"solo:{user_id}"
+        db.create_labyrinth_run(
+            chat_id, party_key, floor=5, seed=1,
+            current_room_id="cp", rooms={"cp": {"id": "cp", "floor": 5, "name": "Checkpoint", "description": "x", "connections": [], "monsters": [], "is_checkpoint": True}},
+        )
+        run = db.update_labyrinth_run(chat_id, party_key, steps_until_encounter=1)
+        character = db.get_character(user_id, chat_id)
+        started = await bot._maybe_trigger_labyrinth_ambush(
+            FakeUpdate(user_id, "", [], chat_id=chat_id), character, run, run["rooms"]["cp"], chat_id, party_key,
+        )
+        self.assertFalse(started)
+
+    def test_labyrinth_antagonist_is_never_a_real_campaign_character(self):
+        """Phase L3, per Coffee: "don't use characters that are in the storyline, make sure they are separate from the actual game"."""
+        name = labyrinth_module.LABYRINTH_ANTAGONIST_NAME
+        for npc_data in bot.CAMPAIGN.get("npcs", {}).values():
+            self.assertNotIn(name.split()[-1], npc_data.get("name", ""))
+        for monster_data in bot.CAMPAIGN.get("monsters", {}).values():
+            self.assertNotIn(name.split()[-1], monster_data.get("name", ""))
+        for quest_data in bot.CAMPAIGN.get("quests", {}).values():
+            self.assertNotIn(name, quest_data.get("description", ""))
 
 
 if __name__ == "__main__":
