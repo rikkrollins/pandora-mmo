@@ -21047,19 +21047,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         exact same class of bug "fight" inside "Fighter" was already
         fixed for. Routed into _do_attack with no matching monster, it
         failed with the confusing, unrelated "No combat is active right
-        now." Fixed the same way: single-word attack_words entries now
-        check the real word set, not a raw substring -- "cast at"/"fire
-        at" (genuine two-word phrases) still use substring matching
-        since they can't be single words and don't collide with
-        anything real (confirmed via a scan of every real location/
-        interactable/monster/quest/item name in the game).
+        now."
+
+        First fix attempt used an exact word-set match and shipped as
+        v1.27.463 -- caught immediately after via this same file's own
+        "keep digging for more" pass: that broke real conjugated attack
+        verbs ("attacking", "hitting", "stabbing", "swinging",
+        "shooting"), which the OLD plain-substring check had always
+        matched correctly (e.g. "attack" is a literal prefix of
+        "attacking") and the new exact-set version silently stopped
+        matching at all -- a real regression never actually deployed
+        live (caught here, before the next ship). Fixed for real with a
+        `\bword\w*\b` regex: a real word BOUNDARY before the base word
+        (so "shoot" can never start matching mid-token, as in
+        "off-SHOOT") while `\w*` after it still freely absorbs a real
+        suffix. Confirmed via a real scan of all 846 real location/
+        interactable/monster/quest/item names in the game: zero false
+        positives.
         """
         self.assertEqual(_keyword_fallback("Look at the shallow offshoot", [])["action"], "examine")
         self.assertEqual(_keyword_fallback("Look at the offshoot", [])["action"], "examine")
         self.assertEqual(_keyword_fallback("Look closer", [])["action"], "examine")
-        # Real "shoot" attacks must still classify correctly.
+        # Real "shoot" attacks, including natural conjugations, must still classify correctly.
         self.assertEqual(_keyword_fallback("I shoot the goblin with my bow", [])["action"], "attack")
         self.assertEqual(_keyword_fallback("shoot the wolf", [])["action"], "attack")
+        for text in ["I am attacking the goblin", "I am hitting the goblin", "stabbing the goblin",
+                     "swinging at the goblin", "shooting the goblin"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "attack", text)
 
     def test_bare_rest_classifies_as_rest_without_misfiring_on_interest_or_arrest(self):
         """

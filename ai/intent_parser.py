@@ -1410,14 +1410,26 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # right now" -- utterly unrelated to what the player actually typed.
     # Root cause: attack_words' plain substring check matched "shoot"
     # inside "off-SHOOT", exactly the same class of bug "fight" inside
-    # "Fighter" was already fixed for right above (word-boundary set
-    # match, not substring). Single-word entries now check against the
-    # real word set; the two genuine multi-word phrases ("cast at",
-    # "fire at") stay substring-checked since a word-set can't hold them
-    # and they're specific enough to not collide with anything real.
+    # "Fighter" was already fixed for right above.
+    #
+    # First fix attempt used an exact word-SET match (fight_words), but
+    # that introduced a real regression caught before shipping further:
+    # "attacking"/"hitting"/"stabbing"/"swinging"/"shooting" (natural
+    # conjugated forms the OLD plain-substring check correctly matched,
+    # since e.g. "attack" is a literal prefix of "attacking") silently
+    # stopped classifying as attack at all. A `\bword\w*\b` regex is the
+    # real fix for both at once: it requires a real word BOUNDARY before
+    # the base word (so "shoot" can never match starting mid-token, as
+    # in "off-SHOOT"), while `\w*` after it still freely absorbs any
+    # real suffix ("-ing"/"-ed"/"-s"), so "attack" also matches
+    # "attacking" as its own real prefix -- exactly the two properties
+    # a plain substring check conflated into one (and got half of).
+    # Multi-word phrases ("cast at", "fire at") stay substring-checked,
+    # unaffected -- they were never part of either bug.
     attack_phrases = [w for w in attack_words if " " in w]
     attack_single_words = [w for w in attack_words if " " not in w]
-    if ((any(w in fight_words for w in attack_single_words) or any(p in lowered for p in attack_phrases))
+    _attack_word_pattern = r"\b(?:" + "|".join(attack_single_words) + r")\w*\b"
+    if ((re.search(_attack_word_pattern, lowered) or any(p in lowered for p in attack_phrases))
             and not any(c in lowered for c in conditional_words)):
         return {**base, "action": "attack"}
 

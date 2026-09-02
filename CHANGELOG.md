@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.465] — fix: a regression from the v1.27.463 "offshoot" fix
+
+Found proactively (this file's own "keep digging for more" pass, not
+a player report) right after v1.27.463 shipped: that fix's exact
+word-set match for `attack_words` stopped conjugated attack verbs
+("attacking", "hitting", "stabbing", "swinging", "shooting") from
+classifying as attack at all — the OLD plain-substring check had
+always matched those correctly (e.g. "attack" is a literal prefix of
+"attacking"), and the new exact-word-set version silently broke that
+while fixing the "offshoot" collision.
+
+Replaced with a `\bword\w*\b` regex: a real word boundary before the
+base word (so "shoot" can never start matching mid-token, as in
+"off-SHOOT") while `\w*` after it still freely absorbs a real suffix
+(so "shoot" also matches "shooting" as its own real prefix). Confirmed
+via a real scan of all 846 location/interactable/monster/quest/item
+names in the game: zero false positives.
+
 ## [1.27.464] — fix: fast travel could crash silently during a Telegram flood-control blip
 
 Found proactively via `scripts/check_error_log.py` (not a player
