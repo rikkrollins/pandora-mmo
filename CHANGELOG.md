@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.468] — content: a real uploaded animation for The Wrathflame Unbound's summon
+
+Real request (2026-09-02, Coffee, dev-bridge): sent a real video and
+asked to use it for The Wrathflame Unbound's summon attack. No code
+change needed — `_maybe_send_remnant_summon_animation` (built for The
+Root That Remembers, v1.27.442) already picks up any file dropped at
+`assets/remnant_summons/{remnant_id}.mp4` automatically. Added
+`assets/remnant_summons/the_wrathflame_unbound.mp4`; verified live
+(not just read) that summoning this Remnant now sends the real
+uploaded animation instead of the generated image. No restart needed —
+the file is checked fresh from disk on every summon.
+
 ## [1.27.467] — feature: a real Labyrinth entrance ritual + dungeon-entry callouts
 
 Per Coffee, live: a real confirmation before entering the Labyrinth,
