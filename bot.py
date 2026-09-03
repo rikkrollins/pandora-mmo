@@ -24720,8 +24720,21 @@ async def _do_show_labyrinth_map(update: Update, floor: int | None = None) -> No
             "Couldn't render the map right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
+    # Real live request (2026-09-03, Coffee: "if u are not going to use
+    # images for it put the name of the location in there so we can
+    # read it better") -- a real generated room name can be longer than
+    # a grid cell's own label ever fits (_fit_label_to_width truncates
+    # with "..."), so the full, untruncated name for every room the
+    # fog-of-war has actually revealed is also listed in plain text.
+    caption = f"🌀 The Labyrinth — Floor {target_floor}."
+    visited_names = [
+        f"{r['name']}{' (you are here)' if rid == current_room_id else ''}"
+        for rid, r in floor_rooms.items() if rid in visited_room_ids or rid == current_room_id
+    ]
+    if visited_names:
+        caption += "\n\n📍 Rooms explored so far:\n" + "\n".join(f"• {name}" for name in visited_names)
     await update.effective_chat.send_photo(
-        photo=png_bytes, caption=f"🌀 The Labyrinth -- Floor {target_floor}.",
+        photo=png_bytes, caption=caption,
         message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         reply_markup=_labyrinth_map_floor_keyboard(visited_floors, target_floor),
     )

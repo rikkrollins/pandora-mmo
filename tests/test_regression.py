@@ -33640,6 +33640,36 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_show_labyrinth_map(FakeUpdate(user_id, "", sink, chat_id=chat_id))
         self.assertTrue(any(s.startswith("<photo:") for s in sink))
 
+    async def test_labyrinth_map_caption_lists_real_untruncated_room_names(self):
+        """
+        Real live request (2026-09-03, Coffee: "if u are not going to
+        use images for it put the name of the location in there so we
+        can read it better") -- a generated room name can be longer
+        than a grid cell's own label ever fits (truncated with "..."
+        in the drawn image itself), so the full name of every room the
+        fog-of-war has actually revealed is also listed in plain,
+        untruncated text in the photo's caption.
+        """
+        user_id, chat_id = 962042, -962042
+        make_basic_character(user_id, "LabyrinthMapCaptionTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub_id = run["current_room_id"]
+        hub_name = run["rooms"][hub_id]["name"]
+
+        sink = []
+        await bot._do_show_labyrinth_map(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        combined = "\n".join(sink)
+        self.assertIn(hub_name, combined)
+        self.assertIn("you are here", combined)
+        self.assertIn("Rooms explored so far", combined)
+        # An unvisited side room's real name must NOT be spoiled in the caption -- fog-of-war applies to the text too, not just the image.
+        unvisited_side_room_id = next(rid for rid in run["rooms"] if rid.endswith("_r0"))
+        unvisited_name = run["rooms"][unvisited_side_room_id]["name"]
+        self.assertNotIn(unvisited_name, combined)
+
     async def test_checkpoint_shrine_pray_is_free_partial_offering_is_full_and_costs_spring_water(self):
         """Phase L3, per Coffee: "we shud not be getting it each time we enter the location, but u can put a shrine there for us to pray or give an offering of spring water" -- the one-time arrival reward is separate from this real, repeatable shrine action."""
         user_id, chat_id = 962022, -962022

@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.475] — feature: full, untruncated room names listed in the Labyrinth map's caption
+
+Real live request (Coffee: "if u are not going to use images for it
+put the name of the location in there so we can read it better"). A
+generated room name can be longer than a grid cell's own drawn label
+ever fits (truncated with "..." in the image itself) — the map's photo
+caption now also lists the full, untruncated name of every room the
+fog-of-war has actually revealed, with "(you are here)" marking the
+current one. Respects the same fog-of-war discipline as the image
+itself — an unvisited room's real name is never spoiled in the text
+either.
+
+New test; full 60-test LabyrinthTests suite passes across 3
+consecutive runs.
+
 ## [1.27.474] — feature: real fog-of-war on the Labyrinth map + fix: "Open map" (no article) misclassified
 
 Two changes, same session:
