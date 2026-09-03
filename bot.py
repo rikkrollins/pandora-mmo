@@ -24951,9 +24951,19 @@ async def _do_show_labyrinth_map(update: Update, floor: int | None = None) -> No
         for lockable in room.get("lockables", [])
         if lockable.get("kind") in ("switch", "multi_switch_gate")
     }
+    # Real "honeycomb" segment strip (2026-09-03, per Coffee's own
+    # earlier "5 levels of honeycombing" framing, dev-bridge: "I want
+    # our dungeons and labyrinth to have maps like this"). Every floor
+    # in the CURRENT segment is real and already generated up front
+    # (generate_segment builds all SEGMENT_SIZE at once) -- cheap to
+    # derive fresh here, no new storage needed.
+    segment_number = labyrinth_module.segment_number_for_floor(target_floor)
+    segment_start = labyrinth_module.segment_start_floor(segment_number)
+    segment_floors = list(range(segment_start, segment_start + labyrinth_module.SEGMENT_SIZE))
     try:
         png_bytes = await asyncio.to_thread(
-            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id, locked_room_ids, visited_room_ids, switch_states,
+            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id, locked_room_ids, visited_room_ids,
+            switch_states, segment_floors,
         )
     except Exception as e:
         logger.warning(f"[map_render] labyrinth map failed: {e!r}")

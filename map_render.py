@@ -651,6 +651,7 @@ def render_dungeon_map(
 # wholesale on the next descend. No network calls at all here.
 _LABYRINTH_ICON_COLORS = {
     "monster": (190, 60, 60),
+    "miniboss": (140, 20, 160),
     "chest": (200, 170, 60),
     "hazard": (200, 100, 20),
     "switch": (80, 160, 200),
@@ -672,6 +673,124 @@ _SWITCH_ELEMENT_COLORS = {
     "physical": (190, 190, 190),
 }
 _SWITCH_INACTIVE_COLOR = (75, 75, 80)
+_LOCKED_DOOR_COLOR = (200, 150, 40)
+_WALL_WIDTH = 4
+_DOOR_GAP_FRACTION = 0.4  # the middle 40% of a connected edge is left open
+_SEGMENT_STRIP_HEIGHT = 56
+_SEGMENT_BOX_SIZE = 34
+_SEGMENT_BOX_GAP = 22
+_SEGMENT_CHECKPOINT_COLOR = (200, 170, 60)
+
+
+def _draw_labyrinth_segment_strip(
+    draw: "ImageDraw.ImageDraw", canvas_width: int, top: int, segment_floors: list[int], current_floor: int,
+) -> None:
+    """
+    A small horizontal strip -- one box per real floor in this segment,
+    connected by plain lines -- showing where `current_floor` sits
+    within the whole 5-floor segment (see render_labyrinth_map's own
+    docstring for the real request and the confirmed-linear real
+    structure this represents honestly, not a fabricated web). The
+    LAST floor (the segment's real checkpoint/waystation) is drawn in
+    its own color -- a fact the tutorial already tells every player
+    about, never a spoiler.
+    """
+    n = len(segment_floors)
+    total_w = n * _SEGMENT_BOX_SIZE + (n - 1) * _SEGMENT_BOX_GAP
+    start_x = (canvas_width - total_w) / 2
+    cy = top + _SEGMENT_STRIP_HEIGHT / 2 - 8
+    box_font = _load_font(14, bold=True)
+    centers = []
+    for i, floor_num in enumerate(segment_floors):
+        bx = start_x + i * (_SEGMENT_BOX_SIZE + _SEGMENT_BOX_GAP)
+        centers.append(bx + _SEGMENT_BOX_SIZE / 2)
+    for i, floor_num in enumerate(segment_floors):
+        bx = start_x + i * (_SEGMENT_BOX_SIZE + _SEGMENT_BOX_GAP)
+        box = [bx, cy - _SEGMENT_BOX_SIZE / 2, bx + _SEGMENT_BOX_SIZE, cy + _SEGMENT_BOX_SIZE / 2]
+        if i > 0:
+            draw.line([(centers[i - 1] + _SEGMENT_BOX_SIZE / 2, cy), (centers[i] - _SEGMENT_BOX_SIZE / 2, cy)], fill=_LEGEND_COLOR, width=2)
+        is_current = floor_num == current_floor
+        is_checkpoint = i == n - 1
+        fill = _SEGMENT_CHECKPOINT_COLOR if is_checkpoint else _LABYRINTH_ROOM_FILL
+        outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
+        draw.rectangle(box, fill=fill, outline=outline, width=3 if is_current else 2)
+        label = str(floor_num)
+        lb = draw.textbbox((0, 0), label, font=box_font)
+        lw, lh = lb[2] - lb[0], lb[3] - lb[1]
+        text_color = (20, 20, 20) if is_checkpoint else _TITLE_COLOR
+        draw.text((bx + (_SEGMENT_BOX_SIZE - lw) / 2, cy - lh / 2 - lb[1]), label, font=box_font, fill=text_color)
+    caption_font = _load_font(11)
+    caption = "this segment's floors — gold box = waystation"
+    cap_bbox = draw.textbbox((0, 0), caption, font=caption_font)
+    draw.text(((canvas_width - (cap_bbox[2] - cap_bbox[0])) / 2, cy + _SEGMENT_BOX_SIZE / 2 + 6), caption, font=caption_font, fill=_LEGEND_COLOR)
+
+
+def _labyrinth_room_connections(room_id: str, rooms: dict) -> tuple[set[str], set[str]]:
+    """
+    Real live request (2026-09-03, Coffee, dev-bridge screenshot of a
+    real Zelda dungeon map: "research this map to understand how the
+    player would get from the beginning to the end... I want this
+    implementation built-in"). The Zelda reference draws an actual
+    open doorway where two rooms connect and a solid wall where they
+    don't -- our own map previously drew every room as an identical
+    closed box with no visual sense of which neighbors actually link
+    up, even though that's already real data (`connections`/`locked_
+    connections`). Returns (open_neighbor_ids, locked_neighbor_ids) for
+    `room_id`, checked from BOTH sides (a plain connection is always
+    declared mutually by generate_floor/generate_segment, but this is
+    defensive rather than assuming that invariant holds forever).
+    """
+    room = rooms[room_id]
+    open_ids = set(room.get("connections", []))
+    locked_ids = set(room.get("locked_connections", {}).keys())
+    for other_id, other in rooms.items():
+        if other_id == room_id:
+            continue
+        if room_id in other.get("connections", []):
+            open_ids.add(other_id)
+        if room_id in other.get("locked_connections", {}):
+            locked_ids.add(other_id)
+    return open_ids, locked_ids
+
+
+def _draw_labyrinth_room_walls(
+    draw: "ImageDraw.ImageDraw", px: int, py: int, cell_size: int,
+    room_id: str, rooms: dict, position: tuple[int, int], by_cell: dict, outline_color: tuple, outline_width: int,
+) -> None:
+    """
+    Draws each of a room's 4 edges individually instead of one plain
+    rectangle: a real open connection leaves a gap in the middle of
+    that edge (a doorway), a locked_connection draws that edge in a
+    distinct color (a real, visible gate), and no connection at all (or
+    no neighbor there) draws a plain solid wall -- see
+    _labyrinth_room_connections's own docstring for the real request
+    this answers. `position` is this room's own (x, y) grid coordinate;
+    `by_cell` maps (x, y) -> room_id for the whole floor, used to find
+    whichever neighbor (if any) actually sits on each side.
+    """
+    open_ids, locked_ids = _labyrinth_room_connections(room_id, rooms)
+    x, y = position
+    # (dx, dy) in grid space, and the two pixel-space corners of that edge.
+    edges = [
+        ((0, 1), (px, py), (px + cell_size, py)),                                   # north
+        ((0, -1), (px, py + cell_size), (px + cell_size, py + cell_size)),          # south
+        ((-1, 0), (px, py), (px, py + cell_size)),                                  # west
+        ((1, 0), (px + cell_size, py), (px + cell_size, py + cell_size)),           # east
+    ]
+    for (dx, dy), p1, p2 in edges:
+        neighbor_id = by_cell.get((x + dx, y + dy))
+        if neighbor_id is None:
+            draw.line([p1, p2], fill=outline_color, width=outline_width)
+            continue
+        if neighbor_id in locked_ids:
+            draw.line([p1, p2], fill=_LOCKED_DOOR_COLOR, width=outline_width + 1)
+        elif neighbor_id in open_ids:
+            mid1 = (p1[0] + (p2[0] - p1[0]) * (0.5 - _DOOR_GAP_FRACTION / 2), p1[1] + (p2[1] - p1[1]) * (0.5 - _DOOR_GAP_FRACTION / 2))
+            mid2 = (p1[0] + (p2[0] - p1[0]) * (0.5 + _DOOR_GAP_FRACTION / 2), p1[1] + (p2[1] - p1[1]) * (0.5 + _DOOR_GAP_FRACTION / 2))
+            draw.line([p1, mid1], fill=outline_color, width=outline_width)
+            draw.line([mid2, p2], fill=outline_color, width=outline_width)
+        else:
+            draw.line([p1, p2], fill=outline_color, width=outline_width)
 
 
 def _labyrinth_room_icons(room: dict, switch_states: dict[str, bool] | None = None) -> list[tuple[str, tuple]]:
@@ -686,7 +805,9 @@ def _labyrinth_room_icons(room: dict, switch_states: dict[str, bool] | None = No
     """
     switch_states = switch_states or {}
     icons = []
-    if room.get("monsters"):
+    if room.get("is_miniboss_room"):
+        icons.append(("miniboss", _LABYRINTH_ICON_COLORS["miniboss"]))
+    elif room.get("monsters"):
         icons.append(("monster", _LABYRINTH_ICON_COLORS["monster"]))
     if any(lk.get("kind") == "chest" for lk in room.get("lockables", [])):
         icons.append(("chest", _LABYRINTH_ICON_COLORS["chest"]))
@@ -704,12 +825,28 @@ def _labyrinth_room_icons(room: dict, switch_states: dict[str, bool] | None = No
 def render_labyrinth_map(
     floor: int, rooms: dict, current_room_id: str,
     locked_room_ids: set[str] | None = None, visited_room_ids: set[str] | None = None,
-    switch_states: dict[str, bool] | None = None,
+    switch_states: dict[str, bool] | None = None, segment_floors: list[int] | None = None,
 ) -> bytes:
     """
     rooms: a live run's own `rooms` dict verbatim, every entry already
     carrying a real `grid_position` (rules.labyrinth._assign_grid_
     positions).
+
+    segment_floors (2026-09-03, per Coffee, dev-bridge screenshot of a
+    real Zelda dungeon map: "I want our dungeons and labyrinth to have
+    maps like this" -- specifically referencing his own earlier "5
+    levels of honeycombing" framing, rules.labyrinth.py's own real term
+    for a segment). Every floor in the CURRENT segment (real, since
+    generate_segment builds all SEGMENT_SIZE floors together up front),
+    e.g. [1, 2, 3, 4, 5] or [16, 17, 18, 19, 20] -- drawn as a small
+    strip of numbered boxes under the title, the floor being viewed
+    highlighted, so the map conveys "you're on floor 3 of this 5-floor
+    segment" at a glance instead of showing one flat floor in total
+    isolation. `None` (the default) skips the strip entirely for any
+    caller not yet updated. The real cross-floor structure is a plain
+    linear chain (floor k's connector descends_to floor k+1's hub, see
+    generate_segment) -- never a real lattice -- so a simple connected
+    strip is an honest, not oversimplified, picture of it.
 
     switch_states (2026-09-03, per Coffee: "find appropriate emojis for
     the elemental colors... some kind of label colour or indication") --
@@ -749,7 +886,9 @@ def render_labyrinth_map(
     cols = max_x - min_x + 1
     grid_rows = max_y - min_y + 1
 
-    legend_lines = ["red outline = you are here"]
+    legend_lines = ["red outline = you are here", "gap in the wall = a real doorway, solid wall = no connection"]
+    if any(r.get("locked_connections") for r in rooms.values()):
+        legend_lines.append("gold wall = a locked/gated connection")
     if locked_room_ids & set(rooms.keys()):
         legend_lines.append("dashed outline = seen, not yet reachable")
     if visited_room_ids is not None and (set(rooms.keys()) - visited_room_ids):
@@ -757,9 +896,10 @@ def render_labyrinth_map(
     if any(lk.get("kind") in ("switch", "multi_switch_gate") for r in rooms.values() for lk in r.get("lockables", [])):
         legend_lines.append("switch dot color = its element, dim grey = inactive")
     legend_row_count = len(legend_lines) + 1
+    strip_height = _SEGMENT_STRIP_HEIGHT if segment_floors else 0
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
     height = min(
-        _MARGIN * 2 + _TITLE_HEIGHT + grid_rows * CELL_SIZE + legend_row_count * _LEGEND_LINE_HEIGHT + 10,
+        _MARGIN * 2 + _TITLE_HEIGHT + strip_height + grid_rows * CELL_SIZE + legend_row_count * _LEGEND_LINE_HEIGHT + 10,
         _MAX_CANVAS_HEIGHT,
     )
 
@@ -772,9 +912,12 @@ def render_labyrinth_map(
     title_bbox = draw.textbbox((0, 0), title, font=title_font)
     draw.text(((width - (title_bbox[2] - title_bbox[0])) / 2, 10), title, font=title_font, fill=_TITLE_COLOR)
 
+    if segment_floors:
+        _draw_labyrinth_segment_strip(draw, width, _MARGIN + _TITLE_HEIGHT, segment_floors, floor)
+
     name_font = _load_font(12, bold=True)
     by_cell = {pos: rid for rid, pos in positions.items()}
-    grid_top = _MARGIN + _TITLE_HEIGHT
+    grid_top = _MARGIN + _TITLE_HEIGHT + strip_height
     for gy in range(grid_rows):
         for gx in range(cols):
             x = min_x + gx
@@ -804,7 +947,9 @@ def render_labyrinth_map(
                 _draw_dashed_rect(draw, [px, py, px + CELL_SIZE, py + CELL_SIZE], _OTHER_FLOOR_OUTLINE)
             else:
                 outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
-                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=outline, width=4 if is_current else 2)
+                _draw_labyrinth_room_walls(
+                    draw, px, py, CELL_SIZE, room_id, rooms, (x, y), by_cell, outline, 4 if is_current else 2,
+                )
 
             # No emoji prefix here -- this server has no color-emoji
             # font (see this module's own established note above), so

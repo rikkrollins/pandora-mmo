@@ -2,6 +2,74 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.484] — feature: real Zelda-style branching dungeon topology + map redraw for the Labyrinth
+
+Real live request (Coffee, dev-bridge: 3 real Link's Awakening dungeon
+maps from Zelda Dungeon's own community mapthroughs — "the map you
+generated was very simple, nothing like a zelda type dungeon map...
+lets improve this with research" → "I want the levels to be more
+explorable, travelable with paths, puzzles, mini bosses... make an
+algorithm to accomplish this, implement it into... the generators").
+
+**Confirmed root cause via direct code read**: `rules/labyrinth.py`'s
+`generate_floor` was pure hub-and-spoke — every side room, and the
+stairs themselves, connected straight to the hub. A player could walk
+from the entrance to the exit in one hop, engaging zero real content —
+the opposite of every reference map studied, all of which showed real
+branching, key-gated side areas, and a mini-boss standing between the
+entrance and the exit.
+
+**Real research done before building anything** (see
+`project_zelda_dungeon_algorithm_research` memory for the full
+writeup): the 3 posted reference maps, external design-pattern
+research (ALTTP crystal switches, the small-key economy — reconfirmed
+out of scope per this project's own earlier decision — and Link's
+Awakening's owl-statue hints), and the academic/open-source Metazelda
+technique (rooms as graph nodes, keys/switches placed in an order
+that's solvable BY CONSTRUCTION, no retry loop) — which matches this
+module's own hard "must generate in well under a second" requirement.
+
+**The algorithm actually shipped** (`rules/labyrinth.py`):
+1. Real branching: the hub connects to 2-5 branch roots, each running
+   0-2 rooms deeper — a real path, not a single dead-end hop.
+2. The single longest branch becomes the main path to the real stairs
+   (reaching the exit now means walking through real rooms).
+3. A real mini-boss (a genuine, extra-scaled catalog monster, never
+   invented) can guard a room on the main path — reaching the stairs
+   can mean facing it.
+4. Branch-gating: a non-main branch can be sealed behind a switch
+   placed in a DIFFERENT, already-reachable, unlocked branch — reuses
+   the existing `multi_switch_gate` mechanism (confirmed, by direct
+   code read of `_lockable_is_open`, to be the one mechanism that
+   correctly checks a remote switch's state; a bare switch referenced
+   directly across rooms would silently never open).
+5. Grid placement switched from a topology-blind spiral to a real BFS
+   walk over the actual connection graph, so a branch stays visually
+   contiguous instead of scattering across unrelated cells.
+
+**The map redraw** (`map_render.py`): `render_labyrinth_map` now draws
+real per-edge doors — a gap in the wall for a genuine connection, a
+gold wall for a locked one, a plain solid wall for no connection —
+instead of every room being an identical closed box. A mini-boss room
+gets its own distinct map icon. A new "honeycomb" floor-strip (per
+Coffee's own earlier "5 levels of honeycombing" framing) shows where
+the current floor sits within its real 5-floor segment — confirmed via
+`generate_segment`'s own code to be a real linear chain, never a
+fabricated lattice.
+
+Fully backward-compatible: only affects newly-generated floors; any
+already-stored run renders and plays identically, since the new
+door/wall drawing reads whatever real `connections` data is already
+there regardless of which algorithm produced it.
+
+12 new/updated tests (real branching depth, mini-boss placement and
+path-guarding, gate solvability-by-construction, grid-position
+collision-freedom, real door/wall rendering, the honeycomb strip) plus
+4 existing tests fixed for the new topology (a couple of hard-coded
+"hub connects directly to the stairs" assumptions, and one real
+stalemate-race flake unrelated to this change but surfaced by it).
+Full 79-test LabyrinthTests suite passes in isolation.
+
 ## [1.27.483] — fix: recurring unprompted "That doesn't work this deep in the Labyrinth" message, one action later
 
 Real live report right after v1.27.482 deployed (Coffee: "no one is in

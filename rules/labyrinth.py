@@ -50,6 +50,28 @@ from rules.dungeon_evolve import _candidate_monsters
 
 _SIDE_ROOM_COUNT_RANGE = (3, 5)
 
+# Real Zelda-style branching topology (2026-09-03, per Coffee, dev-
+# bridge: 3 real Link's Awakening dungeon maps -- "I want the levels to
+# be more explorable, travelable with paths, puzzles, mini bosses...
+# make an algorithm to accomplish this"). Confirmed by direct code read
+# before this: generate_floor was PURE hub-and-spoke (every side room
+# AND the stairs connected straight to the hub) -- a player could walk
+# to the stairs in one hop, engaging zero real content, the opposite of
+# every real reference map studied (all three showed genuine branching,
+# key-gated side areas, and a mini-boss standing between the entrance
+# and the exit). Real external research (Metazelda, github.com/tcoxon/
+# metazelda, and the academic graph-based lock-and-key literature it's
+# cited in) confirms the actual technique: rooms are graph nodes, keys/
+# switches are placed in an order that's solvable BY CONSTRUCTION (a
+# lock is only ever wired to a switch that already exists in an
+# already-reachable, unlocked branch) -- no retry/audit loop needed,
+# matching this module's own hard "must run in well under a second"
+# requirement. See [[project_zelda_dungeon_algorithm_research]] for the
+# full research writeup.
+_BRANCH_DEPTH_WEIGHTS = ([0, 1, 2], [0.45, 0.35, 0.2])  # most branches stay shallow; a few run genuinely deep
+_BRANCH_GATE_CHANCE = 0.35
+_MINIBOSS_CHANCE = 0.3
+
 # L3: one segment = this many real, interconnected floors. Reuses the
 # exact number Phase L2c's milestone interval already used, per
 # Coffee's own "5 levels of honeycombing" framing -- the OLD milestone
@@ -373,15 +395,71 @@ def _spiral_cells():
 
 
 def _assign_grid_positions(rooms: dict, hub_room_id: str) -> None:
-    """Hub at the origin, every other room on the SAME floor placed outward in a real, collision-free spiral -- insertion order gives a stable, reproducible layout for the same seed."""
-    spiral = _spiral_cells()
+    """
+    Hub at the origin; every other room placed by a real BFS walk over
+    its ACTUAL connections/locked_connections graph, one cardinal step
+    (N/S/E/W) from its real parent whenever a free cell is available.
+
+    Real fix (2026-09-03, alongside the branching-topology algorithm
+    above): the old version placed rooms in a blind Chebyshev spiral,
+    completely ignorant of which rooms actually connect to which --
+    fine for the OLD pure hub-and-spoke shape (every room was hub-
+    adjacent anyway, so the exact cell barely mattered), but wrong now
+    that real branches run several rooms deep. A child room could land
+    anywhere on the spiral regardless of its real parent, so map_render.
+    render_labyrinth_map's new per-edge door/wall drawing (a gap where
+    two rooms are ACTUALLY connected) would show doors leading nowhere
+    sensible. BFS placement keeps a branch visually contiguous, the way
+    every real reference map studied actually reads.
+    """
     rooms[hub_room_id]["grid_position"] = {"x": 0, "y": 0}
-    next(spiral)
-    for room_id, room in rooms.items():
-        if room_id == hub_room_id:
-            continue
-        x, y = next(spiral)
-        room["grid_position"] = {"x": x, "y": y}
+    occupied = {(0, 0): hub_room_id}
+    visited = {hub_room_id}
+    queue = [hub_room_id]
+    directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    while queue:
+        current_id = queue.pop(0)
+        cx, cy = rooms[current_id]["grid_position"]["x"], rooms[current_id]["grid_position"]["y"]
+        neighbor_ids = list(rooms[current_id].get("connections", [])) + list(rooms[current_id].get("locked_connections", {}).keys())
+        for neighbor_id in neighbor_ids:
+            if neighbor_id in visited or neighbor_id not in rooms:
+                continue
+            placed = False
+            for dx, dy in directions:
+                if (cx + dx, cy + dy) not in occupied:
+                    rooms[neighbor_id]["grid_position"] = {"x": cx + dx, "y": cy + dy}
+                    occupied[(cx + dx, cy + dy)] = neighbor_id
+                    placed = True
+                    break
+            if not placed:
+                # Every cardinal neighbor of the real parent is already
+                # taken (a tight loop back near the hub) -- fall back to
+                # the nearest free cell outward from the parent, same
+                # spiral search the old placement used globally, just
+                # centered on this specific room instead of the origin.
+                for dx, dy in _spiral_cells():
+                    if (cx + dx, cy + dy) not in occupied:
+                        rooms[neighbor_id]["grid_position"] = {"x": cx + dx, "y": cy + dy}
+                        occupied[(cx + dx, cy + dy)] = neighbor_id
+                        break
+            visited.add(neighbor_id)
+            queue.append(neighbor_id)
+
+    # Defensive: any room genuinely unreachable from the hub via a real
+    # connection (should never happen by construction, but a floor with
+    # a real bug elsewhere must still render instead of crashing) gets
+    # placed on the outer spiral rather than silently missing a
+    # grid_position (map_render.render_labyrinth_map would KeyError).
+    remaining = [rid for rid in rooms if rid not in visited]
+    if remaining:
+        spiral = _spiral_cells()
+        for x, y in spiral:
+            if not remaining:
+                break
+            if (x, y) not in occupied:
+                rid = remaining.pop(0)
+                rooms[rid]["grid_position"] = {"x": x, "y": y}
+                occupied[(x, y)] = rid
 
 
 def _milestone_item_for_floor(floor: int) -> str:
@@ -507,25 +585,108 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     }
     rooms[hub_id] = hub
 
+    # Real branching (2026-09-03, see _BRANCH_DEPTH_WEIGHTS' own module-
+    # level docstring for the full research this replaces): each branch
+    # ROOT still connects straight to the hub (unchanged shape, so the
+    # existing L2e multi-switch/L2f mirror-pair features below -- which
+    # both key off `room_ids`, the flat hub-adjacent set -- keep working
+    # exactly as before), but a branch can now run 0-2 rooms DEEPER, a
+    # real path rather than a single dead-end hop.
+    side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 15, 3)  # depth-scaled RNG: more chambers per floor, deeper in
+    num_branch_roots = rng.randint(_SIDE_ROOM_COUNT_RANGE[0], side_room_max)
+    room_ids = []
+    branch_chains = []
+    next_index = 0
+    for _ in range(num_branch_roots):
+        room, room_id = _new_side_room(floor, hub_id, next_index, pool, modifier, rng, theme)
+        next_index += 1
+        hub["connections"].append(room_id)
+        rooms[room_id] = room
+        room_ids.append(room_id)
+        chain = [room_id]
+        depth = rng.choices(*_BRANCH_DEPTH_WEIGHTS)[0]
+        parent_id = room_id
+        for _ in range(depth):
+            # _new_side_room's own 2nd positional param is only ever used
+            # to set "connections": [that_id] -- passing the real parent
+            # (not hub_id) is what actually builds a genuine deeper path.
+            deep_room, deep_room_id = _new_side_room(floor, parent_id, next_index, pool, modifier, rng, theme)
+            next_index += 1
+            rooms[parent_id]["connections"].append(deep_room_id)
+            rooms[deep_room_id] = deep_room
+            chain.append(deep_room_id)
+            parent_id = deep_room_id
+        branch_chains.append(chain)
+
+    # The main path: the single longest branch leads to the real stairs
+    # (Metazelda/every reference map's own shape -- real content sits
+    # BETWEEN the entrance and the exit, never a direct hop). Ties break
+    # on the first-generated branch, so the same seed always reproduces
+    # the same layout.
+    main_chain = max(branch_chains, key=len)
+    main_path_end = main_chain[-1]
+
     if checkpoint:
-        connector = _build_checkpoint_room(floor, hub_id, rng, theme)
+        connector = _build_checkpoint_room(floor, main_path_end, rng, theme)
     else:
         connector = {
             "id": _stairs_id(floor), "floor": floor, "name": "A Stair Down",
             "description": "A real stairway, always open -- however far you've come, the way deeper never asks permission.",
-            "connections": [hub_id], "monsters": [], "modifier": modifier,
+            "connections": [main_path_end], "monsters": [], "modifier": modifier,
         }
-    hub["connections"].append(connector["id"])
+    rooms[main_path_end]["connections"].append(connector["id"])
     rooms[connector["id"]] = connector
 
-    side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 15, 3)  # depth-scaled RNG: more chambers per floor, deeper in
-    num_side_rooms = rng.randint(_SIDE_ROOM_COUNT_RANGE[0], side_room_max)
-    room_ids = []
-    for i in range(num_side_rooms):
-        room, room_id = _new_side_room(floor, hub_id, i, pool, modifier, rng, theme)
-        hub["connections"].append(room_id)
-        rooms[room_id] = room
-        room_ids.append(room_id)
+    # A real mini-boss guarding the way to the stairs -- always on the
+    # MAIN path, never a side branch, so reaching the exit means facing
+    # it (every reference map studied placed at least one mini-boss
+    # partway along the real critical path, not tucked in an optional
+    # room). Still a real catalog monster from this floor's own pool,
+    # just alone in its room and flagged for narration/map-icon use --
+    # never an invented enemy.
+    miniboss_candidates = [rid for rid in main_chain if pool]
+    if miniboss_candidates and rng.random() < _scaled_chance(_MINIBOSS_CHANCE, floor, 0.002, 0.6):
+        miniboss_room_id = rng.choice(miniboss_candidates)
+        strongest = max(pool, key=lambda mk: (campaign["monsters"].get(mk) or {}).get("hp_max", 0))
+        rooms[miniboss_room_id]["monsters"] = [strongest]
+        rooms[miniboss_room_id]["is_miniboss_room"] = True
+        rooms[miniboss_room_id]["description"] += " Something far stronger than the rest of this floor is waiting here."
+
+    # Real branch-gating, guaranteed solvable BY CONSTRUCTION (Metazelda's
+    # own real technique, see the module-level research note above): a
+    # non-main branch can be sealed behind a switch placed in a
+    # DIFFERENT, already-generated, unlocked branch. Reuses the exact
+    # `multi_switch_gate` mechanism L2e already ships (a single required
+    # switch here, not two) rather than a bare `switch` referenced
+    # directly by `locked_connections` -- confirmed by direct code read
+    # of bot.py's own `_lockable_is_open` that a bare switch is only
+    # ever checked against the SAME room's own `lockables`, so a truly
+    # remote single-switch gate would silently never open; multi_switch_
+    # gate's own `requires` list is the one real mechanism that checks
+    # `_SWITCH_STATE` globally by id regardless of which room the switch
+    # itself lives in, and it's already proven safe by L2e/generate_
+    # segment's own cross-floor puzzle.
+    other_chains = [c for c in branch_chains if c is not main_chain]
+    if len(other_chains) >= 2 and rng.random() < _scaled_chance(_BRANCH_GATE_CHANCE, floor, 0.002, 0.55):
+        gated_chain, switch_chain = rng.sample(other_chains, 2)
+        gate_room_id = gated_chain[0]
+        switch_room_id = switch_chain[0]
+        element = rng.choice(_SWITCH_ELEMENTS)
+        switch_id = f"f{floor}_branchswitch"
+        rooms[switch_room_id].setdefault("lockables", []).append({
+            "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+        })
+        hub["connections"].remove(gate_room_id)
+        hub.setdefault("locked_connections", {})[gate_room_id] = f"f{floor}_branchgate"
+        hub.setdefault("lockables", []).append({
+            "id": f"f{floor}_branchgate", "kind": "multi_switch_gate", "name": "a real sealed archway",
+            "requires": [switch_id],
+        })
+        rooms[gate_room_id]["description"] += " A real elemental ward seals this path -- something elsewhere on this floor must open it."
+        # L2e/L2f below both pick freely from `room_ids` -- excluding the
+        # room this pass just locked keeps them from compounding an
+        # unrelated puzzle onto a room the party can't reach yet.
+        room_ids = [rid for rid in room_ids if rid != gate_room_id]
 
     # L2e: a second, independent switch-gated reward, requiring EVERY
     # switch active at once -- deliberately placed in two side rooms

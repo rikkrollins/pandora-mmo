@@ -32702,10 +32702,20 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         convenience, an ambush encountered mid-walk is fought to a
         real, clean resolution (same win-condition every other combat
         test in this class already uses) before the walk continues.
+
+        Real branching topology (2026-09-03): the connector/checkpoint
+        room no longer sits directly off the hub -- it's at the end of
+        this floor's real main path, which can now be several rooms
+        deep. A single-hop "is my neighbor the connector?" lookup (the
+        old shape, when hub always connected straight to the stairs) no
+        longer finds it; this does a real BFS over the floor's actual
+        `connections` graph and walks one real hop at a time toward
+        whichever room the path says is next.
         """
         import sessions
+        from collections import deque
         party_key = f"solo:{user_id}"
-        for _ in range(3 * labyrinth_module.SEGMENT_SIZE):
+        for _ in range(10 * labyrinth_module.SEGMENT_SIZE):
             run = db.get_labyrinth_run(chat_id, party_key)
             room = run["rooms"][run["current_room_id"]]
             if room.get("is_checkpoint"):
@@ -32713,11 +32723,25 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             if room.get("descends_to"):
                 await bot._do_labyrinth_move(FakeUpdate(user_id, "go down", [], chat_id=chat_id), "go down")
             else:
-                target_id = next(
-                    cid for cid in room.get("connections", [])
-                    if run["rooms"][cid].get("descends_to") or run["rooms"][cid].get("is_checkpoint")
-                )
-                target_name = run["rooms"][target_id]["name"]
+                start = run["current_room_id"]
+                came_from = {start: None}
+                queue = deque([start])
+                target_id = None
+                while queue:
+                    cur = queue.popleft()
+                    cur_room = run["rooms"][cur]
+                    if cur != start and (cur_room.get("descends_to") or cur_room.get("is_checkpoint")):
+                        target_id = cur
+                        break
+                    for nb in cur_room.get("connections", []):
+                        if nb not in came_from and nb in run["rooms"]:
+                            came_from[nb] = cur
+                            queue.append(nb)
+                self.assertIsNotNone(target_id, "no real path to the connector/checkpoint room")
+                next_hop = target_id
+                while came_from[next_hop] != start:
+                    next_hop = came_from[next_hop]
+                target_name = run["rooms"][next_hop]["name"]
                 await bot._do_labyrinth_move(FakeUpdate(user_id, target_name, [], chat_id=chat_id), target_name)
             session = sessions.get_session_for_user(chat_id, user_id)
             if session is not None:
@@ -32744,18 +32768,31 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
 
     def test_generate_floor_produces_a_real_hub_connector_and_reachable_side_rooms(self):
+        """
+        Real branching topology (2026-09-03, per Coffee's own Zelda-
+        dungeon research request): the connector/stairs room sits at
+        the end of the floor's real main path now, not necessarily
+        hub-adjacent, and a side branch can run several rooms deep --
+        the real invariant is "everything is REACHABLE from the hub via
+        the real connection graph," not "everything is one hop away."
+        """
         floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(7))
         rooms = floor_data["rooms"]
         self.assertIn(floor_data["hub_room_id"], rooms)
         self.assertIn(floor_data["connector_room_id"], rooms)
         self.assertFalse(floor_data["is_checkpoint"])
-        hub = rooms[floor_data["hub_room_id"]]
-        self.assertIn(floor_data["connector_room_id"], hub["connections"])
-        for room_id, room in rooms.items():
-            if room_id == floor_data["hub_room_id"] or room_id in hub.get("locked_connections", {}):
-                continue
-            self.assertIn(floor_data["hub_room_id"], room["connections"])
-            self.assertIn(room_id, hub["connections"])
+
+        visited = {floor_data["hub_room_id"]}
+        frontier = [floor_data["hub_room_id"]]
+        while frontier:
+            current_id = frontier.pop()
+            current = rooms[current_id]
+            for neighbor_id in list(current.get("connections", [])) + list(current.get("locked_connections", {}).keys()):
+                if neighbor_id not in visited and neighbor_id in rooms:
+                    visited.add(neighbor_id)
+                    frontier.append(neighbor_id)
+        self.assertEqual(visited, set(rooms.keys()), "every room must be reachable from the hub")
+        self.assertIn(floor_data["connector_room_id"], visited)
 
     def test_generate_segment_produces_five_real_interconnected_floors(self):
         """Phase L3: the actual unit of persistence -- 5 real floors, all genuinely walkable from the entry hub down to the checkpoint via real descends_to/ascends_to edges."""
@@ -32895,10 +32932,33 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         follower_after_entry = db.get_character(follower_id, chat_id)
         self.assertEqual(follower_after_entry["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
 
+        # Real branching topology (2026-09-03): the connector isn't
+        # necessarily hub-adjacent anymore -- real BFS toward the
+        # nearest descends_to room, walked one real hop at a time,
+        # instead of assuming a single direct hub-to-stairs move.
+        from collections import deque
         run = db.get_labyrinth_run(chat_id, f"party:{party_id}")
-        hub = run["rooms"][run["current_room_id"]]
-        connector_name = run["rooms"][hub["connections"][0]]["name"]
-        await bot._do_labyrinth_move(FakeUpdate(leader_id, connector_name, [], chat_id=chat_id), connector_name)
+        while not run["rooms"][run["current_room_id"]].get("descends_to"):
+            start = run["current_room_id"]
+            came_from = {start: None}
+            queue = deque([start])
+            target_id = None
+            while queue:
+                cur = queue.popleft()
+                if cur != start and run["rooms"][cur].get("descends_to"):
+                    target_id = cur
+                    break
+                for nb in run["rooms"][cur].get("connections", []):
+                    if nb not in came_from and nb in run["rooms"]:
+                        came_from[nb] = cur
+                        queue.append(nb)
+            self.assertIsNotNone(target_id, "no real path to a descends_to room")
+            next_hop = target_id
+            while came_from[next_hop] != start:
+                next_hop = came_from[next_hop]
+            target_name = run["rooms"][next_hop]["name"]
+            await bot._do_labyrinth_move(FakeUpdate(leader_id, target_name, [], chat_id=chat_id), target_name)
+            run = db.get_labyrinth_run(chat_id, f"party:{party_id}")
         await bot._do_labyrinth_move(FakeUpdate(leader_id, "go down", [], chat_id=chat_id), "go down")
         run_seen_by_leader = db.get_labyrinth_run(chat_id, f"party:{party_id}")
         run_seen_by_follower = db.get_labyrinth_run(chat_id, bot._labyrinth_party_key(follower_after_entry))
@@ -33854,6 +33914,160 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(png_bytes), 100)
         self.assertTrue(png_bytes.startswith(b"\x89PNG"))
 
+    def test_generate_floor_produces_real_branching_depth_across_seeds(self):
+        """
+        Real Zelda-dungeon research request (2026-09-03, Coffee: 3 real
+        Link's Awakening dungeon maps -- "I want the levels to be more
+        explorable, travelable with paths... make an algorithm to
+        accomplish this"). Confirmed by direct code read before this
+        fix: generate_floor was pure hub-and-spoke, every room one hop
+        from the hub. Statistical, same discipline as the existing
+        "sometimes places X" tests in this file -- real branches must
+        genuinely run deeper than one room across a real sample of
+        seeds, not just occasionally by luck.
+        """
+        deep_branch_seen = False
+        for seed in range(60):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 10, random.Random(seed))
+            hub = floor_data["rooms"][floor_data["hub_room_id"]]
+            for root_id in hub["connections"]:
+                # A room genuinely deeper than the branch root has that
+                # root (not the hub) as its own real parent connection.
+                if any(
+                    root_id in r.get("connections", []) and rid != floor_data["connector_room_id"]
+                    for rid, r in floor_data["rooms"].items()
+                ):
+                    deep_branch_seen = True
+                    break
+            if deep_branch_seen:
+                break
+        self.assertTrue(deep_branch_seen, "expected at least one branch deeper than one room across 60 real seeds")
+
+    def test_generate_floor_places_a_real_miniboss_guarding_the_main_path(self):
+        """Statistical: a mini-boss room, when it fires, must sit on the real main path (reachable en route to the connector), never a side branch."""
+        miniboss_seen = False
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 15, random.Random(seed))
+            rooms = floor_data["rooms"]
+            miniboss_rooms = [rid for rid, r in rooms.items() if r.get("is_miniboss_room")]
+            if not miniboss_rooms:
+                continue
+            miniboss_seen = True
+            miniboss_id = miniboss_rooms[0]
+            self.assertTrue(rooms[miniboss_id]["monsters"], "a miniboss room must have a real monster")
+            # On the main path: walking connections from the miniboss
+            # room must reach the connector without ever passing back
+            # through the hub.
+            visited = {miniboss_id}
+            frontier = [miniboss_id]
+            reached_connector = False
+            while frontier:
+                cur = frontier.pop()
+                if cur == floor_data["connector_room_id"]:
+                    reached_connector = True
+                    break
+                for nb in rooms[cur].get("connections", []):
+                    if nb not in visited and nb != floor_data["hub_room_id"]:
+                        visited.add(nb)
+                        frontier.append(nb)
+            self.assertTrue(reached_connector, "a miniboss room must sit on the real path to the connector")
+            break
+        self.assertTrue(miniboss_seen, "expected at least one miniboss room across 80 real seeds")
+
+    def test_generate_floor_branch_gate_is_solvable_by_construction(self):
+        """
+        Real Metazelda-style guarantee (see rules/labyrinth.py's own
+        research note): when a branch gate fires, its switch must
+        always live in an ALREADY-reachable, unlocked room -- never
+        behind the very gate it opens, and never in a room that's
+        itself locked behind some other unsolved gate. Statistical,
+        checked across real seeds.
+        """
+        gate_seen = False
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub = rooms[floor_data["hub_room_id"]]
+            locked = hub.get("locked_connections", {})
+            if not locked:
+                continue
+            gate_seen = True
+            for gate_room_id, gate_lockable_id in locked.items():
+                gate_lockable = next(lk for lk in hub["lockables"] if lk["id"] == gate_lockable_id)
+                self.assertEqual(gate_lockable["kind"], "multi_switch_gate")
+                for switch_id in gate_lockable["requires"]:
+                    switch_room = next(
+                        rid for rid, r in rooms.items()
+                        for lk in r.get("lockables", []) if lk["id"] == switch_id
+                    )
+                    # The switch's own room must be reachable WITHOUT
+                    # ever crossing the gate this switch itself opens.
+                    self.assertNotEqual(switch_room, gate_room_id)
+                    visited = {floor_data["hub_room_id"]}
+                    frontier = [floor_data["hub_room_id"]]
+                    while frontier:
+                        cur = frontier.pop()
+                        for nb in rooms[cur].get("connections", []):
+                            if nb not in visited and nb != gate_room_id:
+                                visited.add(nb)
+                                frontier.append(nb)
+                    self.assertIn(switch_room, visited, "the switch must be reachable without needing the gate it opens")
+            break
+        self.assertTrue(gate_seen, "expected at least one real branch gate across 80 real seeds")
+
+    def test_assign_grid_positions_gives_every_room_a_unique_cell(self):
+        """
+        Real fix alongside the branching algorithm: the old blind
+        Chebyshev spiral placement never looked at real connections at
+        all, which stopped mattering once branches could run several
+        rooms deep and the map started drawing real per-edge doors
+        (a child room landing far from its real parent would show a
+        doorway leading nowhere sensible). BFS placement must still
+        give every room its own real, collision-free cell.
+        """
+        for seed in range(30):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 25, random.Random(seed))
+            rooms = floor_data["rooms"]
+            positions = [(r["grid_position"]["x"], r["grid_position"]["y"]) for r in rooms.values()]
+            self.assertEqual(len(positions), len(set(positions)), f"seed {seed} produced overlapping grid positions")
+
+    def test_render_labyrinth_map_draws_a_real_door_gap_not_just_a_closed_box(self):
+        """
+        Real live request (2026-09-03, Coffee, dev-bridge: 3 real Zelda
+        dungeon maps -- "I want our dungeons and labyrinth to have maps
+        like this"). The map previously drew every room as an identical
+        closed rectangle regardless of which neighbors it actually
+        connected to. A room with a real open connection must now
+        render differently from the same layout with that connection
+        severed (a real doorway gap vs. a plain solid wall).
+        """
+        import map_render
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(3))
+        rooms = floor_data["rooms"]
+        hub_id = floor_data["hub_room_id"]
+        connected_room = rooms[hub_id]["connections"][0]
+        png_with_door = map_render.render_labyrinth_map(1, rooms, hub_id)
+
+        import copy
+        severed_rooms = copy.deepcopy(rooms)
+        severed_rooms[hub_id]["connections"].remove(connected_room)
+        severed_rooms[connected_room]["connections"] = [
+            cid for cid in severed_rooms[connected_room]["connections"] if cid != hub_id
+        ]
+        png_without_door = map_render.render_labyrinth_map(1, severed_rooms, hub_id)
+        self.assertNotEqual(png_with_door, png_without_door, "a real connection must render visibly differently from no connection")
+
+    def test_render_labyrinth_map_shows_the_real_segment_honeycomb_strip(self):
+        """Real "5 levels of honeycombing" visualization (Coffee's own earlier framing) -- passing segment_floors must produce a visibly different (taller) image than omitting it."""
+        import map_render
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(4))
+        rooms = floor_data["rooms"]
+        hub_id = floor_data["hub_room_id"]
+        png_without_strip = map_render.render_labyrinth_map(3, rooms, hub_id)
+        png_with_strip = map_render.render_labyrinth_map(3, rooms, hub_id, segment_floors=[1, 2, 3, 4, 5])
+        self.assertTrue(png_with_strip.startswith(b"\x89PNG"))
+        self.assertNotEqual(png_without_strip, png_with_strip)
+
     def test_render_labyrinth_map_marks_a_locked_room_without_crashing_or_using_emoji_text(self):
         """
         Real live confusion (2026-09-02, Coffee: "the map is showing a
@@ -34235,17 +34449,34 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         """Phase L3, per Coffee: "enemies spawning and attacking after so many RNG footsteps... like an ambush... it shud feel like a surprise... the battle shud execute automatically"."""
         import sessions
         user_id, chat_id = 962026, -962026
-        make_basic_character(user_id, "LabyrinthAmbushTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
-        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        # Real live flake found 2026-09-03: a genuinely unlucky first
+        # hit could drop a 200-HP tester to 0 before this test ever gets
+        # a chance to intervene, triggering a real stalemate resolution
+        # (session already ended) instead of the ongoing fight this test
+        # wants to inspect. A much higher HP pool makes that outcome
+        # effectively impossible without touching anything this test is
+        # actually about (the ambush firing automatically).
+        make_basic_character(user_id, "LabyrinthAmbushTester", chat_id=chat_id, current_location="the_colosseum", hp_max=5000)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=5000)
         await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
         party_key = f"solo:{user_id}"
         db.update_labyrinth_run(chat_id, party_key, steps_until_encounter=1)
         run = db.get_labyrinth_run(chat_id, party_key)
         hub = run["rooms"][run["current_room_id"]]
-        empty_room_id = next(
-            cid for cid in hub["connections"]
-            if not run["rooms"][cid].get("monsters") and not run["rooms"][cid].get("is_checkpoint") and not run["rooms"][cid].get("hazard")
-        )
+        # Real branching topology (2026-09-03) means the hub's own
+        # direct connections are now just its branch ROOTS (as few as 2
+        # once gating removes one) -- genuinely possible for real
+        # unseeded generation to hand every single one of them a
+        # monster/hazard by chance. This test's own real point is "an
+        # ambush can fire when moving into an otherwise-empty room," not
+        # "generation always produces one" -- force the first candidate
+        # empty instead of hoping one already is, same hard-reset
+        # discipline already used elsewhere in this file for this exact
+        # class of intermittent RNG contamination.
+        empty_room_id = next(cid for cid in hub["connections"] if not run["rooms"][cid].get("is_checkpoint"))
+        run["rooms"][empty_room_id]["monsters"] = []
+        run["rooms"][empty_room_id].pop("hazard", None)
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
         target_name = run["rooms"][empty_room_id]["name"]
         sink = []
         await bot._do_labyrinth_move(FakeUpdate(user_id, target_name, sink, chat_id=chat_id), target_name)
