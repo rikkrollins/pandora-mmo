@@ -12369,8 +12369,10 @@ def _lockable_block_message(location: dict, destination_name: str, lockable_id: 
 def _find_lockable(location: dict, action_text: str) -> dict | None:
     """
     Match a chest/door target mentioned in the player's text against this
-    location's lockables. If exactly one lockable exists here and the
-    text generically mentions "lock"/"chest"/"door", that one is assumed.
+    location's lockables. If exactly one PRESENT lockable's own kind-word
+    list matches the text, that one is assumed -- unambiguous regardless
+    of how many OTHER lockables (of a different kind) also happen to be
+    in the same room.
     """
     lockables = location.get("lockables", [])
     if not lockables:
@@ -12379,43 +12381,71 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
     for lockable in lockables:
         if lockable["id"] in lowered or lockable["name"].lower() in lowered:
             return lockable
-    if len(lockables) == 1:
-        lockable = lockables[0]
-        # Kind-specific fallback words only — a location whose only
-        # lockable is a chest must not match generic "door" phrasing
-        # (and vice versa), or a player mentioning the wrong kind of
-        # lockable gets silently routed to the wrong one. "lever" added
-        # for the dungeon-redesign shortcut mechanic (2026-08-30).
-        #
-        # Real live bug (2026-08-31, dev-bridge, Charvenna: "I picked
-        # the lock successfully, why is it telling me to pick it again?"):
-        # "lock" was deliberately EXCLUDED from lever's words on the
-        # (wrong) theory that it would let a lever be "picked" by
-        # chance -- but _do_lockpick's own kind=="lever" branch already
-        # ALWAYS auto-succeeds regardless of how the player's text got
-        # routed there, so the exclusion provided zero real protection.
-        # All it did was make the single most natural phrase for any
-        # jammed mechanism ("pick the lock") fail to match the lever at
-        # all, falling through to an unrelated, misleadingly-successful-
-        # sounding generic ability check that never actually unlocked
-        # anything. "lock" is back in every kind's word list now.
-        # "switch" (2026-09-01, elemental crystal switches/torches) and
-        # "breakable_wall"/"breakable_floor" (cracked walls/floors) are
-        # real, distinct kinds from "lever" -- each gets its own word
-        # list rather than piggybacking on lever's, even though a
-        # crystal switch is colloquially still "a switch" too.
-        kind_words = {
-            "chest": ("chest", "lock"),
-            "door": ("door", "lock", "gate"),
-            "lever": ("lever", "switch", "wheel", "valve", "lock"),
-            "switch": ("switch", "crystal", "torch", "brazier", "lantern", "lock"),
-            "breakable_wall": ("wall", "crack", "cracked", "bomb", "explode"),
-            "breakable_floor": ("floor", "crack", "cracked", "bomb", "explode"),
-            "pressure_plate": ("plate", "urn", "crate", "statue", "block", "switch"),
-        }
-        if any(w in lowered for w in kind_words.get(lockable["kind"], ("lock",))):
-            return lockable
-    return None
+
+    # Real live bug (2026-09-03, Coffee, dev-bridge: "Attack the
+    # crystal" in a room that ALSO held a real chest -- a generated
+    # lockable's real name is often much longer/flavorier than a
+    # player would ever type verbatim, e.g. "a distant necrotic
+    # crystal, humming faintly", so the exact-name check above never
+    # matched, and the generic kind-words fallback further below can
+    # genuinely tie between two DIFFERENT lockables ("lock" matches
+    # both a chest and a switch). Checked here, before that: each
+    # lockable's own DISTINCTIVE name words (skipping short/common
+    # ones) are real, specific vocabulary that should resolve
+    # unambiguously even with an unrelated lockable also present.
+    name_stopwords = {"a", "an", "the", "of", "in", "at", "on", "is", "here", "behind", "with", "still"}
+    name_word_matches = []
+    for lockable in lockables:
+        words = {w for w in re.findall(r"[a-z']+", lockable["name"].lower()) if w not in name_stopwords and len(w) > 3}
+        if any(w in lowered for w in words):
+            name_word_matches.append(lockable)
+    if len(name_word_matches) == 1:
+        return name_word_matches[0]
+
+    # Kind-specific fallback words — a room holding a chest must not
+    # match generic "door" phrasing (and vice versa), or a player
+    # mentioning the wrong kind of lockable gets silently routed to the
+    # wrong one. "lever" added for the dungeon-redesign shortcut
+    # mechanic (2026-08-30).
+    #
+    # Real live bug (2026-08-31, dev-bridge, Charvenna: "I picked
+    # the lock successfully, why is it telling me to pick it again?"):
+    # "lock" was deliberately EXCLUDED from lever's words on the
+    # (wrong) theory that it would let a lever be "picked" by
+    # chance -- but _do_lockpick's own kind=="lever" branch already
+    # ALWAYS auto-succeeds regardless of how the player's text got
+    # routed there, so the exclusion provided zero real protection.
+    # All it did was make the single most natural phrase for any
+    # jammed mechanism ("pick the lock") fail to match the lever at
+    # all, falling through to an unrelated, misleadingly-successful-
+    # sounding generic ability check that never actually unlocked
+    # anything. "lock" is back in every kind's word list now.
+    # "switch" (2026-09-01, elemental crystal switches/torches) and
+    # "breakable_wall"/"breakable_floor" (cracked walls/floors) are
+    # real, distinct kinds from "lever" -- each gets its own word
+    # list rather than piggybacking on lever's, even though a
+    # crystal switch is colloquially still "a switch" too.
+    kind_words = {
+        "chest": ("chest", "lock"),
+        "door": ("door", "lock", "gate"),
+        "lever": ("lever", "switch", "wheel", "valve", "lock"),
+        "switch": ("switch", "crystal", "torch", "brazier", "lantern", "lock"),
+        "breakable_wall": ("wall", "crack", "cracked", "bomb", "explode"),
+        "breakable_floor": ("floor", "crack", "cracked", "bomb", "explode"),
+        "pressure_plate": ("plate", "urn", "crate", "statue", "block", "switch"),
+    }
+    # Real live bug (2026-09-03, Coffee, dev-bridge: "Attack the
+    # crystal" in a Labyrinth room that ALSO held a real chest --
+    # "exactly one lockable exists here" never fired with a second,
+    # unrelated lockable present, silently falling through to a
+    # meaningless generic ability check that never actually hit the
+    # switch). Generalized from "the only lockable in the room" to
+    # "the only one whose OWN kind-words match" -- if two lockables of
+    # the SAME kind both match (genuinely ambiguous), this correctly
+    # returns None rather than guessing wrong, same disambiguation
+    # philosophy _find_monster_mentioned_in_text already uses.
+    kind_matches = [lk for lk in lockables if any(w in lowered for w in kind_words.get(lk["kind"], ("lock",)))]
+    return kind_matches[0] if len(kind_matches) == 1 else None
 
 
 # Real, non-canonical mapping used only for a switch's own flavor emoji

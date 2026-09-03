@@ -33027,6 +33027,38 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("Nothing here to fight" in s for s in sink))
         self.assertTrue(any("flares to life" in s for s in sink), f"expected the switch to actually toggle, got: {sink}")
 
+    async def test_find_lockable_resolves_by_distinctive_name_words_with_two_lockables_present(self):
+        """
+        Real live bug (2026-09-03, Coffee, dev-bridge: "Attack the
+        crystal" -> a real "Success!" narration with no actual effect).
+        Root cause: a real Labyrinth room ("Labyrinth -- A Sealed
+        Archway") held BOTH a chest AND a switch at once -- the OLD
+        "exactly one lockable in the room" fallback never fired with
+        two present, and a generated lockable's real name ("a distant
+        necrotic crystal, humming faintly") is far too flavorful to
+        ever literally appear in a player's own phrasing, so _find_
+        lockable returned None and _do_skill_check silently ran a
+        meaningless generic ability check instead of the real switch.
+        _find_lockable now matches each lockable's own DISTINCTIVE name
+        words first (skipping short/common ones) before falling back to
+        generic kind-words, which can genuinely tie between two
+        different lockables ("lock" matches both a chest and a switch).
+        """
+        room = {
+            "lockables": [
+                {"id": "f1_gate_cache", "kind": "chest", "name": "a real cache behind the archway", "loot": {}, "gold": 74},
+                {"id": "seg1_switch_0", "kind": "switch", "name": "a distant necrotic crystal, humming faintly", "element": "necrotic"},
+            ]
+        }
+        self.assertEqual(bot._find_lockable(room, "Attack the crystal")["id"], "seg1_switch_0")
+        self.assertEqual(bot._find_lockable(room, "Cast fireball onto the crystal")["id"], "seg1_switch_0")
+        self.assertEqual(bot._find_lockable(room, "open the cache")["id"], "f1_gate_cache")
+        self.assertEqual(bot._find_lockable(room, "loot the cache")["id"], "f1_gate_cache")
+        # Genuinely ambiguous phrasing (no distinctive word at all,
+        # "lock" matches both kind-word lists) correctly refuses to
+        # guess rather than silently picking the wrong one.
+        self.assertIsNone(bot._find_lockable(room, "Pick the lock"))
+
     async def test_cast_fire_spell_onto_a_labyrinth_switch_actually_activates_it(self):
         """
         Real live bug (2026-09-02, Coffee, dev-bridge: "Cast fireball

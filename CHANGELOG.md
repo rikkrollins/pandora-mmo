@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.473] — fix: "Attack the crystal" resolved to nothing in a room that also held a chest
+
+Found live within minutes of v1.27.472 shipping (Coffee: "It's said I
+succeeded, but nothing seemed to happen"). Root cause: the exact real
+room he was standing in ("Labyrinth -- A Sealed Archway") holds BOTH a
+chest AND a switch at once. `_find_lockable`'s old "exactly one
+lockable in the room" fallback never fires with two present, and a
+generated lockable's real name ("a distant necrotic crystal, humming
+faintly") is far too flavorful to ever literally appear in a player's
+own phrasing — so it silently returned no match, and `_do_skill_check`
+ran a meaningless generic ability check instead of the real switch.
+
+`_find_lockable` now matches each present lockable's own DISTINCTIVE
+name words first (skipping short/common ones like "a"/"the"/"behind")
+before falling back to the generic kind-word buckets, which can
+genuinely tie between two different lockables (both a chest's and a
+switch's kind-words include "lock"). "Attack the crystal"/"cast
+fireball onto the crystal" and "open the cache"/"loot the cache" all
+now resolve correctly and unambiguously even with the other lockable
+also present in the same room; a truly generic "pick the lock" with no
+distinguishing word left correctly refuses to guess rather than
+silently picking the wrong object.
+
+New test; full 58-test LabyrinthTests suite passes, all 13 overworld
+switch/breakable/pit tests and 4 lockpick/skill-check tests confirmed
+unaffected.
+
 ## [1.27.472] — fix: "hit the crystal"/"cast fire onto the crystal" never actually worked, anywhere, not just the Labyrinth
 
 Found via proactive bug-hunting right after v1.27.471, then confirmed
