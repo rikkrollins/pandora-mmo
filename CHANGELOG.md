@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.487] — feature: real loop-back connections densify the Labyrinth's dungeon topology
+
+Real, more foundational research follow-up to v1.27.484 (Coffee:
+"research dungeons of infinity and all other research to achieve what
+our editor needs to produce an output similar to my examples") — see
+the `project_zelda_dungeon_algorithm_research` memory's "Follow-up
+research" section for the full writeup. Both "Cyclic Dungeon
+Generation" (an explicitly Zelda-inspired open technique) and the
+standard Delaunay-triangulation/MST-plus-added-edges approach confirmed
+the same real structural gap: v1.27.484's branching was a pure TREE —
+exactly one path to every room — while every reference map studied
+(Link's Awakening Level 0/6/7) is a denser GRID with genuine loops.
+
+`rules/labyrinth.py`'s new `_add_loop_back_connections`, called right
+after grid placement, adds a small number (`_LOOP_BACK_MAX_EDGES = 3`)
+of real bidirectional connections between rooms that are grid-adjacent
+but not yet linked. Safe by construction — adding an edge to an
+already-fully-reachable graph can only add a redundant path, never
+remove one — so no retry/audit loop is needed, matching this module's
+existing discipline. Explicitly excludes the hub/connector (never
+trivialize the main path) and any room reachable only through a real
+branch gate or a collapse-puzzle's sealed leaf — a bare loop-back edge
+into either would silently let a player bypass that gate/trigger
+forever.
+
+4 new tests (statistical loop-detection across 80 seeds, and a real
+bypass-safety check across 150 seeds that also caught and fixed a test
+bug in itself — the collapse puzzle's own "echo" shortcut mechanism is
+a deliberate exception, not a bypass, now correctly distinguished by
+its `_echo_`-tagged lockable id). Full 87-test LabyrinthTests suite
+passes (1 known, pre-existing batch-order flake confirmed harmless in
+isolation).
+
 ## [1.27.486] — fix: 2 live flood-control/timeout crashes + harden the drafted warp/collapse Labyrinth puzzles
 
 Found via the hourly self-improvement monitoring pass's `check_error_log.py`

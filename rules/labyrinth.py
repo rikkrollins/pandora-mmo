@@ -89,6 +89,28 @@ _WARP_CHANCE = 0.25
 # genuinely separate before/after floor copy.
 _COLLAPSE_PUZZLE_CHANCE = 0.2
 
+# Real, more foundational research follow-up (2026-09-03, per Coffee:
+# "research dungeons of infinity and all other research to achieve
+# what our editor needs" -- see [[project_zelda_dungeon_algorithm_
+# research]]'s "Follow-up research" section): both "Cyclic Dungeon
+# Generation" and the standard Delaunay-triangulation/MST-plus-added-
+# edges technique confirm the same real gap -- v1.27.484's branching
+# was a pure TREE (exactly one path to every room), while every real
+# reference map (Level 0/6/7) is a denser GRID with genuine loops. Loop-
+# back connections close that gap: after the branching tree is fully
+# built and grid-placed, add a small number of EXTRA edges between
+# rooms that are grid-ADJACENT but not yet connected. Safe by a simple
+# invariant -- adding an edge to an already-fully-reachable graph can
+# never break reachability, only ever add a redundant path -- so this
+# never needs its own solvability check, unlike a gate/switch. Excludes
+# the hub/connector (kept exactly as branch-rooted, matching every
+# other mechanic's own "never trivialize the main path" discipline) and
+# any room that's only reachable through a still-real lock (a branch
+# gate) or that a collapse-puzzle can later seal off -- a bare loop-back
+# edge into either would silently bypass that gate/trigger forever.
+_LOOP_BACK_CHANCE = 0.4
+_LOOP_BACK_MAX_EDGES = 3
+
 # L3: one segment = this many real, interconnected floors. Reuses the
 # exact number Phase L2c's milestone interval already used, per
 # Coffee's own "5 levels of honeycombing" framing -- the OLD milestone
@@ -479,6 +501,71 @@ def _assign_grid_positions(rooms: dict, hub_room_id: str) -> None:
                 occupied[(x, y)] = rid
 
 
+def _add_loop_back_connections(rooms: dict, hub_id: str, connector_id: str, rng: random.Random, floor: int) -> None:
+    """
+    Real, more foundational research follow-up (2026-09-03) -- see
+    `_LOOP_BACK_CHANCE`'s own module-level docstring for the full
+    research this closes: densifies the pure branching TREE
+    `_assign_grid_positions` just placed into a real GRID with a few
+    genuine loops, matching every reference map studied. Must run
+    AFTER grid positions are assigned (it needs real {x, y} adjacency)
+    and adds at most `_LOOP_BACK_MAX_EDGES` real bidirectional
+    `connections` entries between rooms that are grid-adjacent but not
+    yet linked -- safe by construction (every room here is already
+    reachable; a new edge can only add a redundant path, never remove
+    one), so this never needs its own solvability check.
+
+    Excludes the hub and connector (never trivialize the main path,
+    same discipline warps already follow) and any room that's only
+    reachable through a real branch gate, or that a collapse-puzzle
+    trigger can later seal off -- a bare loop-back edge into either
+    would silently let a player bypass that gate/trigger forever.
+    """
+    excluded = {hub_id, connector_id}
+    for room in rooms.values():
+        excluded.update(room.get("collapsing_connections", {}).keys())
+
+    gated_all = {dest for room in rooms.values() for dest in room.get("locked_connections", {})}
+    frontier = list(gated_all)
+    while frontier:
+        cur = frontier.pop()
+        for nb in rooms[cur].get("connections", []):
+            if nb not in gated_all:
+                gated_all.add(nb)
+                frontier.append(nb)
+    excluded |= gated_all
+
+    by_cell = {(r["grid_position"]["x"], r["grid_position"]["y"]): rid for rid, r in rooms.items()}
+    candidates = []
+    seen_pairs = set()
+    for rid, room in rooms.items():
+        if rid in excluded:
+            continue
+        x, y = room["grid_position"]["x"], room["grid_position"]["y"]
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            neighbor_id = by_cell.get((x + dx, y + dy))
+            if neighbor_id is None or neighbor_id in excluded:
+                continue
+            if neighbor_id in room.get("connections", []) or neighbor_id in room.get("warps", []):
+                continue
+            pair = frozenset((rid, neighbor_id))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            candidates.append((rid, neighbor_id))
+
+    rng.shuffle(candidates)
+    added = 0
+    chance = _scaled_chance(_LOOP_BACK_CHANCE, floor, 0.05, 0.9)
+    for a, b in candidates:
+        if added >= _LOOP_BACK_MAX_EDGES:
+            break
+        if rng.random() < chance:
+            rooms[a].setdefault("connections", []).append(b)
+            rooms[b].setdefault("connections", []).append(a)
+            added += 1
+
+
 def _milestone_item_for_floor(floor: int) -> str:
     for lo, hi, item_id in _MILESTONE_ITEM_BANDS:
         if lo <= floor <= hi:
@@ -829,6 +916,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 rooms[shortcut_a]["locked_connections"][shortcut_b] = f"{trigger_id}_echo_{shortcut_a}"
 
     _assign_grid_positions(rooms, hub_id)
+    _add_loop_back_connections(rooms, hub_id, connector["id"], rng, floor)
     return {
         "rooms": rooms, "hub_room_id": hub_id, "connector_room_id": connector["id"],
         "modifier": modifier, "is_checkpoint": checkpoint,

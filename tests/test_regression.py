@@ -34073,6 +34073,93 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             break
         self.assertTrue(gate_seen, "expected at least one real branch gate across 80 real seeds")
 
+    def test_generate_floor_loop_back_produces_real_grid_loops_across_seeds(self):
+        """
+        Real, more foundational research follow-up (2026-09-03, per
+        Coffee: "research dungeons of infinity and all other research"
+        -- see the project_zelda_dungeon_algorithm_research memory's
+        "Follow-up research" section): v1.27.484's branching was a pure
+        TREE -- exactly (room_count - 1) real undirected edges, no
+        matter the seed. Every real reference map studied is a denser
+        GRID with genuine loops. Statistical: across enough seeds, at
+        least one real floor must have MORE edges than a tree allows.
+        """
+        loop_seen = False
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            edge_count = sum(len(r.get("connections", [])) for r in rooms.values()) // 2
+            if edge_count > len(rooms) - 1:
+                loop_seen = True
+                break
+        self.assertTrue(loop_seen, "expected at least one real loop-back edge across 80 real seeds")
+
+    def test_loop_back_connections_never_bypass_a_branch_gate_or_a_collapse_seal(self):
+        """
+        The loop-back pass must never add a bare edge into a room
+        that's only meant to be reachable through a real branch gate
+        (would silently let a player skip the gate forever), nor into a
+        collapse-puzzle's own sealed leaf (would silently defeat the
+        "structural shift" the whole puzzle is built around). Checked
+        across enough seeds to hit both real branch gates and real
+        collapse puzzles.
+        """
+        gate_checked = collapse_checked = False
+        for seed in range(150):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub_id = floor_data["hub_room_id"]
+
+            for room in rooms.values():
+                for gate_room_id, lockable_id in room.get("locked_connections", {}).items():
+                    # A collapse-puzzle's own "echo" shortcut is a
+                    # DELIBERATE exception -- it's a brand-new path INTO
+                    # an already-otherwise-reachable room that only
+                    # opens once its trigger fires, not an exclusive
+                    # gate (see generate_floor's own collapse-puzzle
+                    # comment). Real branch gates never carry "_echo_"
+                    # in their lockable id.
+                    if "_echo_" in lockable_id:
+                        continue
+                    gate_checked = True
+                    # BFS from the hub via PLAIN connections only (no
+                    # lock check at all) must never reach the gated room
+                    # or anything downstream of it -- if it did, a loop-
+                    # back edge silently bypassed the real gate.
+                    visited = {hub_id}
+                    frontier = [hub_id]
+                    while frontier:
+                        cur = frontier.pop()
+                        for nb in rooms[cur].get("connections", []):
+                            if nb not in visited:
+                                visited.add(nb)
+                                frontier.append(nb)
+                    self.assertNotIn(gate_room_id, visited, f"seed {seed}: loop-back bypassed a real branch gate")
+
+            for room in rooms.values():
+                for seal_leaf, trigger_id in room.get("collapsing_connections", {}).items():
+                    collapse_checked = True
+                    # Remove ONLY the real seal_parent<->seal_leaf edge
+                    # and re-check reachability -- if seal_leaf is still
+                    # reachable some other way, a loop-back edge was
+                    # added into it, permanently defeating the puzzle.
+                    seal_parent_id = room["id"]
+                    trimmed = {
+                        rid: [n for n in r.get("connections", []) if not (rid == seal_parent_id and n == seal_leaf) and not (rid == seal_leaf and n == seal_parent_id)]
+                        for rid, r in rooms.items()
+                    }
+                    visited = {hub_id}
+                    frontier = [hub_id]
+                    while frontier:
+                        cur = frontier.pop()
+                        for nb in trimmed[cur]:
+                            if nb not in visited:
+                                visited.add(nb)
+                                frontier.append(nb)
+                    self.assertNotIn(seal_leaf, visited, f"seed {seed}: a loop-back edge defeats trigger {trigger_id}'s own seal")
+        self.assertTrue(gate_checked, "expected at least one real branch gate across 150 real seeds")
+        self.assertTrue(collapse_checked, "expected at least one real collapse puzzle across 150 real seeds")
+
     def test_generate_floor_warps_and_collapse_puzzle_never_break_reachability_across_seeds(self):
         """
         Real Zelda-dungeon research request (2026-09-03, Coffee: "do all
