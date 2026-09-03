@@ -173,6 +173,14 @@ LABYRINTH_THEMES = [
             "The room curls back on itself at the far end, so that walking straight eventually brings you back to where you started.",
         ],
         "signature_hazard": "drowning",
+        # Real polish found via the hourly self-improvement monitoring
+        # pass (2026-09-03): 4 of 5 themes had no secondary_hazard at
+        # all -- every hazard roll in that theme produced the exact
+        # same type forever, unlike Ashen Verge's own real lava/
+        # overheating variety. No new mechanic needed (freezing already
+        # has real code/resistance-checking) -- just real, thematically
+        # fitting content: shattered ice, frozen reflections.
+        "secondary_hazard": "freezing",
     },
     {
         "id": "hollow_between",
@@ -189,6 +197,7 @@ LABYRINTH_THEMES = [
             "A threshold stands with no door in it and nothing obvious on either side, like something meant to be walked through was forgotten.",
         ],
         "signature_hazard": "freezing",
+        "secondary_hazard": "acid",
     },
     {
         "id": "clockwork_fold",
@@ -205,6 +214,7 @@ LABYRINTH_THEMES = [
             "A tightly coiled spring, thick as a tree trunk, strains visibly against its housing in the corner, tensioned and never released.",
         ],
         "signature_hazard": "arcing_current",
+        "secondary_hazard": "overheating",
     },
     {
         "id": "ashen_verge",
@@ -238,6 +248,7 @@ LABYRINTH_THEMES = [
             "Nothing in this room has been pruned or tended in what feels like a very long time -- growth here answers to no one.",
         ],
         "signature_hazard": "acid",
+        "secondary_hazard": "drowning",
     },
 ]
 

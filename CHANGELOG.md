@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.499] — polish: every Labyrinth theme now has real hazard variety (hourly self-improvement pass)
+
+Found during the hourly monitoring pass's own creative-improvement
+step (per Coffee: "use that info to self improve the generators...
+generate new creative ones... use the themes"), after this pass's real
+AI playtest run came back as pure infra noise (Ollama contention, no
+real generator bug) — a legitimate, expected outcome, but the pass
+looked for a real design gap to close anyway rather than reporting
+nothing.
+
+4 of 5 `LABYRINTH_THEMES` had no `secondary_hazard` at all — every
+hazard roll in Shattered Mirror, Hollow Between, Clockwork Fold, and
+Verdant Undoing produced the exact same type forever, unlike Ashen
+Verge's own real lava/overheating variety (shipped alongside the
+original theme system). No new mechanic needed — every hazard type
+used already has real, tested resistance-checked damage resolution —
+just real, thematically-fitting content: Shattered Mirror now also
+rolls freezing (icy fractured glass), Hollow Between also rolls acid
+(a wrongness that corrodes), Clockwork Fold also rolls overheating
+(overheating brass machinery), Verdant Undoing also rolls drowning
+(waterlogged rot).
+
+2 new tests (a real distinctness/validity check per theme, plus a
+600-seed statistical sweep confirming every secondary hazard actually
+fires in real generated output, not just declared). Full 106-test
+LabyrinthTests suite passes (1 known, pre-existing batch-order flake
+confirmed harmless in isolation).
+
 ## [1.27.498] — feature: AI-driven Labyrinth playtest tool + fix: "rest" refused deep in the Labyrinth
 
 **New dev tool, `scripts/playtest_labyrinth.py`** (per Coffee: "generate

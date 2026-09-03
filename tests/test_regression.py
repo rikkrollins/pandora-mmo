@@ -35287,6 +35287,43 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         for theme in labyrinth_module.LABYRINTH_THEMES:
             self.assertIn(theme["signature_hazard"], seen_by_theme[theme["id"]], theme["id"])
 
+    def test_every_theme_now_has_a_real_distinct_secondary_hazard(self):
+        """
+        Real polish found via the hourly self-improvement monitoring
+        pass (2026-09-03): 4 of 5 themes had no secondary_hazard at all
+        -- every hazard roll in those themes produced the exact same
+        type forever, unlike Ashen Verge's own real lava/overheating
+        variety. Every theme now has one, genuinely different from its
+        own signature, and it actually shows up in real generated
+        output (not just declared and never rolled).
+        """
+        for theme in labyrinth_module.LABYRINTH_THEMES:
+            secondary = theme.get("secondary_hazard")
+            self.assertIsNotNone(secondary, f"{theme['id']} has no secondary_hazard")
+            self.assertNotEqual(secondary, theme["signature_hazard"], f"{theme['id']}'s secondary must differ from its signature")
+            self.assertIn(secondary, labyrinth_module.HAZARD_FLAVOR, f"{theme['id']}'s secondary_hazard has no real flavor text")
+            # "drowning" is the one real theme hazard resolved purely via
+            # a death save (no elemental resistance applies to
+            # suffocation) -- pre-existing (Shattered Mirror's own
+            # signature_hazard), not a gap introduced here.
+            if secondary not in labyrinth_module._THEME_LETHAL_HAZARDS:
+                self.assertIn(secondary, labyrinth_module.HAZARD_DAMAGE_TYPE, f"{theme['id']}'s secondary_hazard has no real damage-type/resistance mapping")
+
+        campaign = bot.CAMPAIGN
+        seen_by_theme = {t["id"]: set() for t in labyrinth_module.LABYRINTH_THEMES}
+        for seed in range(600):
+            floor_data = labyrinth_module.generate_floor(campaign, 20, random.Random(seed))
+            theme_id = None
+            for t in labyrinth_module.LABYRINTH_THEMES:
+                if floor_data["rooms"][floor_data["hub_room_id"]]["name"].startswith(t["name"]):
+                    theme_id = t["id"]
+                    break
+            for r in floor_data["rooms"].values():
+                if r.get("hazard"):
+                    seen_by_theme[theme_id].add(r["hazard"])
+        for theme in labyrinth_module.LABYRINTH_THEMES:
+            self.assertIn(theme["secondary_hazard"], seen_by_theme[theme["id"]], f"{theme['id']}'s secondary_hazard never actually fired across 600 real seeds")
+
     async def test_elemental_hazards_are_reduced_by_real_matching_resistance(self):
         """Phase L3, per Coffee: "freezing... without frost or ice resistences, over heating... with out fire resistences" -- checks the SAME real equipped-gear/racial resistance system combat damage already uses, never a flat number."""
         user_id, chat_id = 962024, -962024
