@@ -22019,6 +22019,73 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(grounded_fact)
         self.assertIn("no hidden door", grounded_fact.lower())
 
+    def test_mentions_breakable_surface_catches_real_phrasing_without_false_positives(self):
+        for text in (
+            "Hit the floor", "strike the wall", "smash the crack in the wall",
+            "attack the wall", "bomb the floor", "blow up the wall",
+        ):
+            self.assertTrue(bot._mentions_breakable_surface(text), text)
+        for text in ("I sneak past the guard", "gather some iron ore", "look around", "hit the goblin"):
+            self.assertFalse(bot._mentions_breakable_surface(text), text)
+
+    async def test_skill_check_grounds_hitting_a_floor_with_no_real_breakable_surface(self):
+        """
+        Real live bug (2026-09-03, Coffee, dev-bridge screenshot: "Hit
+        the floor" in a Labyrinth room whose own hazard flavor said "the
+        floor here looks half-rotted through... a long way down" got a
+        vague, unrelated ability-check narration, prompting "Is this
+        supposed to work?"). That flavor line belongs to a `hazard`
+        (already auto-resolved on arrival), never a `kind: "breakable_
+        floor"` lockable a player can actually hit -- those are a
+        genuinely different, opt-in mechanic this room never had. Same
+        grounding fix as the hidden-door case above: narrate_skill_check
+        now gets an explicit real fact instead of being left free to
+        vaguely gesture at a mechanic that isn't there.
+        """
+        from unittest.mock import patch
+        user_id = 900503
+        make_basic_character(user_id, "FloorHitter", char_class="Rogue", current_location="crossroads_tavern")
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="Nothing gives way.") as mock_narrate:
+            await bot._do_skill_check(
+                FakeUpdate(user_id, "Hit the floor", sink), "dexterity", "Hit the floor", forced_roll=16,
+            )
+        self.assertTrue(mock_narrate.called)
+        grounded_fact = mock_narrate.call_args.kwargs.get("grounded_fact")
+        self.assertIsNotNone(grounded_fact)
+        self.assertIn("nothing here", grounded_fact.lower())
+
+    async def test_skill_check_does_not_ground_hitting_a_real_breakable_floor(self):
+        """The grounding fix above must never fire when a real breakable_floor lockable genuinely IS here -- that case is handled by _do_lockpick instead, before grounded_fact is ever computed."""
+        from unittest.mock import patch
+        user_id = 900504
+        make_basic_character(user_id, "RealFloorBreaker", char_class="Rogue", current_location="crossroads_tavern")
+        # cl.get_location returns a fresh shallow copy every call -- a
+        # mutation on that copy's own "lockables" key (absent on the
+        # real underlying location) would silently vanish rather than
+        # ever being seen by _do_skill_check's own later lookup, so this
+        # has to mutate the real CAMPAIGN dict directly.
+        real_location = bot.CAMPAIGN["locations"]["surface"]["crossroads_tavern"]
+        real_location.setdefault("lockables", []).append(
+            {"id": "test_breakable_floor", "kind": "breakable_floor", "name": "a cracked floor panel"}
+        )
+        try:
+            sink = []
+            with patch("bot.narrate_skill_check", return_value="Nothing gives way.") as mock_narrate:
+                await bot._do_skill_check(
+                    FakeUpdate(user_id, "Hit the floor", sink), "dexterity", "Hit the floor", forced_roll=16,
+                )
+            # _do_lockpick's own breakable-surface narration call is
+            # expected here (a real one genuinely exists) -- what must
+            # NOT happen is the false "nothing here" grounded_fact from
+            # the plain ability-check path above, which only fires when
+            # _find_lockable finds nothing.
+            for call in mock_narrate.call_args_list:
+                grounded_fact = call.kwargs.get("grounded_fact")
+                self.assertNotEqual(grounded_fact, "There is nothing here that actually breaks or gives way to force — no real crack, wall, or floor panel that responds to being hit.")
+        finally:
+            real_location["lockables"] = [lk for lk in real_location["lockables"] if lk["id"] != "test_breakable_floor"]
+
     # -- Rogue/Bard Expertise + Bard Jack of All Trades (2026-07-16) ----
     def test_rogue_expertise_doubles_proficiency_from_level_1(self):
         from rules.leveling import skill_check_proficiency_bonus
@@ -34182,6 +34249,84 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             "talk to the elder bone legionnaire",
         )
         self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+
+    async def test_labyrinth_hazard_and_entry_never_touch_benched_inactive_or_a_dormant_alt(self):
+        """
+        Real live bug (2026-09-03, Coffee, dev-bridge screenshot: a
+        single Labyrinth trap rolled saves for and damaged 12 characters
+        at once -- "The trap shouldn't be hurting people that aren't in
+        the active party and it shouldn't definitely be hurting inactive
+        members"). Root cause: every Labyrinth "whole party" handler
+        (enter/leave, checkpoint heals, hazard saves, best-floor
+        tracking, shrine offerings) called the raw db.get_party_members_
+        by_id directly, with none of the exclusions _get_real_party_
+        combatants already established for ordinary combat back on
+        2026-08-13 -- a real live bug where a single human's own dormant
+        ALT character (Laurienna/Charvenna, Ravenloft/Pan -- the exact
+        names that showed up again in this new screenshot) got double-
+        counted as a second party member, and benched/resting members
+        were swept in unasked. Fixed via one shared _labyrinth_active_
+        party_members helper, reused everywhere. This test proves the
+        two real vectors from the live screenshot directly: a benched/
+        resting member and a dormant alt must never be moved into the
+        Labyrinth OR take real hazard damage.
+        """
+        from unittest.mock import patch
+        leader_id, chat_id = 962033, -962033
+        make_basic_character(leader_id, "LabyrinthPartyScopeLeader", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(leader_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, dexterity=8)
+        party_id = db.create_party(leader_id, chat_id)
+
+        benched_id = 962034
+        make_basic_character(benched_id, "BenchedMember", chat_id=chat_id, current_location="crossroads_tavern", hp_max=100)
+        db.update_character(benched_id, chat_id, party_id=party_id, is_benched=1, hp_current=100, dexterity=8)
+
+        resting_id = 962035
+        make_basic_character(resting_id, "RestingMember", chat_id=chat_id, current_location="crossroads_tavern", hp_max=100)
+        db.update_character(resting_id, chat_id, party_id=party_id, is_inactive=1, hp_current=100, dexterity=8)
+
+        # A dormant alt: the SAME owner as a real active member, but a
+        # newer character db.create_character makes the active one --
+        # the exact Laurienna/Charvenna shape from the live incident.
+        alt_owner_id = 962036
+        alt_old = make_basic_character(alt_owner_id, "AltOld", chat_id=chat_id, current_location="crossroads_tavern", hp_max=100)
+        db.update_character_by_id(alt_old["character_id"], party_id=party_id, hp_current=100, dexterity=8)
+        alt_new = db.create_character(
+            telegram_user_id=alt_owner_id, chat_id=chat_id, name="AltNew", race="Human", char_class="Fighter",
+            ability_scores={"strength": 10, "dexterity": 8, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=100, armor_class=11, gold=0, inventory={}, known_spells=[], current_location="the_colosseum",
+        )
+        db.update_character_by_id(alt_new["character_id"], party_id=party_id, hp_current=100)
+
+        await bot._do_enter_labyrinth(FakeUpdate(leader_id, "", [], chat_id=chat_id))
+
+        # Entry must never relocate a benched/resting member or a dormant alt.
+        self.assertEqual(db.get_character(benched_id, chat_id)["current_location"], "crossroads_tavern")
+        self.assertEqual(db.get_character(resting_id, chat_id)["current_location"], "crossroads_tavern")
+        self.assertEqual(db.get_character_by_id(alt_old["character_id"])["current_location"], "crossroads_tavern")
+        # The real active alt (AltNew) DOES travel with the party.
+        self.assertEqual(db.get_character(alt_owner_id, chat_id)["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+        party_key = f"party:{party_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        rooms[hazard_room_id]["hazard"] = "fire"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        hazard_room_name = rooms[hazard_room_id]["name"]
+
+        with patch("bot.roll_d20", return_value=1):
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(leader_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
+
+        combined = "\n".join(sink)
+        self.assertNotIn("BenchedMember", combined)
+        self.assertNotIn("RestingMember", combined)
+        self.assertNotIn("AltOld", combined)
+        # Untouched HP -- the real proof no damage was silently applied.
+        self.assertEqual(db.get_character(benched_id, chat_id)["hp_current"], 100)
+        self.assertEqual(db.get_character(resting_id, chat_id)["hp_current"], 100)
+        self.assertEqual(db.get_character_by_id(alt_old["character_id"])["hp_current"], 100)
 
     def test_labyrinth_antagonist_is_never_a_real_campaign_character(self):
         """Phase L3, per Coffee: "don't use characters that are in the storyline, make sure they are separate from the actual game"."""

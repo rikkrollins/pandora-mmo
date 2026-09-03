@@ -9087,6 +9087,41 @@ def _labyrinth_party_key(character: dict) -> str:
     return f"party:{party_id}" if party_id else f"solo:{character['telegram_user_id']}"
 
 
+def _labyrinth_active_party_members(character: dict) -> list[dict]:
+    """
+    Real live bug (2026-09-03, Coffee, dev-bridge screenshot: a
+    Labyrinth trap rolled saves for and damaged 12 characters at once --
+    "The trap shouldn't be hurting people that aren't in the active
+    party and it shouldn't definitely be hurting inactive members").
+    Root cause: every one of this file's Labyrinth handlers that
+    operates on "the whole party" (entering/leaving, checkpoint heals,
+    hazard saves, best-floor tracking, shrine offerings) called the
+    RAW db.get_party_members_by_id(party_id) directly -- with none of
+    the exclusions _get_real_party_combatants already established for
+    ordinary combat back on 2026-08-13 (a real live bug where a single
+    human's own dormant ALT character -- Laurienna/Charvenna,
+    Ravenloft/Pan, the exact names in this new screenshot too -- got
+    double-counted as a second party member; benched/resting members
+    swept in unasked). A dormant alt or a benched/resting real player
+    was therefore getting teleported into and out of the Labyrinth, and
+    taking real hazard damage, for a run they were never actually part
+    of. Same two exclusions as combat, minus the PARTY_ACTIVE_COMBAT_CAP
+    truncation (which is a per-fight sizing rule, not a party-membership
+    one) -- every real active member genuinely shares a Labyrinth run,
+    no cap.
+    """
+    if not character.get("party_id"):
+        return [character]
+    members = []
+    for m in db.get_party_members_by_id(character["party_id"]):
+        if m.get("is_benched") or m.get("is_inactive"):
+            continue
+        if m["telegram_user_id"] > 0 and m["character_id"] != db.get_active_character_id(m["telegram_user_id"], m["chat_id"]):
+            continue
+        members.append(m)
+    return members
+
+
 def _location_or_labyrinth_room(character: dict, chat_id: int) -> dict | None:
     """
     Real systemic gap (2026-09-02, Coffee, live and escalating: "not
@@ -9367,7 +9402,7 @@ async def _resolve_labyrinth_checkpoint(update: Update, character: dict, room: d
         return ""
     room["checkpoint_claimed"] = True
     floor = room.get("floor", 0)
-    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    members = _labyrinth_active_party_members(character)
     for m in members:
         db.update_character_by_id(
             m["character_id"], hp_current=m["hp_max"], spell_slots_current=m["spell_slots_max"],
@@ -9420,7 +9455,7 @@ async def _do_enter_labyrinth(update: Update) -> None:
         # (e.g. a newer recruit); the party as a whole resumes at the
         # FURTHEST one any current member has personally banked, so
         # nobody's own real progress is ever silently thrown away.
-        members_for_start = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+        members_for_start = _labyrinth_active_party_members(character)
         checkpoint = max((m.get("labyrinth_checkpoint_floor", 0) for m in members_for_start), default=0)
         start_floor = checkpoint + 1
         segment = labyrinth_module.segment_number_for_floor(start_floor)
@@ -9434,7 +9469,7 @@ async def _do_enter_labyrinth(update: Update) -> None:
         )
         new_segment_theme = segment_data["theme"]
 
-    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    members = _labyrinth_active_party_members(character)
     for m in members:
         db.update_character_by_id(m["character_id"], current_location=LABYRINTH_LOCATION_SENTINEL)
 
@@ -9479,7 +9514,7 @@ async def _do_leave_labyrinth(update: Update) -> None:
         )
         return
     db.delete_labyrinth_run(chat_id, party_key)
-    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    members = _labyrinth_active_party_members(character)
     for m in members:
         db.update_character_by_id(m["character_id"], current_location="the_colosseum")
     checkpoint = character.get("labyrinth_checkpoint_floor", 0)
@@ -9528,7 +9563,7 @@ async def _do_descend_labyrinth(update: Update) -> None:
         current_room_id=segment_data["entry_room_id"], rooms=segment_data["rooms"],
         visited_floors=[entry_room["floor"]],
     )
-    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    members = _labyrinth_active_party_members(character)
     for m in members:
         db.bump_labyrinth_best_floor(m["telegram_user_id"], chat_id, entry_room["floor"])
 
@@ -9718,7 +9753,7 @@ async def _resolve_labyrinth_hazard(update: Update, character: dict, room: dict,
         return ""
     room["hazard_triggered"] = True
     floor = room.get("floor", run["floor"])
-    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    members = _labyrinth_active_party_members(character)
     lines = []
     for member in members:
         if member.get("hp_current", 0) <= 0:
@@ -9853,7 +9888,7 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
         rooms=run["rooms"],
     )
     if newly_reached:
-        members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+        members = _labyrinth_active_party_members(character)
         for m in members:
             db.bump_labyrinth_best_floor(m["telegram_user_id"], chat_id, dest_floor)
     checkpoint_line = await _resolve_labyrinth_checkpoint(update, character, destination, run, chat_id, party_key)
@@ -12992,6 +13027,31 @@ def _mentions_hidden_passage(text: str) -> bool:
     return any(kw in text_lower for kw in _HIDDEN_PASSAGE_KEYWORDS)
 
 
+_BREAKABLE_SURFACE_RE = re.compile(r"\b(?:hit|strike|attack|bomb|blow up|explode|smash)\b.*\b(?:wall|floor|crack)\b")
+
+
+def _mentions_breakable_surface(text: str) -> bool:
+    """
+    Same shape as _mentions_hidden_passage, for the equivalent dexterity-
+    side confusion (2026-09-03, Coffee, dev-bridge screenshot: "Hit the
+    floor" in a room whose own hazard flavor text says "the floor here
+    looks half-rotted through... a long way down" got a vague, unrelated
+    ability-check narration instead of any honest answer). Root cause:
+    that flavor line belongs to a `hazard` (a `collapsing_floor`, which
+    already auto-triggered a real dex save on arrival -- see
+    _resolve_labyrinth_hazard) describing atmosphere, NOT a `kind:
+    "breakable_wall"/"breakable_floor"` lockable a player can actually
+    hit to break through -- those are a genuinely different, opt-in
+    mechanic this room never had. _find_lockable correctly found nothing
+    here, so _do_skill_check fell through to a plain, un-grounded
+    dexterity check, free to invent whatever vague flavor it wanted
+    about "the floor" with zero connection to the real hazard that
+    already resolved. Same regex intent_parser.py's own hit/bomb-a-wall-
+    or-floor classifier already uses.
+    """
+    return bool(_BREAKABLE_SURFACE_RE.search(text.lower()))
+
+
 async def _do_skill_check(update: Update, ability: str, action_text: str, forced_roll: int | None = None) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -13084,6 +13144,19 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
             # monster-grounding branch above) makes it something the
             # model is told to reflect, not just avoid contradicting.
             grounded_fact = "There is no hidden door, passage, or secret exit here — nothing like that exists to find at this location."
+    elif ability == "dexterity" and _mentions_breakable_surface(action_text):
+        # Real live bug (2026-09-03, Coffee, dev-bridge screenshot: "Hit
+        # the floor" in a room whose hazard flavor says "the floor here
+        # looks half-rotted through... a long way down" produced vague,
+        # unrelated narration). We already know for certain there's no
+        # real breakable_wall/breakable_floor lockable here -- if there
+        # were, `lockable` above would be set and _do_lockpick would
+        # have handled this already, never reaching this branch at all.
+        # Same grounding discipline as the wisdom/hidden-passage case
+        # just above: name the real fact instead of leaving the model
+        # free to invent (or vaguely gesture at) a mechanic that isn't
+        # actually there.
+        grounded_fact = "There is nothing here that actually breaks or gives way to force — no real crack, wall, or floor panel that responds to being hit."
 
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, ability,
@@ -27696,7 +27769,7 @@ async def _do_labyrinth_checkpoint_offering(update: Update, text: str) -> None:
     if room is None or not room.get("is_checkpoint"):
         await _safe_send(update, "There's no shrine to pray at here.", speak=False)
         return
-    members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
+    members = _labyrinth_active_party_members(character)
     wants_offering = bool(re.search(r"\b(water|offer|offering)\b", text.lower()))
     if wants_offering:
         if character["inventory"].get("spring_water", 0) < 1:

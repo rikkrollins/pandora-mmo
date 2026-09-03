@@ -2,6 +2,47 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.480] — fix: Labyrinth traps hit benched/inactive/dormant-alt party members; honest "nothing breaks here" instead of vague narration
+
+Two real live reports, back to back.
+
+**Trap scope bug** (Coffee, dev-bridge screenshot: a single Labyrinth
+trap rolled saves for and damaged 12 characters at once — "The trap
+shouldn't be hurting people that aren't in the active party and it
+shouldn't definitely be hurting inactive members"). Root cause: every
+Labyrinth "whole party" handler (enter/leave, checkpoint heals, hazard
+saves, best-floor tracking, shrine offerings) called the raw
+`db.get_party_members_by_id` directly, with none of the exclusions
+`_get_real_party_combatants` already established for ordinary combat
+back on 2026-08-13 — the exact same bug shape recurring here: a
+human's own dormant alt (Laurienna/Charvenna, Ravenloft/Pan — the same
+names from that original incident, again in this new screenshot) got
+double-counted as a second party member, and benched/resting members
+were swept in unasked, taking real damage and getting silently
+teleported for a run they were never part of. Fixed with one shared
+`_labyrinth_active_party_members` helper, reused at all 7 call sites
+that previously duplicated the same wrong pattern.
+
+**Vague "hit the floor" narration** (Coffee: "Is this supposed to
+work? The narration is hinting at a weak floor" → "am i supposed to be
+able to break this floor or should i move on?"). Confirmed against the
+character's own real room data: the "half-rotted floor" text belongs
+to a `collapsing_floor` **hazard** (auto-triggers once on arrival,
+already fired) — not a `breakable_floor` lockable a player can
+actually hit, which is a separate, opt-in mechanic this room never
+had. `_do_skill_check` had no grounding for this case (only wisdom/
+hidden-passage searches were grounded before), so it fell through to
+a plain, ungrounded ability check, free to invent vague flavor with no
+real connection to what actually happened. Same grounding discipline
+as the existing hidden-door fix: `narrate_skill_check` now gets an
+explicit real fact ("nothing here actually breaks or gives way") for
+any hit/strike/bomb-a-wall-or-floor attempt with no real breakable
+lockable present, instead of leaving the model free to imply a
+mechanic that isn't there.
+
+5 new tests; full 70-test LabyrinthTests suite plus the 5 relevant
+grounding tests pass in isolation.
+
 ## [1.27.479] — fix: repeated taps of the same still-resolving button queued a real, growing backlog ahead of the next action
 
 Real live report (Coffee, dev-bridge: "My push buttons haven't worked
