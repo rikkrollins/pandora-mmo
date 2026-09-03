@@ -34349,6 +34349,63 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             break
         self.assertTrue(carry_seen, "expected at least one real carry puzzle across 150 real seeds")
 
+    def test_generate_floor_hint_statue_only_appears_with_something_real_to_hint_at(self):
+        """
+        Real owl-statue-style hint (2026-09-03, Link's Awakening
+        research). Statistical: a hint statue only ever appears in the
+        hub when the floor genuinely has a miniboss/gate/collapse/warp
+        to hint at, and its real hint_lines never name a room or exact
+        position (feedback_never_spoil_puzzle_answers).
+        """
+        statue_seen = no_statue_seen = False
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub = rooms[floor_data["hub_room_id"]]
+            statue = next((lk for lk in hub.get("lockables", []) if lk.get("kind") == "hint_statue"), None)
+            has_real_feature = (
+                any(r.get("is_miniboss_room") for r in rooms.values())
+                or any(r.get("locked_connections") for r in rooms.values())
+                or any(r.get("collapsing_connections") for r in rooms.values())
+                or any(r.get("warps") for r in rooms.values())
+            )
+            if statue is not None:
+                statue_seen = True
+                self.assertTrue(has_real_feature, "a statue must never appear with nothing real to hint at")
+                self.assertTrue(statue["hint_lines"], "expected at least one real hint line")
+                for line in statue["hint_lines"]:
+                    for rid, r in rooms.items():
+                        self.assertNotIn(r["name"], line, f"hint line spoils a real room name: {line!r}")
+            elif not has_real_feature:
+                no_statue_seen = True
+        self.assertTrue(statue_seen, "expected at least one real hint statue across 80 real seeds")
+        self.assertTrue(no_statue_seen, "expected at least one plain floor with nothing to hint at across 80 real seeds")
+
+    async def test_labyrinth_examine_hint_statue_reveals_real_non_spoiler_facts(self):
+        """End-to-end: examining a real hint statue reveals its real hint_lines text, and a pressure plate coexisting in the same room never makes 'examine the statue' ambiguous."""
+        user_id, chat_id = 962054, -962054
+        make_basic_character(user_id, "HintStatueTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub["lockables"] = [
+            {"id": "test_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing",
+             "hint_lines": ["Something stronger than the rest of this floor waits along the way down."]},
+            {"id": "test_plate", "kind": "pressure_plate", "name": "a stone pressure plate"},
+        ]
+        hub["movable_objects"] = [{"id": "test_crate", "name": "a heavy crate"}]
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "examine the statue", sink, chat_id=chat_id), DummyContext(),
+            {"action": "examine", "target": "statue", "raw_text": "examine the statue"}, "examine the statue",
+        )
+        self.assertTrue(any("Something stronger than the rest of this floor waits along the way down." in s for s in sink), sink)
+        self.assertFalse(any("doesn't spot anything" in s for s in sink), f"expected the statue to resolve unambiguously despite the pressure plate, got: {sink}")
+
     def test_carry_puzzle_phrasing_routes_to_skill_check_not_attack_or_gather(self):
         """
         Real bug caught before ever shipping live (2026-09-03, same

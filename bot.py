@@ -9758,6 +9758,15 @@ async def _do_labyrinth_examine(update: Update, target_text: str) -> None:
     if lowered:
         lockable = _find_lockable(room, target_text)
         if lockable:
+            # Real owl-statue-style hint (2026-09-03, Link's Awakening
+            # research) -- reveals every real, honest, non-spoiler fact
+            # about this floor at once (never a room name or exact
+            # position, per feedback_never_spoil_puzzle_answers), not
+            # the generic lockable callout line.
+            if lockable.get("kind") == "hint_statue":
+                hint_text = " ".join(lockable.get("hint_lines", []))
+                await _safe_send(update, f"🗿 **{character['name']}** studies the worn statue. {hint_text}")
+                return
             lines = _lockable_callout_lines({"lockables": [lockable]}, chat_id)
             if lines:
                 await _safe_send(update, f"🔍 **{character['name']}** examines it closely. {lines[0]}")
@@ -12651,9 +12660,16 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
         "switch": ("switch", "crystal", "torch", "brazier", "lantern", "lock"),
         "breakable_wall": ("wall", "crack", "cracked", "bomb", "explode"),
         "breakable_floor": ("floor", "crack", "cracked", "bomb", "explode"),
-        "pressure_plate": ("plate", "urn", "crate", "statue", "block", "switch"),
+        # "statue" deliberately dropped (2026-09-03) -- no real
+        # authored pressure-plate object anywhere in this codebase
+        # actually uses that word (always "a heavy crate"), and the new
+        # hint_statue kind below genuinely does, so keeping it here
+        # would make "examine the statue" ambiguous whenever both
+        # happen to be in the same room (the hub, for both).
+        "pressure_plate": ("plate", "urn", "crate", "block", "switch"),
         "carry_object": ("weight", "stone", "ball", "boulder", "carry", "pick up", "heave", "lift"),
         "pillar": ("pillar", "column", "pedestal"),
+        "hint_statue": ("statue", "owl", "eye"),
     }
     # Real live bug (2026-09-03, Coffee, dev-bridge: "Attack the
     # crystal" in a Labyrinth room that ALSO held a real chest --
@@ -23662,20 +23678,21 @@ def _lockable_callout_lines(location: dict, chat_id: int) -> list[str]:
     lockable_emoji = {
         "door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "pressure_plate": "⚖️",
         "breakable_wall": "💥", "breakable_floor": "💥", "multi_switch_gate": "🔶",
-        "carry_object": "🪨", "pillar": "🏛️",
+        "carry_object": "🪨", "pillar": "🏛️", "hint_statue": "🗿",
     }
     for lockable in location.get("lockables", []):
         if lockable.get("hidden"):
             continue
         kind = lockable.get("kind")
-        # switch/pressure_plate/multi_switch_gate/pillar are
-        # deliberately NEVER skipped here even once used -- all four
-        # can be toggled back off (or, for a pillar, are just a
-        # standing fact about the room either way), unlike every other
-        # kind which "resolves" into an open path once picked.
-        # carry_object is likewise never skipped -- it's a real,
-        # permanently-present object, not something that gets "used up."
-        if kind not in ("switch", "pressure_plate", "multi_switch_gate", "carry_object", "pillar") and _lockable_is_open(location, lockable["id"], chat_id):
+        # switch/pressure_plate/multi_switch_gate/pillar/hint_statue are
+        # deliberately NEVER skipped here even once used -- a statue
+        # never "resolves" (it can be examined any number of times),
+        # and the other four can be toggled back off (or, for a pillar,
+        # are just a standing fact about the room either way), unlike
+        # every other kind which "resolves" into an open path once
+        # picked. carry_object is likewise never skipped -- it's a
+        # real, permanently-present object, not something used up.
+        if kind not in ("switch", "pressure_plate", "multi_switch_gate", "carry_object", "pillar", "hint_statue") and _lockable_is_open(location, lockable["id"], chat_id):
             continue
         emoji = lockable_emoji.get(kind, "🔒")
         if kind == "lever":
@@ -23708,6 +23725,8 @@ def _lockable_callout_lines(location: dict, chat_id: int) -> list[str]:
         elif kind == "pillar":
             active = _lockable_is_open(location, lockable["id"], chat_id)
             state = "already struck" if active else "waiting for a real blow with something heavy"
+        elif kind == "hint_statue":
+            state = "watching over the entry, worth a closer look"
         else:
             state = "locked"
         lines.append(f"{emoji} {lockable['name'].capitalize()} is here, {state}.")

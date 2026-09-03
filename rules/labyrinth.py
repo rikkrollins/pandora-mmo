@@ -1069,6 +1069,27 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 })
                 rooms[shortcut_a]["locked_connections"][shortcut_b] = f"{trigger_id}_echo_{shortcut_a}"
 
+    # Real owl-statue-style hint (2026-09-03, Link's Awakening research
+    # -- an optional, non-spoiler ambient warning before committing to
+    # a room). Strictly honest and vague, matching this project's own
+    # hard `feedback_never_spoil_puzzle_answers` rule: real facts about
+    # what's somewhere on this floor, never a room name or exact
+    # position. Only placed when there's something real to hint at.
+    hint_lines = []
+    if any(r.get("is_miniboss_room") for r in rooms.values()):
+        hint_lines.append("Something stronger than the rest of this floor waits along the way down.")
+    if any(r.get("locked_connections") for r in rooms.values()):
+        hint_lines.append("A passage further in stays sealed until something elsewhere on this floor is answered.")
+    if any(r.get("collapsing_connections") for r in rooms.values()):
+        hint_lines.append("A passage further in feels unstable, like a well-placed blow could change its shape.")
+    if any(r.get("warps") for r in rooms.values()):
+        hint_lines.append("A shimmer somewhere on this floor doesn't belong here -- it leads somewhere else entirely.")
+    if hint_lines:
+        hub.setdefault("lockables", []).append({
+            "id": f"f{floor}_hint_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing",
+            "hint_lines": hint_lines,
+        })
+
     _assign_grid_positions(rooms, hub_id)
     _add_loop_back_connections(rooms, hub_id, connector["id"], rng, floor)
     return {

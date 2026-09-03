@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.490] — feature: owl-statue-style Labyrinth hint (Phase L4, item 1)
+
+Real, discrete, OPTIONAL interactable (never automatic, never spoiling
+an exact room/content — matches this project's own strict
+`feedback_never_spoil_puzzle_answers` rule): a worn statue appears in
+the hub whenever the floor has a real mini-boss, branch gate, collapse
+puzzle, or warp. Examining it reveals one honest, vague line per real
+feature actually present ("something stronger than the rest of this
+floor waits along the way down," "a passage further in feels
+unstable," "a shimmer somewhere on this floor doesn't belong here") —
+real facts, no room names, no exact positions.
+
+Reuses the already-generic `_find_lockable`/`_do_labyrinth_examine`
+machinery — one new `kind_words` entry, one new examine branch. A real
+small bug caught while wiring it up: `pressure_plate`'s own kind_words
+included "statue" (speculative, never actually authored anywhere),
+which would have made "examine the statue" ambiguous whenever a
+pressure plate and a hint statue shared the hub — removed before it
+could ever cause a real player-facing collision.
+
+4 new tests (statistical placement + non-spoiler content check + a
+real ambiguity-safety end-to-end test). Full 95-test LabyrinthTests
+suite passes (2 known, pre-existing batch-order flakes confirmed
+harmless in isolation).
+
 ## [1.27.489] — feature: Eagle's Tower-style carry-and-collapse puzzle + character-sheet proficiency cleanup
 
 **Carry-and-collapse puzzle** (Phase L4, item 0.5) — the literal
