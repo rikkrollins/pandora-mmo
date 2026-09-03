@@ -32412,11 +32412,24 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # the sentinel location first (every cl.get_location(CAMPAIGN, ...)
     # call on these paths already degrades to None/no-op gracefully,
     # never crashes) before being added here.
+    # Real live report (2026-09-03, Coffee, dev-bridge: "Why isnt this
+    # working?" -- "Start the battle" and "Talk to the elder bone
+    # legionnaire" [a real MONSTER name, not an NPC] both hit this same
+    # generic refusal). "start_combat" is a real, separate action from
+    # "attack" (COMBAT_START_WORDS in ai/intent_parser.py -- "start the
+    # battle"/"begin fight"/etc. all classify this way, not as "attack")
+    # that was simply never added here even though the tutorial promises
+    # "attack" works; routed below to the exact same labyrinth-safe path
+    # "attack" already uses. "talk_npc" was never added either, even
+    # though its own handler already falls back to the labyrinth-safe
+    # _do_examine whenever the named target isn't a real CAMPAIGN NPC
+    # (which a Labyrinth room's own generated content -- monsters/
+    # lockables/chests only, never named NPCs -- never is in practice).
     if _in_labyrinth and action not in (
-        "move", "look", "attack", "leave_labyrinth", "descend_labyrinth", "check_inventory", "check_party",
-        "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
+        "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
+        "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
-        "divine_smite", "wild_shape", "examine", "skill_check",
+        "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
@@ -32435,6 +32448,18 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_leave_labyrinth(update)
     elif action == "descend_labyrinth":
         await _do_descend_labyrinth(update)
+    elif action == "start_combat" and _in_labyrinth:
+        # "Start the battle"/"begin fight"/etc. classify as the separate
+        # "start_combat" action (COMBAT_START_WORDS), not "attack" --
+        # routed through the exact same labyrinth-safe path "attack"
+        # itself uses just below, never the overworld's CAMPAIGN-based
+        # _do_start_combat (whose own location lookup degrades to None
+        # here and would fall back to a hardcoded "goblin", ignoring
+        # this room's real monsters entirely).
+        if sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id) is None:
+            await _do_labyrinth_attack(update, intent.get("raw_text", text))
+        else:
+            await _do_attack(update, intent.get("raw_text", text))
     elif action == "start_combat":
         monster_key = None
         lowered = text.lower()

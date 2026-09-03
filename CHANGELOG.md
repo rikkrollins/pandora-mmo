@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.478] — fix: "start the battle" and "talk to X" wrongly refused everywhere in the Labyrinth
+
+Real live report right after the previous deploy (Coffee, dev-bridge:
+"Why isnt this working?" — "Start the battle" and "Talk to the elder
+bone legionnaire" [a real monster name, not an NPC] both got the
+generic "That doesn't work this deep in the Labyrinth" refusal).
+
+Root causes, both allowlist gaps in `_dispatch_intent`'s Labyrinth
+short-circuit:
+- "Start the battle"/"begin fight"/etc. classify as the separate
+  `start_combat` action (`COMBAT_START_WORDS` in
+  `ai/intent_parser.py`), not `attack` — `attack` was already on the
+  allowlist, `start_combat` simply never was, directly contradicting
+  the tutorial's own "attack" promise. Naively allowing it isn't
+  enough either: the overworld's `start_combat` branch calls the
+  CAMPAIGN-based `_do_start_combat`, whose location lookup degrades to
+  `None` inside the Labyrinth and would have started a fight against a
+  hardcoded fallback `"goblin"`, ignoring the room's real monsters —
+  routed instead through the exact same labyrinth-safe path `attack`
+  itself already uses.
+- `talk_npc` was never on the allowlist at all, even though its own
+  handler already falls back to the labyrinth-safe `_do_examine`
+  whenever the named target isn't a real CAMPAIGN NPC — which nothing
+  inside a generated Labyrinth room (monsters/lockables/chests only)
+  ever is in practice.
+
+2 new tests; full 69-test LabyrinthTests suite passes in isolation.
+
 ## [1.27.477] — fix: Labyrinth ambush could freeze forever on an AI companion's first turn; real element-colored switch icons
 
 **Urgent live fix.** Coffee reported "the battle isnt working" / "What

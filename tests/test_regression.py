@@ -34034,6 +34034,69 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             enemy["hp_current"] = 0
         sessions.end_session(chat_id, session)
 
+    async def test_start_combat_phrasing_works_inside_the_labyrinth(self):
+        """
+        Real live report (2026-09-03, Coffee, dev-bridge: "Why isnt
+        this working?" -- "Start the battle" got the generic "That
+        doesn't work this deep in the Labyrinth" refusal). Root cause:
+        "start the battle"/"begin fight"/etc. classify as the separate
+        "start_combat" action (COMBAT_START_WORDS in ai/intent_parser.py),
+        not "attack" -- which was on the labyrinth allowlist but
+        "start_combat" simply never was, even though the tutorial
+        promises "attack" (and by extension any way of phrasing it)
+        works. Must route through the same labyrinth-safe path "attack"
+        itself uses, never the overworld's CAMPAIGN-based _do_start_combat.
+        """
+        import sessions
+        user_id, chat_id = 962031, -962031
+        make_basic_character(user_id, "LabyrinthStartCombatTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "start the battle", sink, chat_id=chat_id), DummyContext(),
+            {"action": "start_combat", "raw_text": "start the battle"}, "start the battle",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session, "a real Labyrinth encounter must have actually started")
+        # The real goblin from THIS room, never the overworld fallback's
+        # hardcoded default -- confirms this went through _do_labyrinth_
+        # attack, not the CAMPAIGN-based _do_start_combat.
+        self.assertTrue(any(p["monster_key"] == "goblin" for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"))
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        sessions.end_session(chat_id, session)
+
+    async def test_talk_npc_phrasing_falls_back_to_examine_inside_the_labyrinth(self):
+        """
+        Real live report (2026-09-03, same dev-bridge screenshot as
+        above): "Talk to the elder bone legionnaire" (a real MONSTER
+        name, not an NPC) got the same generic labyrinth refusal.
+        talk_npc's own handler already falls back to the labyrinth-safe
+        _do_examine whenever the named target isn't a real CAMPAIGN NPC
+        (which nothing inside a generated Labyrinth room ever is) -- it
+        just needed to be let through the allowlist gate at all.
+        """
+        user_id, chat_id = 962032, -962032
+        make_basic_character(user_id, "LabyrinthTalkNpcTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "talk to the elder bone legionnaire", sink, chat_id=chat_id), DummyContext(),
+            {"action": "talk_npc", "npc_name": "the elder bone legionnaire", "raw_text": "talk to the elder bone legionnaire"},
+            "talk to the elder bone legionnaire",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+
     def test_labyrinth_antagonist_is_never_a_real_campaign_character(self):
         """Phase L3, per Coffee: "don't use characters that are in the storyline, make sure they are separate from the actual game"."""
         name = labyrinth_module.LABYRINTH_ANTAGONIST_NAME
