@@ -30289,6 +30289,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_summon_remnant(FakeUpdate(user_id, "summon The Unopened", sink, chat_id=-993), "summon The Unopened")
         self.assertTrue(any("haven't bound any Remnants" in s for s in sink))
 
+    async def test_summon_remnant_stays_silent_for_an_ai_actors_ambiguous_autonomous_text(self):
+        """
+        Real live finding (2026-09-03, self-improvement monitoring
+        pass, topic-activity log): an AI companion's own vague
+        autonomous wandering line ("I seek my location.", "I explore
+        further.") occasionally gets classified as summon_remnant by
+        the semantic intent parser despite never naming a real Remnant
+        -- confirmed 6+ separate occurrences across several companions
+        in one live session, each broadcasting a real "Summon which
+        Remnant? You've bound: X." question into Adventure, addressed
+        to nobody who could ever answer it. A genuine human typing an
+        ambiguous "summon" still gets the real clarifying question --
+        only an AI's own unprompted, unanswerable filler action is
+        silenced, matching this game's actual "chat" default everywhere
+        else in the living-world system.
+        """
+        user_id = 800210
+        make_basic_character(user_id, "AmbiguousSummonAI", current_location="crossroads_tavern", chat_id=-991, is_ai=True)
+        db.update_character(user_id, -991, bound_remnants=["the_wrathflame_unbound"])
+        sink = []
+        await bot._do_summon_remnant(FakeUpdate(user_id, "I seek my location.", sink, chat_id=-991), "I seek my location.")
+        self.assertEqual(sink, [], sink)
+
+        # A real human with the exact same ambiguity still gets the
+        # real, answerable clarifying question -- unaffected by this fix.
+        human_id = 800211
+        make_basic_character(human_id, "AmbiguousSummonHuman", current_location="crossroads_tavern", chat_id=-991)
+        db.update_character(human_id, -991, bound_remnants=["the_wrathflame_unbound"])
+        sink2 = []
+        await bot._do_summon_remnant(FakeUpdate(human_id, "summon", sink2, chat_id=-991), "summon")
+        self.assertTrue(any("Summon which Remnant?" in s for s in sink2), sink2)
+
     async def test_summon_remnant_deals_real_elemental_damage_and_advances_turn(self):
         import asyncio
         import sessions
@@ -34388,6 +34420,73 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             "I venture deeper into uncharted territories.",
         )
         self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+
+    async def test_ambient_ai_summon_remnant_misfire_inside_the_labyrinth_stays_silent(self):
+        """
+        Real live report (2026-09-03, Coffee: "no one is in the
+        labyrinth and it is giving the same msg... it keep happening").
+        Same root pattern as the "chat" fix just above, one action
+        later: multiple AI companions still genuinely inside an active
+        Labyrinth run kept having their own ambient wandering lines ("I
+        explore further.", "I seek my location.") misclassified as
+        "summon_remnant" -- never on the allowlist, so it hit the
+        generic refusal every ~15 minutes (the AI party tick interval),
+        attributed to no one. Combines with the is_ai silence fix on
+        _do_summon_remnant itself (see that function's own docstring)
+        to fully suppress this: the action must first be LET THROUGH
+        the labyrinth gate, then its own ambiguous-target handling
+        silences it for an AI actor specifically.
+        """
+        user_id, chat_id = 962038, -962038
+        make_basic_character(user_id, "LabyrinthAmbientSummonTester", chat_id=chat_id, current_location="the_colosseum", is_ai=True)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], bound_remnants=["the_wrathflame_unbound"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "I explore further.", sink, chat_id=chat_id), DummyContext(),
+            {"action": "summon_remnant", "raw_text": "I explore further."},
+            "I explore further.",
+        )
+        self.assertEqual(sink, [], sink)
+
+    async def test_real_human_can_summon_a_bound_remnant_during_a_real_labyrinth_fight(self):
+        """
+        Real feature gap closed as a side effect of the fix above: since
+        _do_summon_remnant never touches CAMPAIGN location lookups
+        anywhere in its body, a real human genuinely summoning their own
+        bound Remnant mid-fight inside the Labyrinth now actually works,
+        instead of being blocked by the same generic refusal.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        user_id, chat_id = 962039, -962039
+        make_basic_character(user_id, "LabyrinthRealSummonTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, bound_remnants=["the_wrathflame_unbound"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session, "combat must have actually started")
+
+        sink = []
+        with patch("bot.narrate_remnant_summon", return_value="It answers your call."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._dispatch_intent(
+                FakeUpdate(user_id, "summon the wrathflame unbound", sink, chat_id=chat_id), DummyContext(),
+                {"action": "summon_remnant", "raw_text": "summon the wrathflame unbound"},
+                "summon the wrathflame unbound",
+            )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+        self.assertTrue(any("The Wrathflame Unbound" in s for s in sink), sink)
+
+        leftover = sessions.get_session_for_user(chat_id, user_id)
+        if leftover is not None:
+            sessions.end_session(chat_id, leftover)
 
     async def test_labyrinth_hazard_and_entry_never_touch_benched_inactive_or_a_dormant_alt(self):
         """

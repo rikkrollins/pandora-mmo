@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.483] — fix: recurring unprompted "That doesn't work this deep in the Labyrinth" message, one action later
+
+Real live report right after v1.27.482 deployed (Coffee: "no one is in
+the labyrinth and it is giving the same msg... it keep happening").
+Confirmed live: the exact same root pattern as v1.27.482's `chat` fix,
+recurring for a DIFFERENT action — multiple AI companions still
+genuinely inside an active Labyrinth run kept having their own ambient
+wandering lines ("I explore further.", "I seek my location.")
+misclassified as `summon_remnant` by the semantic intent parser.
+`summon_remnant` was never on the Labyrinth's action allowlist, so it
+kept hitting the generic refusal every ~15 minutes (the AI party tick
+interval), attributed to no one, exactly matching "it keeps happening."
+
+Fixed the same way as `chat`/`talk_npc`: confirmed `_do_summon_remnant`
+never touches a CAMPAIGN location lookup anywhere in its body, so it's
+safe to let through. Combined with the self-improvement monitoring
+pass's already-prepared fix (silences `_do_summon_remnant`'s own
+"which Remnant?" clarifying question specifically for an `is_ai` actor
+whose text names no real Remnant — a human asking the same ambiguous
+question still gets the real, answerable prompt) to fully suppress
+this class of noise. Also closes a real, legitimate feature gap as a
+side effect: a human can now genuinely summon their own bound Remnant
+during a real Labyrinth ambush fight, which was silently impossible
+before this fix.
+
+4 new tests (2 for this fix, 2 carried over from the monitoring pass);
+full 73-test LabyrinthTests suite passes in isolation.
+
 ## [1.27.482] — fix: an AI companion's own ambient chatter could produce a confusing, unprompted Labyrinth rejection
 
 Real live report (Coffee, dev-bridge screenshot: an unprompted "That

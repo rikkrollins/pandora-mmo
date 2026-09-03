@@ -31270,6 +31270,22 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         return
     remnant_id = remnants_module.find_remnant_mentioned_in_text(text, candidate_ids=character["bound_remnants"])
     if remnant_id is None:
+        # Real live finding (2026-09-03, self-improvement monitoring
+        # pass, topic-activity log): an AI companion's own vague
+        # autonomous wandering line ("I seek my location.", "I explore
+        # further.") occasionally gets classified as summon_remnant by
+        # the semantic intent parser despite never naming a real
+        # Remnant -- with no is_ai check here, this broadcast a real
+        # "Summon which Remnant? You've bound: X." question, addressed
+        # to nobody, into Adventure every time it happened (confirmed
+        # live: at least 6 separate occurrences across several
+        # companions in one session). A human who genuinely typed
+        # "summon" with an ambiguous/missing name still gets the real
+        # clarifying question (they can answer it); an AI's own
+        # unprompted, unanswerable filler action just stays silent,
+        # same as this game's actual "chat" default everywhere else.
+        if character.get("is_ai"):
+            return
         if not character["bound_remnants"]:
             await _safe_send(update, "You haven't bound any Remnants yet — defeat a real Unbound to earn one.")
         else:
@@ -32576,11 +32592,25 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # here it hit the generic refusal instead, turning a silent AI aside
     # into a visible, confusing system message attributed to no one,
     # right in the middle of the Adventure topic.
+    # Real live report (2026-09-03, Coffee: "no one is in the labyrinth
+    # and it is giving the same msg... it keep happening"). Confirmed
+    # live: multiple AI companions still genuinely inside an active
+    # Labyrinth run keep having their own ambient wandering lines ("I
+    # explore further.", "I seek my location.") misclassified as
+    # "summon_remnant" by the semantic intent parser -- same root
+    # pattern as the "chat" fix just above, one action later. "summon_
+    # remnant" was never on this allowlist, so it kept hitting the
+    # generic refusal every ~15 minutes (the AI party tick interval),
+    # attributed to no one. Confirmed CAMPAIGN-agnostic just like the
+    # others here -- _do_summon_remnant never touches cl.get_location
+    # anywhere in its body -- so this is also a real, legitimate
+    # feature gap closed as a side effect: a human can now genuinely
+    # summon their own bound Remnant during a real Labyrinth ambush too.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
-        "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat",
+        "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
