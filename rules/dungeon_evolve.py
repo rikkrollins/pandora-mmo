@@ -70,6 +70,19 @@ from scripts import build_location_grid
 # from LONGER branches, not more of them (see _generate_once below).
 _HUB_NON_BOSS_BRANCHES = 3
 
+# Loop-back connections (rules/labyrinth.py's own "densify the tree
+# into a real grid" mechanic) were tried here too (2026-09-03) and
+# deliberately NOT shipped: real testing across 3 source dungeons x 40
+# seeds each found it fires ZERO times, because every branch here
+# extends in ONE fixed compass direction in a straight line for its
+# whole length (see the branch-extension loop below) -- branches
+# radiate outward from the hub and never curve back into grid-adjacency
+# with each other, unlike the Labyrinth's own organic, BFS-placed
+# branches. Shipping a mechanic confirmed dead on real output would
+# violate this project's own "never claim something works without
+# running it" rule. Revisit if this generator's branch-extension logic
+# ever grows real direction changes (jogs/turns) mid-branch.
+
 
 def _harder_target_band(campaign: dict, source_dungeon_id: str, explicit_band: tuple[int, int] | None = None) -> tuple[int, int]:
     """
@@ -489,6 +502,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     # below the real boss, since it draws from the same pool bounded by
     # the same target_band ceiling rather than reaching above it.
     non_boss_leaves = branch_leaf_ids[:-1]
+    miniboss_room_id = None
     if non_boss_leaves:
         band_lo, band_hi = target_band
         mid_lo = band_lo + (band_hi - band_lo) // 2
@@ -542,6 +556,29 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     if new_dungeon_id not in campaign.setdefault("evolved_dungeon_ids", []):
         campaign["evolved_dungeon_ids"].append(new_dungeon_id)
 
+    # Real owl-statue-style hint (2026-09-03, Phase L4, item 4 -- ported
+    # from rules/labyrinth.py's own identical mechanic, per Coffee's own
+    # repeated "dungeons and labyrinth"/"dungeon or labyrinth
+    # generation" phrasing that this scope was never Labyrinth-only).
+    # Directly portable as-is: same `_find_lockable`/`_lockable_callout_
+    # lines`/examine machinery, same non-spoiler discipline. Only ever
+    # hints at a miniboss or a switch/pressure-plate-gated branch --
+    # never the boss gate itself, since every evolved dungeon has one
+    # by definition (not a real discovery, unlike the Labyrinth's own
+    # probabilistic features).
+    hint_lines = []
+    if miniboss_room_id is not None:
+        hint_lines.append("Something stronger than the rest of this place waits along the way, off the main path.")
+    if switch_branch_idx is not None:
+        hint_lines.append("A passage further in stays sealed until something elsewhere here is answered.")
+    if plate_branch_idx is not None:
+        hint_lines.append("A passage further in waits on something heavy, placed just right.")
+    if hint_lines:
+        hub_room.setdefault("lockables", []).append({
+            "id": f"{new_dungeon_id}_hint_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing",
+            "hint_lines": hint_lines,
+        })
+
     return {
         "new_dungeon_id": new_dungeon_id,
         "room_ids": room_ids,
@@ -555,6 +592,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         "has_shop": len(room_ids) >= 18,
         "switch_branch_idx": switch_branch_idx,
         "plate_branch_idx": plate_branch_idx,
+        "boss_gate_room_id": boss_branch_first_id,
     }
 
 

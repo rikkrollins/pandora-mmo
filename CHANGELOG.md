@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.493] — feature: owl-statue hint ported to the overworld dungeon generator (Phase L4, item 4, partial)
+
+Coffee's own repeated phrasing ("dungeons and labyrinth," "dungeon or
+labyrinth generation") meant this whole phase was never Labyrinth-only.
+`rules/dungeon_evolve.py`'s generator now places the same owl-statue-
+style hint the Labyrinth got in v1.27.490, in the hub whenever a
+generated dungeon has a real miniboss or switch/pressure-plate-gated
+branch (never the boss gate itself — every evolved dungeon has one by
+definition, so it's not a real discovery the way it is for the
+Labyrinth's own probabilistic features). Same `_find_lockable`/examine
+machinery, directly portable as-is.
+
+**Loop-back connections were tried here too and deliberately NOT
+shipped** — a real, tested finding, not a silent drop: across 3 source
+dungeons × 40 seeds each, it fired zero times. Root cause, confirmed by
+generating and inspecting real output: every branch in this generator
+extends in ONE fixed compass direction in a straight line for its
+whole length, so branches radiate outward from the hub and never curve
+back into grid-adjacency with each other — unlike the Labyrinth's own
+organic, BFS-placed branches. Shipping a mechanic confirmed dead on
+real output would violate this project's own "never claim something
+works without running it" rule. Documented in `rules/dungeon_evolve.py`
+itself as a revisit-if-branch-geometry-ever-changes note. Warps and the
+collapse/carry puzzles remain deferred too, per the plan's own
+acknowledgment that porting them to this heavier, retry-based pipeline
+is real, separate follow-up work.
+
+1 new test (real end-to-end hint reveal in a generated dungeon). Full
+112-test LabyrinthTests + SwitchAndBreakableAndPitTests suite, plus all
+35 DungeonEvolveTests/DungeonAuditTests, pass clean.
+
 ## [1.27.492] — feature: `scripts/preview_labyrinth_floor.py` review tool + a real bug it found on first use (Phase L4, item 3)
 
 The concrete "editor to train it" tool Coffee's own framing called

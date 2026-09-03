@@ -24750,6 +24750,14 @@ async def _do_examine(update: Update, target_text: str) -> None:
         lockable_match = _find_lockable(location, target_text)
         if lockable_match:
             kind = lockable_match.get("kind")
+            # Real owl-statue-style hint (2026-09-03, Phase L4, item 4,
+            # ported from the Labyrinth's identical mechanic) -- reveals
+            # every real, honest, non-spoiler fact about this dungeon
+            # at once, not the generic lockable state line below.
+            if kind == "hint_statue":
+                hint_text = " ".join(lockable_match.get("hint_lines", []))
+                await _safe_send(update, f"🗿 **{character['name']}** studies the worn statue. {hint_text}")
+                return
             is_open = _lockable_is_open(location, lockable_match["id"], update.effective_chat.id)
             if kind == "switch":
                 element = lockable_match.get("element", "")

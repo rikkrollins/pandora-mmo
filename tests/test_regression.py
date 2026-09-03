@@ -32436,6 +32436,34 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             character = db.get_character(user_id, -999)
             self.assertEqual(character["current_location"], "goblin_warrens_evolved_test5_entrance")
 
+    async def test_evolve_dungeon_hint_statue_reveals_real_facts_end_to_end(self):
+        """Real owl-statue-style hint, ported from the Labyrinth (2026-09-03, Phase L4, item 4) -- examining it in a real evolved dungeon reveals real, non-spoiler facts, via the ordinary overworld _do_examine path."""
+        import copy
+        from unittest.mock import patch
+        statue_seen = False
+        for seed in range(20):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_statue_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            hub_id = next((rid for rid, r in rooms.items() if any(lk.get("kind") == "hint_statue" for lk in r.get("lockables", []))), None)
+            if hub_id is None:
+                continue
+            statue_seen = True
+            with patch.object(bot, "CAMPAIGN", campaign):
+                user_id = 960910 + seed
+                make_basic_character(user_id, f"StatueTester{seed}", current_location=hub_id)
+                sink = []
+                await bot._do_examine(FakeUpdate(user_id, "", sink), "statue")
+                combined = " ".join(sink)
+                self.assertTrue(
+                    any(phrase in combined for phrase in ("Something stronger", "stays sealed", "waits on something heavy")),
+                    f"seed {seed}: expected a real hint fact, got: {combined}",
+                )
+            break
+        self.assertTrue(statue_seen, "expected at least one real hint statue across 20 real seeds")
+
     def test_evolve_dungeon_is_deterministic_with_the_same_seed(self):
         import copy
         campaign_a = copy.deepcopy(bot.CAMPAIGN)
