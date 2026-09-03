@@ -1496,10 +1496,12 @@ def narrate_labyrinth_segment_flavor(theme_name: str, theme_intro: str, antagoni
         f"{antagonist_name} ({antagonist_lore}).\n\n"
         f"Theme: {theme_name}\nIntro: {theme_intro}\n\n"
         f"Write {scaled_sentences(1, 2)} of atmospheric flavor for arriving here, in the voice of "
-        f"the Dungeon Master. You may reference {antagonist_name} obliquely (its handiwork, not a "
-        f"direct confrontation) but never invent a new named character, faction, or plot detail "
-        f"beyond what's given. {style_directive()} Output ONLY the line itself, no preamble, no "
-        "quotation marks."
+        f"the Dungeon Master. Lean into real dungeon-crawl imagery -- ancient mechanisms, sealed "
+        f"archways, the sense of a real structure built with real dangers waiting deeper in -- so "
+        f"this reads as an explorable dungeon, not generic horror or mystery prose. You may "
+        f"reference {antagonist_name} obliquely (its handiwork, not a direct confrontation) but "
+        f"never invent a new named character, faction, or plot detail beyond what's given. "
+        f"{style_directive()} Output ONLY the line itself, no preamble, no quotation marks."
     )
     try:
         response = requests.post(

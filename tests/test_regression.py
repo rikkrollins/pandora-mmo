@@ -33339,6 +33339,44 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             f"expected a real compass word in the exits line, got: {text}",
         )
 
+    def test_labyrinth_room_image_prompt_leans_dungeon_crawl_but_stays_grounded(self):
+        """
+        Real style enrichment (2026-09-03, Phase L4, item 2, per
+        Coffee: "you aren't just building a dungeon, you are building
+        an environment that is full travellable, and adventurable" /
+        "make sure narrations and images match this style"). The
+        room's own real description text must still be the actual
+        grounding (never dropped), with real dungeon-crawl descriptors
+        added on top, not replacing it.
+        """
+        room = {"description": "A real, distinct room description that must survive verbatim."}
+        prompt = bot._labyrinth_room_image_prompt(room)
+        self.assertIn(room["description"], prompt)
+        self.assertTrue(
+            any(word in prompt.lower() for word in ("stone corridor", "torchlight", "mechanism", "archway")),
+            f"expected real dungeon-crawl imagery in the prompt, got: {prompt}",
+        )
+
+    async def test_labyrinth_segment_flavor_prompt_asks_for_dungeon_crawl_imagery(self):
+        """Real style enrichment (2026-09-03, Phase L4, item 2) -- the segment-arrival flavor prompt itself must steer toward explorable-dungeon imagery, not just the image prompt."""
+        from unittest.mock import patch
+        import ai.dm_agent as dm_agent_module
+        captured = {}
+
+        class FakeResponse:
+            status_code = 200
+            def raise_for_status(self): pass
+            def json(self): return {"response": "A real flavor line."}
+
+        def fake_post(url, json=None, timeout=None):
+            captured["prompt"] = json["prompt"]
+            return FakeResponse()
+
+        with patch("ai.dm_agent.requests.post", side_effect=fake_post):
+            dm_agent_module.narrate_labyrinth_segment_flavor("The Shattered Mirror", "A real intro.", "The Root That Remembers", "some lore", 1)
+        self.assertIn("dungeon-crawl imagery", captured["prompt"])
+        self.assertIn("explorable dungeon", captured["prompt"])
+
     def test_labyrinth_side_rooms_have_distinct_descriptions_not_one_shared_flavor_line(self):
         """
         Real live report (2026-09-02, Coffee, dev-bridge: "not giving
@@ -34756,6 +34794,39 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         png_with_strip = map_render.render_labyrinth_map(3, rooms, hub_id, segment_floors=[1, 2, 3, 4, 5])
         self.assertTrue(png_with_strip.startswith(b"\x89PNG"))
         self.assertNotEqual(png_without_strip, png_with_strip)
+
+    def test_labyrinth_locked_door_color_matches_its_gating_switchs_element(self):
+        """
+        Real live request (2026-09-03, Coffee, dev-bridge screenshot:
+        "switches and doors that are controlled by a certain element...
+        some kind of label colour or indication that is connected to
+        that crystal switch or lever"). A door gated by an elemental
+        switch (branch gate, collapse trigger) must draw in that
+        element's own color, matching the switch dot's already-shipped
+        color-coding; a door with no real element to match (pressure
+        plate, breakable, carry-puzzle pillars) falls back to the flat
+        generic gold, same as before this fix.
+        """
+        import map_render
+        rooms = {
+            "hub": {"id": "hub", "lockables": [
+                {"id": "gate1", "kind": "multi_switch_gate", "requires": ["sw1"]},
+            ], "locked_connections": {"gated_room": "gate1"}},
+            "sw_room": {"id": "sw_room", "lockables": [{"id": "sw1", "kind": "switch", "element": "fire"}]},
+            "gated_room": {"id": "gated_room"},
+            "plate_room": {"id": "plate_room", "lockables": [
+                {"id": "plate1", "kind": "pressure_plate"},
+            ], "locked_connections": {"no_element_room": "plate1"}},
+            "no_element_room": {"id": "no_element_room"},
+        }
+        self.assertEqual(
+            map_render._labyrinth_locked_door_color("hub", "gated_room", rooms),
+            map_render._SWITCH_ELEMENT_COLORS["fire"],
+        )
+        self.assertEqual(
+            map_render._labyrinth_locked_door_color("plate_room", "no_element_room", rooms),
+            map_render._LOCKED_DOOR_COLOR,
+        )
 
     def test_render_labyrinth_map_marks_a_locked_room_without_crashing_or_using_emoji_text(self):
         """

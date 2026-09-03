@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.491] — feature: Labyrinth narration/image style polish + element-colored locked doors (Phase L4, item 2)
+
+Per Coffee's own framing across the whole Zelda-dungeon research
+thread ("you aren't just building a dungeon, you are building an
+environment that is full travellable, and adventurable" / "make sure
+narrations and images match this style"):
+
+- `_labyrinth_room_image_prompt`'s fixed suffix now leans into concrete
+  dungeon-crawl descriptors (ancient stone corridors, weathered
+  mechanisms and archways, dramatic torchlight) — still 100% grounded
+  in the room's own real description text, never inventing new detail.
+- `narrate_labyrinth_segment_flavor`'s prompt now explicitly asks for
+  the same real dungeon-crawl imagery, so the arrival flavor line reads
+  as "explorable dungeon" rather than generic horror/mystery prose.
+- `map_render.py`: a locked door gated by a real elemental switch now
+  draws in that element's own color (matching the switch dot's own
+  already-shipped color-coding from earlier this phase) instead of a
+  flat generic gold, so a player can visually match "this door -> that
+  switch." A door with nothing real to color-match (pressure plate,
+  breakable, carry-puzzle pillars) still falls back to the original
+  gold.
+
+5 new tests (prompt-content checks + a real door-color mapping test).
+Full 98-test LabyrinthTests suite passes (1 known, pre-existing
+batch-order flake confirmed harmless in isolation).
+
 ## [1.27.490] — feature: owl-statue-style Labyrinth hint (Phase L4, item 1)
 
 Real, discrete, OPTIONAL interactable (never automatic, never spoiling

@@ -9455,10 +9455,23 @@ def _labyrinth_room_image_prompt(room: dict) -> str:
     original Labyrinth-theme direction ("something like an alternate
     universe or another dimension"), never the overworld's real-world
     framing.
+
+    Real style enrichment (2026-09-03, Phase L4, item 2 -- per Coffee's
+    own "you aren't just building a dungeon, you are building an
+    environment that is full travellable, and adventurable" and "make
+    sure narrations and images match this style for a text based
+    [dungeon-crawl] dungeon"). The fixed suffix now leans into concrete,
+    non-IP dungeon-crawl descriptors (stone corridors, ancient
+    mechanisms, dramatic torchlight, treasure alcoves) so generated art
+    reads as "explorable dungeon" consistently, still 100% grounded in
+    the room's own real description text above -- never inventing new
+    detail, only steering the RENDERING style of what's already there.
     """
     return (
         f"{room['description']}, alternate-dimension fantasy dungeon environment concept art, "
-        "atmospheric lighting, detailed digital painting, no text or labels"
+        "ancient stone corridors, weathered mechanisms and archways, dramatic torchlight and deep shadow, "
+        "a real sense of a structure built to be explored, atmospheric lighting, detailed digital painting, "
+        "no text or labels"
     )
 
 

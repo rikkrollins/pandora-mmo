@@ -754,6 +754,37 @@ def _labyrinth_room_connections(room_id: str, rooms: dict) -> tuple[set[str], se
     return open_ids, locked_ids
 
 
+def _labyrinth_locked_door_color(room_id: str, neighbor_id: str, rooms: dict) -> tuple:
+    """
+    Real live request (2026-09-03, Coffee, dev-bridge screenshot,
+    element-icon ask -- see `_SWITCH_ELEMENT_COLORS`'s own docstring
+    for the switch-dot half of this already-shipped): a locked door
+    gated by an elemental switch draws in THAT element's own color
+    instead of the flat generic gold, so a player can visually match
+    "this door -> that switch" at a glance. Falls back to
+    `_LOCKED_DOOR_COLOR` for a plain DC13 door with no element to match
+    (nothing exists to color-code it to).
+    """
+    room = rooms.get(room_id) or {}
+    lockable_id = room.get("locked_connections", {}).get(neighbor_id)
+    if lockable_id is None:
+        neighbor = rooms.get(neighbor_id) or {}
+        lockable_id = neighbor.get("locked_connections", {}).get(room_id)
+        room = neighbor
+    if lockable_id is None:
+        return _LOCKED_DOOR_COLOR
+    lockable = next((lk for lk in room.get("lockables", []) if lk["id"] == lockable_id), None)
+    if lockable is None:
+        return _LOCKED_DOOR_COLOR
+    switch_ids = lockable.get("requires") or ([lockable["id"]] if lockable.get("kind") == "switch" else [])
+    for switch_id in switch_ids:
+        for r in rooms.values():
+            for lk in r.get("lockables", []):
+                if lk["id"] == switch_id and lk.get("element"):
+                    return _SWITCH_ELEMENT_COLORS.get(lk["element"], _LOCKED_DOOR_COLOR)
+    return _LOCKED_DOOR_COLOR
+
+
 def _draw_labyrinth_room_walls(
     draw: "ImageDraw.ImageDraw", px: int, py: int, cell_size: int,
     room_id: str, rooms: dict, position: tuple[int, int], by_cell: dict, outline_color: tuple, outline_width: int,
@@ -784,7 +815,8 @@ def _draw_labyrinth_room_walls(
             draw.line([p1, p2], fill=outline_color, width=outline_width)
             continue
         if neighbor_id in locked_ids:
-            draw.line([p1, p2], fill=_LOCKED_DOOR_COLOR, width=outline_width + 1)
+            door_color = _labyrinth_locked_door_color(room_id, neighbor_id, rooms)
+            draw.line([p1, p2], fill=door_color, width=outline_width + 1)
         elif neighbor_id in open_ids:
             mid1 = (p1[0] + (p2[0] - p1[0]) * (0.5 - _DOOR_GAP_FRACTION / 2), p1[1] + (p2[1] - p1[1]) * (0.5 - _DOOR_GAP_FRACTION / 2))
             mid2 = (p1[0] + (p2[0] - p1[0]) * (0.5 + _DOOR_GAP_FRACTION / 2), p1[1] + (p2[1] - p1[1]) * (0.5 + _DOOR_GAP_FRACTION / 2))
