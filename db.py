@@ -973,6 +973,19 @@ def init_db() -> None:
         if "steps_until_encounter" not in labyrinth_runs_columns:
             conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN steps_until_encounter INTEGER NOT NULL DEFAULT 0")
 
+        # labyrinth_runs.carrying (2026-09-03, Phase L4, item 0.5, per
+        # Coffee's own live screenshot re-ask: "multiple levels floors
+        # and basements to get to the other end of the dungeon" -- the
+        # real Eagle's Tower mechanic, confirmed via research: carry a
+        # heavy object between rooms, strike real pillars scattered
+        # across the floor with it, collapse a section once every
+        # pillar's struck). NULL when nothing is being carried; the id
+        # of a real `carry_object` lockable while it is -- party-shared,
+        # same as every other Labyrinth run field, since only one party
+        # can ever be hauling the one object at a time.
+        if "carrying" not in labyrinth_runs_columns:
+            conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN carrying TEXT")
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)

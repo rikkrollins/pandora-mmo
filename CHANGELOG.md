@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.489] — feature: Eagle's Tower-style carry-and-collapse puzzle + character-sheet proficiency cleanup
+
+**Carry-and-collapse puzzle** (Phase L4, item 0.5) — the literal
+mechanic Coffee re-asked for directly against a live screenshot
+comparing his own generated floor to a favorite Link's Awakening
+dungeon: "multiple levels floors and basements to get to the other end
+of the dungeon." Researched (zeldadungeon.net's own level-design
+writeup): Eagle's Tower's real signature is carrying a heavy object
+between rooms and striking 2+ pillars scattered across the floor with
+it, one trip at a time. `generate_floor` now occasionally places a
+real `carry_object` in the hub and 2 `pillar` lockables across 2
+different branches, sharing one `puzzle_id`; striking a pillar without
+carrying the object is refused, striking it while carrying consumes
+the object (forcing a genuine return trip for the second pillar), and
+solving both reuses the exact same `collapsing_connections` mechanism
+the simpler single-switch collapse puzzle already uses (mutually
+exclusive with it). New `labyrinth_runs.carrying` DB column
+(party-shared, like every other run field) tracks what's currently
+being hauled. A real, caught-before-shipping intent-parser gap: "strike
+the pillar" and "pick up the stone weight" would have silently
+misclassified as `attack`/`gather`/`chat` (same bug class as the
+earlier "Hit the crystal" fix) — fixed with the same early-routing
+pattern before it ever reached a real player.
+
+**Character-sheet proficiency cleanup** — real live report (Coffee,
+dev-bridge: "Where are my weapon masters and why can't I see them?...
+clean up this list... make them clear and legible"). Every stat was
+already real and present, just crammed into one undifferentiated
+comma-joined line. Now grouped by real category (⚔️ Weapons, 🛡️ Armor,
+🔨 Professions, ✨ Magic, 🗡️ Combat Skills, 🔮 Summoning), one labeled
+line each — no new data, same underlying fields, just organized so
+"where's my weapon mastery" has an obvious, dedicated answer.
+
+10 new tests (statistical solvability + a real end-to-end pick-up/
+strike/return-trip test + intent-classification + character-sheet
+grouping). Full 93-test LabyrinthTests suite + 22 sheet-related tests +
+47 dungeon/switch/breakable tests all pass.
+
 ## [1.27.488] — feature: pressure plates + breakable walls/floors in the Labyrinth (Bottle Grotto coverage)
 
 Real gap found while directly answering Coffee's own question — "are

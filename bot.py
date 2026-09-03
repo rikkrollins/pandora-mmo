@@ -12530,18 +12530,21 @@ def _lockable_is_open(location: dict, lockable_id: str, chat_id: int) -> bool:
     floor) is a one-way PERMANENT open, tracked in _UNLOCKED -- once
     picked, always open (see _UNLOCKED's own docstring, "permanent,
     add-only"). `kind: "switch"` (2026-09-01, elemental crystal
-    switches/torches) and `kind: "pressure_plate"` (2026-09-01,
-    movable-object/liquid-fill puzzles) are the real exceptions: both
-    can be toggled back OFF, so their actual current state lives in
-    the separate _SWITCH_STATE store instead -- plain _UNLOCKED-style
-    membership would be wrong for either (that would only ever mean
-    "has been used at least once," not "is on right now"). Every real
-    gating check in this file (the move-blocking check, the permanent-
-    unlock travel button row) routes through this one function so they
-    can never silently drift out of sync with each other.
+    switches/torches), `kind: "pressure_plate"` (2026-09-01, movable-
+    object/liquid-fill puzzles), and `kind: "pillar"` (2026-09-03,
+    Eagle's Tower carry-and-collapse puzzle) are the real exceptions:
+    all three can, in principle, be toggled -- a pillar in practice is
+    only ever struck once per floor (there's no "un-strike" action),
+    but it shares the exact same re-lockable `_SWITCH_STATE` store as
+    switch/pressure_plate rather than `_UNLOCKED`, since a
+    multi_switch_gate's own `requires` list checks that store, not
+    _UNLOCKED. Every real gating check in this file (the move-blocking
+    check, the permanent-unlock travel button row) routes through this
+    one function so they can never silently drift out of sync with
+    each other.
     """
     lockable = next((lk for lk in location.get("lockables", []) if lk["id"] == lockable_id), None)
-    if lockable and lockable.get("kind") in ("switch", "pressure_plate"):
+    if lockable and lockable.get("kind") in ("switch", "pressure_plate", "pillar"):
         return _chat_scoped_dict(_SWITCH_STATE, chat_id).get(lockable_id, False)
     # Multi-switch puzzles (2026-09-02, Labyrinth Phase L2): a real
     # AND over several INDEPENDENT switch ids (never itself a real
@@ -12649,6 +12652,8 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
         "breakable_wall": ("wall", "crack", "cracked", "bomb", "explode"),
         "breakable_floor": ("floor", "crack", "cracked", "bomb", "explode"),
         "pressure_plate": ("plate", "urn", "crate", "statue", "block", "switch"),
+        "carry_object": ("weight", "stone", "ball", "boulder", "carry", "pick up", "heave", "lift"),
+        "pillar": ("pillar", "column", "pedestal"),
     }
     # Real live bug (2026-09-03, Coffee, dev-bridge: "Attack the
     # crystal" in a Labyrinth room that ALSO held a real chest --
@@ -12818,6 +12823,63 @@ async def _do_push_object_down_pit(update: Update, text: str) -> None:
     await _do_activate_pressure_plate(update, character, destination, plate, verb="sends tumbling down onto")
 
 
+async def _do_pick_up_carry_object(update: Update, character: dict, lockable: dict) -> None:
+    """
+    Real Eagle's Tower-style carry mechanic (2026-09-03, Phase L4, item
+    0.5) -- picking up the floor's own real carriable object. Party-
+    shared (a real `carrying` column on the labyrinth_runs row, not a
+    character inventory item), matching how every other piece of
+    Labyrinth puzzle state already works. Only one object can ever be
+    carried at a time -- dropping the current one to grab a different
+    one isn't a real scenario this generator ever creates (exactly one
+    `carry_object` lockable per floor), so no swap logic is needed.
+    """
+    chat_id = update.effective_chat.id
+    party_key = _labyrinth_party_key(character)
+    run = db.get_labyrinth_run(chat_id, party_key)
+    if run is None:
+        return
+    if run.get("carrying") == lockable["id"]:
+        await _safe_send(update, f"**{character['name']}** is already carrying {lockable['name'].lower()}.")
+        return
+    db.update_labyrinth_run(chat_id, party_key, carrying=lockable["id"])
+    await _safe_send(update, f"💪 **{character['name']}** heaves up {lockable['name'].lower()} — heavy, but carriable.")
+
+
+async def _do_strike_pillar(update: Update, character: dict, lockable: dict) -> None:
+    """
+    Real Eagle's Tower-style carry mechanic (2026-09-03, Phase L4, item
+    0.5) -- striking a real pillar only works while genuinely carrying
+    the matching `carry_object` (same `puzzle_id`). Successfully
+    striking one flips its own real `_SWITCH_STATE` entry (the same
+    store `multi_switch_gate.requires` already checks globally by id,
+    proven safe by the collapse puzzle this reuses) and consumes the
+    carried object -- a real return trip is required for every
+    additional pillar, same back-and-forth Eagle's Tower is built
+    around, not a single one-and-done action.
+    """
+    chat_id = update.effective_chat.id
+    party_key = _labyrinth_party_key(character)
+    run = db.get_labyrinth_run(chat_id, party_key)
+    if run is None:
+        return
+    carry_id = next(
+        (lk["id"] for room in run["rooms"].values() for lk in room.get("lockables", [])
+         if lk.get("kind") == "carry_object" and lk.get("puzzle_id") == lockable.get("puzzle_id")),
+        None,
+    )
+    if run.get("carrying") != carry_id:
+        await _safe_send(update, f"**{character['name']}** has nothing heavy enough on hand — {lockable['name'].lower()} won't budge without real weight behind it.")
+        return
+    state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
+    if state.get(lockable["id"]):
+        await _safe_send(update, f"{lockable['name'].capitalize()} has already been struck.")
+        return
+    state[lockable["id"]] = True
+    db.update_labyrinth_run(chat_id, party_key, carrying=None)
+    await _safe_send(update, f"💥 **{character['name']}** slams the weight into {lockable['name'].lower()} — it shudders, something else on this floor answering back.")
+
+
 async def _do_lockpick(update: Update, character: dict, lockable: dict, action_text: str,
                         forced_roll: int | None = None) -> None:
     """
@@ -12850,7 +12912,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     # specific "already broken open" message (_do_break_obstacle,
     # dispatched below) that this generic check would otherwise shadow
     # before it's ever reached.
-    if lockable.get("kind") not in ("switch", "pressure_plate", "breakable_wall", "breakable_floor") and lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
+    if lockable.get("kind") not in ("switch", "pressure_plate", "breakable_wall", "breakable_floor", "carry_object", "pillar") and lockable["id"] in _chat_scoped_set(_UNLOCKED, update.effective_chat.id):
         await update.effective_chat.send_message(
             f"{lockable['name'].capitalize()} is already unlocked.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -12867,6 +12929,14 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
 
     if lockable.get("kind") in ("breakable_wall", "breakable_floor"):
         await _do_break_obstacle(update, character, location, lockable, method="hit")
+        return
+
+    if lockable.get("kind") == "carry_object":
+        await _do_pick_up_carry_object(update, character, lockable)
+        return
+
+    if lockable.get("kind") == "pillar":
+        await _do_strike_pillar(update, character, lockable)
         return
 
     key_item = lockable.get("requires_key_item")
@@ -19594,32 +19664,62 @@ def _format_proficiency_line(character: dict) -> str:
     Magic 2%"), which used to sit right next to its own redundant
     per-spell twin ("Fireball 2%, Fire Magic 2%") on this exact line.
     """
-    entries = []
-    dict_fields = (
-        ("weapon_proficiency_pct", lambda k: f"{k.replace('_', ' ').capitalize()} Weapon"),
-        ("armor_proficiency_pct", lambda k: f"{k.replace('_', ' ').capitalize()} Armor"),
-        ("profession_mastery_pct", lambda k: k.replace("_", " ").capitalize()),
-        ("element_mastery_pct", lambda k: f"{k.capitalize()} Magic"),
-    )
-    for field, label_fn in dict_fields:
-        for key, pct in sorted((character.get(field) or {}).items()):
-            if pct > PROFICIENCY_STARTING_PCT:
-                entries.append((label_fn(key), pct))
-    scalar_fields = (
-        ("backstab_proficiency_pct", "Backstab"),
-        ("throw_proficiency_pct", "Throw"),
-        ("steal_proficiency_pct", "Steal"),
-        ("lockpick_proficiency_pct", "Lockpick"),
-        ("summoning_mastery_pct", "Summoning"),
-    )
-    for field, label in scalar_fields:
+    # Real live request (2026-09-03, Coffee, dev-bridge: "Where are my
+    # weapon masters and why can't I see them?... clean up this list so
+    # it looks a little bit better. You can use emojis and text styles,
+    # consider future evolutions. We will need space for the stats,
+    # make them clear and legible") -- every entry below was already
+    # real and present, just crammed into one undifferentiated comma-
+    # joined line (weapon %, armor %, professions, magic elements,
+    # backstab/throw/steal/lockpick, and summoning all mixed together),
+    # easy to lose track of any one category in. Grouped by real
+    # category instead, one labeled line each -- no new data, same
+    # underlying fields, just organized so "where's my weapon mastery"
+    # has an obvious, dedicated answer. "future evolutions" (more
+    # weapon/armor/magic/profession categories as they're added) is
+    # already handled for free -- each group is built from whatever
+    # keys actually exist on the character, never a fixed list.
+    groups: list[tuple[str, str, list[tuple[str, float]]]] = [
+        ("⚔️", "Weapons", []),
+        ("🛡️", "Armor", []),
+        ("🔨", "Professions", []),
+        ("✨", "Magic", []),
+        ("🗡️", "Combat Skills", []),
+        ("🔮", "Summoning", []),
+    ]
+    weapons, armor, professions, magic, combat, summoning = (g[2] for g in groups)
+    for key, pct in sorted((character.get("weapon_proficiency_pct") or {}).items()):
+        if pct > PROFICIENCY_STARTING_PCT:
+            weapons.append((key.replace("_", " ").capitalize(), pct))
+    for key, pct in sorted((character.get("armor_proficiency_pct") or {}).items()):
+        if pct > PROFICIENCY_STARTING_PCT:
+            armor.append((key.replace("_", " ").capitalize(), pct))
+    for key, pct in sorted((character.get("profession_mastery_pct") or {}).items()):
+        if pct > PROFICIENCY_STARTING_PCT:
+            professions.append((key.replace("_", " ").capitalize(), pct))
+    for key, pct in sorted((character.get("element_mastery_pct") or {}).items()):
+        if pct > PROFICIENCY_STARTING_PCT:
+            magic.append((key.capitalize(), pct))
+    for field, label in (
+        ("backstab_proficiency_pct", "Backstab"), ("throw_proficiency_pct", "Throw"),
+        ("steal_proficiency_pct", "Steal"), ("lockpick_proficiency_pct", "Lockpick"),
+    ):
         pct = character.get(field, PROFICIENCY_STARTING_PCT)
         if pct > PROFICIENCY_STARTING_PCT:
-            entries.append((label, pct))
-    if not entries:
+            combat.append((label, pct))
+    summon_pct = character.get("summoning_mastery_pct", PROFICIENCY_STARTING_PCT)
+    if summon_pct > PROFICIENCY_STARTING_PCT:
+        summoning.append(("Summoning", summon_pct))
+
+    lines = [f"🎯 **Proficiencies** (100% = Mastery):"]
+    for emoji, label, entries in groups:
+        if not entries:
+            continue
+        formatted = ", ".join(f"{name} {pct:.0f}%" for name, pct in entries)
+        lines.append(f"  {emoji} {label}: {formatted}")
+    if len(lines) == 1:
         return ""
-    formatted = ", ".join(f"{label} {pct:.0f}%" for label, pct in entries)
-    return f"🎯 Proficiencies (100% = Mastery): {formatted}\n"
+    return "\n".join(lines) + "\n"
 
 
 def _format_character_sheet(character: dict) -> str:
@@ -23559,17 +23659,23 @@ def _lockable_callout_lines(location: dict, chat_id: int) -> list[str]:
     like `_lockable_is_open`/`_find_lockable` already are.
     """
     lines = []
-    lockable_emoji = {"door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "pressure_plate": "⚖️", "breakable_wall": "💥", "breakable_floor": "💥", "multi_switch_gate": "🔶"}
+    lockable_emoji = {
+        "door": "🔒", "chest": "🔒", "lever": "🔧", "switch": "🔷", "pressure_plate": "⚖️",
+        "breakable_wall": "💥", "breakable_floor": "💥", "multi_switch_gate": "🔶",
+        "carry_object": "🪨", "pillar": "🏛️",
+    }
     for lockable in location.get("lockables", []):
         if lockable.get("hidden"):
             continue
         kind = lockable.get("kind")
-        # switch/pressure_plate/multi_switch_gate are deliberately
-        # NEVER skipped here even once used -- all three can be
-        # toggled back off, so they're still real, present objects (or
-        # a real fact about the gate) either way, unlike every other
+        # switch/pressure_plate/multi_switch_gate/pillar are
+        # deliberately NEVER skipped here even once used -- all four
+        # can be toggled back off (or, for a pillar, are just a
+        # standing fact about the room either way), unlike every other
         # kind which "resolves" into an open path once picked.
-        if kind not in ("switch", "pressure_plate", "multi_switch_gate") and _lockable_is_open(location, lockable["id"], chat_id):
+        # carry_object is likewise never skipped -- it's a real,
+        # permanently-present object, not something that gets "used up."
+        if kind not in ("switch", "pressure_plate", "multi_switch_gate", "carry_object", "pillar") and _lockable_is_open(location, lockable["id"], chat_id):
             continue
         emoji = lockable_emoji.get(kind, "🔒")
         if kind == "lever":
@@ -23597,6 +23703,11 @@ def _lockable_callout_lines(location: dict, chat_id: int) -> list[str]:
             state = "every switch answering it, active" if active else "still waiting on one or more of its switches"
         elif kind in ("breakable_wall", "breakable_floor"):
             state = "cracked, looks breakable"
+        elif kind == "carry_object":
+            state = "heavy, but carriable"
+        elif kind == "pillar":
+            active = _lockable_is_open(location, lockable["id"], chat_id)
+            state = "already struck" if active else "waiting for a real blow with something heavy"
         else:
             state = "locked"
         lines.append(f"{emoji} {lockable['name'].capitalize()} is here, {state}.")

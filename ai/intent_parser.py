@@ -1459,6 +1459,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\b(?:hit|strike|attack|bomb|blow up|explode|smash)\b.*\b(?:wall|floor|crack)\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
 
+    # Real Eagle's Tower-style carry-and-collapse puzzle (2026-09-03,
+    # Phase L4, item 0.5). Same real bug class as the switch/breakable
+    # fixes above -- "strike"/"hit" are themselves attack_words, and
+    # "pick up"/"carry" would otherwise fall to "gather"/"chat" (a real
+    # bug caught before ever shipping, not live yet). Both need this
+    # same early routing into skill_check -> _find_lockable -> _do_
+    # lockpick's own real "pillar"/"carry_object" branches.
+    if re.search(r"\b(?:hit|strike|attack|smash|swing)\b.*\b(?:pillar|column|pedestal)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+    if re.search(r"\b(?:pick up|carry|heave|lift|grab|haul)\b.*\b(?:weight|stone|ball|boulder)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
     attack_phrases = [w for w in attack_words if " " in w]
     attack_single_words = [w for w in attack_words if " " not in w]
     _attack_word_pattern = r"\b(?:" + "|".join(attack_single_words) + r")\w*\b"

@@ -23176,10 +23176,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         character = db.get_character(user_id, -999)
         sheet = bot._format_character_sheet(character)
-        self.assertIn("Martial Weapon 62%", sheet)
-        self.assertIn("Backstab 140%", sheet)
+        # Real live cleanup (2026-09-03, Coffee, dev-bridge: "Where are
+        # my weapon masters and why can't I see them?... clean up this
+        # list... make them clear and legible") -- these all used to be
+        # one undifferentiated comma-joined line; now grouped by real
+        # category, one labeled line each. The old "Weapon"/"Magic"
+        # per-item suffix is dropped as redundant once the group's own
+        # header already says "Weapons"/"Magic".
+        self.assertIn("⚔️ Weapons: Martial 62%", sheet)
+        self.assertIn("🗡️ Combat Skills: Backstab 140%", sheet)
         self.assertNotIn("Fireball 155%", sheet, "the old per-spell proficiency entry must be gone from this line (Fireball itself still legitimately appears elsewhere, under Spells known)")
-        self.assertIn("Fire Magic 30%", sheet)
+        self.assertIn("✨ Magic: Fire 30%", sheet)
         self.assertIn("100% = Mastery", sheet)
 
     def test_character_sheet_omits_proficiency_line_for_a_fresh_character(self):
@@ -23188,6 +23195,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = make_basic_character(user_id, "FreshCharacter")
         sheet = bot._format_character_sheet(character)
         self.assertNotIn("Proficiencies", sheet)
+
+    def test_character_sheet_proficiencies_grouped_by_real_category_on_separate_lines(self):
+        """
+        Real live report (2026-09-03, Coffee, dev-bridge screenshot of
+        a dense character sheet: "Where are my weapon masters and why
+        can't I see them?... clean up this list... We will need space
+        for the stats, make them clear and legible"). Every category
+        exercised at once -- each must land on its OWN labeled line,
+        never merged back into one undifferentiated comma-joined blob
+        the way it worked before this fix.
+        """
+        user_id = 900521
+        character = make_basic_character(user_id, "FullyProficient")
+        db.update_character(
+            user_id, -999,
+            weapon_proficiency_pct={"martial": 40.0, "simple": 15.0},
+            armor_proficiency_pct={"heavy": 25.0},
+            profession_mastery_pct={"blacksmithing": 6.0},
+            element_mastery_pct={"fire": 30.0, "poison": 5.0},
+            backstab_proficiency_pct=140.0, steal_proficiency_pct=10.0,
+            summoning_mastery_pct=68.0,
+        )
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        lines = sheet.splitlines()
+        weapons_line = next(l for l in lines if "⚔️ Weapons:" in l)
+        armor_line = next(l for l in lines if "🛡️ Armor:" in l)
+        professions_line = next(l for l in lines if "🔨 Professions:" in l)
+        magic_line = next(l for l in lines if "✨ Magic:" in l)
+        combat_line = next(l for l in lines if "🗡️ Combat Skills:" in l)
+        summoning_line = next(l for l in lines if "🔮 Summoning:" in l)
+        # Every category lands on its OWN line -- none accidentally merged together.
+        self.assertEqual(len({weapons_line, armor_line, professions_line, magic_line, combat_line, summoning_line}), 6)
+        self.assertIn("Martial 40%", weapons_line)
+        self.assertIn("Simple 15%", weapons_line)
+        self.assertIn("Heavy 25%", armor_line)
+        self.assertIn("Blacksmithing 6%", professions_line)
+        self.assertIn("Fire 30%", magic_line)
+        self.assertIn("Poison 5%", magic_line)
+        self.assertIn("Backstab 140%", combat_line)
+        self.assertIn("Steal 10%", combat_line)
+        self.assertIn("Summoning 68%", summoning_line)
 
     # -- Pronouns (2026-07-17, per Coffee, task #117): "no gender/pronoun
     #    field -- narration guesses pronouns with no real data, can guess
@@ -34253,6 +34302,164 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("gives way" in s for s in sink2), f"expected the wall to actually break, got: {sink2}")
         exits_leaf = bot._labyrinth_exits(run["rooms"]["test_breakable_leaf"], run["rooms"], chat_id)
         self.assertIn("test_bonus_room", [d["id"] for _, _, d in exits_leaf], "expected the secret room reachable once broken")
+
+    def test_generate_floor_places_a_real_carry_puzzle_solvable_by_construction(self):
+        """
+        Real, more literal Eagle's Tower mechanic (2026-09-03, per
+        Coffee's own live screenshot re-ask: "multiple levels floors
+        and basements to get to the other end of the dungeon"), a real
+        object carried between rooms and struck against 2 scattered
+        pillars. Statistical: when it fires, the object always starts
+        in the hub (never behind content a player hasn't reached), both
+        pillars live outside the branch being sealed, and it's never
+        placed on the same floor as the simpler single-switch collapse
+        puzzle (mutually exclusive by design).
+        """
+        carry_seen = False
+        for seed in range(150):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub = rooms[floor_data["hub_room_id"]]
+            carry_lk = next((lk for lk in hub.get("lockables", []) if lk.get("kind") == "carry_object"), None)
+            if carry_lk is None:
+                continue
+            carry_seen = True
+            puzzle_id = carry_lk["puzzle_id"]
+            pillar_rooms = [
+                (rid, lk) for rid, r in rooms.items() for lk in r.get("lockables", [])
+                if lk.get("kind") == "pillar" and lk.get("puzzle_id") == puzzle_id
+            ]
+            self.assertEqual(len(pillar_rooms), 2, "expected exactly 2 real pillars for this puzzle")
+            pillar_ids = [lk["id"] for _, lk in pillar_rooms]
+
+            trigger_room = next(r for r in rooms.values() if r.get("collapsing_connections"))
+            seal_leaf, trigger_id = next(iter(trigger_room["collapsing_connections"].items()))
+            trigger_lockable = next(lk for lk in trigger_room["lockables"] if lk["id"] == trigger_id)
+            self.assertEqual(set(trigger_lockable["requires"]), set(pillar_ids))
+
+            for pillar_room_id, _ in pillar_rooms:
+                self.assertNotEqual(pillar_room_id, seal_leaf, "a pillar must never live inside the branch it seals")
+
+            # Never coexists with the simpler single-switch collapse trigger on the same floor.
+            collapse_triggers = [
+                lk for r in rooms.values() for lk in r.get("lockables", [])
+                if lk.get("kind") == "multi_switch_gate" and lk["id"].endswith("_collapse_trigger")
+            ]
+            self.assertEqual(collapse_triggers, [], "the carry puzzle and the simpler collapse puzzle must be mutually exclusive")
+            break
+        self.assertTrue(carry_seen, "expected at least one real carry puzzle across 150 real seeds")
+
+    def test_carry_puzzle_phrasing_routes_to_skill_check_not_attack_or_gather(self):
+        """
+        Real bug caught before ever shipping live (2026-09-03, same
+        class as the earlier "Hit the crystal" -> attack bug): "strike"/
+        "hit" are themselves attack_words, and "pick up"/"carry" would
+        otherwise fall to "gather"/"chat" -- neither ever reached
+        skill_check -> _find_lockable -> _do_lockpick's real pillar/
+        carry_object branches without this fix.
+        """
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("strike the pillar", [])["action"], "skill_check")
+        self.assertEqual(_keyword_fallback("hit the pillar", [])["action"], "skill_check")
+        self.assertEqual(_keyword_fallback("pick up the stone weight", [])["action"], "skill_check")
+        self.assertEqual(_keyword_fallback("carry the stone weight", [])["action"], "skill_check")
+        self.assertEqual(_keyword_fallback("heave up the stone weight", [])["action"], "skill_check")
+        # Regression guard: real monster attacks must still classify as attack.
+        self.assertEqual(_keyword_fallback("I attack the goblin", [])["action"], "attack")
+        self.assertEqual(_keyword_fallback("I attack the boss", [])["action"], "attack")
+
+    async def test_labyrinth_carry_puzzle_requires_a_real_return_trip_per_pillar(self):
+        """End-to-end: striking a pillar without carrying the object is refused; carrying it and striking works; the object is consumed, so the SECOND pillar needs a real return trip; both struck seals one path and opens the promised shortcut."""
+        user_id, chat_id = 962053, -962053
+        make_basic_character(user_id, "CarryPuzzleTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        puzzle_id = "test_carry"
+        hub["lockables"] = [{"id": "test_carry_object", "kind": "carry_object", "name": "a real, half-buried stone weight", "puzzle_id": puzzle_id}]
+        pillar_a = {
+            "id": "test_pillar_room_a", "floor": hub["floor"], "name": "Pillar Room A", "monsters": [],
+            "description": "test", "connections": [hub["id"]],
+            "lockables": [{"id": "test_pillar_a", "kind": "pillar", "name": "a real weathered support pillar", "puzzle_id": puzzle_id}],
+        }
+        pillar_b = {
+            "id": "test_pillar_room_b", "floor": hub["floor"], "name": "Pillar Room B", "monsters": [],
+            "description": "test", "connections": [hub["id"]],
+            "lockables": [{"id": "test_pillar_b", "kind": "pillar", "name": "a real weathered support pillar", "puzzle_id": puzzle_id}],
+        }
+        seal_leaf = {
+            "id": "test_seal_leaf", "floor": hub["floor"], "name": "Sealed Leaf", "monsters": [],
+            "description": "test", "connections": [hub["id"]],
+        }
+        hub.setdefault("lockables", []).append({
+            "id": "test_carry_trigger", "kind": "multi_switch_gate", "name": "a real structural trigger",
+            "requires": ["test_pillar_a", "test_pillar_b"],
+        })
+        hub["collapsing_connections"] = {"test_seal_leaf": "test_carry_trigger"}
+        hub["connections"] += ["test_pillar_room_a", "test_pillar_room_b", "test_seal_leaf"]
+        run["rooms"]["test_pillar_room_a"] = pillar_a
+        run["rooms"]["test_pillar_room_b"] = pillar_b
+        run["rooms"]["test_seal_leaf"] = seal_leaf
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        # Sealed leaf reachable before either pillar is struck.
+        exits_before = bot._labyrinth_exits(hub, run["rooms"], chat_id)
+        self.assertIn("test_seal_leaf", [d["id"] for _, _, d in exits_before])
+
+        # Striking without carrying is refused.
+        db.update_labyrinth_run(chat_id, party_key, current_room_id="test_pillar_room_a")
+        sink_refused = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "strike the pillar", sink_refused, chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "strike the pillar"}, "strike the pillar",
+        )
+        self.assertTrue(any("nothing heavy enough" in s for s in sink_refused), sink_refused)
+        self.assertFalse(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("test_pillar_a"))
+
+        # Pick up the object in the hub, walk to pillar A, strike it.
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=hub["id"])
+        sink_pickup = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "pick up the stone weight", sink_pickup, chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "pick up the stone weight"}, "pick up the stone weight",
+        )
+        self.assertTrue(any("heaves up" in s for s in sink_pickup), sink_pickup)
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["carrying"], "test_carry_object")
+
+        db.update_labyrinth_run(chat_id, party_key, current_room_id="test_pillar_room_a")
+        sink_strike_a = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "strike the pillar", sink_strike_a, chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "strike the pillar"}, "strike the pillar",
+        )
+        self.assertTrue(any("slams the weight" in s for s in sink_strike_a), sink_strike_a)
+        self.assertTrue(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("test_pillar_a"))
+        # The object is consumed -- a second strike attempt (still at pillar A) with nothing carried is refused again.
+        self.assertIsNone(db.get_labyrinth_run(chat_id, party_key)["carrying"])
+
+        # Sealed leaf must STILL be reachable -- only ONE of two pillars struck so far.
+        exits_mid = bot._labyrinth_exits(hub, run["rooms"], chat_id)
+        self.assertIn("test_seal_leaf", [d["id"] for _, _, d in exits_mid])
+
+        # Real return trip: back to the hub, pick the object back up, walk to pillar B, strike it.
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=hub["id"])
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "pick up the stone weight", [], chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "pick up the stone weight"}, "pick up the stone weight",
+        )
+        db.update_labyrinth_run(chat_id, party_key, current_room_id="test_pillar_room_b")
+        sink_strike_b = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "strike the pillar", sink_strike_b, chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "strike the pillar"}, "strike the pillar",
+        )
+        self.assertTrue(any("slams the weight" in s for s in sink_strike_b), sink_strike_b)
+
+        # Both struck: the sealed leaf is now genuinely blocked.
+        exits_after = bot._labyrinth_exits(hub, run["rooms"], chat_id)
+        self.assertNotIn("test_seal_leaf", [d["id"] for _, _, d in exits_after], "expected the sealed leaf BLOCKED once both pillars are struck")
 
     def test_generate_floor_warps_and_collapse_puzzle_never_break_reachability_across_seeds(self):
         """

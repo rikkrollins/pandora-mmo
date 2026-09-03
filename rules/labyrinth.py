@@ -104,6 +104,12 @@ _WARP_CHANCE = 0.25
 # genuinely separate before/after floor copy.
 _COLLAPSE_PUZZLE_CHANCE = 0.2
 
+# Real, more literal Eagle's Tower carry-and-collapse puzzle -- see this
+# constant's own usage site in generate_floor for the full research and
+# design writeup. Mutually exclusive with _COLLAPSE_PUZZLE_CHANCE above
+# (never both on one floor).
+_CARRY_PUZZLE_CHANCE = 0.15
+
 # Real, more foundational research follow-up (2026-09-03, per Coffee:
 # "research dungeons of infinity and all other research to achieve
 # what our editor needs" -- see [[project_zelda_dungeon_algorithm_
@@ -995,6 +1001,72 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 # added so _lockable_is_open finds it locally, same real
                 # constraint the branch-gate fix above already worked
                 # around once.
+                rooms[shortcut_a]["locked_connections"][shortcut_b] = f"{trigger_id}_echo_{shortcut_a}"
+
+    # Real Eagle's Tower-style carry-and-collapse puzzle (2026-09-03,
+    # per Coffee's own live screenshot re-ask, comparing his actual
+    # in-game floor to a reference map: "multiple levels floors and
+    # basements to get to the other end of the dungeon" -- confirmed
+    # via real research (zeldadungeon.net's own level-design writeup)
+    # to be Eagle's Tower's literal mechanic: carry a heavy object
+    # between rooms, strike 2+ real pillars scattered across the floor
+    # with it (one trip at a time -- the object is dropped/consumed the
+    # instant it strikes a pillar, forcing a genuine return trip for
+    # the second), and the floor's structure shifts once every pillar
+    # is struck. Reuses the exact same `collapsing_connections`
+    # mechanism the simpler single-switch collapse puzzle above uses --
+    # mutually exclusive with it (never both on the same floor, keeps
+    # the puzzle count sane), same "solvable by construction"
+    # discipline (the pillars are never inside the branch being sealed,
+    # never a dependency any OTHER gate relies on -- multi_switch_
+    # gate's own `requires` list is checked globally by id, same proven
+    # mechanism L2e/the collapse puzzle already use).
+    already_has_collapse = any(r.get("collapsing_connections") for r in rooms.values())
+    carry_sealable = [
+        c for c in branch_chains
+        if c is not main_chain and len(c) >= 1
+        and not any(lk.get("kind") == "switch" for lk in rooms[c[0]].get("lockables", []))
+    ]
+    if not already_has_collapse and len(carry_sealable) >= 1 and rng.random() < _scaled_chance(_CARRY_PUZZLE_CHANCE, floor, 0.001, 0.35):
+        seal_chain = rng.choice(carry_sealable)
+        seal_leaf = seal_chain[-1]
+        seal_parent = hub_id if len(seal_chain) == 1 else seal_chain[-2]
+        pillar_source_chains = [c for c in other_chains if c is not seal_chain]
+        if len(pillar_source_chains) >= 2:
+            pillar_chain_a, pillar_chain_b = rng.sample(pillar_source_chains, 2)
+            puzzle_id = f"f{floor}_carry"
+            carry_id = f"{puzzle_id}_object"
+            pillar_ids = [f"{puzzle_id}_pillar_0", f"{puzzle_id}_pillar_1"]
+            # The real, carriable object always starts in the hub --
+            # found immediately, same as Eagle's Tower's own wrecking
+            # ball -- so it never depends on a branch a player hasn't
+            # reached yet.
+            hub.setdefault("lockables", []).append({
+                "id": carry_id, "kind": "carry_object", "name": "a real, half-buried stone weight", "puzzle_id": puzzle_id,
+            })
+            rooms[pillar_chain_a[0]].setdefault("lockables", []).append({
+                "id": pillar_ids[0], "kind": "pillar", "name": "a real weathered support pillar", "puzzle_id": puzzle_id,
+            })
+            rooms[pillar_chain_b[0]].setdefault("lockables", []).append({
+                "id": pillar_ids[1], "kind": "pillar", "name": "a real weathered support pillar", "puzzle_id": puzzle_id,
+            })
+            rooms[pillar_chain_a[0]]["description"] += " A real, weathered stone pillar stands here, cracked with age."
+            rooms[pillar_chain_b[0]]["description"] += " A real, weathered stone pillar stands here, cracked with age."
+            trigger_id = f"{puzzle_id}_trigger"
+            rooms[seal_parent].setdefault("lockables", []).append({
+                "id": trigger_id, "kind": "multi_switch_gate", "name": "a real structural trigger",
+                "requires": pillar_ids,
+            })
+            rooms[seal_parent].setdefault("collapsing_connections", {})[seal_leaf] = trigger_id
+            rooms[seal_parent]["description"] += " Something here feels structurally unstable -- like a well-placed blow, twice over, could bring it down."
+            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain]
+            if len(shortcut_pair) >= 2:
+                shortcut_a, shortcut_b = rng.sample(shortcut_pair, 2)
+                rooms[shortcut_a].setdefault("locked_connections", {})[shortcut_b] = trigger_id
+                rooms[shortcut_a].setdefault("lockables", []).append({
+                    "id": f"{trigger_id}_echo_{shortcut_a}", "kind": "multi_switch_gate",
+                    "name": "a newly-opened shortcut", "requires": pillar_ids,
+                })
                 rooms[shortcut_a]["locked_connections"][shortcut_b] = f"{trigger_id}_echo_{shortcut_a}"
 
     _assign_grid_positions(rooms, hub_id)
