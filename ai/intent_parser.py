@@ -1426,6 +1426,33 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # a plain substring check conflated into one (and got half of).
     # Multi-word phrases ("cast at", "fire at") stay substring-checked,
     # unaffected -- they were never part of either bug.
+    # Real live bug (2026-09-02, Coffee, dev-bridge: "Hit the crystal" ->
+    # "Nothing here to fight"). These two checks used to live further
+    # down this function, AFTER the generic attack_words check below --
+    # but "hit"/"strike"/"attack" are themselves real attack_words, so
+    # the generic check always won first and these two were completely
+    # unreachable dead code for exactly the verbs their own docstrings
+    # say they exist to handle. Moved ahead of the generic attack check
+    # so a real switch/crystal/torch or breakable wall/floor mention
+    # correctly routes to skill_check before "hit" alone can be
+    # swallowed as a combat attack.
+    #
+    # Real elemental crystal-switch mechanic (2026-09-01, per Coffee's
+    # own ALTTP-inspired ask: hitting it also alternates it, same as
+    # casting a matching spell at it). "hit"/"strike" is the single most
+    # natural verb for a switch/crystal/torch, so it needs the exact
+    # same real path into _do_skill_check -> _find_lockable -> _do_lockpick.
+    if re.search(r"\b(?:hit|strike|attack|light)\b.*\b(?:switch|crystal|torch|brazier|lantern)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
+    # Real breakable wall/floor mechanic (2026-09-01, per Coffee: "cracks
+    # in walls we can explode... or cast a fire spell onto it"). A plain
+    # hit/bomb/explode attempt routes the same way; casting a real fire/
+    # force spell at one is handled separately in _do_cast_spell's own
+    # non-combat object-targeting branch, not here.
+    if re.search(r"\b(?:hit|strike|attack|bomb|blow up|explode|smash)\b.*\b(?:wall|floor|crack)\b", lowered):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
     attack_phrases = [w for w in attack_words if " " in w]
     attack_single_words = [w for w in attack_words if " " not in w]
     _attack_word_pattern = r"\b(?:" + "|".join(attack_single_words) + r")\w*\b"
@@ -2116,22 +2143,11 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\bpull(?:ing|ed)?\b.*\b(?:lever|switch)\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
 
-    # Real elemental crystal-switch mechanic (2026-09-01, per Coffee's
-    # own ALTTP-inspired ask: hitting it also alternates it, same as
-    # casting a matching spell at it). Same routing shape as the lever
-    # fix just above -- "hit"/"strike" is the single most natural verb
-    # for a switch/crystal/torch, so it needs the exact same real path
-    # into _do_skill_check -> _find_lockable -> _do_lockpick.
-    if re.search(r"\b(?:hit|strike|attack|light)\b.*\b(?:switch|crystal|torch|brazier|lantern)\b", lowered):
-        return {**base, "action": "skill_check", "ability": "dexterity"}
-
-    # Real breakable wall/floor mechanic (2026-09-01, per Coffee: "cracks
-    # in walls we can explode... or cast a fire spell onto it"). A plain
-    # hit/bomb/explode attempt routes the same way; casting a real fire/
-    # force spell at one is handled separately in _do_cast_spell's own
-    # non-combat object-targeting branch, not here.
-    if re.search(r"\b(?:hit|strike|attack|bomb|blow up|explode|smash)\b.*\b(?:wall|floor|crack)\b", lowered):
-        return {**base, "action": "skill_check", "ability": "dexterity"}
+    # The crystal-switch and breakable wall/floor "hit" checks that used
+    # to live here were moved earlier in this function (ahead of the
+    # generic attack_words check) -- see that comment for why; "hit"/
+    # "strike"/"attack" are themselves attack_words, so leaving these
+    # this far down made them permanently unreachable dead code.
 
     # Real ALTTP-style visible pit mechanic (2026-09-01, per Coffee):
     # jumping down a real, visible gap to the floor below is a genuine

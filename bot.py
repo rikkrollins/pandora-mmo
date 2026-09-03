@@ -29759,7 +29759,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
         # caster's own current location actually has a matching switch/
         # breakable lockable; otherwise falls through to the existing
         # combat-only behavior completely unchanged.
-        location = cl.get_location(CAMPAIGN, character["current_location"])
+        location = _location_or_labyrinth_room(character, update.effective_chat.id)
         object_lockable = _find_lockable(location, text) if location else None
         if object_lockable and object_lockable.get("kind") in ("switch", "breakable_wall", "breakable_floor"):
             if not await _spend_cast_resource(update, character, spell, via_scroll, via_gear, gear_instance_id, gear_spell_uses):

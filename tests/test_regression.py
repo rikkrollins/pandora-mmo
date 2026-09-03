@@ -32986,6 +32986,83 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run_after["current_room_id"], run["current_room_id"])
         self.assertTrue(any("blocked" in s for s in sink))
 
+    async def test_hit_the_crystal_actually_toggles_it_instead_of_attacking(self):
+        """
+        Real live bug (2026-09-02, Coffee, dev-bridge: "Hit the crystal"
+        -> "Nothing here to fight"). The switch/crystal-hit and
+        breakable wall/floor-hit regexes in ai/intent_parser.py used to
+        live AFTER the generic attack_words check -- but "hit"/
+        "strike"/"attack" are themselves attack_words, so the generic
+        check always won first, making both completely unreachable dead
+        code. Moved ahead of it. Confirms real end-to-end: typing "Hit
+        the crystal" at a real Labyrinth switch actually toggles it,
+        not a combat "nothing to fight" refusal.
+        """
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("Hit the crystal", [])["action"], "skill_check")
+        self.assertEqual(_keyword_fallback("Attack the crystal", [])["action"], "skill_check")
+        self.assertEqual(_keyword_fallback("smash the wall", [])["action"], "skill_check")
+        # Regression guard: real monster attacks must still classify as attack.
+        self.assertEqual(_keyword_fallback("I attack the goblin", [])["action"], "attack")
+        self.assertEqual(_keyword_fallback("I attack the boss", [])["action"], "attack")
+
+        user_id, chat_id = 962039, -962039
+        make_basic_character(user_id, "LabyrinthCrystalHitTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        # Real generation can randomly place its own lockable in the hub
+        # too (e.g. the L2e multi-switch puzzle) -- reset to exactly one
+        # so _find_lockable's single-lockable fallback is deterministic.
+        hub["lockables"] = [{"id": "test_crystal", "kind": "switch", "name": "a fire crystal", "element": "fire"}]
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "Hit the crystal", sink, chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "Hit the crystal"}, "Hit the crystal",
+        )
+        self.assertFalse(any("Nothing here to fight" in s for s in sink))
+        self.assertTrue(any("flares to life" in s for s in sink), f"expected the switch to actually toggle, got: {sink}")
+
+    async def test_cast_fire_spell_onto_a_labyrinth_switch_actually_activates_it(self):
+        """
+        Real live bug (2026-09-02, Coffee, dev-bridge: "Cast fireball
+        onto the crystal" -> "There's nothing to cast that at right
+        now"). _do_cast_spell's non-combat object-targeting branch had
+        the same CAMPAIGN-only location bug as _do_skill_check/
+        _do_lockpick -- now uses _location_or_labyrinth_room too.
+        """
+        user_id, chat_id = 962040, -962040
+        make_basic_character(
+            user_id, "LabyrinthCastSwitchTester", chat_id=chat_id, current_location="the_colosseum", char_class="Wizard",
+        )
+        db.update_character(
+            user_id, chat_id, defeated_monsters=["colosseum_champion"],
+            known_spells=["fireball"], spell_slots_current=2, spell_slots_max=2,
+        )
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        # Real generation can randomly place its own lockable in the hub
+        # too (e.g. the L2e multi-switch puzzle) -- reset to exactly one
+        # so _find_lockable's single-lockable fallback is deterministic.
+        hub["lockables"] = [{"id": "test_crystal2", "kind": "switch", "name": "a fire crystal", "element": "fire"}]
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "Cast fireball onto the crystal", sink, chat_id=chat_id), DummyContext(),
+            {"action": "cast_spell", "raw_text": "Cast fireball onto the crystal"}, "Cast fireball onto the crystal",
+        )
+        self.assertFalse(any("nothing to cast that at" in s for s in sink))
+        self.assertTrue(any("flares to life" in s for s in sink), f"expected the switch to actually activate, got: {sink}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["spell_slots_current"], 1, "a real spell slot must have been spent")
+
     def test_labyrinth_dangerous_modifier_scales_enemies_higher_than_baseline(self):
         """Phase L2b: "dangerous" is a real, extra flat bonus on top of depth alone, never baked into the base curve."""
         baseline = bot._build_labyrinth_enemy("goblin", 5, 0, 1)
@@ -33406,7 +33483,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         party_key = f"solo:{user_id}"
         run = db.get_labyrinth_run(chat_id, party_key)
         hub = run["rooms"][run["current_room_id"]]
-        hub.setdefault("lockables", []).append({"id": "test_switch", "kind": "switch", "name": "a fire crystal", "element": "fire"})
+        # Real generation can randomly place its own lockable in the hub
+        # too (e.g. the L2e multi-switch puzzle) -- reset to exactly one
+        # so _find_lockable's single-lockable fallback is deterministic.
+        hub["lockables"] = [{"id": "test_switch", "kind": "switch", "name": "a fire crystal", "element": "fire"}]
         db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
 
         sink = []
@@ -33454,10 +33534,13 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         party_key = f"solo:{user_id}"
         run = db.get_labyrinth_run(chat_id, party_key)
         hub = run["rooms"][run["current_room_id"]]
-        hub.setdefault("lockables", []).append({
+        # Real generation can randomly place its own lockable in the hub
+        # too (e.g. the L2e multi-switch puzzle) -- reset to exactly one
+        # so _find_lockable's single-lockable fallback is deterministic.
+        hub["lockables"] = [{
             "id": "test_chest", "kind": "chest", "name": "a hastily-buried cache",
             "loot": {"healing_potion": 2}, "gold": 50,
-        })
+        }]
         db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
 
         sink = []

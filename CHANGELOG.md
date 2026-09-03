@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.472] — fix: "hit the crystal"/"cast fire onto the crystal" never actually worked, anywhere, not just the Labyrinth
+
+Found via proactive bug-hunting right after v1.27.471, then confirmed
+live via dev-bridge (Coffee: "Why isn't anything working?... I can't
+attack it and I can't cast fire onto it" on a real switch).
+
+Two separate real bugs, both predating this session (from the original
+v1.27.450 switch/breakable feature), only now surfacing because a real
+player was finally testing switches directly:
+
+1. `ai/intent_parser.py`'s switch/crystal-hit and breakable wall/floor-
+   hit regexes (matching "hit"/"strike"/"attack" + "switch"/"crystal"/
+   "wall"/"floor"/etc.) lived AFTER the generic `attack_words` check —
+   but "hit"/"strike"/"attack" are themselves attack_words, so the
+   generic check always won first, making both regexes permanently
+   unreachable dead code everywhere in the game, not just the
+   Labyrinth. "Hit the crystal" always misclassified as a combat
+   attack and got "Nothing here to fight." Moved both checks ahead of
+   the generic attack check.
+2. `_do_cast_spell`'s non-combat object-targeting branch (casting a
+   matching spell at a switch/breakable) had the same CAMPAIGN-only
+   location bug already fixed for `_do_skill_check`/`_do_lockpick` in
+   v1.27.471 — now uses the same shared `_location_or_labyrinth_room`
+   helper.
+
+4 new tests (2 regression guards confirming real monster attacks still
+classify as "attack"); full 57-test LabyrinthTests suite passes, plus
+all 13 existing overworld switch/breakable/pit tests confirmed
+unaffected.
+
 ## [1.27.471] — fix: a whole systemic class of Labyrinth actions silently broken (examine, lockpicking/skill checks) + map showed locked rooms as reachable
 
 Found live, escalating fast (2026-09-02, Coffee: "Is looking for a
