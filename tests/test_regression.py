@@ -35691,6 +35691,56 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(hub["name"], captured["situation_facts"])
         self.assertIn("Exits:", captured["situation_facts"])
 
+    async def test_labyrinth_rest_refused_away_from_a_checkpoint_but_never_relocates_or_orphans_state(self):
+        """
+        Real live gap found via the AI-driven Labyrinth playtest tool's
+        own first real run (2026-09-03): "I rest for now" -- an
+        ordinary autonomous action -- hit the generic "doesn't work
+        this deep" refusal, since rest/go_inactive were never
+        allowlisted. Simply allowlisting them into the ordinary _do_
+        rest/_do_go_inactive would have been a real NEW bug of the
+        exact class just fixed in v1.27.495: those relocate a resting
+        character to an ordinary CAMPAIGN safe waypoint without ever
+        touching the party's real labyrinth_runs row, orphaning state.
+        Confirms the real fix: refused with an honest, specific message
+        away from a checkpoint, and current_location/the run itself are
+        both completely untouched either way.
+        """
+        user_id, chat_id = 962056, -962056
+        make_basic_character(user_id, "LabyrinthRestTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "I rest for now.", sink, chat_id=chat_id), DummyContext(),
+            {"action": "rest", "raw_text": "I rest for now."}, "I rest for now.",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+        self.assertTrue(any("nowhere safe to properly rest" in s for s in sink), sink)
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        self.assertFalse(character_after.get("is_inactive"))
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, f"solo:{user_id}"), "the real run must never be silently dropped")
+
+    async def test_labyrinth_rest_works_at_a_real_checkpoint_without_relocating(self):
+        """The one place resting genuinely works deep in the Labyrinth: a real, reached checkpoint room -- and even there, it never relocates (already exactly where it needs to be)."""
+        user_id, chat_id = 962057, -962057
+        make_basic_character(user_id, "LabyrinthCheckpointRestTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "I rest for now.", sink, chat_id=chat_id), DummyContext(),
+            {"action": "rest", "raw_text": "I rest for now."}, "I rest for now.",
+        )
+        self.assertTrue(any("settles in to rest" in s for s in sink), sink)
+        character_after = db.get_character(user_id, chat_id)
+        self.assertTrue(character_after.get("is_inactive"))
+        self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL, "resting at a checkpoint must never relocate the character")
+
     async def test_real_human_can_summon_a_bound_remnant_during_a_real_labyrinth_fight(self):
         """
         Real feature gap closed as a side effect of the fix above: since

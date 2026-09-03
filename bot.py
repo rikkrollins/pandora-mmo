@@ -9663,6 +9663,56 @@ async def _do_leave_labyrinth(update: Update) -> None:
     )
 
 
+async def _do_labyrinth_rest(update: Update) -> None:
+    """
+    Real live gap found via the AI-driven Labyrinth playtest tool's own
+    first real run (2026-09-03): "I rest for now" -- an ordinary,
+    common autonomous-player action (real, recurring topic-activity
+    traffic already confirmed this) -- hit the generic "That doesn't
+    work this deep in the Labyrinth" refusal, since rest/go_inactive
+    were never on the Labyrinth allowlist at all. Simply allowlisting
+    them, though, would have been a real NEW bug of the exact same
+    class just fixed in v1.27.495: _go_inactive relocates a character
+    to `_nearest_safe_waypoint` (an ordinary CAMPAIGN location) without
+    ever touching or clearing the party's real labyrinth_runs row --
+    "resting" deep in the Labyrinth would silently teleport a character
+    out to the Colosseum/tavern while their run kept thinking they were
+    still inside it, orphaning state exactly like the Ravenloft
+    incident, just from the opposite direction.
+
+    Real, safe fix instead: resting only actually works at a real
+    checkpoint room (this segment's own established "safe waystation"
+    concept, per Phase L3 -- narratively and mechanically the one place
+    in the Labyrinth already framed as safe), and never relocates
+    (already exactly where they need to be). Anywhere else, a clear,
+    honest refusal naming the real reason, not the generic one-size
+    "doesn't work this deep" message.
+    """
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        return
+    if character.get("is_inactive"):
+        await _safe_send(update, "You're already resting.")
+        return
+    if sessions.get_session_for_user(chat_id, update.effective_user.id) is not None:
+        await _safe_send(update, "You can't rest in the middle of a fight -- escape or finish the battle first.")
+        return
+    run = db.get_labyrinth_run(chat_id, _labyrinth_party_key(character))
+    if run is None:
+        return
+    room = run["rooms"].get(run["current_room_id"])
+    if room is None or not room.get("is_checkpoint"):
+        await _safe_send(
+            update,
+            "There's nowhere safe to properly rest this deep in the Labyrinth -- reach this segment's own waystation first.",
+        )
+        return
+    db.mark_inactive(update.effective_user.id, chat_id)
+    db.update_character(update.effective_user.id, chat_id, rest_started_at=datetime.now(timezone.utc).isoformat())
+    await _safe_send(update, f"😴 **{character['name']}** settles in to rest at the waystation, safe until they return -- they'll recover naturally the longer they rest.")
+
+
 async def _do_descend_labyrinth(update: Update) -> None:
     """
     Phase L3: repurposed -- this is now specifically "break the
@@ -32874,6 +32924,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
         "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant", "find_merchant",
+        "rest", "go_inactive",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
@@ -32882,6 +32933,18 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         return
     if _in_labyrinth and action in ("show_map", "visual_map"):
         await _do_show_labyrinth_map(update)
+        return
+    # Real live gap found via the AI-driven Labyrinth playtest tool's
+    # own first real run (2026-09-03): "rest"/"go_inactive" -- an
+    # ordinary, common autonomous action -- must route to the real
+    # Labyrinth-aware rest handler (only works at a checkpoint, never
+    # relocates), NOT the ordinary _do_rest/_do_go_inactive, which
+    # would silently teleport a character out to an overworld waypoint
+    # via _nearest_safe_waypoint while their labyrinth_runs row kept
+    # thinking they were still inside -- the same orphaned-state bug
+    # class just fixed in v1.27.495, from the opposite direction.
+    if _in_labyrinth and action in ("rest", "go_inactive"):
+        await _do_labyrinth_rest(update)
         return
 
     if action == "create_character":

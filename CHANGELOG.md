@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.498] — feature: AI-driven Labyrinth playtest tool + fix: "rest" refused deep in the Labyrinth
+
+**New dev tool, `scripts/playtest_labyrinth.py`** (per Coffee: "generate
+some dungeons/labyrinths and have your Test environment play it with
+AI characters... use that info to self improve the generators... and
+then repeat... update each segment as we go... and when i ask"): drives
+a real, throwaway AI-controlled character through a live Labyrinth run
+using the exact same real pipeline a live AI companion uses
+(`ai.autonomous_player.choose_next_action` -> `ai.intent_parser.
+parse_intents` -> `bot._dispatch_intent`) -- not a synthetic
+simulation. Self-limits via `bot._ollama_congested()` so it backs off
+under real load instead of queuing indefinitely. Folded into the
+hourly self-improvement monitoring cron (one bounded playtest per
+pass, distinguishing real generator findings from expected infra/
+timing noise), and runnable on demand any time.
+
+**Its first two real runs immediately found a real bug**: "I rest for
+now" -- an ordinary, common autonomous action (real, recurring live
+topic-activity traffic already confirmed this) -- hit the generic
+"That doesn't work this deep in the Labyrinth" refusal, since rest/
+go_inactive were never allowlisted. Simply allowlisting them would
+have been a real NEW bug of the exact class just fixed in v1.27.495:
+the ordinary rest handler relocates a character to an overworld safe
+waypoint without ever touching the party's real `labyrinth_runs` row,
+orphaning state from the opposite direction. Real fix: a new `_do_
+labyrinth_rest` only actually works at a real, reached checkpoint room
+(this segment's own established "safe waystation") and never
+relocates; anywhere else, a clear, honest, specific refusal instead of
+the generic one.
+
+3 new tests (1 for the AI-grounding regression already fixed in
+v1.27.497's own test, 2 for the rest fix here — all fail without their
+fix, pass with it). Full 105-test LabyrinthTests suite passes clean.
+
 ## [1.27.497] — fix: autonomous AI companions have been navigating the Labyrinth completely blind
 
 Real root cause found while designing an AI-driven Labyrinth playtest
