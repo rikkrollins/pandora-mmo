@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.482] — fix: an AI companion's own ambient chatter could produce a confusing, unprompted Labyrinth rejection
+
+Real live report (Coffee, dev-bridge screenshot: an unprompted "That
+doesn't work this deep in the Labyrinth" appeared in Adventure, and
+Coffee — genuinely not the one who triggered it — asked "I'm not even
+in the labyrinth why is it saying this?").
+
+Root-caused via the real log: an AI companion's own autonomous
+living-world wandering line ("I venture deeper into uncharted
+territories") classifies as the `chat` action, same as any ordinary
+human roleplay aside — and `chat` was never on the Labyrinth's action
+allowlist. Everywhere else in the game, `chat` is silent by design
+(its own branch's location lookup safely degrades to a no-op for
+content it doesn't recognize); inside the Labyrinth it instead hit the
+generic refusal, turning a silent AI aside into a visible, confusing
+system message with no clear author. `chat` is already safe there —
+it only needed to be let through instead of rejected.
+
+1 new test (fails without the fix, passes with it); full 71-test
+LabyrinthTests suite passes in isolation.
+
 ## [1.27.481] — fix: battle-menu target-picker buttons could silently exceed Telegram's callback_data limit
 
 Real live report (Coffee, dev-bridge screenshot: "It's not letting me

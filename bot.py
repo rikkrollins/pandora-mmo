@@ -32562,11 +32562,25 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # _do_examine whenever the named target isn't a real CAMPAIGN NPC
     # (which a Labyrinth room's own generated content -- monsters/
     # lockables/chests only, never named NPCs -- never is in practice).
+    # Real live report (2026-09-03, Coffee, dev-bridge, from a screenshot
+    # of an unprompted rejection: "I'm not even in the labyrinth why is
+    # it saying this?"). Root cause: an AI companion's own autonomous
+    # "living world" ambient wandering line ("I venture deeper into
+    # uncharted territories" -- Sarah, in-party with Coffee and
+    # genuinely inside the Labyrinth at the time) classifies as "chat",
+    # same as any ordinary human roleplay aside -- and "chat" was never
+    # on this allowlist. Everywhere else in the game "chat" is silent by
+    # design (its own branch's cl.get_location call already degrades to
+    # None for the sentinel and no-ops safely, confirmed CAMPAIGN-
+    # agnostic same as every other Labyrinth-safe action here) -- but
+    # here it hit the generic refusal instead, turning a silent AI aside
+    # into a visible, confusing system message attributed to no one,
+    # right in the middle of the Adventure topic.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
-        "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc",
+        "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",

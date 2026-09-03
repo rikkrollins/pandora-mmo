@@ -34359,6 +34359,36 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
 
+    async def test_ambient_ai_chat_inside_the_labyrinth_stays_silent_not_a_visible_refusal(self):
+        """
+        Real live report (2026-09-03, Coffee, dev-bridge screenshot: an
+        unprompted "That doesn't work this deep in the Labyrinth"
+        appeared in Adventure, and Coffee -- genuinely not the one who
+        triggered it -- asked "I'm not even in the labyrinth why is it
+        saying this?"). Root-caused via the real log: an AI companion's
+        own autonomous living-world wandering line ("I venture deeper
+        into uncharted territories") classified as "chat" while she was
+        genuinely inside the Labyrinth -- "chat" was never on the
+        allowlist, so a silent-by-design ambient aside turned into a
+        visible, confusing system message with no clear author. "chat"
+        is already safe here (its own branch's cl.get_location call
+        degrades to None for the sentinel and just no-ops, same as
+        every other Labyrinth-safe action) -- it only needed to be
+        let through instead of hitting the generic refusal.
+        """
+        user_id, chat_id = 962037, -962037
+        make_basic_character(user_id, "LabyrinthAmbientChatTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "I venture deeper into uncharted territories.", sink, chat_id=chat_id), DummyContext(),
+            {"action": "chat", "raw_text": "I venture deeper into uncharted territories."},
+            "I venture deeper into uncharted territories.",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+
     async def test_labyrinth_hazard_and_entry_never_touch_benched_inactive_or_a_dormant_alt(self):
         """
         Real live bug (2026-09-03, Coffee, dev-bridge screenshot: a
