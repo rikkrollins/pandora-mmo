@@ -657,28 +657,68 @@ _LABYRINTH_ICON_COLORS = {
 }
 _LABYRINTH_ROOM_FILL = (55, 48, 68)
 
+# Real live request (2026-09-03, Coffee, dev-bridge screenshot: circled
+# the generic blue diamond shown for every switch regardless of its own
+# real element -- "find appropriate emojis for the elemental colors...
+# some kind of label colour or indication"). A drawn dot is a real RGB
+# fill, not a text glyph, so this server's missing color-emoji font
+# (see this module's own established note) doesn't apply here -- these
+# match bot.py's own _SWITCH_ELEMENT_EMOJI mapping one-for-one, just as
+# colors instead of characters.
+_SWITCH_ELEMENT_COLORS = {
+    "fire": (220, 90, 40), "cold": (120, 190, 230), "lightning": (230, 210, 60),
+    "force": (150, 90, 220), "radiant": (235, 220, 150), "psychic": (190, 100, 190),
+    "poison": (110, 180, 80), "necrotic": (100, 70, 110), "earth": (150, 120, 80),
+    "physical": (190, 190, 190),
+}
+_SWITCH_INACTIVE_COLOR = (75, 75, 80)
 
-def _labyrinth_room_icons(room: dict) -> list[str]:
+
+def _labyrinth_room_icons(room: dict, switch_states: dict[str, bool] | None = None) -> list[tuple[str, tuple]]:
+    """
+    Returns (category, color) pairs, not just category names -- a
+    switch's own dot color now reflects its REAL current element/state
+    (bright, element-colored when active; a plain dim grey when not),
+    rather than one fixed blue regardless. `switch_states` (real
+    current `_lockable_is_open` results, keyed by lockable id) is
+    optional so any caller not yet updated still gets the old
+    always-inactive-colored behavior instead of crashing.
+    """
+    switch_states = switch_states or {}
     icons = []
     if room.get("monsters"):
-        icons.append("monster")
+        icons.append(("monster", _LABYRINTH_ICON_COLORS["monster"]))
     if any(lk.get("kind") == "chest" for lk in room.get("lockables", [])):
-        icons.append("chest")
+        icons.append(("chest", _LABYRINTH_ICON_COLORS["chest"]))
     if room.get("hazard"):
-        icons.append("hazard")
-    if any(lk.get("kind") in ("switch", "multi_switch_gate") for lk in room.get("lockables", [])):
-        icons.append("switch")
+        icons.append(("hazard", _LABYRINTH_ICON_COLORS["hazard"]))
+    for lockable in room.get("lockables", []):
+        if lockable.get("kind") not in ("switch", "multi_switch_gate"):
+            continue
+        active = switch_states.get(lockable["id"], False)
+        color = _SWITCH_ELEMENT_COLORS.get(lockable.get("element"), _LABYRINTH_ICON_COLORS["switch"]) if active else _SWITCH_INACTIVE_COLOR
+        icons.append(("switch", color))
     return icons
 
 
 def render_labyrinth_map(
     floor: int, rooms: dict, current_room_id: str,
     locked_room_ids: set[str] | None = None, visited_room_ids: set[str] | None = None,
+    switch_states: dict[str, bool] | None = None,
 ) -> bytes:
     """
     rooms: a live run's own `rooms` dict verbatim, every entry already
     carrying a real `grid_position` (rules.labyrinth._assign_grid_
     positions).
+
+    switch_states (2026-09-03, per Coffee: "find appropriate emojis for
+    the elemental colors... some kind of label colour or indication") --
+    real current `_lockable_is_open` results for every switch/multi_
+    switch_gate lockable on this floor, keyed by lockable id. This
+    module has no DB/chat-state access of its own (by design, see the
+    "no network calls" note elsewhere in this file), so the caller
+    computes this and passes it in as plain data -- see
+    `_labyrinth_room_icons` for how it's actually used.
 
     locked_room_ids (2026-09-02, real live confusion, Coffee: "the map
     is showing a north location but its not available to travel too" --
@@ -714,6 +754,8 @@ def render_labyrinth_map(
         legend_lines.append("dashed outline = seen, not yet reachable")
     if visited_room_ids is not None and (set(rooms.keys()) - visited_room_ids):
         legend_lines.append("grey = unexplored, walk there to reveal it")
+    if any(lk.get("kind") in ("switch", "multi_switch_gate") for r in rooms.values() for lk in r.get("lockables", [])):
+        legend_lines.append("switch dot color = its element, dim grey = inactive")
     legend_row_count = len(legend_lines) + 1
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
     height = min(
@@ -774,7 +816,7 @@ def render_labyrinth_map(
             draw.rectangle([px, py + CELL_SIZE - lh - 8, px + CELL_SIZE, py + CELL_SIZE], fill=_LABEL_BG)
             draw.text((px + (CELL_SIZE - lw) / 2, py + CELL_SIZE - lh - 5), label, font=name_font, fill=_LABEL_COLOR)
 
-            icons = _labyrinth_room_icons(room)
+            icons = _labyrinth_room_icons(room, switch_states)
             if icons:
                 swatch_r = 6
                 pad = 4
@@ -783,8 +825,7 @@ def render_labyrinth_map(
                 draw.rectangle([px + 2, py + 2, px + 2 + strip_w, py + 2 + swatch_r * 2 + pad], fill=_LABEL_BG)
                 cx = px + 2 + pad // 2 + swatch_r
                 cy = py + 2 + pad // 2 + swatch_r
-                for category in icons:
-                    color = _LABYRINTH_ICON_COLORS.get(category, (200, 200, 200))
+                for _category, color in icons:
                     draw.ellipse([cx - swatch_r, cy - swatch_r, cx + swatch_r, cy + swatch_r], fill=color, outline=(0, 0, 0))
                     cx += swatch_span
 

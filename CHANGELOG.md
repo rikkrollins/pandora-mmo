@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.477] — fix: Labyrinth ambush could freeze forever on an AI companion's first turn; real element-colored switch icons
+
+**Urgent live fix.** Coffee reported "the battle isnt working" / "What
+is happening why hasn't the battle started?" about a real, currently-
+active Labyrinth ambush. Confirmed via the live `sessions_snapshot.json`:
+a real fight sitting on Round 1 with zero HP changes on either side,
+because the RNG-rolled initiative order put an AI companion (Sarah) in
+the very first turn slot. Root cause: `_start_labyrinth_combat` (the
+shared start path for both an explicit "attack" and a random Phase L3
+ambush) sent its own initiative header and returned — unlike the
+overworld's own `_do_start_combat`, it never called `_resolve_ai_turns`
+afterward, so nothing ever triggered the AI's automatic first action.
+A fight that happened to roll a human into the first slot never showed
+the bug; one that rolled an AI companion (or an enemy) first sat frozen
+forever, since no human input was ever needed to notice something was
+wrong. Fixed with the one missing call, exactly matching the overworld's
+own pattern. New regression test reproduces the live shape directly
+(an AI companion with a real +5 DEX-mod initiative edge) and fails
+without the fix, passes with it. The already-live stuck fight itself
+also resolves once the bot restarts — `_on_startup`'s existing restore
+logic already unconditionally calls `_resolve_ai_turns` on every
+session recovered from the snapshot.
+
+**Also shipped this deploy** (written earlier the same session, not yet
+released): real per-element switch icons instead of one generic blue
+diamond everywhere — Coffee, dev-bridge screenshot: "find appropriate
+emojis for the elemental colors... some kind of label colour or
+indication that is connected to that crystal switch or lever."
+- The room-text callout for a switch now shows its real element emoji
+  (🔥/❄️/⚡/etc., matching `_do_activate_switch`'s own narration) instead
+  of a generic diamond, dark ⚫ while inactive.
+- The Labyrinth map's own switch dot is now a real, distinct RGB color
+  per element (bright when active, dim grey when not) — a drawn shape
+  isn't limited by this server's missing color-emoji font the way
+  text-rendered-as-image is, so this works where an emoji-in-PNG
+  approach would have silently rendered as an empty box.
+
+5 new/updated tests (including one fixed for a real intermittent
+RNG-contamination failure — unseeded floor generation can already place
+its own switch lockables elsewhere on the same floor); full 67-test
+LabyrinthTests suite passes in isolation.
+
 ## [1.27.476] — feature: a real, explicit Labyrinth objective — tutorial, persistent reminder, and its own quest board section
 
 Real live question (Coffee: "what is the objective of each generated

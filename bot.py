@@ -9944,6 +9944,15 @@ async def _start_labyrinth_combat(update: Update, requester: dict, run: dict, ro
             f"🎯 **Initiative order:** {initiative_line}"
         )
     await _safe_send(update, header, reply_markup=_battle_menu_keyboard(session))
+    # Real live bug (2026-09-03, Coffee: "the battle isnt working" /
+    # "What is happening why hasn't the battle started?"): unlike the
+    # overworld's own _do_start_combat (which calls this immediately
+    # after sending its own initiative header), this function returned
+    # without ever resolving the first turn -- if the RNG-rolled
+    # initiative order put an AI companion first, nothing ever
+    # triggered their automatic action and the fight sat frozen on
+    # Round 1 forever, exactly as seen live in a real ambush session.
+    await _resolve_ai_turns(update, session)
     return True
 
 
@@ -23365,6 +23374,17 @@ def _lockable_callout_lines(location: dict, chat_id: int) -> list[str]:
         elif kind == "switch":
             active = _lockable_is_open(location, lockable["id"], chat_id)
             element = lockable.get("element", "")
+            # Real live request (2026-09-03, Coffee, dev-bridge
+            # screenshot: circled the generic blue diamond shown for
+            # every switch regardless of its own real element/state --
+            # "find appropriate emojis for the elemental colors"). The
+            # real per-element emoji already exists and is already used
+            # correctly in the activation narration (_do_activate_
+            # switch) -- this was simply the one other place a switch's
+            # icon still used the generic kind-level default instead.
+            # Inactive stays a plain dark circle regardless of element
+            # (an unlit crystal doesn't show its own color yet).
+            emoji = _SWITCH_ELEMENT_EMOJI.get(element, "🔷") if active else "⚫"
             state = f"{'glowing' if active else 'dark'}{f' {element}' if element else ''}, {'active' if active else 'inactive'}"
         elif kind == "pressure_plate":
             active = _lockable_is_open(location, lockable["id"], chat_id)
@@ -24781,9 +24801,22 @@ async def _do_show_labyrinth_map(update: Update, floor: int | None = None) -> No
     # move/_do_descend_labyrinth) -- reused directly here rather than a
     # second, separate tracking structure.
     visited_room_ids = {rid for rid, r in floor_rooms.items() if r.get("visited")}
+    # Real live request (2026-09-03, Coffee, dev-bridge screenshot:
+    # circled the generic blue diamond shown for every switch -- "find
+    # appropriate emojis for the elemental colors... some kind of label
+    # colour or indication"). map_render.py has no chat-state access of
+    # its own (by design), so the real current on/off state of every
+    # switch/multi_switch_gate lockable on this floor is computed here
+    # and passed in as plain data.
+    switch_states = {
+        lockable["id"]: _lockable_is_open(room, lockable["id"], update.effective_chat.id)
+        for room in floor_rooms.values()
+        for lockable in room.get("lockables", [])
+        if lockable.get("kind") in ("switch", "multi_switch_gate")
+    }
     try:
         png_bytes = await asyncio.to_thread(
-            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id, locked_room_ids, visited_room_ids,
+            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id, locked_room_ids, visited_room_ids, switch_states,
         )
     except Exception as e:
         logger.warning(f"[map_render] labyrinth map failed: {e!r}")

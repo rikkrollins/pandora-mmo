@@ -33027,6 +33027,71 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("Nothing here to fight" in s for s in sink))
         self.assertTrue(any("flares to life" in s for s in sink), f"expected the switch to actually toggle, got: {sink}")
 
+    def test_lockable_callout_shows_the_real_element_emoji_not_a_generic_diamond(self):
+        """
+        Real live request (2026-09-03, Coffee, dev-bridge screenshot,
+        circled the generic blue diamond shown for every switch: "find
+        appropriate emojis for the elemental colors"). The activation
+        narration (_do_activate_switch) already used the real per-
+        element emoji correctly -- this was the one other place a
+        switch's icon still fell back to the generic kind-level default.
+        Inactive stays a plain dark circle regardless of element.
+        """
+        room = {"lockables": [{"id": "fire_switch", "kind": "switch", "name": "a fire crystal", "element": "fire"}]}
+        lines_inactive = bot._lockable_callout_lines(room, -962044)
+        self.assertTrue(any(line.startswith("⚫ A fire crystal") for line in lines_inactive), lines_inactive)
+
+        bot._chat_scoped_dict(bot._SWITCH_STATE, -962044)["fire_switch"] = True
+        lines_active = bot._lockable_callout_lines(room, -962044)
+        self.assertTrue(any(line.startswith("🔥 A fire crystal") for line in lines_active), lines_active)
+
+    def test_labyrinth_map_switch_dot_color_reflects_real_element_and_state(self):
+        """
+        Real live request (2026-09-03, Coffee: "some kind of label
+        colour or indication that is connected to that crystal switch
+        or lever"). A drawn dot is a real RGB fill, not a text glyph,
+        so the missing-color-emoji-font limitation doesn't apply here --
+        the color itself can vary by element/state.
+        """
+        import map_render as map_render_module
+        room_inactive = {"lockables": [{"id": "cold_switch", "kind": "switch", "name": "a cold crystal", "element": "cold"}]}
+        room_active = {"lockables": [{"id": "cold_switch", "kind": "switch", "name": "a cold crystal", "element": "cold"}]}
+        icons_inactive = map_render_module._labyrinth_room_icons(room_inactive, {"cold_switch": False})
+        icons_active = map_render_module._labyrinth_room_icons(room_active, {"cold_switch": True})
+        self.assertEqual(icons_inactive, [("switch", map_render_module._SWITCH_INACTIVE_COLOR)])
+        self.assertEqual(icons_active, [("switch", map_render_module._SWITCH_ELEMENT_COLORS["cold"])])
+        self.assertNotEqual(icons_inactive[0][1], icons_active[0][1])
+
+    async def test_labyrinth_map_computes_real_switch_states_end_to_end(self):
+        """Real end-to-end: _do_show_labyrinth_map actually computes switch_states from the run's own real _SWITCH_STATE, not just the renderer supporting the parameter in isolation."""
+        from unittest.mock import patch
+        user_id, chat_id = 962045, -962045
+        make_basic_character(user_id, "LabyrinthSwitchColorMapTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub["lockables"] = [{"id": "test_earth_switch", "kind": "switch", "name": "an earth crystal", "element": "earth"}]
+        # Real unseeded RNG floor generation can already place its own
+        # independent switch/multi_switch_gate lockables in OTHER rooms
+        # on this same floor (e.g. the L2e multi-switch puzzle) -- clear
+        # those too so this end-to-end check only ever sees the one
+        # switch this test itself is exercising, matching the same
+        # hard-reset fix already applied to other lockable tests this
+        # session for exactly this intermittent-failure shape.
+        for room_id, room in run["rooms"].items():
+            if room_id != run["current_room_id"]:
+                room["lockables"] = []
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+        bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)["test_earth_switch"] = True
+
+        with patch("map_render.render_labyrinth_map") as mock_render:
+            mock_render.return_value = b"\x89PNGfake"
+            await bot._do_show_labyrinth_map(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        switch_states_arg = mock_render.call_args[0][5]
+        self.assertEqual(switch_states_arg, {"test_earth_switch": True})
+
     async def test_find_lockable_resolves_by_distinctive_name_words_with_two_lockables_present(self):
         """
         Real live bug (2026-09-03, Coffee, dev-bridge: "Attack the
@@ -33914,6 +33979,60 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             FakeUpdate(user_id, "", [], chat_id=chat_id), character, run, run["rooms"]["cp"], chat_id, party_key,
         )
         self.assertFalse(started)
+
+    async def test_labyrinth_combat_resolves_ai_companions_turn_automatically_when_they_go_first(self):
+        """
+        Real live bug (2026-09-03, Coffee: "the battle isnt working" /
+        "What is happening why hasn't the battle started?"). Confirmed
+        via a real, live, currently-stuck ambush session's own
+        sessions_snapshot.json: round 1, zero HP changes on either side,
+        turn_order's first slot an AI companion (Sarah). Root cause:
+        unlike the overworld's own _do_start_combat (which calls
+        _resolve_ai_turns right after sending its own initiative
+        header), _start_labyrinth_combat sent the header and returned
+        without ever resolving the first turn -- so a fight that rolled
+        an AI companion into the very first initiative slot just sat
+        frozen forever, since no human ever needed to act to unstick it.
+        """
+        import sessions
+        from unittest.mock import patch
+        human_id, chat_id = 962029, -962029
+        companion_id = -962029
+        make_basic_character(human_id, "FrozenBattleTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(human_id, chat_id, defeated_monsters=["colosseum_champion"], dexterity=8)
+        party_id = db.create_party(human_id, chat_id)
+        db.update_character(human_id, chat_id, party_id=party_id)
+        # High Dexterity all but guarantees Sarah wins initiative and
+        # lands in turn_order's first slot -- exactly the live shape.
+        make_basic_character(companion_id, "Sarah", chat_id=chat_id, current_location="the_colosseum", is_ai=True)
+        db.update_character(companion_id, chat_id, party_id=party_id, dexterity=20)
+
+        await bot._do_enter_labyrinth(FakeUpdate(human_id, "", [], chat_id=chat_id))
+        party_key = f"party:{party_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        room = run["rooms"][run["current_room_id"]]
+        requester = db.get_character(human_id, chat_id)
+
+        sink = []
+        # A fixed initiative roll for everyone means Sarah's real +5 DEX
+        # mod (vs. the human's -1) is what decides the order -- not luck.
+        with patch("rules.combat.roll_d20", return_value=10):
+            started = await bot._start_labyrinth_combat(
+                FakeUpdate(human_id, "", sink, chat_id=chat_id), requester, run, room, ["goblin"], surprise=True,
+            )
+        self.assertTrue(started)
+        session = sessions.get_session_for_user(chat_id, human_id)
+        self.assertIsNotNone(session)
+        self.assertEqual(session.turn_order[0], companion_id)
+        # If Sarah's automatic turn never resolved, current_participant()
+        # would still be stuck on her and no turn-announcement would ever
+        # have been sent -- both would reproduce the live freeze exactly.
+        current = session.current_participant()
+        self.assertNotEqual(current["telegram_user_id"], companion_id)
+        self.assertTrue(any("Round" in s and "turn" in s for s in sink))
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        sessions.end_session(chat_id, session)
 
     def test_labyrinth_antagonist_is_never_a_real_campaign_character(self):
         """Phase L3, per Coffee: "don't use characters that are in the storyline, make sure they are separate from the actual game"."""
