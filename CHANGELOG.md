@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.488] — feature: pressure plates + breakable walls/floors in the Labyrinth (Bottle Grotto coverage)
+
+Real gap found while directly answering Coffee's own question — "are
+you sure everything is included to make a dungeon like the bottle
+grotto or face shrine or the Eagle's Tower?" — with a real, live-
+generated sample floor to check against. Grepping every `"kind":`
+`rules/labyrinth.py`'s `generate_floor` actually placed showed only
+`chest`/`switch`/`multi_switch_gate` — `pressure_plate` and
+`breakable_wall`/`breakable_floor` have had real, generic bot.py
+dispatch since v1.27.450/452 (`_do_activate_pressure_plate`, `_do_
+break_obstacle` — both confirmed CAMPAIGN-agnostic) but were never
+actually PLACED anywhere in the live game: not by `dungeon_evolve.py`'s
+own overworld generator, not by hand in `campaign.json`, and not in
+the Labyrinth. This closes the gap for the Labyrinth specifically —
+Bottle Grotto's own real signature mechanic ("grab a nearby pot and
+step on the lift to make it fall") plus general ALTTP secret-wall
+puzzles.
+
+`generate_floor` now occasionally gates a branch behind a pressure
+plate (kept LOCAL to the hub room, matching `dungeon_evolve.py`'s own
+correct pattern — a real bug caught and fixed mid-implementation: an
+initial draft placed the plate remotely, which `_lockable_is_open`'s
+own confirmed local-only lookup would have silently never opened), and
+occasionally reveals a genuine bonus "Hidden Cache" room off a non-main
+branch leaf via a breakable wall/floor (a plain hit always works; a
+fire/force spell also does) — never gates the critical path, so it
+needs no solvability check.
+
+5 new tests (statistical placement across seeds + a real end-to-end
+push-the-crate/smash-the-wall test). Full 90-test LabyrinthTests suite
+passes (1 known, pre-existing batch-order flake confirmed harmless in
+isolation).
+
 ## [1.27.487] — feature: real loop-back connections densify the Labyrinth's dungeon topology
 
 Real, more foundational research follow-up to v1.27.484 (Coffee:

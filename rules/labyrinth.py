@@ -72,6 +72,21 @@ _BRANCH_DEPTH_WEIGHTS = ([0, 1, 2], [0.45, 0.35, 0.2])  # most branches stay sha
 _BRANCH_GATE_CHANCE = 0.35
 _MINIBOSS_CHANCE = 0.3
 
+# Real gap found while confirming Bottle Grotto coverage (2026-09-03,
+# per Coffee: "are you sure everything is included to make a dungeon
+# like the bottle grotto or face shrine or the Eagle's Tower?"):
+# pressure plates and breakable walls/floors have had real, generic,
+# already-shipped bot.py dispatch since v1.27.450/452 (_do_activate_
+# pressure_plate, _do_break_obstacle -- both confirmed CAMPAIGN-
+# agnostic, already reused as-is here) but were NEVER actually PLACED
+# anywhere in the live game -- not by dungeon_evolve.py's own
+# generator, not by hand in campaign.json, and not here. Bottle
+# Grotto's own real signature is "grab a nearby pot and step on the
+# lift to make it fall" (a pressure plate) plus general ALTTP secret-
+# wall/floor puzzles -- this closes that gap for the Labyrinth.
+_PRESSURE_PLATE_CHANCE = 0.3
+_BREAKABLE_CHANCE = 0.3
+
 # Real live follow-up (2026-09-03, Coffee: "do all of them" -- warps,
 # a floor-altering puzzle, and an owl-statue-style hint, after the same
 # 3 Link's Awakening maps). Warps are a real, one-way-declared-but-
@@ -771,6 +786,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # itself lives in, and it's already proven safe by L2e/generate_
     # segment's own cross-floor puzzle.
     other_chains = [c for c in branch_chains if c is not main_chain]
+    gated_chain = None
     if len(other_chains) >= 2 and rng.random() < _scaled_chance(_BRANCH_GATE_CHANCE, floor, 0.002, 0.55):
         gated_chain, switch_chain = rng.sample(other_chains, 2)
         gate_room_id = gated_chain[0]
@@ -791,6 +807,72 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         # room this pass just locked keeps them from compounding an
         # unrelated puzzle onto a room the party can't reach yet.
         room_ids = [rid for rid in room_ids if rid != gate_room_id]
+
+    # Real pressure-plate gate (2026-09-03, per Coffee: "look at the
+    # dead ends... a grid style map with multiple paths" -- confirmed
+    # via follow-up research to be Bottle Grotto's own real signature
+    # mechanic: "grab a nearby pot and step on the lift to make it
+    # fall"). A second, independent kind of branch gate -- deliberately
+    # never the same branch as the elemental-switch gate above, so both
+    # can coexist or neither can. Mirrors rules/dungeon_evolve.py's own
+    # identical mechanic for the overworld generator exactly: the plate
+    # AND its movable object live in the SAME room as the gate itself
+    # (the hub) -- NOT a remote puzzle. Confirmed by direct code read of
+    # `_lockable_is_open`: a bare `pressure_plate`/`switch` kind is only
+    # ever looked up against the SAME room passed in, so placing it
+    # remotely (the way a `switch` gets wrapped in `multi_switch_gate`
+    # to work around that) would silently never open -- dungeon_evolve.
+    # py's own version already gets this right by keeping everything
+    # local, reused here as-is.
+    plate_eligible = [c for c in other_chains if c is not gated_chain]
+    if plate_eligible and rng.random() < _scaled_chance(_PRESSURE_PLATE_CHANCE, floor, 0.002, 0.5):
+        plated_chain = rng.choice(plate_eligible)
+        plate_room_id = plated_chain[0]
+        plate_id = f"f{floor}_plate"
+        crate_id = f"f{floor}_crate"
+        hub.setdefault("lockables", []).append(
+            {"id": plate_id, "kind": "pressure_plate", "name": "a stone pressure plate"}
+        )
+        hub.setdefault("movable_objects", []).append(
+            {"id": crate_id, "name": "a heavy crate"}
+        )
+        hub["connections"].remove(plate_room_id)
+        hub.setdefault("locked_connections", {})[plate_room_id] = plate_id
+        rooms[plate_room_id]["description"] += " A weight-locked mechanism seals this path -- something heavy, placed just right, would hold it open."
+        room_ids = [rid for rid in room_ids if rid != plate_room_id]
+
+    # Real breakable-wall/floor secret (2026-09-03, per Coffee's same
+    # research request): a genuine ALTTP/Bottle-Grotto-style optional
+    # secret off an already-reachable branch LEAF -- never gates the
+    # critical path, purely adds a bonus room, so it needs no
+    # solvability check at all. Reuses bot.py's already-generic,
+    # already-shipped `_do_break_obstacle` dispatch (a plain hit always
+    # works; a fire/force spell also works) -- this had real dispatch
+    # code since v1.27.450 but was never actually PLACED anywhere in
+    # the live game (not by dungeon_evolve.py, not by hand in campaign.
+    # json) until now.
+    breakable_leaf_candidates = [c[-1] for c in branch_chains if c is not main_chain]
+    if breakable_leaf_candidates and rng.random() < _scaled_chance(_BREAKABLE_CHANCE, floor, 0.002, 0.5):
+        leaf_id = rng.choice(breakable_leaf_candidates)
+        kind = rng.choice(("breakable_wall", "breakable_floor"))
+        noun = "wall" if kind == "breakable_wall" else "floor"
+        bonus_id = f"f{floor}_secret"
+        lockable_id = f"f{floor}_breakable"
+        rooms[bonus_id] = {
+            "id": bonus_id, "floor": floor, "name": "Labyrinth -- A Hidden Cache", "monsters": [],
+            "description": f"A room that shouldn't be here, sealed off until the {noun} that hid it finally gave way.",
+            "connections": [leaf_id], "modifier": modifier,
+            "lockables": [{
+                "id": f"f{floor}_secret_cache", "kind": "chest", "name": "a real cache no one else has found",
+                "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(80, 200) * floor,
+            }],
+        }
+        rooms[leaf_id].setdefault("locked_connections", {})[bonus_id] = lockable_id
+        rooms[leaf_id].setdefault("lockables", []).append({
+            "id": lockable_id, "kind": kind,
+            "name": f"a real, visibly cracked {noun}",
+        })
+        rooms[leaf_id]["description"] += f" A real crack splits the {noun} here -- something about it looks ready to give way."
 
     # L2e: a second, independent switch-gated reward, requiring EVERY
     # switch active at once -- deliberately placed in two side rooms

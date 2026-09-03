@@ -34160,6 +34160,100 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(gate_checked, "expected at least one real branch gate across 150 real seeds")
         self.assertTrue(collapse_checked, "expected at least one real collapse puzzle across 150 real seeds")
 
+    def test_generate_floor_places_a_real_pressure_plate_gate_kept_local_to_the_hub(self):
+        """
+        Real gap found while confirming Bottle Grotto coverage
+        (2026-09-03, per Coffee: "are you sure everything is included
+        to make a dungeon like the bottle grotto..."): pressure plates
+        have had real, generic bot.py dispatch since v1.27.452 but were
+        never actually placed in the Labyrinth. Statistical: a plate
+        gate, when it fires, keeps the plate/crate in the SAME room as
+        the gate itself (the hub) -- a REMOTE placement would silently
+        never open, per `_lockable_is_open`'s own real, confirmed
+        local-only lookup.
+        """
+        plate_seen = False
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            hub = floor_data["rooms"][floor_data["hub_room_id"]]
+            plate = next((lk for lk in hub.get("lockables", []) if lk.get("kind") == "pressure_plate"), None)
+            if plate is None:
+                continue
+            plate_seen = True
+            self.assertTrue(hub.get("movable_objects"), "expected a real movable object in the SAME room as the plate")
+            gated_ids = [d for d, lid in hub.get("locked_connections", {}).items() if lid == plate["id"]]
+            self.assertEqual(len(gated_ids), 1, "expected the plate to gate exactly one real destination")
+            break
+        self.assertTrue(plate_seen, "expected at least one real pressure-plate gate across 80 real seeds")
+
+    def test_generate_floor_places_a_real_breakable_secret_off_a_genuine_leaf(self):
+        """Statistical: a breakable wall/floor, when it fires, gates a real bonus room off a genuine non-main branch leaf -- never the critical path."""
+        breakable_seen = False
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            for room in rooms.values():
+                breakable_lk = next((lk for lk in room.get("lockables", []) if lk.get("kind") in ("breakable_wall", "breakable_floor")), None)
+                if breakable_lk is None:
+                    continue
+                breakable_seen = True
+                bonus_id = next(d for d, lid in room["locked_connections"].items() if lid == breakable_lk["id"])
+                self.assertIn("Hidden Cache", rooms[bonus_id]["name"])
+                self.assertTrue(any(lk["kind"] == "chest" for lk in rooms[bonus_id].get("lockables", [])))
+                break
+            if breakable_seen:
+                break
+        self.assertTrue(breakable_seen, "expected at least one real breakable secret across 80 real seeds")
+
+    async def test_labyrinth_pressure_plate_and_breakable_wall_actually_open_when_triggered(self):
+        """End-to-end: pushing a crate onto a real Labyrinth pressure plate, and hitting a real breakable wall, actually flip real game state -- not just present in generation data."""
+        user_id, chat_id = 962052, -962052
+        make_basic_character(user_id, "PlateBreakableTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        bonus_room = {
+            "id": "test_bonus_room", "floor": hub["floor"], "name": "Labyrinth -- A Hidden Cache",
+            "description": "test", "connections": [hub["id"]], "monsters": [],
+        }
+        hub["lockables"] = [{"id": "test_plate", "kind": "pressure_plate", "name": "a stone pressure plate"}]
+        hub["movable_objects"] = [{"id": "test_crate", "name": "a heavy crate"}]
+        hub.setdefault("locked_connections", {})["f_plate_dest"] = "test_plate"
+        hub["connections"] = [c for c in hub["connections"]]
+        plate_dest = dict(bonus_room, id="f_plate_dest")
+        run["rooms"]["f_plate_dest"] = plate_dest
+        run["rooms"]["test_bonus_room"] = bonus_room
+        breakable_leaf = {
+            "id": "test_breakable_leaf", "floor": hub["floor"], "name": "A Test Leaf", "monsters": [],
+            "description": "test", "connections": [hub["id"]],
+            "lockables": [{"id": "test_wall", "kind": "breakable_wall", "name": "a real, visibly cracked wall"}],
+            "locked_connections": {"test_bonus_room": "test_wall"},
+        }
+        run["rooms"]["test_breakable_leaf"] = breakable_leaf
+        hub["connections"].append("test_breakable_leaf")
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "push the crate onto the plate", sink, chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "push the crate onto the plate"}, "push the crate onto the plate",
+        )
+        self.assertTrue(any("sinks into place" in s for s in sink), f"expected the plate to actually activate, got: {sink}")
+        exits_hub = bot._labyrinth_exits(hub, run["rooms"], chat_id)
+        self.assertIn("f_plate_dest", [d["id"] for _, _, d in exits_hub], "expected the plate's destination reachable once active")
+
+        sink2 = []
+        db.update_labyrinth_run(chat_id, party_key, current_room_id="test_breakable_leaf")
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "smash the wall", sink2, chat_id=chat_id), DummyContext(),
+            {"action": "skill_check", "ability": "dexterity", "raw_text": "smash the wall"}, "smash the wall",
+        )
+        self.assertTrue(any("gives way" in s for s in sink2), f"expected the wall to actually break, got: {sink2}")
+        exits_leaf = bot._labyrinth_exits(run["rooms"]["test_breakable_leaf"], run["rooms"], chat_id)
+        self.assertIn("test_bonus_room", [d["id"] for _, _, d in exits_leaf], "expected the secret room reachable once broken")
+
     def test_generate_floor_warps_and_collapse_puzzle_never_break_reachability_across_seeds(self):
         """
         Real Zelda-dungeon research request (2026-09-03, Coffee: "do all
