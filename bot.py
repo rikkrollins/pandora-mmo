@@ -10356,9 +10356,30 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     if twin_id and run["rooms"].get(twin_id) and not room.get("mirror_hint_revealed"):
         room["mirror_hint_revealed"] = True
         hint_line = f"✨ As it falls, you glimpse something -- **{run['rooms'][twin_id]['name']}** holds its mirror."
+    # Real, guaranteed mini-boss reward (2026-09-03, Phase L4, item 6 --
+    # per the Link's Awakening research: a mini-boss fight always pays
+    # off with something real, e.g. Catfish's Maw's Hookshot). Reuses
+    # the exact same floor-scaled item-band pool _build_checkpoint_room
+    # already uses for milestone vaults -- never an invented item.
+    # Granted directly (not a chest) since defeating the miniboss IS
+    # the real trigger, same "no extra step" shape the checkpoint's own
+    # ASI/skill-point grant already uses. Guarded by a real one-time
+    # flag, same convention as the checkpoint/hazard triggers.
+    reward_line = None
+    if room.get("is_miniboss_room") and not room.get("miniboss_reward_claimed"):
+        room["miniboss_reward_claimed"] = True
+        item_id = labyrinth_module._milestone_item_for_floor(room.get("floor", run["floor"]))
+        item = items_module.get_item(item_id)
+        members = _labyrinth_active_party_members(character)
+        for m in members:
+            if not m.get("is_ai"):
+                db.add_item(m["telegram_user_id"], update.effective_chat.id, item_id, 1)
+        reward_line = f"🏆 The mini-boss falls, and leaves behind something real: **{item['name'] if item else item_id}** (added to the party's stash)."
     db.update_labyrinth_run(update.effective_chat.id, party_key, rooms=run["rooms"])
     if hint_line:
         await _safe_send(update, hint_line)
+    if reward_line:
+        await _safe_send(update, reward_line)
 
 
 def _npc_combatant_from_stats(npc_id: str, npc_data: dict, party_levels: list[int] | None = None) -> dict:

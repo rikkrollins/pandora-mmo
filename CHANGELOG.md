@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.494] — feature: guaranteed real mini-boss reward in the Labyrinth (Phase L4, item 6) + monitoring-cron extension (item 5)
+
+**Guaranteed mini-boss reward**: per the Link's Awakening research this
+whole phase is built from (Catfish's Maw's Hookshot — a mini-boss
+fight always pays off with something real), defeating a real
+`is_miniboss_room` monster now guarantees a floor-scaled item on top
+of normal combat rewards, reusing the exact same milestone item-band
+pool the checkpoint vault already uses — never an invented item.
+One-time only, granted directly to the party's real human members
+(same shape as the checkpoint's own ASI/skill-point grant).
+
+**Monitoring-cron extension** (item 5, closing Coffee's own original
+"implement it into our self improvement agent" ask): the hourly
+self-improvement cron now also generates 5 fresh real floors per pass
+via `scripts/preview_labyrinth_floor.py` and flags a real, actionable
+finding if a floor shows zero branching depth, or all 5 sampled floors
+show none of {miniboss, gate, warp, collapse, carry puzzle} at once
+(normal variance is 1-2 features missing per floor, not all 5 floors
+missing everything).
+
+1 new test. Full 100-test LabyrinthTests suite passes (multiple known,
+pre-existing batch-order flakes confirmed harmless — a different
+subset flakes each run, none of them mine, consistent with this
+suite's already-documented ordering sensitivity).
+
+This closes out Phase L4's full build order (items 0 through 6) —
+see CHANGELOG entries v1.27.486 through this one for the complete
+Zelda-dungeon-topology arc.
+
 ## [1.27.493] — feature: owl-statue hint ported to the overworld dungeon generator (Phase L4, item 4, partial)
 
 Coffee's own repeated phrasing ("dungeons and labyrinth," "dungeon or

@@ -33959,6 +33959,53 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("A Mirror (II)" in s for s in sink2))
         sessions.end_session(chat_id, session)
 
+    async def test_labyrinth_miniboss_defeat_grants_a_real_guaranteed_item_once_only(self):
+        """
+        Real, guaranteed mini-boss reward (2026-09-03, Phase L4, item
+        6, per Link's Awakening research: a mini-boss fight always pays
+        off with something real). Reuses the exact same floor-scaled
+        item-band pool the checkpoint vault already uses -- never an
+        invented item. One-time only, same convention as every other
+        Labyrinth trigger.
+        """
+        import sessions
+        user_id, chat_id = 962055, -962055
+        make_basic_character(user_id, "MinibossRewardTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        miniboss_room_id = "laby_miniboss_test"
+        rooms[miniboss_room_id] = {
+            "id": miniboss_room_id, "floor": 20, "name": "A Real Mini-Boss Chamber",
+            "connections": [hub_id], "monsters": ["goblin"], "is_miniboss_room": True,
+        }
+        rooms[hub_id]["connections"].append(miniboss_room_id)
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=miniboss_room_id)
+
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session)
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+
+        expected_item_id = labyrinth_module._milestone_item_for_floor(20)
+        before = (db.get_character(user_id, chat_id).get("inventory") or {}).get(expected_item_id, 0)
+        sink = []
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
+        after = db.get_character(user_id, chat_id).get("inventory", {}).get(expected_item_id, 0)
+        self.assertEqual(after, before + 1, f"expected exactly one real {expected_item_id} granted, got {sink}")
+        self.assertTrue(any("mini-boss falls" in s for s in sink), sink)
+
+        # Defeating it again (a real room the player could re-enter) never grants a second copy.
+        sink2 = []
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink2, chat_id=chat_id), session)
+        after2 = db.get_character(user_id, chat_id).get("inventory", {}).get(expected_item_id, 0)
+        self.assertEqual(after2, before + 1, "expected the guaranteed reward to be one-time only")
+        sessions.end_session(chat_id, session)
+
     def test_enter_labyrinth_button_only_shows_once_unlocked(self):
         """Phase L2g: same hardcoded-location precedent as the hollow_stump_shrine prayer button -- never shown before the real unlock condition is met, a real discoverable tap target once it is."""
         colosseum = cl.get_location(bot.CAMPAIGN, "the_colosseum")
