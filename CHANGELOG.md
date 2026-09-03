@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.495] — fix: leaving the Labyrinth after switching active alts orphaned the other character at the sentinel location
+
+Found live while investigating Coffee's own report of being stuck:
+character "Ravenloft" (his real, active-at-the-time character) entered
+the Labyrinth normally, then Coffee switched his globally active
+character to "Elduinn" (same party, same owner) without leaving first
+— a real, legitimate multi-alt workflow. Issuing "leave the labyrinth"
+as Elduinn correctly found and deleted the real, party-shared run
+(`party_key` is party-scoped, not tied to whichever character issued
+the command), but `_labyrinth_active_party_members`'s old "must be the
+globally active character for their owner" exclusion then wrongly
+skipped resetting Ravenloft's own `current_location` back to the
+Colosseum — he was no longer the "active" alt, even though he was
+demonstrably still sitting at `LABYRINTH_LOCATION_SENTINEL`. Left him
+permanently stuck: sentinel location, no matching run, "that doesn't
+work this deep in the Labyrinth" for everything.
+
+Fixed: a party member now also counts as genuinely active in a
+Labyrinth run if their OWN `current_location` really is the sentinel
+— not just "are they the globally active character right now." The
+original dormant-alt exclusion this builds on (v1.27.469-ish,
+`Laurienna/Charvenna`/`Ravenloft/Pan`) still works exactly the same
+for a true dormant alt who was never actually in the run.
+
+Ravenloft's own stuck location was fixed directly in the live DB
+(reset to `the_colosseum`) so Coffee could re-enter and replay Phase
+L4's content from floor 1, per his own request.
+
+1 new test (fails without the fix, passes with it — confirmed by
+literally reproducing the exact live scenario: enter as character A,
+switch active to character B, leave as B, confirm A's location resets
+too). Full 101-test LabyrinthTests suite passes clean.
+
 ## [1.27.494] — feature: guaranteed real mini-boss reward in the Labyrinth (Phase L4, item 6) + monitoring-cron extension (item 5)
 
 **Guaranteed mini-boss reward**: per the Link's Awakening research this

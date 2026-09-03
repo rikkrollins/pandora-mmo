@@ -35718,6 +35718,54 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(resting_id, chat_id)["hp_current"], 100)
         self.assertEqual(db.get_character_by_id(alt_old["character_id"])["hp_current"], 100)
 
+    async def test_labyrinth_leave_resets_a_party_member_even_after_the_owner_switches_active_alt(self):
+        """
+        Real live bug (2026-09-03, found investigating a real "stuck in
+        the Labyrinth" report -- Coffee's own character "Ravenloft" was
+        left at LABYRINTH_LOCATION_SENTINEL with no matching run after
+        issuing "leave the labyrinth"). Root cause: Ravenloft entered
+        the Labyrinth while active, then the SAME owner switched their
+        globally active character to a different alt ("Elduinn," same
+        party) without leaving first. Leaving as Elduinn correctly
+        found and deleted the real party-shared run (party_key is
+        party-scoped, not tied to whichever character issued the
+        command) -- but _labyrinth_active_party_members's old "must be
+        the globally active character" exclusion then wrongly skipped
+        resetting RAVENLOFT's own current_location, since he was no
+        longer the active alt, even though he was demonstrably still
+        sitting at the sentinel. Fixed: a member now also counts as
+        active if their OWN current_location genuinely is the sentinel,
+        not just "are they the globally active character right now."
+        """
+        owner_id, chat_id = 962037, -962037
+        first = make_basic_character(owner_id, "RavenloftTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character_by_id(first["character_id"], defeated_monsters=["colosseum_champion"])
+        party_id = db.create_party(owner_id, chat_id)
+        db.update_character_by_id(first["character_id"], party_id=party_id)
+        db.switch_character(owner_id, chat_id, first["character_id"])
+
+        await bot._do_enter_labyrinth(FakeUpdate(owner_id, "", [], chat_id=chat_id))
+        self.assertEqual(db.get_character_by_id(first["character_id"])["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+        # The SAME owner switches to a different alt, same party --
+        # never having left the Labyrinth with the first character.
+        second = db.create_character(
+            telegram_user_id=owner_id, chat_id=chat_id, name="ElduinnTester", race="Human", char_class="Fighter",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=20, armor_class=11, gold=0, inventory={}, known_spells=[], current_location="crossroads_tavern",
+        )
+        db.update_character_by_id(second["character_id"], party_id=party_id)
+        db.switch_character(owner_id, chat_id, second["character_id"])
+        self.assertEqual(db.get_active_character_id(owner_id, chat_id), second["character_id"])
+
+        # Leaving as the now-active second alt must still reset the FIRST character too.
+        await bot._do_leave_labyrinth(FakeUpdate(owner_id, "", [], chat_id=chat_id))
+        self.assertEqual(
+            db.get_character_by_id(first["character_id"])["current_location"], "the_colosseum",
+            "expected the real character sitting in the Labyrinth to be reset even after the owner switched active alts",
+        )
+        self.assertIsNone(db.get_labyrinth_run(chat_id, f"party:{party_id}"))
+
     def test_labyrinth_antagonist_is_never_a_real_campaign_character(self):
         """Phase L3, per Coffee: "don't use characters that are in the storyline, make sure they are separate from the actual game"."""
         name = labyrinth_module.LABYRINTH_ANTAGONIST_NAME

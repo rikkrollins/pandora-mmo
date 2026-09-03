@@ -9208,7 +9208,26 @@ def _labyrinth_active_party_members(character: dict) -> list[dict]:
     for m in db.get_party_members_by_id(character["party_id"]):
         if m.get("is_benched") or m.get("is_inactive"):
             continue
-        if m["telegram_user_id"] > 0 and m["character_id"] != db.get_active_character_id(m["telegram_user_id"], m["chat_id"]):
+        # Real live bug (2026-09-03, found investigating a stuck
+        # current_location report): "is this the active character for
+        # their owner" is the wrong proxy for "is this character
+        # genuinely part of the live run" -- a Labyrinth run is party-
+        # shared, so a party member can still be sitting at
+        # LABYRINTH_LOCATION_SENTINEL even after their owner switches
+        # their globally active character to a DIFFERENT alt (e.g. to
+        # handle something in the overworld) without first leaving.
+        # The original dormant-alt exclusion this replaces would then
+        # wrongly skip resetting THAT member's own current_location on
+        # leave, orphaning them at the sentinel with no matching run --
+        # confirmed live (character_id 23, "Ravenloft," stuck at
+        # "__labyrinth__" after "Elduinn" became the active character
+        # and issued "leave the labyrinth"). A member now counts as
+        # genuinely active in this run if EITHER they're the globally
+        # active character, OR their own current_location really is
+        # the sentinel -- the second clause is the real, demonstrable
+        # fact this whole check was trying to approximate all along.
+        is_active_character = m["telegram_user_id"] <= 0 or m["character_id"] == db.get_active_character_id(m["telegram_user_id"], m["chat_id"])
+        if not is_active_character and m.get("current_location") != LABYRINTH_LOCATION_SENTINEL:
             continue
         members.append(m)
     return members
