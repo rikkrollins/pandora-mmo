@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.476] — feature: a real, explicit Labyrinth objective — tutorial, persistent reminder, and its own quest board section
+
+Real live question (Coffee: "what is the objective of each generated
+labyrinth? there not posted? how does the player figure out what to
+do?"). Confirmed honestly: there was none — the tutorial only ever
+implied the goal by explaining mechanics, never stated it outright,
+and it never appeared as a tracked quest anywhere.
+
+Three real, computed-fresh-from-the-same-segment-math additions
+(never a static/guessed number, so they can't drift out of sync with
+each other):
+
+1. The one-time tutorial now leads with an explicit "🎯 Your
+   objective" line instead of only implying it.
+2. Every room's own text now shows a live "🎯 Goal: reach floor N for
+   this segment's waystation (X floors to go)" reminder until the
+   checkpoint is actually reached, then it disappears.
+3. "Check quests" now shows a real "🌀 Labyrinth" section: the live
+   objective and current floor while inside a run, permanent best/
+   checkpoint progress with a nudge to re-enter when not, and nothing
+   at all before the Labyrinth is even unlocked. Also fixed a related
+   latent bug while building this: checking quests from INSIDE the
+   Labyrinth would have shown "Quest board — __labyrinth__" (the raw
+   sentinel id) for the ordinary location-scoped board section, which
+   doesn't apply there at all.
+
+4 new tests; full 63-test LabyrinthTests suite passes across 3
+consecutive runs, plus all 4 existing overworld quest-board tests
+confirmed unaffected.
+
 ## [1.27.475] — feature: full, untruncated room names listed in the Labyrinth map's caption
 
 Real live request (Coffee: "if u are not going to use images for it

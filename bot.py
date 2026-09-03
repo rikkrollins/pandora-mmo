@@ -9014,9 +9014,19 @@ LABYRINTH_ENTRY_WARNING = (
 
 # Shown once per character, appended to their real first arrival
 # message (never a separate message -- see _do_enter_labyrinth).
+#
+# Real live gap (2026-09-03, Coffee: "what is the objective of each
+# generated labyrinth? there not posted? how does the player figure
+# out what to do?") -- this used to only ever IMPLY the goal by
+# explaining the mechanics, never stating it outright. Now leads with
+# a real, explicit objective line instead of making the player infer it.
 LABYRINTH_TUTORIAL_TEXT = (
     "📖 **First time here? A quick word on how this works:**\n"
-    "• Built in **5-floor segments** — clear one and you reach a real "
+    "🎯 **Your objective:** survive and reach this segment's **waystation** "
+    "5 floors down — that's what triggers real rewards and lets you go "
+    "deeper. There's no final win condition; the Labyrinth is meant to "
+    "go as deep as your party can survive.\n"
+    "• Built in **5-floor segments** — clearing one gets you a real "
     "**waystation**: a full heal, spell slots restored, a permanent "
     "stat and skill point, and a shrine + shop you can waypoint back to "
     "later.\n"
@@ -9246,12 +9256,28 @@ def _labyrinth_room_text(character: dict, room: dict, run: dict, chat_id: int, a
     means anything.
     """
     modifier = room.get("modifier")
-    header = f"**{room['name']}** (Floor {room.get('floor', run['floor'])})"
+    floor = room.get("floor", run["floor"])
+    header = f"**{room['name']}** (Floor {floor})"
+    # Real live gap (2026-09-03, Coffee: "what is the objective of each
+    # generated labyrinth? there not posted?"). A persistent, real
+    # reminder of the current goal -- computed fresh from the floor's
+    # own segment math, never a static/guessed number -- shown on every
+    # look/move until the segment's own checkpoint is actually reached.
+    goal_line = None
+    if not room.get("is_checkpoint"):
+        segment_end = labyrinth_module.segment_start_floor(labyrinth_module.segment_number_for_floor(floor)) + labyrinth_module.SEGMENT_SIZE - 1
+        remaining = segment_end - floor
+        goal_line = (
+            f"🎯 Goal: reach floor {segment_end} for this segment's waystation "
+            f"({remaining} floor{'s' if remaining != 1 else ''} to go)."
+        )
     if modifier == "lightless" and not _has_light_source(character, chat_id):
         lines = [
             header,
             "🌑 **It is too dark to see anything here.** (equip a torch, or cast a spell like Dancing Lights, to see here.)",
         ]
+        if goal_line:
+            lines.append(goal_line)
         if announce_modifier:
             lines.append(labyrinth_module.MODIFIER_ANNOUNCEMENT[modifier])
         return "\n".join(lines)
@@ -9264,6 +9290,8 @@ def _labyrinth_room_text(character: dict, room: dict, run: dict, chat_id: int, a
     exits = _labyrinth_exits(room, run["rooms"], chat_id)
     if exits:
         lines.append("🧭 Exits: " + ", ".join(f"{label} ({dest['name']})" for _, label, dest in exits))
+    if goal_line:
+        lines.append(goal_line)
     if announce_modifier and modifier:
         lines.append(labyrinth_module.MODIFIER_ANNOUNCEMENT[modifier])
     return "\n".join(lines)
@@ -16974,20 +17002,63 @@ async def _do_check_quests(update: Update) -> None:
             )
             lines.append(f"• {bq['title']} (for {npc_name}) — {progress}{by_note}\n  {bq['description']}")
 
+    # Real live gap (2026-09-03, Coffee: "what is the objective of each
+    # generated labyrinth? there not posted? add it to the quest board
+    # on its own area called 'Labyrinth'"). A real, computed-fresh
+    # objective (never a static/guessed number) -- same segment math
+    # _labyrinth_room_text's own per-room reminder uses, so the two can
+    # never drift out of sync with each other.
+    if _labyrinth_unlocked(character):
+        lines.append("\n🌀 **Labyrinth**")
+        labyrinth_run = db.get_labyrinth_run(update.effective_chat.id, _labyrinth_party_key(character))
+        if labyrinth_run is not None:
+            current_room = labyrinth_run["rooms"][labyrinth_run["current_room_id"]]
+            current_floor = current_room.get("floor", labyrinth_run["floor"])
+            if current_room.get("is_checkpoint"):
+                lines.append(f"You're at this segment's waystation (floor {current_floor}) — say \"go deeper\" when you're ready to continue.")
+            else:
+                segment_end = labyrinth_module.segment_start_floor(labyrinth_module.segment_number_for_floor(current_floor)) + labyrinth_module.SEGMENT_SIZE - 1
+                remaining = segment_end - current_floor
+                lines.append(
+                    f"🎯 Objective: reach floor {segment_end} for this segment's waystation "
+                    f"({remaining} floor{'s' if remaining != 1 else ''} to go) — you're on floor {current_floor} now."
+                )
+        else:
+            checkpoint = character.get("labyrinth_checkpoint_floor", 0)
+            best = character.get("labyrinth_best_floor", 0)
+            if checkpoint or best:
+                lines.append(
+                    f"Deepest floor reached: {best} · last waystation cleared: floor {checkpoint or 'none yet'}. "
+                    f"Say \"enter the labyrinth\" at the Colosseum to continue."
+                )
+            else:
+                lines.append(
+                    "Say \"enter the labyrinth\" at the Colosseum to begin — survive 5-floor segments, "
+                    "reaching each one's waystation to go deeper."
+                )
+
     location_id = character["current_location"]
-    location = cl.get_location(CAMPAIGN, location_id)
-    story_offer = _offerable_quest_at_location(character, location_id)
-    area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id)
-    lines.append(f"\n📋 **Quest board — {location['name'] if location else location_id}**")
-    if not story_offer and not area_board_quests:
-        lines.append("Nothing posted here today.")
-    if story_offer:
-        story_quest_id, quest = story_offer
-        lines.append(_format_story_quest_poster(story_quest_id, quest, location_id, character["chat_id"]))
-    if area_board_quests:
-        lines.append(board_quests_module.format_board_listings(area_board_quests))
-    if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
-        lines.append("(Say \"I accept this quest\" — name it if more than one's posted — or tap a button below.)")
+    # The Labyrinth's sentinel location is never a real CAMPAIGN id --
+    # its own objective is already covered by the Labyrinth section
+    # just above, so the ordinary location-scoped board simply doesn't
+    # apply while inside it (matches every other CAMPAIGN-only lookup
+    # in this file, see _location_or_labyrinth_room's own docstring).
+    story_offer = None
+    area_board_quests = []
+    if location_id != LABYRINTH_LOCATION_SENTINEL:
+        location = cl.get_location(CAMPAIGN, location_id)
+        story_offer = _offerable_quest_at_location(character, location_id)
+        area_board_quests = board_quests_module.get_or_generate_all_board_quests(CAMPAIGN, location_id, update.effective_chat.id)
+        lines.append(f"\n📋 **Quest board — {location['name'] if location else location_id}**")
+        if not story_offer and not area_board_quests:
+            lines.append("Nothing posted here today.")
+        if story_offer:
+            story_quest_id, quest = story_offer
+            lines.append(_format_story_quest_poster(story_quest_id, quest, location_id, character["chat_id"]))
+        if area_board_quests:
+            lines.append(board_quests_module.format_board_listings(area_board_quests))
+        if story_offer or any(not q.get("accepted_by") and not q.get("completed_at") for q in area_board_quests):
+            lines.append("(Say \"I accept this quest\" — name it if more than one's posted — or tap a button below.)")
 
     await _safe_send(
         update, "\n".join(lines),

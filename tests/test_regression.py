@@ -33439,8 +33439,55 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("7", line)
         self.assertIn("5", line)
 
+    def test_labyrinth_room_text_states_the_real_objective_until_the_checkpoint(self):
+        """
+        Real live gap (2026-09-03, Coffee: "what is the objective of
+        each generated labyrinth? there not posted? how does the
+        player figure out what to do?"). A persistent, computed-fresh
+        "Goal" reminder must appear on every plain room until the
+        segment's own checkpoint is actually reached, then disappear
+        once it has been.
+        """
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(4))
+        hub = floor_data["rooms"][floor_data["hub_room_id"]]
+        run = {"rooms": floor_data["rooms"], "floor": 3}
+        character = {"current_location": bot.LABYRINTH_LOCATION_SENTINEL}
+        text = bot._labyrinth_room_text(character, hub, run, -1)
+        self.assertIn("🎯 Goal: reach floor 5", text)
+
+        checkpoint_room = {"name": "A Waystation", "floor": 5, "description": "Safe.", "connections": [], "is_checkpoint": True}
+        text2 = bot._labyrinth_room_text(character, checkpoint_room, run, -1)
+        self.assertNotIn("🎯 Goal:", text2)
+
+    def test_tutorial_leads_with_a_real_explicit_objective(self):
+        self.assertIn("Your objective", bot.LABYRINTH_TUTORIAL_TEXT)
+
+    async def test_check_quests_shows_a_real_labyrinth_section_with_live_objective(self):
+        """
+        Real live request (2026-09-03, Coffee: "add it to the quest
+        board on its own area called 'Labyrinth'"). Must show a real,
+        live objective while inside an active run, must never crash on
+        the sentinel location when computing the ordinary location-
+        scoped quest board, and must show nothing at all before the
+        Labyrinth is even unlocked.
+        """
+        user_id, chat_id = 962043, -962043
+        make_basic_character(user_id, "LabyrinthQuestBoardTester", chat_id=chat_id, current_location="crossroads_tavern")
+        sink = []
+        await bot._do_check_quests(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertFalse(any("🌀 **Labyrinth**" in s for s in sink), "no section before the Labyrinth is even unlocked")
+
+        db.update_character(user_id, chat_id, current_location="the_colosseum", defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        sink2 = []
+        await bot._do_check_quests(FakeUpdate(user_id, "", sink2, chat_id=chat_id))
+        combined = "\n".join(sink2)
+        self.assertIn("🌀 Labyrinth", combined)  # _safe_send converts **bold** to real entities, stripping the literal asterisks
+        self.assertIn("🎯 Objective: reach floor 5", combined)
+        self.assertNotIn("__labyrinth__", combined, "the sentinel id must never leak into the ordinary quest board section")
+
     def test_render_labyrinth_map_produces_a_real_png_with_the_current_room_marked(self):
-        """Phase L2h: a lean, purpose-built renderer -- no network calls, no fog-of-war (a floor is fully revealed the moment it's generated)."""
+        """Phase L2h: a lean, purpose-built renderer -- no network calls."""
         import map_render
         floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(5))
         rooms = floor_data["rooms"]
