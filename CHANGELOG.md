@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.492] — feature: `scripts/preview_labyrinth_floor.py` review tool + a real bug it found on first use (Phase L4, item 3)
+
+The concrete "editor to train it" tool Coffee's own framing called
+for: `python3 scripts/preview_labyrinth_floor.py --seed N --floor F
+[--segment]` generates a real floor (or full 5-floor segment) via the
+exact same functions the live game calls, renders its real map to a
+local PNG (fog-of-war off, for reviewing generation quality), and
+prints a readable text dump of the full room graph — every room's real
+connections/locked_connections/warps/collapsing_connections, and every
+hazard/monster/miniboss/chest/switch/pillar/hint it holds.
+
+**Its first real use immediately found a real bug**: seed 283, floor
+12 showed a room simultaneously gated by BOTH the pressure-plate
+mechanic AND targeted by the single-switch collapse puzzle's own
+`collapsing_connections` entry — since the pressure plate had already
+removed that branch from the hub's plain `connections` list, the
+collapse trigger was permanently inert (the room's real reachability
+was already fully decided by the plate, not the trigger). The exact
+same latent gap existed in the newer carry-and-collapse puzzle too.
+Both `sealable_candidates` (collapse) and `carry_sealable` (carry
+puzzle) now require the branch root to still be a genuine, ungated
+hub connection before it can be picked as a seal target.
+
+A quick real structural comparison against the reference maps this
+whole phase is built from: a single floor generates ~6-12 rooms; a
+full 5-floor segment (the real comparable unit, per Coffee's own "5
+levels of honeycombing" framing) lands comfortably in Level 0/6/7's
+own 24-40+ room range — no constant retuning needed yet.
+
+1 new regression test for the caught bug. Full 99-test LabyrinthTests
+suite passes (1 known, pre-existing batch-order flake confirmed
+harmless in isolation).
+
 ## [1.27.491] — feature: Labyrinth narration/image style polish + element-colored locked doors (Phase L4, item 2)
 
 Per Coffee's own framing across the whole Zelda-dungeon research

@@ -959,9 +959,18 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # main, non-gated branch (never anything hosting a switch another
     # gate depends on), so this can never break the real solvable-by-
     # construction guarantee the rest of this generator relies on.
+    # Real bug found via scripts/preview_labyrinth_floor.py's own first
+    # real use (2026-09-03): a branch already gated by the pressure-
+    # plate mechanic above (removed from hub["connections"] entirely)
+    # could still get PICKED as a seal target here, producing a real,
+    # generated `collapsing_connections` entry that's permanently
+    # inert -- the room's actual reachability is already fully decided
+    # by its own `locked_connections` gate, so this trigger would never
+    # visibly do anything. `c[0] in hub["connections"]` requires the
+    # branch root to still be a genuine, ungated, plain hub connection.
     sealable_candidates = [
         c for c in branch_chains
-        if c is not main_chain and len(c) >= 1
+        if c is not main_chain and len(c) >= 1 and c[0] in hub["connections"]
         and not any(lk.get("kind") == "switch" for lk in rooms[c[0]].get("lockables", []))
     ]
     if len(sealable_candidates) >= 1 and other_chains and rng.random() < _scaled_chance(_COLLAPSE_PUZZLE_CHANCE, floor, 0.001, 0.4):
@@ -1022,9 +1031,12 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # gate's own `requires` list is checked globally by id, same proven
     # mechanism L2e/the collapse puzzle already use).
     already_has_collapse = any(r.get("collapsing_connections") for r in rooms.values())
+    # Same real fix as sealable_candidates above -- a branch already
+    # gated by the pressure-plate mechanic (removed from hub[
+    # "connections"]) must never be picked as a seal target here either.
     carry_sealable = [
         c for c in branch_chains
-        if c is not main_chain and len(c) >= 1
+        if c is not main_chain and len(c) >= 1 and c[0] in hub["connections"]
         and not any(lk.get("kind") == "switch" for lk in rooms[c[0]].get("lockables", []))
     ]
     if not already_has_collapse and len(carry_sealable) >= 1 and rng.random() < _scaled_chance(_CARRY_PUZZLE_CHANCE, floor, 0.001, 0.35):

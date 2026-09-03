@@ -34556,6 +34556,32 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         exits_after = bot._labyrinth_exits(hub, run["rooms"], chat_id)
         self.assertNotIn("test_seal_leaf", [d["id"] for _, _, d in exits_after], "expected the sealed leaf BLOCKED once both pillars are struck")
 
+    def test_collapse_and_carry_puzzles_never_seal_a_branch_already_gated_by_something_else(self):
+        """
+        Real bug found via scripts/preview_labyrinth_floor.py's own
+        first real use (2026-09-03, seed 283 floor 12): the single-
+        switch collapse puzzle and the carry-puzzle could both pick a
+        branch already gated by the pressure-plate mechanic (removed
+        from hub["connections"] entirely) as their own seal target --
+        producing a real, generated `collapsing_connections` entry that
+        was permanently inert, since the room's actual reachability was
+        already fully decided by its own `locked_connections` gate.
+        Statistical: whenever a `collapsing_connections` entry exists,
+        its own parent room must list the sealed room as a genuine,
+        currently-plain connection (not also gated by some OTHER
+        lockable).
+        """
+        checked = False
+        for seed in range(200):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            for room in rooms.values():
+                for seal_leaf in room.get("collapsing_connections", {}):
+                    checked = True
+                    self.assertIn(seal_leaf, room.get("connections", []), f"seed {seed}: {seal_leaf} is sealed by a trigger but isn't even a plain connection of its own parent")
+                    self.assertNotIn(seal_leaf, room.get("locked_connections", {}), f"seed {seed}: {seal_leaf} is both a collapse target AND separately gated -- the collapse trigger would be permanently inert")
+        self.assertTrue(checked, "expected at least one real collapse/carry puzzle across 200 real seeds")
+
     def test_generate_floor_warps_and_collapse_puzzle_never_break_reachability_across_seeds(self):
         """
         Real Zelda-dungeon research request (2026-09-03, Coffee: "do all
