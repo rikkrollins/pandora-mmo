@@ -34681,6 +34681,32 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(sink, [], sink)
 
+    async def test_ambient_ai_find_merchant_misfire_inside_the_labyrinth_stays_safe(self):
+        """
+        Real self-improvement monitoring finding (2026-09-03), same
+        live topic-activity pattern as "chat" and "summon_remnant"
+        above, caught proactively this time: "find_merchant" is a third
+        real action an AI companion's own vague wandering line ("I seek
+        my way home.") gets classified as while genuinely inside the
+        Labyrinth. Unlike summon_remnant's ambiguous-target question,
+        _do_find_merchant always answers something real and sensible
+        (never a confusing question) -- it just needed to be let
+        through the gate instead of hitting the generic refusal.
+        """
+        user_id, chat_id = 962040, -962040
+        make_basic_character(user_id, "LabyrinthAmbientMerchantTester", chat_id=chat_id, current_location="the_colosseum", is_ai=True)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "I seek my way home.", sink, chat_id=chat_id), DummyContext(),
+            {"action": "find_merchant", "raw_text": "I seek my way home."},
+            "I seek my way home.",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+        self.assertTrue(any("merchant" in s.lower() for s in sink), sink)
+
     async def test_real_human_can_summon_a_bound_remnant_during_a_real_labyrinth_fight(self):
         """
         Real feature gap closed as a side effect of the fix above: since

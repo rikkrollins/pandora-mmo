@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.485] — fix: third recurrence of the AI-ambient-chatter Labyrinth rejection ("find_merchant")
+
+Found proactively by the hourly self-improvement monitoring pass, same
+root pattern as v1.27.482 (`chat`) and v1.27.483 (`summon_remnant`):
+an AI companion's own vague autonomous wandering line ("I seek my way
+home.") can also get classified as `find_merchant` by the semantic
+intent parser while genuinely inside the Labyrinth — never on the
+allowlist, so it hit the same generic "That doesn't work this deep in
+the Labyrinth" refusal.
+
+Confirmed CAMPAIGN-safe the same way as the other two:
+`_do_find_merchant`'s own `_nearest_shop_location` → `_location_
+neighbors` already degrades to an empty neighbor list for an
+unrecognized location id (the sentinel), so it just answers "no known
+merchant reachable from here" — never crashes, never invents a
+location. Unlike `summon_remnant`'s ambiguous-target question, this
+one always has a real, sensible answer, so no extra silencing was
+needed — it only had to be let through the gate.
+
+1 new test (fails without the fix, passes with it); full 80-test
+LabyrinthTests suite passes in isolation (2 unrelated pre-existing
+batch-order flakes confirmed harmless).
+
 ## [1.27.484] — feature: real Zelda-style branching dungeon topology + map redraw for the Labyrinth
 
 Real live request (Coffee, dev-bridge: 3 real Link's Awakening dungeon

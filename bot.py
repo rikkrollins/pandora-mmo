@@ -32616,11 +32616,22 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # anywhere in its body -- so this is also a real, legitimate
     # feature gap closed as a side effect: a human can now genuinely
     # summon their own bound Remnant during a real Labyrinth ambush too.
+    # Real self-improvement monitoring finding (2026-09-03, same live
+    # topic-activity pattern as "chat" and "summon_remnant" just above,
+    # caught proactively this time instead of waiting for a third live
+    # report): "find_merchant" is a third real action an AI companion's
+    # own vague wandering line ("I seek my way home.") gets classified
+    # as while genuinely inside the Labyrinth. Confirmed CAMPAIGN-safe
+    # the same way: _do_find_merchant's own _nearest_shop_location ->
+    # _location_neighbors already degrades to an empty neighbor list for
+    # an unrecognized location id (the sentinel), so its BFS just finds
+    # nothing and answers "no known merchant reachable from here" --
+    # never crashes, never invents a location.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
-        "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant",
+        "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant", "find_merchant",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
