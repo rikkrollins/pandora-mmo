@@ -3419,6 +3419,61 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await _safe_answer(update.callback_query, "⏳ Already working on that one — no need to tap it again.", show_alert=False)
 
 
+def _resolve_target_token(session: sessions.Session | None, token: str | None, chat_id: int | None = None) -> str | None:
+    """
+    Real live bug (2026-09-03, Coffee, dev-bridge screenshot: "It's not
+    letting me select these buttons" -- confirmed live via
+    bot_live_tmp.log: EVERY tap of "The Root That Remembers" summon
+    target picker got a real `editMessageReplyMarkup` 400 `Button_data_
+    invalid`, over and over). Root cause: every "xxxtarget" button
+    picker (cast/summon/use/scroll/throw/steal) built its callback_data
+    as `f"bm|xxxtarget|{value}|{p['name']}"` -- embedding the FULL
+    target name directly. Telegram caps callback_data at 64 BYTES; a
+    long remnant/spell/item id (`the_root_that_remembers`, 24 chars)
+    combined with a long real monster name (`The High Approach Sentinel
+    2`, 29 chars) blows straight through that budget, and Telegram
+    rejects the ENTIRE button, so the target-picker menu could never
+    even be shown -- reading exactly like the buttons "not working."
+
+    Fix: callback_data now carries the target's real `telegram_user_id`
+    (always short, numeric, never length-limited) instead of its name.
+    This resolves that token back to the real, full participant name by
+    looking it up against the live session -- called once, right where
+    `target_name` used to be taken directly from the raw callback data,
+    so every downstream consumer (which only ever uses `target_name` as
+    plain narration text, never re-encodes it) is unaffected. Handles
+    the one special case (Command spell's "{name}, {word}" combined
+    token) by resolving only the leading id portion and reattaching the
+    rest verbatim. Falls back to returning `token` itself unresolved if
+    it's not a real participant id (e.g. an in-flight stale button from
+    before this fix, or session is None) -- never raises, never drops
+    a tap outright.
+
+    A single-target revive item's "usetarget" picker (Tent) names a
+    DEAD party member -- who, by definition, isn't a living combat
+    `session.participant` at all (removed via session.remove_dead_
+    player, or never added) -- so a real, genuine revive target would
+    otherwise never resolve here and silently fall through to the
+    "unresolved" branch. `chat_id`, when given, adds a real `db.
+    get_character` fallback for exactly this case.
+    """
+    if token is None or session is None:
+        return token
+    id_part, sep, rest = token.partition(", ")
+    try:
+        target_id = int(id_part)
+    except ValueError:
+        return token
+    for p in session.participants:
+        if p["telegram_user_id"] == target_id:
+            return f"{p['name']}{sep}{rest}" if sep else p["name"]
+    if chat_id is not None:
+        dead_member = db.get_character(target_id, chat_id)
+        if dead_member is not None:
+            return f"{dead_member['name']}{sep}{rest}" if sep else dead_member["name"]
+    return token
+
+
 async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handles taps on the RPG-style battle menu (_battle_menu_keyboard) --
@@ -3479,7 +3534,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     value = parts[2] if len(parts) > 2 else None
-    target_name = parts[3] if len(parts) > 3 else None
+    target_name = _resolve_target_token(session, parts[3] if len(parts) > 3 else None, chat_id=chat_id)
     # Real gap found live (2026-08-13, dev-bridge report: "I casted
     # eldritch blast, but it's saying I did an attack" -- investigated
     # thoroughly but NOT reproducible, since a button tap's callback_
@@ -3578,7 +3633,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                 buttons = [
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
-                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                        callback_data=f"bm|casttarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in opposing
                 ]
@@ -3593,7 +3648,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
                         + (" — you" if p["telegram_user_id"] == user_id else ""),
-                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                        callback_data=f"bm|casttarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in allies
                 ]
@@ -3609,7 +3664,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                 )
                 return
             buttons = [
-                [InlineKeyboardButton(p["name"], callback_data=f"bm|casttarget|{value}|{p['name']}")]
+                [InlineKeyboardButton(p["name"], callback_data=f"bm|casttarget|{value}|{p['telegram_user_id']}")]
                 for p in dead
             ]
             buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
@@ -3635,7 +3690,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
                         + (" — you" if p["telegram_user_id"] == user_id else ""),
-                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                        callback_data=f"bm|casttarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in allies
                 ]
@@ -3662,7 +3717,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                 await _do_cast_spell(update, f"cast {spell_name} on {down[0]['name']}")
                 return
             buttons = [
-                [InlineKeyboardButton(f"{p['name']} (0 HP)", callback_data=f"bm|casttarget|{value}|{p['name']}")]
+                [InlineKeyboardButton(f"{p['name']} (0 HP)", callback_data=f"bm|casttarget|{value}|{p['telegram_user_id']}")]
                 for p in down
             ]
             buttons.append([InlineKeyboardButton("« Back", callback_data="bm|skills")])
@@ -3685,7 +3740,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
             buttons = [
                 [InlineKeyboardButton(
                     f"{p['name']}: {word.capitalize()}",
-                    callback_data=f"bm|casttarget|{value}|{p['name']}, {word}",
+                    callback_data=f"bm|casttarget|{value}|{p['telegram_user_id']}, {word}",
                 )]
                 for p in opposing for word in ("flee", "drop")
             ]
@@ -3701,7 +3756,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                 buttons = [
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
-                        callback_data=f"bm|casttarget|{value}|{p['name']}",
+                        callback_data=f"bm|casttarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in opposing
                 ]
@@ -3737,7 +3792,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
             buttons = [
                 [InlineKeyboardButton(
                     f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
-                    callback_data=f"bm|summontarget|{value}|{p['name']}",
+                    callback_data=f"bm|summontarget|{value}|{p['telegram_user_id']}",
                 )]
                 for p in opposing
             ]
@@ -3801,7 +3856,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
                         + (" — you" if p["telegram_user_id"] == user_id else ""),
-                        callback_data=f"bm|usetarget|{value}|{p['name']}",
+                        callback_data=f"bm|usetarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in allies
                 ]
@@ -3825,7 +3880,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                 )
                 return
             buttons = [
-                [InlineKeyboardButton(p["name"], callback_data=f"bm|usetarget|{value}|{p['name']}")]
+                [InlineKeyboardButton(p["name"], callback_data=f"bm|usetarget|{value}|{p['telegram_user_id']}")]
                 for p in dead
             ]
             buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
@@ -3859,7 +3914,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                 buttons = [
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
-                        callback_data=f"bm|scrolltarget|{value}|{p['name']}",
+                        callback_data=f"bm|scrolltarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in opposing
                 ]
@@ -3874,7 +3929,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
                         + (" — you" if p["telegram_user_id"] == user_id else ""),
-                        callback_data=f"bm|scrolltarget|{value}|{p['name']}",
+                        callback_data=f"bm|scrolltarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in allies
                 ]
@@ -3894,7 +3949,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                 )
                 return
             buttons = [
-                [InlineKeyboardButton(p["name"], callback_data=f"bm|scrolltarget|{value}|{p['name']}")]
+                [InlineKeyboardButton(p["name"], callback_data=f"bm|scrolltarget|{value}|{p['telegram_user_id']}")]
                 for p in dead
             ]
             buttons.append([InlineKeyboardButton("« Back", callback_data="bm|items")])
@@ -3920,7 +3975,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
                     [InlineKeyboardButton(
                         f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)"
                         + (" — you" if p["telegram_user_id"] == user_id else ""),
-                        callback_data=f"bm|scrolltarget|{value}|{p['name']}",
+                        callback_data=f"bm|scrolltarget|{value}|{p['telegram_user_id']}",
                     )]
                     for p in allies
                 ]
@@ -3993,7 +4048,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
         buttons = [
             [InlineKeyboardButton(
                 f"{p['name']} ({p['hp_current']}/{p.get('hp_max', p['hp_current'])} HP)",
-                callback_data=f"bm|throwtarget|{value}|{p['name']}",
+                callback_data=f"bm|throwtarget|{value}|{p['telegram_user_id']}",
             )]
             for p in opposing
         ]

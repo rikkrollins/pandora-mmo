@@ -119,6 +119,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # loop for its whole lifetime.
         bot._CHAT_NARRATION_QUEUES.clear()
         bot._CHAT_NARRATION_WORKERS.clear()
+        # Same real cross-test hazard, the OTHER module-level queue pair
+        # (2026-09-03, found while adding the callback_data byte-limit
+        # regression tests -- two adjacent tests reusing user_id 950929
+        # hung forever: the first test's _USER_WORKERS entry was a real
+        # asyncio.Task bound to that test's own now-closed event loop,
+        # so the second test's _run_in_user_order call enqueued onto the
+        # same queue but nothing was ever alive to dequeue it). Same
+        # fix, same reasoning as the narration queues just above.
+        bot._USER_QUEUES.clear()
+        bot._USER_WORKERS.clear()
+        bot._USER_BUSY.clear()
+        bot._USER_PENDING_SIGNATURES.clear()
 
     # -- NPC-name stopword bug (v1.7.3) --------------------------------
     def test_npc_name_filler_words_dont_hijack_unrelated_messages(self):
@@ -11008,7 +11020,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         target_picker = await tap("bm|throwweapon|silvered_dagger")
         self.assertIn("MenuGoblinA", target_picker)
         self.assertIn("MenuGoblinB", target_picker)
-        self.assertIn("bm|throwtarget|silvered_dagger|MenuGoblinB", target_picker)
+        self.assertIn(f"bm|throwtarget|silvered_dagger|{-2_500_064}", target_picker)
 
     async def test_battle_menu_steal_button_offers_a_target_picker_and_steals(self):
         """
@@ -17385,7 +17397,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
 
     async def test_battle_menu_summon_flow_lists_remnant_then_target_then_casts(self):
-        """Full tap-through: bm|summon -> bm|summonpick|<id> -> bm|summontarget|<id>|<name>, same shape as the existing cast/casttarget flow."""
+        """
+        Full tap-through: bm|summon -> bm|summonpick|<id> -> bm|summontarget|<id>|<target telegram_user_id>,
+        same shape as the existing cast/casttarget flow. The target
+        picker's callback_data carries the target's real telegram_user_id
+        (2026-09-03 fix, see _resolve_target_token's own docstring for
+        the real live "Button_data_invalid" bug this replaces a raw
+        embedded name with), resolved back to the real name before
+        _do_summon_remnant ever sees it.
+        """
         import sessions
         from unittest.mock import patch, AsyncMock
         sessions.end_session(-999)
@@ -17413,13 +17433,102 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         target_picker = await tap("bm|summonpick|the_wrathflame_unbound")
         self.assertIn("SummonGoblinA", target_picker)
-        self.assertIn("bm|summontarget|the_wrathflame_unbound|SummonGoblinB", target_picker)
+        self.assertIn(f"bm|summontarget|the_wrathflame_unbound|{-5100052}", target_picker)
 
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
-            result = await tap("bm|summontarget|the_wrathflame_unbound|SummonGoblinB")
+            result = await tap(f"bm|summontarget|the_wrathflame_unbound|{-5100052}")
         self.assertIn("The Wrathflame Unbound", result)
         self.assertIn("SummonGoblinB", result)
+        sessions.end_session(-999)
+
+    def test_resolve_target_token_covers_real_cases(self):
+        """
+        Direct unit coverage of _resolve_target_token: resolves a real
+        participant's numeric telegram_user_id token back to their name;
+        resolves the Command-word combined "id, word" token, reattaching
+        the word verbatim; falls back to a real db.get_character lookup
+        for a target that's a real party member but NOT a live combat
+        participant (a dead ally awaiting revival); and returns the raw
+        token unresolved when it isn't a real id at all (an old, in-
+        flight stale button predating this fix) or session is None.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900505
+        make_basic_character(user_id, "TokenResolverTester", current_location="crossroads_tavern")
+        enemy = {"telegram_user_id": -5300001, "name": "TokenGoblin", "hp_current": 20, "hp_max": 20, "is_ai": 1, "dexterity": 10}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -5300001: "enemy"})
+
+        self.assertEqual(bot._resolve_target_token(session, str(-5300001)), "TokenGoblin")
+        self.assertEqual(bot._resolve_target_token(session, f"{-5300001}, flee"), "TokenGoblin, flee")
+        # Not a real participant id, but a real party member (dead, so
+        # not in the live session) -- must fall back to a DB lookup.
+        dead_id = 900506
+        make_basic_character(dead_id, "DeadAllyForRevive", current_location="crossroads_tavern")
+        db.update_character(dead_id, -999, is_dead=1, hp_current=0)
+        self.assertEqual(bot._resolve_target_token(session, str(dead_id), chat_id=-999), "DeadAllyForRevive")
+        # Genuinely unresolvable -- returned verbatim, never raises.
+        self.assertEqual(bot._resolve_target_token(session, "NotARealId"), "NotARealId")
+        self.assertEqual(bot._resolve_target_token(None, str(-5300001)), str(-5300001))
+        self.assertIsNone(bot._resolve_target_token(session, None))
+        sessions.end_session(-999)
+
+    async def test_summontarget_callback_data_stays_under_telegrams_64_byte_limit(self):
+        """
+        Real live bug (2026-09-03, Coffee, dev-bridge screenshot: "It's
+        not letting me select these buttons" -- confirmed live via
+        bot_live_tmp.log: every tap of "The Root That Remembers" summon
+        target picker got a real `editMessageReplyMarkup` 400
+        `Button_data_invalid`, because "bm|summontarget|the_root_that_
+        remembers|The High Approach Sentinel 2" is 70 bytes, over
+        Telegram's real 64-byte callback_data cap). Reproduces the EXACT
+        live shape (that same real Remnant id + a long real monster
+        name) and confirms the generated button's callback_data now
+        stays comfortably under the limit, and the flow still correctly
+        resolves and summons on the real named target.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 950652
+        make_basic_character(user_id, "LongNameSummonTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, bound_remnants=["the_root_that_remembers"])
+        enemy_a = {"telegram_user_id": -5100061, "name": "Battlement Watchman 1", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
+        enemy_b = {"telegram_user_id": -5100062, "name": "The High Approach Sentinel 2", "hp_current": 20, "hp_max": 20,
+                   "is_ai": 1, "strength": 10, "dexterity": 10, "armor_class": 10}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy_a, enemy_b],
+                                          {user_id: "party", -5100061: "enemy", -5100062: "enemy"})
+        session.turn_order = [user_id, -5100061, -5100062]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|summonpick|the_root_that_remembers", sink), DummyContext())
+        # Extract every real callback_data string this tap actually produced.
+        markup_lines = [s for s in sink if s.startswith("<edit_markup:")]
+        self.assertTrue(markup_lines, sink)
+        for line in markup_lines:
+            for match in re.findall(r"callback_data='([^']*)'", line):
+                self.assertLessEqual(
+                    len(match.encode("utf-8")), 64,
+                    f"{match!r} is {len(match.encode('utf-8'))} bytes -- exceeds Telegram's real callback_data limit",
+                )
+        self.assertIn(f"bm|summontarget|the_root_that_remembers|{-5100062}", "\n".join(markup_lines))
+
+        with patch("bot.narrate_remnant_summon", return_value="It answers your call."), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            result_sink = []
+            await bot.battle_menu_callback(
+                FakeCallbackUpdate(user_id, f"bm|summontarget|the_root_that_remembers|{-5100062}", result_sink), DummyContext(),
+            )
+        result = "\n".join(result_sink)
+        self.assertIn("The Root That Remembers", result)
+        self.assertIn("The High Approach Sentinel 2", result)
         sessions.end_session(-999)
 
     async def test_do_check_remnants_shows_real_bound_remnant(self):
@@ -17957,9 +18066,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         picker = await tap("bm|cast|hex")
         self.assertIn("HexGoblinA", picker)
         self.assertIn("HexGoblinB", picker)
-        self.assertIn("bm|casttarget|hex|HexGoblinB", picker)
+        self.assertIn(f"bm|casttarget|hex|{-5200002}", picker)
 
-        await tap("bm|casttarget|hex|HexGoblinB")
+        await tap(f"bm|casttarget|hex|{-5200002}")
         caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
         self.assertEqual(caster_p.get("marked_target_id"), -5200002)  # the chosen goblin, not the default first one
         sessions.end_session(-999)
@@ -17999,9 +18108,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         picker = await tap("bm|use|greater_spell_tonic")
         self.assertIn("TonicAlly", picker)
-        self.assertIn("bm|usetarget|greater_spell_tonic|TonicAlly", picker)
+        self.assertIn(f"bm|usetarget|greater_spell_tonic|{ally_id}", picker)
 
-        await tap("bm|usetarget|greater_spell_tonic|TonicAlly")
+        await tap(f"bm|usetarget|greater_spell_tonic|{ally_id}")
         self.assertEqual(db.get_character(ally_id, -999)["spell_slots_current"], 4)  # the chosen ally, not self
         self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 4)  # unchanged
         sessions.end_session(-999)
@@ -18033,9 +18142,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         picker = await tap("bm|use|tent")
         self.assertIn("FallenAlly", picker)
-        self.assertIn("bm|usetarget|tent|FallenAlly", picker)
+        self.assertIn(f"bm|usetarget|tent|{dead_id}", picker)
 
-        await tap("bm|usetarget|tent|FallenAlly")
+        await tap(f"bm|usetarget|tent|{dead_id}")
         revived = db.get_character(dead_id, -999)
         self.assertFalse(revived["is_dead"])
         sessions.end_session(-999)
@@ -18073,7 +18182,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ShieldAlly", picker)
         self.assertIn("— you", picker)  # the caster's own entry, per the heal-picker pattern this reuses
 
-        await tap("bm|casttarget|shield|ShieldAlly")
+        await tap(f"bm|casttarget|shield|{ally_id}")
         ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
         caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
         self.assertIn("shield_active", ally_p.get("conditions", []))
@@ -18310,9 +18419,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         picker = await tap("bm|scroll|scroll_shield")
         self.assertIn("ScrollShieldAlly", picker)
-        self.assertIn("bm|scrolltarget|scroll_shield|ScrollShieldAlly", picker)
+        self.assertIn(f"bm|scrolltarget|scroll_shield|{ally_id}", picker)
 
-        await tap("bm|scrolltarget|scroll_shield|ScrollShieldAlly")
+        await tap(f"bm|scrolltarget|scroll_shield|{ally_id}")
         ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
         caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
         self.assertIn("shield_active", ally_p.get("conditions", []))
@@ -18537,9 +18646,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         picker = await tap("bm|cast|command")
         self.assertIn("CommandGoblin: Drop", picker)
-        self.assertIn("bm|casttarget|command|CommandGoblin, drop", picker)
+        self.assertIn(f"bm|casttarget|command|{-5200005}, drop", picker)
 
-        reply = await tap("bm|casttarget|command|CommandGoblin, drop")
+        reply = await tap(f"bm|casttarget|command|{-5200005}, drop")
         self.assertNotIn("needs a real command word", reply)
         enemy_p = next(p for p in session.participants if p["telegram_user_id"] == -5200005)
         self.assertIn("disarmed", enemy_p.get("conditions", []))
@@ -18596,7 +18705,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         sink2 = []
         await bot.battle_menu_callback(
-            FakeCallbackUpdate(leader_id, "bm|scrolltarget|scroll_revivify|ScrollMenuFallen", sink2), DummyContext(),
+            FakeCallbackUpdate(leader_id, f"bm|scrolltarget|scroll_revivify|{dead_companion['telegram_user_id']}", sink2), DummyContext(),
         )
         revived = db.get_character_by_id(dead_companion["character_id"])
         self.assertFalse(revived.get("is_dead"))

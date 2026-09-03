@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.481] — fix: battle-menu target-picker buttons could silently exceed Telegram's callback_data limit
+
+Real live report (Coffee, dev-bridge screenshot: "It's not letting me
+select these buttons"). Confirmed live via `bot_live_tmp.log`: every
+single tap of "The Root That Remembers" summon target picker got a
+real `editMessageReplyMarkup` 400 `Button_data_invalid`, repeated 10+
+times as the player understandably kept re-tapping a button that never
+visibly did anything.
+
+Root cause: every "xxxtarget" button picker (cast/summon/use/scroll/
+throw) built its `callback_data` as `f"bm|xxxtarget|{value}|{p['name']}"`
+— embedding the target's full name directly. Telegram caps
+`callback_data` at 64 bytes; a long remnant/spell/item id
+(`the_root_that_remembers`, 24 chars) combined with a long real
+monster name (`The High Approach Sentinel 2`, 29 chars) blows straight
+through that budget (70 bytes here), and Telegram rejects the entire
+button — the target-picker menu could never even be shown.
+
+Fixed by carrying the target's real `telegram_user_id` (always short,
+numeric, never length-limited) in `callback_data` instead of the name,
+resolved back to the real name in one shared place
+(`_resolve_target_token`) right where it's consumed — every downstream
+handler is unaffected since it only ever used the resolved name as
+plain narration text. Also covers a single-target revive picker's
+special case (the named target is a dead party member, not a live
+combat participant) via a real `db.get_character` fallback, and the
+Command spell's combined "name, word" token.
+
+Also fixed, found while adding regression tests for this: a real,
+pre-existing test-isolation gap where `_USER_QUEUES`/`_USER_WORKERS`
+(module-level, persisting across `unittest.IsolatedAsyncioTestCase`'s
+per-test event loops) could hang a later test forever if it reused a
+`user_id` from an earlier one — same class of bug already fixed once
+for a different queue pair, now extended to this one too. Never a
+production concern (the real bot has exactly one persistent event
+loop), but real test-suite flakiness this surfaced directly.
+
+12 existing tests updated for the new callback_data shape, 2 new tests
+added (a direct `_resolve_target_token` unit test and an end-to-end
+reproduction of the exact live 68-byte overflow); confirmed the new
+test fails without the fix and passes with it. Full 70-test
+LabyrinthTests suite unaffected.
+
 ## [1.27.480] — fix: Labyrinth traps hit benched/inactive/dormant-alt party members; honest "nothing breaks here" instead of vague narration
 
 Two real live reports, back to back.
