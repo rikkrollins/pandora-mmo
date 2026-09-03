@@ -35641,6 +35641,56 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
         self.assertTrue(any("merchant" in s.lower() for s in sink), sink)
 
+    async def test_autonomous_ai_companion_gets_real_grounded_facts_inside_the_labyrinth(self):
+        """
+        Real root cause found (2026-09-03, while designing an AI-driven
+        Labyrinth playtest loop): _build_ai_player_situation_facts --
+        the ONLY thing that ever fed choose_next_action -- always did
+        cl.get_location(CAMPAIGN, location_id), which returns None for
+        the Labyrinth's sentinel location and silently fell back to
+        "You aren't sure where you are." Every autonomous AI companion
+        that has ever entered the Labyrinth has been choosing its next
+        action completely blind ever since Part D shipped -- almost
+        certainly the actual root cause behind the recurring "chat"/
+        "summon_remnant"/"find_merchant" ambient-misclassification bugs
+        fixed earlier this session (each one only ever allowlisted the
+        SYMPTOM). This confirms the real fix: a Labyrinth-aware
+        situation-facts builder, reusing the same real _labyrinth_room_
+        text a human player already sees.
+        """
+        from unittest.mock import patch
+        companion = db.create_ai_companion(
+            -962038, "LabyrinthAiPlaytester", "Elf", "Ranger",
+            ability_scores={"strength": 12, "dexterity": 17, "constitution": 13,
+                             "intelligence": 11, "wisdom": 15, "charisma": 10},
+            hp_max=20, armor_class=14, gold=0, inventory={},
+        )
+        ai_user_id = companion["telegram_user_id"]
+        db.update_character(ai_user_id, -962038, current_location="the_colosseum", defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(ai_user_id, "", [], chat_id=-962038))
+        actor = db.get_character(ai_user_id, -962038)
+        actor["telegram_user_id"] = ai_user_id
+        actor["chat_id"] = -962038
+        run = db.get_labyrinth_run(-962038, f"solo:{ai_user_id}")
+        hub = run["rooms"][run["current_room_id"]]
+
+        class _FakeBot:
+            async def send_message(self, **kwargs):
+                return None
+
+        captured = {}
+
+        def fake_choose(character, personality, situation_facts, last_action=None):
+            captured["situation_facts"] = situation_facts
+            return "I look around."
+
+        with patch("bot.choose_next_action", side_effect=fake_choose):
+            await bot._ai_party_act_one_turn(_FakeBot(), actor)
+
+        self.assertNotEqual(captured["situation_facts"], "You aren't sure where you are.")
+        self.assertIn(hub["name"], captured["situation_facts"])
+        self.assertIn("Exits:", captured["situation_facts"])
+
     async def test_real_human_can_summon_a_bound_remnant_during_a_real_labyrinth_fight(self):
         """
         Real feature gap closed as a side effect of the fix above: since

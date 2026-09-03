@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.497] — fix: autonomous AI companions have been navigating the Labyrinth completely blind
+
+Real root cause found while designing an AI-driven Labyrinth playtest
+loop (per Coffee: "have your Test environment play it with AI
+characters... use that info to self improve the generators").
+`_build_ai_player_situation_facts` — the ONLY function that has ever
+fed an autonomous AI companion's `choose_next_action` call — always
+does `cl.get_location(CAMPAIGN, location_id)`, which returns `None`
+for the Labyrinth's synthetic sentinel location and silently falls
+back to `"You aren't sure where you are."` **Every autonomous AI
+companion that has ever entered the Labyrinth has been choosing its
+next action completely blind since Part D shipped** — no room
+description, no exits, no monsters, no mechanics. This is almost
+certainly the actual root cause behind the recurring "chat"/
+"summon_remnant"/"find_merchant" ambient-misclassification bugs fixed
+earlier this session (v1.27.482-485) — the AI wasn't malfunctioning
+each time, it was guessing with zero real information; those fixes
+only ever allowlisted the symptom, one action at a time.
+
+New `_build_labyrinth_ai_situation_facts` reuses `_labyrinth_room_text`
+verbatim — the exact same real, grounded description a human player
+already sees (room name/description, real monsters, every real
+lockable/mechanic present, real exits, the segment goal, and now
+whether the AI is currently carrying a real carry-puzzle object) —
+wired into `_ai_party_act_one_turn` via a real `current_location ==
+LABYRINTH_LOCATION_SENTINEL` check.
+
+1 new test (fails without the fix, reproducing the exact blind-prompt
+behavior; passes with it, confirming the AI now genuinely sees its
+real room). Full 103-test LabyrinthTests suite passes clean.
+
 ## [1.27.496] — fix: pressure plates/carry objects/pillars/hint statue never drew a map icon at all
 
 Real gap found directly asked for ("did you miss anything on the

@@ -36078,6 +36078,51 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     return "\n".join(lines)
 
 
+def _build_labyrinth_ai_situation_facts(character: dict, chat_id: int) -> str:
+    """
+    Real gap found (2026-09-03, while designing an AI-driven Labyrinth
+    playtest loop, per Coffee: "have your Test environment play it with
+    AI characters"): `_build_ai_player_situation_facts` above is the
+    ONLY thing that ever fed an autonomous AI companion's `choose_next_
+    action` call, and it does `cl.get_location(CAMPAIGN, location_id)`
+    unconditionally -- which returns None for the Labyrinth's synthetic
+    sentinel location, silently falling back to "You aren't sure where
+    you are." EVERY autonomous AI companion who has ever entered the
+    Labyrinth has been choosing its next action COMPLETELY BLIND ever
+    since Part D shipped -- no room description, no exits, no
+    monsters, no mechanics. This almost certainly explains why the
+    ambient-AI-misclassification bugs fixed earlier this session
+    (v1.27.482-485: "chat"/"summon_remnant"/"find_merchant" swallowing
+    ambiguous wandering lines like "I seek my location.") kept
+    recurring one action at a time -- the AI wasn't malfunctioning, it
+    was guessing with zero real information, the same root cause each
+    time, only ever patched at the symptom (allowlist one more
+    accidental action) rather than the actual cause.
+
+    Reuses `_labyrinth_room_text` verbatim -- the exact same real,
+    grounded description a human player already sees (name, monsters,
+    every real lockable/mechanic present, real exits, the segment
+    goal) -- rather than re-deriving a second, separately-maintained
+    description of the same room.
+    """
+    run = db.get_labyrinth_run(chat_id, _labyrinth_party_key(character))
+    if run is None:
+        return "You aren't sure where you are."
+    room = run["rooms"].get(run["current_room_id"])
+    if room is None:
+        return "You aren't sure where you are."
+    lines = [_labyrinth_room_text(character, room, run, chat_id)]
+    carrying_id = run.get("carrying")
+    if carrying_id:
+        carried = next(
+            (lk for r in run["rooms"].values() for lk in r.get("lockables", []) if lk["id"] == carrying_id),
+            None,
+        )
+        if carried:
+            lines.append(f"You are currently carrying {carried['name']}.")
+    return "\n".join(lines)
+
+
 async def _maybe_auto_roll_pending_dice(bot) -> None:
     """
     Per Coffee (2026-07-19): "give the user 1 minute to roll - if not
@@ -36328,7 +36373,10 @@ async def _ai_party_act_one_turn(bot, actor: dict) -> None:
     if personality is None:
         npc = _find_campaign_npc_by_name(actor["name"])
         personality = npc.get("personality", "") if npc else ""
-    situation_facts = _build_ai_player_situation_facts(actor, actor["current_location"])
+    if actor["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        situation_facts = _build_labyrinth_ai_situation_facts(actor, chat_id)
+    else:
+        situation_facts = _build_ai_player_situation_facts(actor, actor["current_location"])
     # Task #222, per Coffee: a human party member can tell an AI
     # companion something mid-fight (see _do_message_ai) without it
     # counting as anyone's turn -- that message is stashed here as real
