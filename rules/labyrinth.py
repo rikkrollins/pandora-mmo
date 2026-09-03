@@ -72,6 +72,23 @@ _BRANCH_DEPTH_WEIGHTS = ([0, 1, 2], [0.45, 0.35, 0.2])  # most branches stay sha
 _BRANCH_GATE_CHANCE = 0.35
 _MINIBOSS_CHANCE = 0.3
 
+# Real live follow-up (2026-09-03, Coffee: "do all of them" -- warps,
+# a floor-altering puzzle, and an owl-statue-style hint, after the same
+# 3 Link's Awakening maps). Warps are a real, one-way-declared-but-
+# mutually-added shortcut between two rooms that AREN'T already
+# adjacent in the branch graph -- stored as `room["warps"]` (a
+# separate field from `connections`, since a warp's own map line is
+# drawn differently -- a real line straight across the floor, not a
+# doorway gap between grid-adjacent cells) rather than pretending it's
+# an ordinary lateral connection.
+_WARP_CHANCE = 0.25
+# Real Eagle's Tower-style structural puzzle: solving it doesn't just
+# open one new door, it also SEALS a previously-open one elsewhere on
+# the same floor -- "the floor's structure shifts," same spirit as the
+# reference's pillar-triggered floor collapse, without needing a
+# genuinely separate before/after floor copy.
+_COLLAPSE_PUZZLE_CHANCE = 0.2
+
 # L3: one segment = this many real, interconnected floors. Reuses the
 # exact number Phase L2c's milestone interval already used, per
 # Coffee's own "5 levels of honeycombing" framing -- the OLD milestone
@@ -741,6 +758,75 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             "id": f"f{floor}_mirror_cache", "kind": "chest", "name": "an unguarded, matching cache",
             "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
         }]
+
+    # Real warp shortcut (2026-09-03, per Coffee: "do all of them" --
+    # warps, a real Zelda reference mechanic, after Level 6/Level 7's
+    # own maps both showed one linking two distant rooms directly).
+    # Picked from two DIFFERENT branches' own deepest room (the most
+    # "interesting" real content to shortcut between) -- never the hub
+    # or connector, so a warp is always a genuine bonus link, never a
+    # way to skip the real critical path outright. Stored separately
+    # from `connections` (a warp's own map line is drawn differently --
+    # straight across the floor, not a doorway between grid-adjacent
+    # cells) rather than pretending it's an ordinary lateral exit.
+    warp_candidates = [c[-1] for c in branch_chains if c is not main_chain and len(c) >= 1]
+    if len(warp_candidates) >= 2 and rng.random() < _scaled_chance(_WARP_CHANCE, floor, 0.002, 0.5):
+        warp_a, warp_b = rng.sample(warp_candidates, 2)
+        rooms[warp_a].setdefault("warps", []).append(warp_b)
+        rooms[warp_b].setdefault("warps", []).append(warp_a)
+        rooms[warp_a]["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else on this floor."
+        rooms[warp_b]["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else on this floor."
+
+    # Real Eagle's Tower-style structural puzzle (2026-09-03): solving
+    # it doesn't just open one new door, it ALSO seals a previously-open
+    # dead-end branch elsewhere on the floor -- "the floor's structure
+    # shifts beneath you." Only ever targets a genuine LEAF of a non-
+    # main, non-gated branch (never anything hosting a switch another
+    # gate depends on), so this can never break the real solvable-by-
+    # construction guarantee the rest of this generator relies on.
+    sealable_candidates = [
+        c for c in branch_chains
+        if c is not main_chain and len(c) >= 1
+        and not any(lk.get("kind") == "switch" for lk in rooms[c[0]].get("lockables", []))
+    ]
+    if len(sealable_candidates) >= 1 and other_chains and rng.random() < _scaled_chance(_COLLAPSE_PUZZLE_CHANCE, floor, 0.001, 0.4):
+        seal_chain = rng.choice(sealable_candidates)
+        seal_leaf = seal_chain[-1]
+        seal_parent = hub_id if len(seal_chain) == 1 else seal_chain[-2]
+        # Switches for THIS trigger live in a real, unrelated, already-
+        # reachable branch -- never inside the branch being sealed.
+        switch_source_chains = [c for c in other_chains if c is not seal_chain]
+        if switch_source_chains:
+            switch_room_id = rng.choice(switch_source_chains)[0]
+            element = rng.choice(_SWITCH_ELEMENTS)
+            trigger_switch_id = f"f{floor}_collapse_switch"
+            rooms[switch_room_id].setdefault("lockables", []).append({
+                "id": trigger_switch_id, "kind": "switch", "name": f"a shuddering {element} crystal", "element": element,
+            })
+            trigger_id = f"f{floor}_collapse_trigger"
+            rooms[seal_parent].setdefault("lockables", []).append({
+                "id": trigger_id, "kind": "multi_switch_gate", "name": "a real structural trigger",
+                "requires": [trigger_switch_id],
+            })
+            rooms[seal_parent].setdefault("collapsing_connections", {})[seal_leaf] = trigger_id
+            rooms[seal_parent]["description"] += " Something here feels structurally unstable -- like it's rigged to give way."
+            # The real reward: a genuine new shortcut opens elsewhere on
+            # the floor the instant this same trigger fires, so solving
+            # it is a real trade, not just a loss.
+            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain]
+            if len(shortcut_pair) >= 2:
+                shortcut_a, shortcut_b = rng.sample(shortcut_pair, 2)
+                rooms[shortcut_a].setdefault("locked_connections", {})[shortcut_b] = trigger_id
+                rooms[shortcut_a].setdefault("lockables", []).append({
+                    "id": f"{trigger_id}_echo_{shortcut_a}", "kind": "multi_switch_gate",
+                    "name": "a newly-opened shortcut", "requires": [trigger_switch_id],
+                })
+                # locked_connections looks up its OWN lockable id, not the
+                # shared trigger's -- point it at the per-room echo just
+                # added so _lockable_is_open finds it locally, same real
+                # constraint the branch-gate fix above already worked
+                # around once.
+                rooms[shortcut_a]["locked_connections"][shortcut_b] = f"{trigger_id}_echo_{shortcut_a}"
 
     _assign_grid_positions(rooms, hub_id)
     return {

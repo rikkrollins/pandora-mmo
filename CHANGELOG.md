@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.486] — fix: 2 live flood-control/timeout crashes + harden the drafted warp/collapse Labyrinth puzzles
+
+Found via the hourly self-improvement monitoring pass's `check_error_log.py`
+step, while re-confirming the Zelda-dungeon-topology research before
+continuing that work (Coffee: "check dev and do the research... DO NOT
+LEAVE ANYTHING OUT"):
+
+- `_do_show_labyrinth_map`'s `send_photo` call had no retry at all,
+  unlike `_safe_send`'s real 3-attempt/honor-`RetryAfter` handling for
+  text — a plain `telegram.error.TimedOut` silently dropped the map.
+  New `_safe_send_photo` helper (same retry semantics as `_safe_send`)
+  now wraps it.
+- `_do_summon_remnant` mixed a few `_safe_send` calls with several raw
+  `update.effective_chat.send_message` calls that had none of that
+  retry handling — a real `RetryAfter` surfaced as an unhandled
+  exception. Every send in the function now routes through
+  `_safe_send`, same bug class already fixed in `_do_fast_travel`
+  (v1.27.464) and `_do_use_item`.
+
+Also hardened (never shipped before now) the warp and Eagle's-Tower-
+style collapse-puzzle mechanics drafted alongside v1.27.484/485's
+topology rewrite: a real statistical sweep (150 seeds) confirms neither
+ever breaks floor reachability, a collapse trigger's own switch never
+lives inside the branch it seals and never doubles as an unrelated
+gate's requirement, and end-to-end tests confirm a warp is a real,
+walkable exit and a collapse trigger genuinely blocks one path while
+opening the new shortcut it promises. One real, pre-existing test bug
+also surfaced and fixed in the same pass: `test_cross_floor_switches_
+can_gate_a_reward_on_the_checkpoint_floor` picked "the first
+multi_switch_gate found" on the checkpoint hub, ambiguous whenever
+L2e's own per-floor multi-switch puzzle also independently fires on
+the checkpoint floor — now matches the cross-floor gate by its real id.
+
+6 new tests (all fail without their fix, pass with it); full 85-test
+LabyrinthTests suite passes (1 known, pre-existing batch-order flake
+confirmed harmless in isolation).
+
 ## [1.27.485] — fix: third recurrence of the AI-ambient-chatter Labyrinth rejection ("find_merchant")
 
 Found proactively by the hourly self-improvement monitoring pass, same

@@ -4551,6 +4551,43 @@ async def _safe_send(
                 await asyncio.sleep(2)
 
 
+async def _safe_send_photo(
+    update: Update, photo: bytes, caption: str | None = None, thread_id: int | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> bool:
+    """
+    Real live bug (2026-09-03, error-log monitoring): a plain
+    `telegram.error.TimedOut` on `_do_show_labyrinth_map`'s own raw
+    `send_photo` call silently dropped the map (caught only by that
+    caller's broad `except Exception`, or not at all) -- the exact
+    same "raw send with no retry" failure class `_safe_send` already
+    fixes for text, just never extended to photos. Same retry
+    semantics: up to 3 attempts, honoring a real `RetryAfter`'s own
+    wait, a flat 2s pause on any other transient TelegramError.
+    Returns True on success, False if every attempt failed (caller
+    decides what to tell the player).
+    """
+    resolved_thread_id = thread_id if thread_id is not None else topics.thread_id_for(update.effective_chat.id, "adventure")
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            await update.effective_chat.send_photo(
+                photo=photo, caption=caption, message_thread_id=resolved_thread_id, reply_markup=reply_markup,
+            )
+            return True
+        except TelegramError as e:
+            if attempt == max_attempts - 1:
+                logger.warning(f"[photo] send failed again, giving up: {e!r}")
+            elif isinstance(e, RetryAfter):
+                wait = e.retry_after + 1
+                logger.warning(f"[photo] flood control hit, waiting {wait}s then retrying: {e!r}")
+                await asyncio.sleep(wait)
+            else:
+                logger.warning(f"[photo] send failed, retrying: {e!r}")
+                await asyncio.sleep(2)
+    return False
+
+
 async def _safe_answer(query, text: str | None = None, show_alert: bool = False) -> bool:
     """
     Real live bug (2026-07-19, caught via monitoring): every callback-
@@ -9301,13 +9338,27 @@ def _labyrinth_exits(room: dict, rooms: dict, chat_id: int) -> list[tuple[str, s
         dest_id for dest_id, lockable_id in room.get("locked_connections", {}).items()
         if _lockable_is_open(room, lockable_id, chat_id)
     }
-    dest_ids = list(room.get("connections", [])) + [d for d in already_open_dests if d not in room.get("connections", [])]
+    collapsed_ids = {
+        dest_id for dest_id, trigger_id in room.get("collapsing_connections", {}).items()
+        if _lockable_is_open(room, trigger_id, chat_id)
+    }
+    dest_ids = [cid for cid in room.get("connections", []) if cid not in collapsed_ids] + [
+        d for d in already_open_dests if d not in room.get("connections", [])
+    ]
     exits = []
     for dest_id in dest_ids:
         dest = rooms.get(dest_id)
         if dest is None:
             continue
         exits.append(("🚶", _labyrinth_direction(room, dest).title(), dest))
+    # Real warp shortcut (2026-09-03): never a compass word (the
+    # destination usually isn't grid-adjacent at all) -- its own
+    # distinct icon instead, same "cross-floor gets its own arrow"
+    # precedent descends_to/ascends_to already set.
+    for dest_id in room.get("warps", []):
+        dest = rooms.get(dest_id)
+        if dest is not None:
+            exits.append(("🌀", "Warp", dest))
     if room.get("descends_to") and rooms.get(room["descends_to"]):
         exits.append(("⬇️", "Down", rooms[room["descends_to"]]))
     if room.get("ascends_to") and rooms.get(room["ascends_to"]):
@@ -9882,9 +9933,24 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
     # up/down phrasing FIRST (mirrors the overworld's own "jump down"
     # priority), then folded into the same named-destination list.
     locked_connections = room.get("locked_connections", {})
-    reachable_ids = list(room.get("connections", [])) + [
+    # Real Eagle's Tower-style structural puzzle (2026-09-03): a
+    # `collapsing_connections` entry is the INVERSE of locked_
+    # connections -- it starts OPEN (a plain, ordinary connection) and
+    # becomes BLOCKED once its own trigger (a real multi_switch_gate)
+    # is solved, "the floor's structure shifts beneath you" rather than
+    # a passage opening up.
+    collapsed_ids = {
+        dest_id for dest_id, trigger_id in room.get("collapsing_connections", {}).items()
+        if _lockable_is_open(room, trigger_id, chat_id)
+    }
+    reachable_ids = [cid for cid in room.get("connections", []) if cid not in collapsed_ids] + [
         d for d in locked_connections if d not in room.get("connections", [])
     ]
+    # Real warp shortcut (2026-09-03): a genuine second exit list, not
+    # pretending to be an ordinary lateral connection -- see rules.
+    # labyrinth.generate_floor's own docstring for why it's stored
+    # separately from `connections`.
+    reachable_ids += [w for w in room.get("warps", []) if w not in reachable_ids]
     if room.get("descends_to"):
         reachable_ids.append(room["descends_to"])
     if room.get("ascends_to"):
@@ -24984,11 +25050,12 @@ async def _do_show_labyrinth_map(update: Update, floor: int | None = None) -> No
     ]
     if visited_names:
         caption += "\n\n📍 Rooms explored so far:\n" + "\n".join(f"• {name}" for name in visited_names)
-    await update.effective_chat.send_photo(
-        photo=png_bytes, caption=caption,
-        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+    sent = await _safe_send_photo(
+        update, png_bytes, caption=caption,
         reply_markup=_labyrinth_map_floor_keyboard(visited_floors, target_floor),
     )
+    if not sent:
+        await _safe_send(update, "Couldn't send the map right now — Telegram's acting up. Try again in a moment.")
 
 
 async def map_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -31274,9 +31341,7 @@ def _summons_per_battle(character: dict) -> int | None:
 async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None = None) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!")
         return
     remnant_id = remnants_module.find_remnant_mentioned_in_text(text, candidate_ids=character["bound_remnants"])
     if remnant_id is None:
@@ -31307,40 +31372,26 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
     chat_id = update.effective_chat.id
     async with _held_session(chat_id, update.effective_user.id) as session:
         if session is None:
-            await update.effective_chat.send_message(
-                "There's nothing to summon into right now — this only works in combat.",
-                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-            )
+            await _safe_send(update, "There's nothing to summon into right now — this only works in combat.")
             return
         if session.current_participant_id() != update.effective_user.id:
             await _self_heal_stuck_ai_turn(update, session)
             session = sessions.get_session_by_id(session.session_id)
             if session is None:
-                await update.effective_chat.send_message(
-                    "Combat had stalled and just resolved itself — nothing active right now.",
-                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-                )
+                await _safe_send(update, "Combat had stalled and just resolved itself — nothing active right now.")
                 return
         if session.current_participant_id() != update.effective_user.id:
             current_name = session.current_participant()["name"]
-            await update.effective_chat.send_message(
-                f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-            )
+            await _safe_send(update, f"It's not your turn — it's **{current_name}**'s turn.")
             return
         caster = session.current_participant()
         if caster["hp_current"] <= 0:
-            await update.effective_chat.send_message(
-                "You're unconscious (0 HP) and can't act until healed.",
-                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
-            )
+            await _safe_send(update, "You're unconscious (0 HP) and can't act until healed.")
             return
         opposing = session.living_on_side(session.opposing_side(update.effective_user.id))
         if not opposing:
             if not await _try_end_stale_combat(update, session):
-                await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=topics.thread_id_for(chat_id, "adventure")
-                )
+                await _safe_send(update, "No valid targets remain.")
             return
 
         cap = _summons_per_battle(character)
@@ -31368,16 +31419,16 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
         )
         if mastery:
             if character["spell_slots_current"] < 1:
-                await update.effective_chat.send_message(
+                await _safe_send(
+                    update,
                     f"At Mastery, calling {remnant['name']} still costs a real spell slot — you have none left to spend.",
-                    message_thread_id=topics.thread_id_for(chat_id, "adventure"),
                 )
                 return
         elif used >= cap:
-            await update.effective_chat.send_message(
+            await _safe_send(
+                update,
                 f"You've already called a Remnant {cap}x this battle — that's every use your current "
                 f"Summoning mastery allows. Real Mastery (100%) lifts the cap, at the cost of a spell slot per cast.",
-                message_thread_id=topics.thread_id_for(chat_id, "adventure"),
             )
             return
 

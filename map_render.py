@@ -674,6 +674,7 @@ _SWITCH_ELEMENT_COLORS = {
 }
 _SWITCH_INACTIVE_COLOR = (75, 75, 80)
 _LOCKED_DOOR_COLOR = (200, 150, 40)
+_WARP_LINE_COLOR = (170, 80, 200)
 _WALL_WIDTH = 4
 _DOOR_GAP_FRACTION = 0.4  # the middle 40% of a connected edge is left open
 _SEGMENT_STRIP_HEIGHT = 56
@@ -895,6 +896,8 @@ def render_labyrinth_map(
         legend_lines.append("grey = unexplored, walk there to reveal it")
     if any(lk.get("kind") in ("switch", "multi_switch_gate") for r in rooms.values() for lk in r.get("lockables", [])):
         legend_lines.append("switch dot color = its element, dim grey = inactive")
+    if any(r.get("warps") for r in rooms.values()):
+        legend_lines.append("purple line = a real warp shortcut between two rooms")
     legend_row_count = len(legend_lines) + 1
     strip_height = _SEGMENT_STRIP_HEIGHT if segment_floors else 0
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
@@ -973,6 +976,32 @@ def render_labyrinth_map(
                 for _category, color in icons:
                     draw.ellipse([cx - swatch_r, cy - swatch_r, cx + swatch_r, cy + swatch_r], fill=color, outline=(0, 0, 0))
                     cx += swatch_span
+
+    # Real warp shortcut (2026-09-03, per Coffee's own Zelda dungeon
+    # research -- Level 6/7 both showed a real warp linking two distant
+    # rooms directly). Drawn as a real line straight across the floor
+    # AFTER every cell, so it visibly cuts across the grid instead of
+    # following the wall-by-wall doors above -- exactly the visual
+    # "this isn't just a clean tree" cue those reference maps have.
+    # Fog-of-war respected: only drawn once BOTH ends are visited (or
+    # fog-of-war is off for this caller entirely).
+    def _cell_center(room_id: str) -> tuple[float, float]:
+        rx, ry = positions[room_id]
+        gx2, gy2 = rx - min_x, max_y - ry
+        cx2 = _MARGIN + gx2 * CELL_SIZE + CELL_SIZE / 2
+        cy2 = grid_top + gy2 * CELL_SIZE + CELL_SIZE / 2
+        return (cx2, cy2)
+
+    drawn_warp_pairs = set()
+    for room_id, room in rooms.items():
+        for warp_dest in room.get("warps", []):
+            pair = frozenset((room_id, warp_dest))
+            if pair in drawn_warp_pairs or warp_dest not in rooms:
+                continue
+            if visited_room_ids is not None and (room_id not in visited_room_ids or warp_dest not in visited_room_ids):
+                continue
+            drawn_warp_pairs.add(pair)
+            draw.line([_cell_center(room_id), _cell_center(warp_dest)], fill=_WARP_LINE_COLOR, width=3)
 
     legend_font = _load_font(13)
     legend_y = height - legend_row_count * _LEGEND_LINE_HEIGHT - 8

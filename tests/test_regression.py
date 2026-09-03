@@ -30321,6 +30321,54 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_summon_remnant(FakeUpdate(human_id, "summon", sink2, chat_id=-991), "summon")
         self.assertTrue(any("Summon which Remnant?" in s for s in sink2), sink2)
 
+    async def test_summon_remnant_survives_a_flood_control_blip_instead_of_crashing(self):
+        """
+        Real live crash (error-log finding, telegram.error.RetryAfter
+        surfacing as an unhandled exception out of _do_summon_remnant):
+        the function mixed a few _safe_send calls with several raw
+        update.effective_chat.send_message calls that had none of
+        _safe_send's real 3-retry/honor-requested-wait handling -- same
+        bug class already fixed in _do_fast_travel (v1.27.464) and
+        _do_use_item. Every send in this function now routes through
+        _safe_send; simulates the same blip on the "it's not your turn"
+        reply and confirms it still reaches the player instead of
+        crashing.
+        """
+        import sessions
+        from telegram.error import RetryAfter
+        sessions.end_session(-994)
+        user_id, current_id = 800212, 800213
+        make_basic_character(user_id, "FloodBlipSummoner", current_location="crossroads_tavern", chat_id=-994)
+        make_basic_character(current_id, "FloodBlipCurrentTurn", current_location="crossroads_tavern", chat_id=-994)
+        db.update_character(user_id, -994, bound_remnants=["the_wrathflame_unbound"])
+        player = db.get_character(user_id, -994)
+        player["telegram_user_id"] = user_id
+        current = db.get_character(current_id, -994)
+        current["telegram_user_id"] = current_id
+        enemy_id = -3
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 50, "hp_max": 50,
+                 "armor_class": 10, "dexterity": 10, "resistances": [], "vulnerabilities": []}
+        session = sessions.start_session(-994, [player, current, enemy], {user_id: "party", current_id: "party", enemy_id: "enemy"})
+        session.turn_order = [current_id, user_id, enemy_id]
+        session.current_turn_index = 0  # genuinely current's turn, not the summoner's
+
+        update = FakeUpdate(user_id, "summon The Wrathflame Unbound", [], chat_id=-994)
+        real_send = update.effective_chat.send_message
+        calls = {"n": 0}
+
+        async def flaky_send(text, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RetryAfter(1)
+            return await real_send(text, **kwargs)
+
+        update.effective_chat.send_message = flaky_send
+        await bot._do_summon_remnant(update, "summon The Wrathflame Unbound")  # must not raise
+        combined = "\n".join(update.effective_chat._sink)
+        self.assertIn("not your turn", combined)
+        self.assertGreaterEqual(calls["n"], 2, "the send must have actually been retried, not just swallowed")
+        sessions.end_session(-994)
+
     async def test_summon_remnant_deals_real_elemental_damage_and_advances_turn(self):
         import asyncio
         import sessions
@@ -33684,7 +33732,17 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         data, gate_room = found
         rooms = data["rooms"]
         checkpoint_hub = next(r for r in rooms.values() if r["floor"] == 5 and r["id"].endswith("_hub"))
-        lockable = next(lk for lk in checkpoint_hub["lockables"] if lk["kind"] == "multi_switch_gate")
+        # Real, pre-existing ambiguity surfaced (not caused) by the
+        # warp/collapse-puzzle work's extra rng calls shifting which
+        # seed lands first: L2e's own PER-FLOOR multi-switch gate can
+        # also independently fire on the checkpoint floor itself,
+        # appending its own multi_switch_gate to this SAME hub's
+        # lockables list -- picking "the first multi_switch_gate found"
+        # is ambiguous whenever both exist (L2e's is always inserted
+        # first, since it's built during generate_floor, before generate_
+        # segment's cross-floor gate is appended afterward). Match the
+        # cross-floor gate by its own real, predictable id instead.
+        lockable = next(lk for lk in checkpoint_hub["lockables"] if lk["id"] == "seg1_multi_gate")
         switch_floors = set()
         for switch_id in lockable["requires"]:
             for r in rooms.values():
@@ -34015,6 +34073,192 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             break
         self.assertTrue(gate_seen, "expected at least one real branch gate across 80 real seeds")
 
+    def test_generate_floor_warps_and_collapse_puzzle_never_break_reachability_across_seeds(self):
+        """
+        Real Zelda-dungeon research request (2026-09-03, Coffee: "do all
+        of them" -- warps + a real Eagle's Tower-style floor-altering
+        puzzle, after Level 6/7's own reference maps both showed one).
+        Both were drafted directly in generate_floor but never covered
+        by a real statistical sweep before now -- this is that sweep.
+        Every room must stay BFS-reachable from the hub treating a
+        `collapsing_connections` entry as still OPEN (its pre-solve
+        state, the only state generation itself produces), and a warp
+        must never connect the hub or the connector room (both would
+        trivialize the real critical path this floor is built around).
+        """
+        warp_seen = collapse_seen = False
+        for seed in range(150):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub_id = floor_data["hub_room_id"]
+            connector_id = floor_data["connector_room_id"]
+
+            visited = {hub_id}
+            frontier = [hub_id]
+            while frontier:
+                cur = frontier.pop()
+                room = rooms[cur]
+                neighbors = list(room.get("connections", []))
+                neighbors += [d for d in room.get("locked_connections", {}) if d not in neighbors]
+                neighbors += [w for w in room.get("warps", []) if w not in neighbors]
+                for nb in neighbors:
+                    if nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            self.assertEqual(visited, set(rooms.keys()), f"seed {seed}: not every room reachable pre-solve")
+
+            for room_id, room in rooms.items():
+                if room.get("warps"):
+                    warp_seen = True
+                    self.assertNotIn(hub_id, room["warps"] + [room_id if hub_id in room.get("warps", []) else None])
+                    self.assertNotEqual(room_id, hub_id, "a warp must never live in the hub")
+                    self.assertNotEqual(room_id, connector_id, "a warp must never live in the connector room")
+                if room.get("collapsing_connections"):
+                    collapse_seen = True
+                    for seal_leaf, trigger_id in room["collapsing_connections"].items():
+                        trigger_lockable = next(lk for lk in room["lockables"] if lk["id"] == trigger_id)
+                        self.assertEqual(trigger_lockable["kind"], "multi_switch_gate")
+                        for switch_id in trigger_lockable["requires"]:
+                            switch_room_id = next(
+                                rid for rid, r in rooms.items()
+                                for lk in r.get("lockables", []) if lk["id"] == switch_id
+                            )
+                            # The switch must never live inside the very
+                            # branch being sealed by its own trigger.
+                            self.assertNotEqual(switch_room_id, seal_leaf)
+                            # And no OTHER, UNRELATED gate anywhere on the
+                            # floor may depend on this same switch (the
+                            # trigger's own "new shortcut" echo gate is
+                            # the one deliberate exception -- it's built
+                            # to share the exact same switch on purpose,
+                            # see generate_floor's own collapse-puzzle
+                            # comment) -- solvable by construction means
+                            # every OTHER dependency stays reachable
+                            # forever, not just at generation time.
+                            for other_room in rooms.values():
+                                for other_lk in other_room.get("lockables", []):
+                                    if other_lk["id"] == trigger_id or other_lk["id"].startswith(f"{trigger_id}_echo_"):
+                                        continue
+                                    if other_lk.get("kind") == "multi_switch_gate":
+                                        self.assertNotIn(
+                                            switch_id, other_lk.get("requires", []),
+                                            "a collapse trigger's own switch must not double as some UNRELATED gate's requirement",
+                                        )
+        self.assertTrue(warp_seen, "expected at least one warp across 150 real seeds")
+        self.assertTrue(collapse_seen, "expected at least one collapse puzzle across 150 real seeds")
+
+    async def test_labyrinth_warp_is_a_real_named_exit_and_move_actually_uses_it(self):
+        """End-to-end: a generated warp shows up as a real, distinctly-labeled exit (never a compass word), and moving through it actually relocates the character -- not just present in the generation data."""
+        warp_seed = warp_floor_data = warp_room_id = warp_dest_id = None
+        for seed in range(150):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            for rid, room in floor_data["rooms"].items():
+                if room.get("warps"):
+                    warp_seed, warp_floor_data, warp_room_id, warp_dest_id = seed, floor_data, rid, room["warps"][0]
+                    break
+            if warp_floor_data:
+                break
+        self.assertIsNotNone(warp_floor_data, "expected at least one warp across 150 real seeds")
+
+        user_id, chat_id = 962050, -962050
+        make_basic_character(user_id, "WarpTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        # Splice the real, warp-bearing generated floor into this live
+        # run and stand the character in the warp's own room, exactly
+        # as if they'd walked there normally.
+        run["rooms"] = warp_floor_data["rooms"]
+        run["current_room_id"] = warp_room_id
+        for r in run["rooms"].values():
+            r["visited"] = True
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"], current_room_id=warp_room_id)
+
+        exits = bot._labyrinth_exits(run["rooms"][warp_room_id], run["rooms"], chat_id)
+        warp_exit = next((e for e in exits if e[1] == "Warp"), None)
+        self.assertIsNotNone(warp_exit, f"expected a real 'Warp' exit, got: {exits}")
+        self.assertEqual(warp_exit[2]["id"], warp_dest_id)
+
+        dest_name = run["rooms"][warp_dest_id]["name"]
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, dest_name, sink, chat_id=chat_id), dest_name)
+        updated_run = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(updated_run["current_room_id"], warp_dest_id, f"expected the warp to relocate the character, got: {sink}")
+
+    async def test_labyrinth_collapse_trigger_seals_one_path_and_opens_a_real_new_shortcut(self):
+        """End-to-end: solving a collapse trigger's switch actually blocks the room it seals AND opens the new shortcut it promises -- not just present in the generation data."""
+        found = None
+        for seed in range(150):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            for room_id, room in floor_data["rooms"].items():
+                if room.get("collapsing_connections"):
+                    seal_leaf, trigger_id = next(iter(room["collapsing_connections"].items()))
+                    trigger_lockable = next(lk for lk in room["lockables"] if lk["id"] == trigger_id)
+                    switch_id = trigger_lockable["requires"][0]
+                    echo_entry = next(
+                        ((rid, r, dest, lk["id"])
+                         for rid, r in floor_data["rooms"].items()
+                         for dest, lk_id in r.get("locked_connections", {}).items()
+                         for lk in r.get("lockables", [])
+                         if lk["id"] == lk_id and lk["id"] != trigger_id and lk.get("requires") == [switch_id]),
+                        None,
+                    )
+                    if echo_entry:
+                        found = (floor_data, room_id, seal_leaf, trigger_id, switch_id, echo_entry)
+                        break
+            if found:
+                break
+        self.assertIsNotNone(found, "expected at least one real collapse trigger with its own shortcut echo across 150 real seeds")
+        floor_data, seal_parent_id, seal_leaf, trigger_id, switch_id, (shortcut_a_id, shortcut_a_room, shortcut_b_id, echo_lockable_id) = found
+
+        user_id, chat_id = 962051, -962051
+        make_basic_character(user_id, "CollapseTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        run["rooms"] = floor_data["rooms"]
+        for r in run["rooms"].values():
+            r["visited"] = True
+
+        # Pre-solve: the sealed room is still reachable, the shortcut is not yet.
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"], current_room_id=seal_parent_id)
+        exits_before = bot._labyrinth_exits(run["rooms"][seal_parent_id], run["rooms"], chat_id)
+        self.assertIn(seal_leaf, [d["id"] for _, _, d in exits_before], "expected the sealed room reachable BEFORE the trigger fires")
+        exits_shortcut_before = bot._labyrinth_exits(shortcut_a_room, run["rooms"], chat_id)
+        self.assertNotIn(shortcut_b_id, [d["id"] for _, _, d in exits_shortcut_before], "the new shortcut must not be open yet")
+
+        # Solve it (same real mechanism a hit/spell-cast on the switch already uses).
+        bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)[switch_id] = True
+
+        exits_after = bot._labyrinth_exits(run["rooms"][seal_parent_id], run["rooms"], chat_id)
+        self.assertNotIn(seal_leaf, [d["id"] for _, _, d in exits_after], "expected the sealed room BLOCKED after the trigger fires")
+        exits_shortcut_after = bot._labyrinth_exits(shortcut_a_room, run["rooms"], chat_id)
+        self.assertIn(shortcut_b_id, [d["id"] for _, _, d in exits_shortcut_after], "expected the new shortcut OPEN after the trigger fires")
+
+        # And a real move onto the now-blocked room is refused.
+        sink = []
+        blocked_name = run["rooms"][seal_leaf]["name"]
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=seal_parent_id)
+        await bot._do_labyrinth_move(FakeUpdate(user_id, blocked_name, sink, chat_id=chat_id), blocked_name)
+        updated_run = db.get_labyrinth_run(chat_id, party_key)
+        self.assertNotEqual(updated_run["current_room_id"], seal_leaf, f"expected the move onto the collapsed path to be refused, got: {sink}")
+
+    def test_render_labyrinth_map_draws_a_real_warp_line_without_crashing(self):
+        """map_render.py's post-cell warp-line drawing pass must actually run (and the legend must mention it) whenever a floor has a real warp, without crashing."""
+        import map_render
+        warp_floor_data = None
+        for seed in range(150):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            if any(r.get("warps") for r in floor_data["rooms"].values()):
+                warp_floor_data = floor_data
+                break
+        self.assertIsNotNone(warp_floor_data, "expected at least one warp across 150 real seeds")
+        rooms = warp_floor_data["rooms"]
+        png_bytes = map_render.render_labyrinth_map(20, rooms, warp_floor_data["hub_room_id"], set(), set(rooms.keys()), {}, None)
+        self.assertGreater(len(png_bytes), 0)
+
     def test_assign_grid_positions_gives_every_room_a_unique_cell(self):
         """
         Real fix alongside the branching algorithm: the old blind
@@ -34289,6 +34533,40 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         unvisited_side_room_id = next(rid for rid in run["rooms"] if rid.endswith("_r0"))
         unvisited_name = run["rooms"][unvisited_side_room_id]["name"]
         self.assertNotIn(unvisited_name, combined)
+
+    async def test_labyrinth_map_survives_a_flood_control_blip_instead_of_dropping_the_map(self):
+        """
+        Real live crash (error-log finding, telegram.error.TimedOut in
+        _do_show_labyrinth_map): the map's own send_photo call had no
+        retry at all, unlike _safe_send's text-message retry logic --
+        a transient TimedOut/RetryAfter silently dropped the map.
+        _do_show_labyrinth_map now routes through _safe_send_photo
+        (same 3-attempt/honor-RetryAfter's-wait semantics as _safe_
+        send); simulates the same blip (the very first send_photo call
+        raises RetryAfter) and confirms the map still reaches the
+        player instead of being dropped.
+        """
+        from telegram.error import RetryAfter
+        user_id, chat_id = 962043, -962043
+        make_basic_character(user_id, "MapFloodBlipTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        update = FakeUpdate(user_id, "", sink, chat_id=chat_id)
+        real_send_photo = update.effective_chat.send_photo
+        calls = {"n": 0}
+
+        async def flaky_send_photo(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RetryAfter(1)
+            return await real_send_photo(*args, **kwargs)
+
+        update.effective_chat.send_photo = flaky_send_photo
+        await bot._do_show_labyrinth_map(update)  # must not raise, must not silently drop the map
+        self.assertTrue(any(s.startswith("<photo:") for s in sink), f"expected the map to still be sent, got: {sink}")
+        self.assertGreaterEqual(calls["n"], 2, "the send must have actually been retried, not just swallowed")
 
     async def test_checkpoint_shrine_pray_is_free_partial_offering_is_full_and_costs_spring_water(self):
         """Phase L3, per Coffee: "we shud not be getting it each time we enter the location, but u can put a shrine there for us to pray or give an offering of spring water" -- the one-time arrival reward is separate from this real, repeatable shrine action."""
