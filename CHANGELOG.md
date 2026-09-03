@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.474] — feature: real fog-of-war on the Labyrinth map + fix: "Open map" (no article) misclassified
+
+Two changes, same session:
+
+1. **Fog-of-war** (Coffee: "i want fog of war in the labyrinth -
+   specially if they get larger, we shud be exploring them"). Every
+   room on a floor used to render fully revealed the instant it
+   generated. Rooms are now marked `visited` the instant a real
+   arrival happens (enter/move/descend); `render_labyrinth_map` draws
+   any room NOT yet visited as a plain, unlabeled grey cell (real
+   shape/position on the grid, so the maze's overall layout still
+   guides exploration) with no name and no monster/chest/hazard/switch
+   icons — those are the actual reward for physically walking there.
+   Found and fixed a related real bug while building this: an ordinary
+   move to a plain room (no checkpoint, no hazard) never persisted
+   `rooms` at all, so the new visited flag would have silently never
+   reached the database.
+2. **"Open map"** (no article) misclassified as `examine` instead of
+   showing the map — the original "the map"/"my map" trigger phrase
+   never covered a bare "map" after a real map-viewing verb
+   (open/show/view/check/see/display).
+
+2 new tests; full 59-test LabyrinthTests suite passes across 4
+consecutive runs.
+
 ## [1.27.473] — fix: "Attack the crystal" resolved to nothing in a room that also held a chest
 
 Found live within minutes of v1.27.472 shipping (Coffee: "It's said I

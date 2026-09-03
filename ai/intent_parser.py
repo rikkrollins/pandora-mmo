@@ -414,7 +414,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # not the old plain-text listing. The text version stays reachable
     # via the /map slash command (map_command -> _do_show_map directly,
     # unaffected by this classifier).
-    if any(w in lowered for w in ["the map", "my map"]):
+    # Real live gap (2026-09-03, Coffee, dev-bridge: "Open map" -- no
+    # article -- misclassified as examine instead, then correctly
+    # worked once he retyped "Open the map"). The original fix above
+    # only ever matched "the map"/"my map" verbatim; a bare "map" after
+    # a real map-viewing verb is just as natural a phrasing and was
+    # never covered.
+    if any(w in lowered for w in ["the map", "my map"]) or re.search(r"\b(?:open|show|view|check|see|display)\s+map\b", lowered):
         return {**base, "action": "visual_map"}
 
     # Checked BEFORE check_quests below: "Accept the quest on the quest

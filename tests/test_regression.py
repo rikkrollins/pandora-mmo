@@ -33497,6 +33497,50 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         locked_ids_arg = call_kwargs[0][3]
         self.assertIn(gate_room_id, locked_ids_arg)
 
+    async def test_labyrinth_map_fog_of_war_only_reveals_actually_visited_rooms(self):
+        """
+        Real live request (2026-09-03, Coffee: "i want fog of war in
+        the labyrinth - specially if they get larger, we shud be
+        exploring them"). A room is marked `visited` the instant a real
+        arrival happens (enter/move/descend); _do_show_labyrinth_map
+        must only pass ALREADY-visited room ids to the renderer, never
+        every room on the floor, and the renderer must actually draw an
+        unvisited room as a plain grey cell (no name, no icons).
+        """
+        from unittest.mock import patch
+        import map_render as map_render_module
+        user_id, chat_id = 962041, -962041
+        make_basic_character(user_id, "LabyrinthFogTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub_id = run["current_room_id"]
+        rooms = run["rooms"]
+        self.assertTrue(rooms[hub_id].get("visited"), "the room the party actually enters into must be marked visited")
+        unvisited_side_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        self.assertFalse(rooms[unvisited_side_room_id].get("visited"), "a side room never walked into must not be pre-visited")
+
+        with patch("map_render.render_labyrinth_map") as mock_render:
+            mock_render.return_value = b"\x89PNGfake"
+            await bot._do_show_labyrinth_map(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        visited_ids_arg = mock_render.call_args[0][4]
+        self.assertIn(hub_id, visited_ids_arg)
+        self.assertNotIn(unvisited_side_room_id, visited_ids_arg)
+
+        # Real render: the unvisited room draws as a plain grey cell (no name/icons), the visited hub does not.
+        floor_rooms = {rid: r for rid, r in rooms.items() if r.get("floor") == rooms[hub_id]["floor"]}
+        png_fog = map_render_module.render_labyrinth_map(1, floor_rooms, hub_id, set(), {hub_id})
+        png_no_fog = map_render_module.render_labyrinth_map(1, floor_rooms, hub_id, set(), None)
+        self.assertTrue(png_fog.startswith(b"\x89PNG"))
+        self.assertNotEqual(png_fog, png_no_fog, "fogged and fully-revealed renders of the same floor must differ")
+
+        # Walking into the previously-unvisited room marks it visited for next time.
+        dest_name = rooms[unvisited_side_room_id]["name"]
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", [], chat_id=chat_id), f"go to {dest_name}")
+        run_after = db.get_labyrinth_run(chat_id, party_key)
+        self.assertTrue(run_after["rooms"][unvisited_side_room_id].get("visited"))
+
     async def test_labyrinth_examine_describes_a_real_switch_instead_of_refusing(self):
         """
         Real live gap (2026-09-02, Coffee: "Is looking for a switch

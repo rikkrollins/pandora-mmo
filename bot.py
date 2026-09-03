@@ -9402,6 +9402,9 @@ async def _do_enter_labyrinth(update: Update) -> None:
         db.update_character_by_id(m["character_id"], current_location=LABYRINTH_LOCATION_SENTINEL)
 
     room = run["rooms"][run["current_room_id"]]
+    if not room.get("visited"):
+        room["visited"] = True
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
     body = _labyrinth_room_text(character, room, run, chat_id, announce_modifier=True)
     tutorial = f"{LABYRINTH_TUTORIAL_TEXT}\n\n" if first_time else ""
     await _safe_send(
@@ -9482,6 +9485,7 @@ async def _do_descend_labyrinth(update: Update) -> None:
     new_segment = labyrinth_module.segment_number_for_floor(run["floor"]) + 1
     segment_data = labyrinth_module.generate_segment(CAMPAIGN, new_segment, random.Random(run["seed"] + new_segment))
     entry_room = segment_data["rooms"][segment_data["entry_room_id"]]
+    entry_room["visited"] = True
     run = db.update_labyrinth_run(
         chat_id, party_key, floor=entry_room["floor"],
         current_room_id=segment_data["entry_room_id"], rooms=segment_data["rooms"],
@@ -9786,6 +9790,7 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
             )
             return
     destination = run["rooms"][destination_id]
+    destination["visited"] = True
     dest_floor = destination.get("floor", run["floor"])
     visited_floors = set(run.get("visited_floors") or [])
     newly_reached = dest_floor not in visited_floors
@@ -9798,8 +9803,17 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
     # would silently orphan that reference, so a first-arrival
     # checkpoint/hazard flag would mutate a dict never written back to
     # the database (a real bug, caught by this file's own tests).
+    #
+    # `rooms=run["rooms"]` IS included here (2026-09-03, real live fog-
+    # of-war bug) -- an ordinary move to a plain room with no checkpoint
+    # and no hazard never reaches either of those two functions' own
+    # persist calls, so the `destination["visited"] = True` flag set
+    # just above would otherwise never actually reach the database.
+    # Harmless to persist `rooms` again a second time when checkpoint/
+    # hazard also fire and do it themselves right after.
     db.update_labyrinth_run(
         chat_id, party_key, current_room_id=destination_id, floor=dest_floor, visited_floors=sorted(visited_floors),
+        rooms=run["rooms"],
     )
     if newly_reached:
         members = db.get_party_members_by_id(character["party_id"]) if character.get("party_id") else [character]
@@ -24689,9 +24703,16 @@ async def _do_show_labyrinth_map(update: Update, floor: int | None = None) -> No
         for dest_id, lockable_id in room.get("locked_connections", {}).items()
         if dest_id in floor_rooms and not _lockable_is_open(room, lockable_id, update.effective_chat.id)
     }
+    # Real fog-of-war (2026-09-03, per Coffee: "i want fog of war in
+    # the labyrinth - specially if they get larger, we shud be
+    # exploring them"). A room is only ever marked "visited" the
+    # instant a real arrival happens (_do_enter_labyrinth/_do_labyrinth_
+    # move/_do_descend_labyrinth) -- reused directly here rather than a
+    # second, separate tracking structure.
+    visited_room_ids = {rid for rid, r in floor_rooms.items() if r.get("visited")}
     try:
         png_bytes = await asyncio.to_thread(
-            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id, locked_room_ids,
+            map_render.render_labyrinth_map, target_floor, floor_rooms, current_room_id, locked_room_ids, visited_room_ids,
         )
     except Exception as e:
         logger.warning(f"[map_render] labyrinth map failed: {e!r}")

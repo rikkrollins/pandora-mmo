@@ -671,14 +671,14 @@ def _labyrinth_room_icons(room: dict) -> list[str]:
     return icons
 
 
-def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str, locked_room_ids: set[str] | None = None) -> bytes:
+def render_labyrinth_map(
+    floor: int, rooms: dict, current_room_id: str,
+    locked_room_ids: set[str] | None = None, visited_room_ids: set[str] | None = None,
+) -> bytes:
     """
     rooms: a live run's own `rooms` dict verbatim, every entry already
     carrying a real `grid_position` (rules.labyrinth._assign_grid_
-    positions). An entire floor is always fully "revealed" the instant
-    it's generated -- there is no partial/fog-of-war state to track for
-    content that never outlives one visit, so unlike render_layer_map
-    this never filters by a visited/revealed set at all.
+    positions).
 
     locked_room_ids (2026-09-02, real live confusion, Coffee: "the map
     is showing a north location but its not available to travel too" --
@@ -686,10 +686,20 @@ def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str, locked_r
     multi-switch puzzle he hadn't solved yet, drawn IDENTICALLY to
     every genuinely reachable room). Rooms in this set get the same
     real dashed-border convention render_layer_map already uses for an
-    "attained but not currently reachable" cell, plus a 🔒 prefix on
-    the label -- still honestly shown (never hidden, this game never
-    hides a real discovered room), just visually distinct from a room
-    the party can actually walk into right now.
+    "attained but not currently reachable" cell -- still honestly
+    shown (never hidden), just visually distinct from a room the party
+    can actually walk into right now.
+
+    visited_room_ids (2026-09-03, per Coffee: "i want fog of war in the
+    labyrinth - specially if they get larger, we shud be exploring
+    them" -- reverses this function's original "a whole floor is
+    always fully revealed" design). When given, a room NOT in this set
+    is drawn as a plain, unlabeled grey cell (its real shape/position
+    on the grid, so the maze's overall layout still guides exploration)
+    with no name and no monster/chest/hazard/switch icons -- those are
+    the actual reward for physically walking there. `None` (the
+    default) keeps the old fully-revealed behavior for any caller that
+    hasn't been updated to track visits yet.
     """
     locked_room_ids = locked_room_ids or set()
     positions = {rid: (r["grid_position"]["x"], r["grid_position"]["y"]) for rid, r in rooms.items()}
@@ -702,6 +712,8 @@ def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str, locked_r
     legend_lines = ["red outline = you are here"]
     if locked_room_ids & set(rooms.keys()):
         legend_lines.append("dashed outline = seen, not yet reachable")
+    if visited_room_ids is not None and (set(rooms.keys()) - visited_room_ids):
+        legend_lines.append("grey = unexplored, walk there to reveal it")
     legend_row_count = len(legend_lines) + 1
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
     height = min(
@@ -734,6 +746,17 @@ def render_labyrinth_map(floor: int, rooms: dict, current_room_id: str, locked_r
             room = rooms[room_id]
             is_current = room_id == current_room_id
             is_locked = room_id in locked_room_ids
+            # A room the party is CURRENTLY standing in is always
+            # visited by definition, regardless of what the caller's
+            # own visited-tracking set says (defensive -- arrival
+            # should always mark it, but never trust that alone).
+            is_unvisited = visited_room_ids is not None and room_id not in visited_room_ids and not is_current
+
+            if is_unvisited:
+                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_OTHER_FLOOR_FILL)
+                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=_OTHER_FLOOR_OUTLINE, width=2)
+                continue
+
             draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_LABYRINTH_ROOM_FILL)
             if is_locked:
                 _draw_dashed_rect(draw, [px, py, px + CELL_SIZE, py + CELL_SIZE], _OTHER_FLOOR_OUTLINE)
