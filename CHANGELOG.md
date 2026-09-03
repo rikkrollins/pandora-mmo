@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.479] — fix: repeated taps of the same still-resolving button queued a real, growing backlog ahead of the next action
+
+Real live report (Coffee, dev-bridge: "My push buttons haven't worked
+for a couple of turns" → "its not lketting me attack / its doing its
+own thing" → "i didnt mean to multi tap, it was frozen"). Root-caused
+live: **The Lower Span Widow** genuinely has a real stealable item
+(`stealable_items` in its monster template), so every "Steal" tap
+triggered its own full ~30-160s Ollama narration call. Tapping the
+same still-visible button again while the first was still resolving —
+completely reasonable, since the tap gave zero visible feedback while
+waiting — queued a SEPARATE full re-execution every time, since the
+existing "Still working on your last action... No need to resend it"
+notice was only ever a polite heads-up, never backed by real dedup.
+7+ redundant "steal" attempts piled up strictly ahead of this same
+player's later, genuinely different "Attack" in their own per-user
+FIFO queue, so the real action they wanted next queued for many
+minutes behind their own stale duplicate taps.
+
+`_run_in_user_order` now accepts a `signature` (a callback's own `data`
+string, or normalized typed text) — a resend of the exact same
+not-yet-finished action is now a real no-op instead of a second
+execution, making "No need to resend it" literally true. A genuinely
+different action (different signature) is completely unaffected and
+still queues normally — a player who changes their mind mid-wait
+(e.g. types "flee" while "attack" is still resolving) is never
+silently dropped. Wired into both `battle_menu_callback` (dedup key:
+the tapped button's own callback data) and `text_message_router`
+(dedup key: normalized message text, Adventure only).
+
+2 new tests (a direct unit test on the dedup plus an end-to-end one
+through the real callback handler); all 22 existing battle-menu tests
+(including the existing rapid-duplicate-taps serialization test)
+still pass unchanged.
+
 ## [1.27.478] — fix: "start the battle" and "talk to X" wrongly refused everywhere in the Labyrinth
 
 Real live report right after the previous deploy (Coffee, dev-bridge:

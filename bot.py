@@ -3407,7 +3407,16 @@ async def battle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             "⏳ Still working on your last action — I'll get to this one right after.",
             show_alert=False,
         )
-    await _run_in_user_order(user_id, lambda: _battle_menu_callback_inner(update, context))
+    enqueued = await _run_in_user_order(
+        user_id, lambda: _battle_menu_callback_inner(update, context), signature=update.callback_query.data,
+    )
+    if not enqueued:
+        # This exact button was already tapped once and is still
+        # resolving somewhere in this user's own queue -- see
+        # _run_in_user_order's docstring for the real live incident
+        # this prevents. Not a game action, so no _battle_menu_callback_
+        # inner call happens at all for this tap.
+        await _safe_answer(update.callback_query, "⏳ Already working on that one — no need to tap it again.", show_alert=False)
 
 
 async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -34851,7 +34860,13 @@ def _get_user_queue(user_id: int) -> asyncio.Queue:
     return _USER_QUEUES[user_id]
 
 
-async def _run_in_user_order(user_id: int, coro_fn) -> None:
+# Tracks, per user, which action "signatures" are currently somewhere in
+# that user's own pipeline (either actively running or still waiting in
+# queue) -- see _run_in_user_order's `signature` param below.
+_USER_PENDING_SIGNATURES: dict[int, set[str]] = {}
+
+
+async def _run_in_user_order(user_id: int, coro_fn, signature: str | None = None) -> bool:
     """
     Ensures this ONE user's messages are handled strictly in the order
     they arrived, despite python-telegram-bot dispatching every update
@@ -34865,11 +34880,51 @@ async def _run_in_user_order(user_id: int, coro_fn) -> None:
     context.user_data) just as easily as it'd confuse ordinary play.
     Different players are completely unaffected and still run fully
     concurrently with each other and with this user's queue.
+
+    Real live bug (2026-09-03, Coffee, dev-bridge: "My push buttons
+    haven't worked for a couple of turns" -> "its not lketting me
+    attack / its doing its own thing"). Confirmed live: repeatedly
+    tapping the same still-visible "Steal" button (impatient re-taps
+    while the first attempt was still genuinely resolving, each ~30-
+    160s of real Ollama narration) queued a SEPARATE full re-execution
+    every single time -- the "Still working on your last action... No
+    need to resend it" notice was only ever a polite heads-up, never
+    actually backed by any real dedup, so 7+ redundant "steal" attempts
+    piled up strictly ahead of this same player's later, genuinely
+    different "Attack" in their own FIFO queue. Each redundant attempt
+    still had to fully resolve (its own real narration call) before the
+    next one even started, so the real "Attack" the player actually
+    wanted next queued for many minutes behind its own player's stale
+    duplicate taps -- reading exactly like "it's doing its own thing"
+    instead of responding.
+
+    `signature` (when given, e.g. a callback's own raw `data` string, or
+    normalized message text) opts a caller into real dedup: if this
+    exact signature is already somewhere in this user's own pipeline
+    (currently running OR still queued, not yet finished), this call is
+    a no-op that returns False immediately instead of enqueuing a
+    second copy -- making "No need to resend it" literally true rather
+    than just reassuring. A genuinely DIFFERENT action (different
+    signature) is completely unaffected and queues normally, so a
+    player who changes their mind mid-wait (e.g. types "flee" while an
+    "attack" is still resolving) is never silently dropped. Omitted
+    (the default) preserves the exact old always-enqueue behavior for
+    every other caller.
     """
+    if signature is not None:
+        pending = _USER_PENDING_SIGNATURES.setdefault(user_id, set())
+        if signature in pending:
+            return False
+        pending.add(signature)
     queue = _get_user_queue(user_id)
     future = asyncio.get_event_loop().create_future()
     await queue.put((coro_fn, future))
-    await future
+    try:
+        await future
+    finally:
+        if signature is not None:
+            _USER_PENDING_SIGNATURES.get(user_id, set()).discard(signature)
+    return True
 
 
 # Per-chat ordered narration delivery queues -- same shape as
@@ -35043,13 +35098,22 @@ async def text_message_router(update: Update, context: ContextTypes.DEFAULT_TYPE
     # when this exact user genuinely already has something in flight --
     # never fires for an ordinary single message.
     raw_thread_id = update.effective_message.message_thread_id
-    if topics.is_adventure(update.effective_chat.id, raw_thread_id or 0) and user_id in _USER_BUSY:
+    in_adventure = topics.is_adventure(update.effective_chat.id, raw_thread_id or 0)
+    if in_adventure and user_id in _USER_BUSY:
         await _safe_send(
             update,
             "⏳ Still working on your last action — I'll get to this one right after. No need to resend it.",
             speak=False,
         )
-    await _run_in_user_order(user_id, lambda: _route_text_message(update, context))
+    # Real dedup (2026-09-03, same live incident as battle_menu_callback's
+    # own fix -- see _run_in_user_order's docstring), scoped to Adventure
+    # only: a real "resend" of the exact same text while the first copy
+    # is still resolving is now actually a no-op, not just reassured
+    # against. Support/Development never pass a signature, so a
+    # legitimate identical retry there (e.g. re-asking a Support
+    # question) is completely unaffected.
+    signature = update.message.text.strip().lower() if in_adventure else None
+    await _run_in_user_order(user_id, lambda: _route_text_message(update, context), signature=signature)
 
 
 async def _log_unhandled_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

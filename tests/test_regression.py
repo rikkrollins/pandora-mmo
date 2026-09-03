@@ -26981,6 +26981,92 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 bot._USER_BUSY.discard(other_user_id)
 
+    async def test_run_in_user_order_dedups_an_identical_signature_still_pending(self):
+        """
+        Real live bug (2026-09-03, Coffee, dev-bridge: "My push buttons
+        haven't worked for a couple of turns" -> "its not lketting me
+        attack / its doing its own thing"). Confirmed live: repeatedly
+        tapping the same still-visible "Steal" button while the first
+        tap was still genuinely resolving (real Ollama narration, tens
+        of seconds each) queued a SEPARATE full execution every time --
+        the "No need to resend it" notice was never actually backed by
+        real dedup, so redundant re-taps piled up strictly ahead of this
+        same player's later, genuinely different "Attack" in their own
+        FIFO queue. `signature` now makes a real resend of the exact
+        same not-yet-finished action an actual no-op.
+        """
+        import asyncio
+        user_id = 900711
+        call_count = 0
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_job():
+            nonlocal call_count
+            call_count += 1
+            started.set()
+            await release.wait()
+            return "done"
+
+        task1 = asyncio.create_task(bot._run_in_user_order(user_id, slow_job, signature="steal"))
+        await started.wait()
+        # A second identical signature while the first is still actively
+        # resolving must be a real no-op, not a second execution.
+        result2 = await bot._run_in_user_order(user_id, slow_job, signature="steal")
+        self.assertFalse(result2)
+        self.assertEqual(call_count, 1, "the redundant tap must never have actually run the job")
+
+        release.set()
+        result1 = await task1
+        self.assertTrue(result1)
+
+        # Once genuinely finished, the same signature is free again --
+        # this is only a "still pending" dedup, never a permanent block.
+        result3 = await bot._run_in_user_order(user_id, slow_job, signature="steal")
+        self.assertTrue(result3)
+        self.assertEqual(call_count, 2)
+
+        # A DIFFERENT signature is never blocked by an unrelated one still
+        # pending -- a player who changes their mind mid-wait (e.g. types
+        # "flee" while "attack" is still resolving) must still go through.
+        task4 = asyncio.create_task(bot._run_in_user_order(user_id, slow_job, signature="attack"))
+        await asyncio.sleep(0)
+        result5 = await bot._run_in_user_order(user_id, slow_job, signature="flee")
+        self.assertTrue(result5)
+        release.set()
+        await task4
+
+    async def test_battle_menu_callback_drops_a_redundant_tap_of_the_same_still_resolving_button(self):
+        """End-to-end version of the dedup above, through the real callback entry point."""
+        import asyncio
+        from unittest.mock import patch
+        user_id, chat_id = 900712, -900712
+        started = asyncio.Event()
+        release = asyncio.Event()
+        call_count = 0
+
+        async def slow_inner(update, context):
+            nonlocal call_count
+            call_count += 1
+            started.set()
+            await release.wait()
+
+        with patch.object(bot, "_battle_menu_callback_inner", slow_inner):
+            sink1 = []
+            task1 = asyncio.create_task(
+                bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|steal", sink1, chat_id=chat_id), DummyContext())
+            )
+            await started.wait()
+
+            sink2 = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|steal", sink2, chat_id=chat_id), DummyContext())
+            self.assertTrue(any("Already working on that" in m for m in sink2), sink2)
+            self.assertEqual(call_count, 1, "the redundant tap must never have re-invoked the real handler")
+
+            release.set()
+            await task1
+        self.assertEqual(bot._USER_PENDING_SIGNATURES.get(user_id, set()), set())
+
     def test_attack_with_a_named_spell_classifies_as_cast_spell_not_a_weapon_attack(self):
         """
         Real live bug, confirmed twice via dev-topic screenshots
