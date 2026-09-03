@@ -655,6 +655,17 @@ _LABYRINTH_ICON_COLORS = {
     "chest": (200, 170, 60),
     "hazard": (200, 100, 20),
     "switch": (80, 160, 200),
+    # Real gap found (2026-09-03, Coffee: "did you miss anything on the
+    # generator?"): pressure plates (v1.27.488), carry objects/pillars
+    # (v1.27.489), and the hint statue (v1.27.490) all got real text
+    # descriptions via _lockable_callout_lines, but were never added
+    # here -- a room holding one of these drew with NO icon at all on
+    # the actual map image, even though the room text correctly
+    # mentioned it.
+    "pressure_plate": (180, 140, 60),
+    "carry_object": (120, 100, 80),
+    "pillar": (130, 110, 150),
+    "hint_statue": (110, 110, 100),
 }
 _LABYRINTH_ROOM_FILL = (55, 48, 68)
 
@@ -852,6 +863,24 @@ def _labyrinth_room_icons(room: dict, switch_states: dict[str, bool] | None = No
         active = switch_states.get(lockable["id"], False)
         color = _SWITCH_ELEMENT_COLORS.get(lockable.get("element"), _LABYRINTH_ICON_COLORS["switch"]) if active else _SWITCH_INACTIVE_COLOR
         icons.append(("switch", color))
+    # Real gap found (2026-09-03, Coffee: "did you miss anything on the
+    # generator?") -- these four real kinds (v1.27.488-490) never got a
+    # map icon at all. `pillar` reflects its own real struck/unstruck
+    # state the same way `switch` already does (both share the
+    # `_SWITCH_STATE` store); the other three are simple, permanent
+    # presence dots.
+    for lockable in room.get("lockables", []):
+        kind = lockable.get("kind")
+        if kind == "pressure_plate":
+            icons.append(("pressure_plate", _LABYRINTH_ICON_COLORS["pressure_plate"]))
+        elif kind == "carry_object":
+            icons.append(("carry_object", _LABYRINTH_ICON_COLORS["carry_object"]))
+        elif kind == "pillar":
+            active = switch_states.get(lockable["id"], False)
+            color = _SWITCH_INACTIVE_COLOR if active else _LABYRINTH_ICON_COLORS["pillar"]
+            icons.append(("pillar", color))
+        elif kind == "hint_statue":
+            icons.append(("hint_statue", _LABYRINTH_ICON_COLORS["hint_statue"]))
     return icons
 
 
@@ -930,6 +959,14 @@ def render_labyrinth_map(
         legend_lines.append("switch dot color = its element, dim grey = inactive")
     if any(r.get("warps") for r in rooms.values()):
         legend_lines.append("purple line = a real warp shortcut between two rooms")
+    if any(lk.get("kind") == "pressure_plate" for r in rooms.values() for lk in r.get("lockables", [])):
+        legend_lines.append("tan dot = a real pressure plate")
+    if any(lk.get("kind") == "carry_object" for r in rooms.values() for lk in r.get("lockables", [])):
+        legend_lines.append("brown dot = a real object you can carry")
+    if any(lk.get("kind") == "pillar" for r in rooms.values() for lk in r.get("lockables", [])):
+        legend_lines.append("mauve dot = an unstruck pillar, dim grey = already struck")
+    if any(lk.get("kind") == "hint_statue" for r in rooms.values() for lk in r.get("lockables", [])):
+        legend_lines.append("grey-stone dot = a real hint statue, worth examining")
     legend_row_count = len(legend_lines) + 1
     strip_height = _SEGMENT_STRIP_HEIGHT if segment_floors else 0
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)

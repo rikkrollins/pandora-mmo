@@ -34929,6 +34929,45 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             map_render._LOCKED_DOOR_COLOR,
         )
 
+    def test_labyrinth_map_icons_cover_pressure_plate_carry_object_pillar_and_hint_statue(self):
+        """
+        Real gap found (2026-09-03, Coffee: "did you miss anything on
+        the generator?"): pressure plates (v1.27.488), carry objects/
+        pillars (v1.27.489), and the hint statue (v1.27.490) all got
+        real text descriptions via _lockable_callout_lines, but were
+        never added to _labyrinth_room_icons -- a room holding one of
+        these drew with NO icon at all on the actual map image. A
+        pillar's own dot also reflects its real struck/unstruck state,
+        same as a switch.
+        """
+        import map_render
+        room = {
+            "id": "r1",
+            "lockables": [
+                {"id": "plate1", "kind": "pressure_plate"},
+                {"id": "carry1", "kind": "carry_object", "puzzle_id": "p1"},
+                {"id": "pillar1", "kind": "pillar", "puzzle_id": "p1"},
+                {"id": "statue1", "kind": "hint_statue", "hint_lines": ["A real fact."]},
+            ],
+        }
+        icons = map_render._labyrinth_room_icons(room, switch_states={})
+        categories = [c for c, _ in icons]
+        self.assertIn("pressure_plate", categories)
+        self.assertIn("carry_object", categories)
+        self.assertIn("pillar", categories)
+        self.assertIn("hint_statue", categories)
+
+        # A struck pillar's dot color changes, same convention as a switch.
+        unstruck_color = dict(icons)["pillar"]
+        struck_icons = map_render._labyrinth_room_icons(room, switch_states={"pillar1": True})
+        struck_color = dict(struck_icons)["pillar"]
+        self.assertNotEqual(unstruck_color, struck_color)
+
+        # And the map actually renders without crashing, with a real legend line for each.
+        rooms = {"r1": {**room, "grid_position": {"x": 0, "y": 0}, "name": "Test Room", "connections": []}}
+        png_bytes = map_render.render_labyrinth_map(1, rooms, "r1", set(), set(rooms.keys()), {}, None)
+        self.assertGreater(len(png_bytes), 0)
+
     def test_render_labyrinth_map_marks_a_locked_room_without_crashing_or_using_emoji_text(self):
         """
         Real live confusion (2026-09-02, Coffee: "the map is showing a

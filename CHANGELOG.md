@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.496] — fix: pressure plates/carry objects/pillars/hint statue never drew a map icon at all
+
+Real gap found directly asked for ("did you miss anything on the
+generator?"): pressure plates (v1.27.488), carry objects/pillars
+(v1.27.489), and the hint statue (v1.27.490) all got real text
+descriptions via `_lockable_callout_lines`, but `map_render.py`'s
+`_labyrinth_room_icons` was never updated to draw them — a room
+holding one of these showed the right text but NO icon dot at all on
+the actual map image, silently invisible at a glance. A pillar's own
+dot now reflects its real struck/unstruck state, same convention as a
+switch. Real legend lines added for all four.
+
+1 new test (fails without the fix, passes with it). Full 102-test
+LabyrinthTests suite passes clean.
+
 ## [1.27.495] — fix: leaving the Labyrinth after switching active alts orphaned the other character at the sentinel location
 
 Found live while investigating Coffee's own report of being stuck:
