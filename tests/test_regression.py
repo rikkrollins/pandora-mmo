@@ -29721,15 +29721,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(image.format, "PNG")
         self.assertGreaterEqual(image.size[0], map_render._MIN_CANVAS_WIDTH)
 
-    def test_render_layer_map_draws_a_real_warp_line_only_once_both_ends_are_visited(self):
+    def test_render_layer_map_handles_a_real_warp_without_crashing(self):
         """
-        Real warp-line port to the overworld renderer (2026-09-04, per
-        Coffee's own correction that this belongs in the generator now,
-        not deferred -- render_labyrinth_map already draws these,
-        render_layer_map never did). Confirms: no crash with a real
-        warp present, the legend line only appears when a warp is
-        actually drawn, and fog-of-war is respected (an unvisited warp
-        destination must not be drawn or mentioned).
+        The warp connection itself is real game logic (rules/
+        dungeon_evolve.py); its map visualization was removed on both
+        renderers (2026-09-04, per Coffee: "we don't need to know where
+        the warp locations go"). Confirms no crash with a real warp
+        present, visited or not.
         """
         import copy
         import io
@@ -29756,6 +29754,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(image.format, "PNG")
         self.assertGreater(len(png_with_warp), 0)
         self.assertGreater(len(png_without_warp_visited), 0)
+        former_warp_line_color = (170, 80, 200)
+        used_colors = {color for _count, color in image.convert("RGB").getcolors(maxcolors=1_000_000)}
+        self.assertNotIn(former_warp_line_color, used_colors, "the removed warp-line color must never be drawn")
 
     def test_render_layer_map_handles_a_single_visited_location(self):
         """Real edge case: a brand-new character has visited exactly one place (their start) -- must not crash with no edges at all."""
@@ -36958,8 +36959,14 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         updated_run = db.get_labyrinth_run(chat_id, party_key)
         self.assertNotEqual(updated_run["current_room_id"], seal_leaf, f"expected the move onto the collapsed path to be refused, got: {sink}")
 
-    def test_render_labyrinth_map_draws_a_real_warp_line_without_crashing(self):
-        """map_render.py's post-cell warp-line drawing pass must actually run (and the legend must mention it) whenever a floor has a real warp, without crashing."""
+    def test_render_labyrinth_map_handles_a_real_warp_without_crashing(self):
+        """
+        The warp connection itself is still real game logic (see
+        rules/labyrinth.py) -- only its map visualization was removed
+        (2026-09-04, per Coffee: "we don't need to know where the warp
+        locations go"). A floor with a real warp must still render
+        cleanly with no line and no legend mention of it.
+        """
         import map_render
         warp_floor_data = None
         for seed in range(150):
@@ -36971,6 +36978,12 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         rooms = warp_floor_data["rooms"]
         png_bytes = map_render.render_labyrinth_map(20, rooms, warp_floor_data["hub_room_id"], set(), set(rooms.keys()), {}, None)
         self.assertGreater(len(png_bytes), 0)
+        import io
+        from PIL import Image
+        image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        former_warp_line_color = (170, 80, 200)
+        used_colors = {color for _count, color in image.getcolors(maxcolors=1_000_000)}
+        self.assertNotIn(former_warp_line_color, used_colors, "the removed warp-line color must never be drawn")
 
     def test_assign_grid_positions_gives_every_room_a_unique_cell(self):
         """

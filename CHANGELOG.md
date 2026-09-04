@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.511] — fix: Labyrinth/dungeon map no longer draws the purple warp line
+
+Real live request (Coffee, dev-bridge, screenshot of Floor 1 with a
+diagonal purple line circled: "Please remove this purple straight
+line. We don't need to know where the warp locations go."). The warp
+connection itself is real, functioning game logic in
+`rules/labyrinth.py`/`rules/dungeon_evolve.py` -- only its map
+visualization was a spoiler, showing exactly which two rooms a warp
+linked before the player ever used it.
+
+Removed the warp-line drawing pass and its "purple line = ..." legend
+entry from BOTH map renderers in `map_render.py`
+(`render_layer_map` for the overworld/evolved dungeons, and
+`render_labyrinth_map` for the Labyrinth itself) for consistency --
+only one had actually been reported, but both shared the identical
+mechanic and would have hit the same complaint eventually. The now-
+unused `_WARP_LINE_COLOR` constant was removed too.
+
+2 existing tests renamed and strengthened (now assert the removed
+purple pixel color is genuinely absent from the rendered image, not
+just "renders without crashing") plus the surrounding 4-test map-
+render batch re-verified in isolation, all green.
+
 ## [1.27.510] — fix: "pick the lock" silently no-oped when a room held both a chest and a switch/lever
 
 Real live bug (Coffee, dev-bridge: "Picking the lock didn't work for
