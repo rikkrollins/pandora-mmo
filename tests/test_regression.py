@@ -4528,6 +4528,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent("I want to leave my party", [])
         self.assertEqual(result["action"], "leave_party")
 
+    def test_model_guessing_summon_remnant_for_unrelated_text_is_never_trusted(self):
+        """
+        Real live incident (2026-09-04, topic-activity signal): three
+        different, unrelated real inputs in one evening -- "Stand on
+        the pressure plate", a bare "Inventory", and "Go through the
+        door" -- were all classified as summon_remnant by the model,
+        each firing a real, confusing "Summon which Remnant? You've
+        bound: ..." prompt with zero relation to what the player
+        actually said. summon_remnant had no equivalent guard to the
+        start_combat/pass_turn/flee/dismantle_item/leave_guild/
+        leave_party defensive patterns already established above, even
+        though it's exactly as exciting/sticky-sounding a wrong guess
+        for text this model doesn't understand. Same fix: never trusted
+        from the model alone unless the raw text actually contains a
+        real trigger word or names a real bound Remnant -- the same
+        grounding the deterministic fallback (mentions_a_real_remnant)
+        already requires of itself.
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "summon_remnant"}'}
+
+        for text in ("Stand on the pressure plate", "Inventory", "Go through the door"):
+            with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+                result = intent_parser_module.parse_intent(text, [])
+            self.assertNotEqual(result["action"], "summon_remnant", f"text={text!r}")
+
+        # No regression: a real summon phrase the model happens to agree with still works.
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Summon the wrathflame unbound", [])
+        self.assertEqual(result["action"], "summon_remnant")
+
     def test_summon_remnant_never_loses_to_a_shared_word_npc_name_collision(self):
         """
         Real live bug + real spoiler (2026-08-31, dev-bridge, Elduinn:
@@ -33268,6 +33306,79 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink4, chat_id=chat_id))
         run_resumed = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
         self.assertEqual(run_resumed["floor"], 6)
+
+    async def test_checkpoint_floor_and_best_floor_persist_to_the_real_character_not_whoever_is_active(self):
+        """
+        Real live report (2026-09-04, Coffee: "we left the labyrinth
+        and when i went to return it reset?"). Investigated the real
+        live data: labyrinth_checkpoint_floor was 0 for every character
+        in the party despite labyrinth_best_floor showing real progress
+        (2/4) for several -- meaning the actual resume field was never
+        landing on the right row. Root cause, found reading the code
+        (same bug class as the earlier "Ravenloft" stuck-sentinel
+        incident, _labyrinth_active_party_members's own docstring):
+        _resolve_labyrinth_checkpoint wrote via
+        db.update_character(m["telegram_user_id"], ...) and both
+        bump_labyrinth_best_floor call sites the same way -- ALL three
+        resolve to whichever character is CURRENTLY ACTIVE for that
+        telegram_user_id, not necessarily the specific party member `m`
+        that actually earned the reward. Two real humans each running
+        two alts in the same party (exactly Coffee's and Sugar's real
+        situation) means this fires for real: the non-active alt's own
+        checkpoint/best-floor progress is silently redirected onto
+        whichever character happens to be active at that instant,
+        never its own row.
+        """
+        owner_id, chat_id = 962040, -962040
+        first = make_basic_character(owner_id, "CheckpointOwnerTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character_by_id(first["character_id"], defeated_monsters=["colosseum_champion"], hp_current=1)
+        party_id = db.create_party(owner_id, chat_id)
+        db.update_character_by_id(first["character_id"], party_id=party_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+
+        # The SAME owner has a second alt in the same party -- and it's
+        # THIS one that's currently active, not `first`, exactly the
+        # real live shape (Coffee/Sugar both running two alts each).
+        second = db.create_character(
+            telegram_user_id=owner_id, chat_id=chat_id, name="CheckpointActiveAltTester", race="Human", char_class="Fighter",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=20, armor_class=11, gold=0, inventory={}, known_spells=[], current_location="crossroads_tavern",
+        )
+        db.update_character_by_id(second["character_id"], party_id=party_id)
+        db.switch_character(owner_id, chat_id, second["character_id"])
+        self.assertEqual(db.get_active_character_id(owner_id, chat_id), second["character_id"])
+
+        party_key = f"party:{party_id}"
+        room = {
+            "id": "f5_checkpoint", "name": "A Waystation", "description": "Safe.",
+            "floor": 5, "is_checkpoint": True, "connections": [],
+        }
+        run = db.create_labyrinth_run(
+            chat_id, party_key, floor=5, seed=1, current_room_id="f5_checkpoint", rooms={"f5_checkpoint": room},
+        )
+        # `first` is the one who physically reached the checkpoint (the real actor).
+        await bot._resolve_labyrinth_checkpoint(
+            FakeUpdate(owner_id, "", [], chat_id=chat_id), first, room, run, chat_id, party_key,
+        )
+        db.bump_labyrinth_best_floor_by_id(first["character_id"], 5)
+
+        first_after = db.get_character_by_id(first["character_id"])
+        second_after = db.get_character_by_id(second["character_id"])
+        self.assertEqual(
+            first_after["labyrinth_checkpoint_floor"], 5,
+            "expected the character who actually reached the checkpoint to have it on their own row",
+        )
+        self.assertEqual(
+            first_after["labyrinth_best_floor"], 5,
+            "expected the character who actually reached floor 5 to have it on their own row",
+        )
+        self.assertEqual(
+            second_after.get("labyrinth_checkpoint_floor", 0), 0,
+            "the currently-active OTHER alt must not receive a checkpoint they never earned",
+        )
+        self.assertEqual(
+            second_after.get("labyrinth_best_floor", 0), 0,
+            "the currently-active OTHER alt must not receive a best-floor bump they never earned",
+        )
 
     async def test_checkpoint_grants_full_heal_asi_skill_point_and_achievement_once_only(self):
         user_id, chat_id = 962014, -962014

@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.503] — fix: model kept guessing "summon_remnant" for unrelated text + Labyrinth checkpoint/best-floor progress could silently land on the wrong alt
+
+**Intent misclassification** (prepared during the hourly monitoring pass, per its own "don't ship, just prepare" rule): three unrelated live inputs in one evening -- "Stand on the pressure plate", a bare "Inventory", and "Go through the door" -- were all classified by the AI intent classifier as `summon_remnant`, each firing a confusing "Summon which Remnant?" prompt. `summon_remnant` was missing the same defensive "never trust the model alone without a real trigger word" guard this codebase already applies to `start_combat`/`pass_turn`/`flee`/`dismantle_item`/`leave_guild`/`leave_party` after past live incidents. Fixed in `ai/intent_parser.py`; a real test covers all three live inputs plus a no-regression check that a genuine "Summon the wrathflame unbound" still works.
+
+**Labyrinth progress silently misattributed** (live report, Coffee: "we left the labyrinth and when i went to return it reset?"): live data showed `labyrinth_checkpoint_floor` stuck at 0 for an entire party despite `labyrinth_best_floor` showing real depth reached (2-4). Root cause: `_resolve_labyrinth_checkpoint`'s write and both `bump_labyrinth_best_floor` call sites all resolved via `telegram_user_id`, which always targets whichever character is CURRENTLY ACTIVE for that owner -- not necessarily the specific party member who actually earned the reward. A real person running two alts in the same party (exactly Coffee's and Sugar's own setup) hits this every time the non-active alt is the one that reaches a checkpoint or a new floor. Same bug class as `update_character_by_id`'s own documented incident and the earlier "Ravenloft" stuck-sentinel fix. Fixed: new `db.bump_labyrinth_best_floor_by_id`, and both call sites (plus the checkpoint write/re-fetch) now target the exact `character_id`, never the ambient "active character." A real test reproduces the exact live shape (two same-owner alts, one active, one not) and confirms both fields now land on the character that actually earned them.
+
+Note: this fix prevents the bug going forward, but does not recover the specific run that was already lost -- that run's seed and room data were deleted on leave and were never logged anywhere separately (see the next planned item: a real seed-logging/replay system).
+
+Full `LabyrinthTests` suite (108 tests) passes (6 known, pre-existing batch-order flakes confirmed harmless in isolation).
+
 ## [1.27.502] — fix: "stand on the pressure plate" misclassified as summoning a Remnant
 
 Real live report (2026-09-04, dev-bridge): Coffee typed "Stand on the

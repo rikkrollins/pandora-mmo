@@ -2923,6 +2923,27 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # raw text actually contains "party".
             if parsed["action"] == "leave_party" and "party" not in text.lower():
                 return fallback
+            # Same defensive pattern again (2026-09-04, topic-activity
+            # signal): three different, unrelated real inputs in one
+            # evening -- "Stand on the pressure plate", a bare
+            # "Inventory", and "Go through the door" -- were all
+            # classified as summon_remnant by the model, each firing a
+            # real, confusing "Summon which Remnant? You've bound: ..."
+            # prompt with zero relation to what the player actually
+            # said. summon_remnant is exactly as exciting/sticky-
+            # sounding a wrong guess for text this model doesn't
+            # understand as start_combat/pass_turn/flee/dismantle_item/
+            # leave_guild/leave_party above, and had no equivalent
+            # guard. Never trusted from the model alone unless the raw
+            # text actually contains a real trigger word or names a
+            # real bound Remnant -- the same grounding the deterministic
+            # fallback (mentions_a_real_remnant, above in this same
+            # file) already requires of itself.
+            if parsed["action"] == "summon_remnant" and not (
+                re.search(r"\b(?:summon|call forth|invoke)\b", text.lower())
+                or any(r["name"].lower() in text.lower() or rid.replace("_", " ") in text.lower() for rid, r in REMNANTS.items())
+            ):
+                return fallback
             # Real live bug (2026-08-15, dev-bridge screenshot): "Take
             # the band" -- a ring the player had just been shown in a
             # quest/reward preview but never actually earned yet -- came

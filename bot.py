@@ -9535,6 +9535,20 @@ async def _resolve_labyrinth_checkpoint(update: Update, character: dict, room: d
     is real, not cosmetic: labyrinth_checkpoint_floor is exactly what
     _do_enter_labyrinth reads to decide which segment a FUTURE run
     starts in.
+
+    Real live bug fixed (2026-09-04, Coffee: "we left the labyrinth and
+    when i went to return it reset?"): the actual live data showed
+    labyrinth_checkpoint_floor stuck at 0 for an entire party despite
+    labyrinth_best_floor showing real depth reached -- root cause,
+    this function's own write used db.update_character(m["telegram_
+    user_id"], ...), which always resolves to whichever character is
+    CURRENTLY ACTIVE for that owner, not necessarily the specific party
+    member `m` that actually reached the checkpoint (a real person
+    running two alts in one party, exactly Coffee's and Sugar's own
+    setup, hits this every time the non-active alt is the one that
+    reaches it). Same real bug class as update_character_by_id's own
+    documented incident and the earlier "Ravenloft" stuck-sentinel fix
+    -- now writes and re-fetches by the exact character_id instead.
     """
     if not room.get("is_checkpoint") or room.get("checkpoint_claimed"):
         return ""
@@ -9548,8 +9562,8 @@ async def _resolve_labyrinth_checkpoint(update: Update, character: dict, room: d
             skill_points=m.get("skill_points", 0) + 1,
         )
         if not m.get("is_ai"):
-            db.update_character(m["telegram_user_id"], chat_id, labyrinth_checkpoint_floor=floor)
-            refreshed = db.get_character(m["telegram_user_id"], chat_id)
+            db.update_character_by_id(m["character_id"], labyrinth_checkpoint_floor=floor)
+            refreshed = db.get_character_by_id(m["character_id"])
             await _check_and_award_achievements(update, refreshed)
     db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
     return (
@@ -9776,7 +9790,7 @@ async def _do_descend_labyrinth(update: Update) -> None:
     )
     members = _labyrinth_active_party_members(character)
     for m in members:
-        db.bump_labyrinth_best_floor(m["telegram_user_id"], chat_id, entry_room["floor"])
+        db.bump_labyrinth_best_floor_by_id(m["character_id"], entry_room["floor"])  # 2026-09-04: character_id, not telegram_user_id -- see bump_labyrinth_best_floor_by_id's own docstring
 
     body = _labyrinth_room_text(character, entry_room, run, chat_id, announce_modifier=True)
     await _safe_send(
@@ -10125,7 +10139,7 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
     if newly_reached:
         members = _labyrinth_active_party_members(character)
         for m in members:
-            db.bump_labyrinth_best_floor(m["telegram_user_id"], chat_id, dest_floor)
+            db.bump_labyrinth_best_floor_by_id(m["character_id"], dest_floor)  # 2026-09-04: character_id, not telegram_user_id -- see bump_labyrinth_best_floor_by_id's own docstring
     checkpoint_line = await _resolve_labyrinth_checkpoint(update, character, destination, run, chat_id, party_key)
     hazard_line = "" if checkpoint_line else await _resolve_labyrinth_hazard(update, character, destination, run, chat_id, party_key)
 

@@ -3658,6 +3658,28 @@ def bump_labyrinth_best_floor(telegram_user_id: int, chat_id: int, floor: int) -
         )
 
 
+def bump_labyrinth_best_floor_by_id(character_id: int, floor: int) -> None:
+    """
+    Same as bump_labyrinth_best_floor, but targets an exact character_id
+    directly instead of resolving through telegram_user_id's currently-
+    active character. Real bug found live (2026-09-04, Coffee: "we left
+    the labyrinth and when i went to return it reset?"): a party can
+    contain two characters owned by the same real person (exactly
+    Coffee's and Sugar's own real setup), and the telegram_user_id-based
+    variant always resolves to whichever of them is CURRENTLY active --
+    so the non-active party member's own real depth progress silently
+    lands on their owner's OTHER character instead, never its own row.
+    Same real bug class as update_character_by_id's own documented
+    incident (shrine offering revival) and the earlier "Ravenloft"
+    stuck-sentinel fix.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE characters SET labyrinth_best_floor = ? WHERE character_id = ? AND labyrinth_best_floor < ?",
+            (floor, character_id, floor),
+        )
+
+
 # --- Autonomous AI-played party (2026-07-10, per Coffee: a separate,
 # self-directed party that plays through the exact same pipeline real
 # players use -- distinct from is_ai=1 combat companions, which only
