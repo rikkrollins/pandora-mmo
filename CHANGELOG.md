@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.504] — feature: durable Labyrinth seed logging + "load labyrinth seed #"
+
+Direct follow-up to the checkpoint/best-floor fix in v1.27.503: that
+fix prevents progress from silently landing on the wrong character
+going forward, but the actual seed/room data for the run Coffee's
+party lost was already gone for good, because every Labyrinth
+segment's seed was a one-shot `random.randint()` stored ONLY in the
+live `labyrinth_runs` row, hard-deleted the instant the party leaves.
+Per Coffee's direct asks: "make a seed logging system so if that
+happen u can reload the seed", a way to ask for a seed number, and
+"let us load and play a seed with the generator" (example phrasing he
+gave: "Load labyrinth seed #123456").
+
+Researched how Noita handles this (per Coffee's own ask): a world seed
+plus a deterministic PRNG fully determines every piece of procedural
+content, and typing in ANY arbitrary seed -- never played before or
+not -- always produces a real, valid world. Confirmed `rules/labyrinth.
+generate_segment(campaign, segment, rng)` already has this exact
+property (new determinism test added, since it was previously only
+assumed by analogy to `rules/dungeon_evolve.py`'s own tested guarantee).
+
+**New, append-only `labyrinth_seed_log` table** (never deleted, unlike
+`labyrinth_runs`) — a real row logged on every segment generation
+(`_do_enter_labyrinth` and `_do_descend_labyrinth`), recording the
+segment, seed, theme, and a real point-in-time snapshot of which
+characters were on the run.
+
+**Two new commands.** "What is my seed" / "show the seed" / "current
+seed" -> `_do_check_labyrinth_seed`: shows the live run's segment/seed
+if in one, plus the party's last 5 logged seeds. "Load labyrinth seed
+#123456" / "load seed 123456" -> `_do_enter_labyrinth`'s existing entry
+path with a `forced_seed` (and optional `forced_segment`) override —
+same preconditions as a normal entry, no separate "replay" function
+needed: loading a previously-logged seed reproduces that exact
+segment, and loading a brand-new number nobody's ever typed still
+produces a real, valid one, since `random.Random` never fails for any
+int and the log is a record of what's been played, never a whitelist.
+
+7 new tests: segment-generation determinism, both real log call sites,
+the seed-check command's live+history output, a real end-to-end
+replay producing byte-identical rooms, a never-before-seen seed still
+generating a valid segment with no error, and the new intent
+phrasings (including all of Coffee's own example variants). Full
+`LabyrinthTests` suite (113 tests) passes (6 known, pre-existing
+batch-order flakes confirmed harmless in isolation).
+
 ## [1.27.503] — fix: model kept guessing "summon_remnant" for unrelated text + Labyrinth checkpoint/best-floor progress could silently land on the wrong alt
 
 **Intent misclassification** (prepared during the hourly monitoring pass, per its own "don't ship, just prepare" rule): three unrelated live inputs in one evening -- "Stand on the pressure plate", a bare "Inventory", and "Go through the door" -- were all classified by the AI intent classifier as `summon_remnant`, each firing a confusing "Summon which Remnant?" prompt. `summon_remnant` was missing the same defensive "never trust the model alone without a real trigger word" guard this codebase already applies to `start_combat`/`pass_turn`/`flee`/`dismantle_item`/`leave_guild`/`leave_party` after past live incidents. Fixed in `ai/intent_parser.py`; a real test covers all three live inputs plus a no-regression check that a genuine "Summon the wrathflame unbound" still works.

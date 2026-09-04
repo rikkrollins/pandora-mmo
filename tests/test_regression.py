@@ -33250,6 +33250,31 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(back["floor"], 2)
         self.assertEqual(back["descends_to"], floor3_hub["id"])
 
+    def test_generate_segment_is_deterministic_with_the_same_seed(self):
+        """
+        Real, load-bearing guarantee for the new seed-logging/replay
+        feature (2026-09-04, per Coffee: "make a seed logging system...
+        also let us load and play a seed with the generator... make
+        sure everything ... is included so when we load them games or
+        replay them they are the same"). generate_segment must be a
+        pure function of (campaign, segment, rng) -- confirmed here,
+        not just assumed by analogy to rules/dungeon_evolve.py's own
+        already-tested determinism.
+        """
+        data_a = labyrinth_module.generate_segment(bot.CAMPAIGN, 3, random.Random(918273))
+        data_b = labyrinth_module.generate_segment(bot.CAMPAIGN, 3, random.Random(918273))
+        self.assertEqual(data_a["theme"]["id"], data_b["theme"]["id"])
+        self.assertEqual(data_a["entry_room_id"], data_b["entry_room_id"])
+        self.assertEqual(data_a["checkpoint_room_id"], data_b["checkpoint_room_id"])
+        self.assertEqual(set(data_a["rooms"].keys()), set(data_b["rooms"].keys()))
+        for room_id, room_a in data_a["rooms"].items():
+            room_b = data_b["rooms"][room_id]
+            self.assertEqual(room_a.get("name"), room_b.get("name"))
+            self.assertEqual(room_a.get("connections"), room_b.get("connections"))
+            self.assertEqual(room_a.get("monsters"), room_b.get("monsters"))
+            self.assertEqual(room_a.get("lockables"), room_b.get("lockables"))
+            self.assertEqual(room_a.get("hazard"), room_b.get("hazard"))
+
     def test_labyrinth_depth_multiplier_strictly_increases_monster_stats(self):
         floor1 = bot._build_labyrinth_enemy("goblin", 1, 0, 1)
         floor20 = bot._build_labyrinth_enemy("goblin", 20, 0, 1)
@@ -33306,6 +33331,113 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink4, chat_id=chat_id))
         run_resumed = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
         self.assertEqual(run_resumed["floor"], 6)
+
+    async def test_enter_and_descend_both_log_a_real_durable_seed_row(self):
+        """
+        Real live incident (2026-09-04, Coffee: "we left the labyrinth
+        and when i went to return it reset?"): the seed was gone
+        forever the moment the run row was deleted, with no record
+        anywhere. labyrinth_seed_log is append-only and never deleted
+        (unlike labyrinth_runs) -- confirmed here it actually gets a
+        real row on both a brand-new entry AND a later descend, not
+        just one of the two real call sites.
+        """
+        user_id, chat_id = 962041, -962041
+        make_basic_character(user_id, "SeedLogTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        party_key = f"solo:{user_id}"
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        run = db.get_labyrinth_run(chat_id, party_key)
+        log_after_enter = db.get_labyrinth_seed_log(chat_id, party_key)
+        self.assertEqual(len(log_after_enter), 1)
+        self.assertEqual(log_after_enter[0]["segment"], 1)
+        self.assertEqual(log_after_enter[0]["seed"], run["seed"])
+        self.assertIn("SeedLogTester", log_after_enter[0]["party_names"])
+        self.assertTrue(log_after_enter[0]["theme"])
+
+        base_seed = run["seed"]
+        await self._walk_to_checkpoint(user_id, chat_id)
+        await bot._do_descend_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        log_after_descend = db.get_labyrinth_seed_log(chat_id, party_key)
+        self.assertEqual(len(log_after_descend), 2)
+        # Most recent first. _do_descend_labyrinth derives its own real
+        # per-segment seed as base_seed + segment (labyrinth_runs' own
+        # `seed` column always stays the party's original base value,
+        # never overwritten on descend) -- the log must record that
+        # real, DERIVED value actually used for generation, not the
+        # unchanged base column.
+        self.assertEqual(log_after_descend[0]["segment"], 2)
+        self.assertEqual(log_after_descend[0]["seed"], base_seed + 2)
+
+    async def test_check_labyrinth_seed_shows_current_run_and_real_history(self):
+        user_id, chat_id = 962042, -962042
+        make_basic_character(user_id, "SeedCheckTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+
+        sink = []
+        await bot._do_check_labyrinth_seed(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("No Labyrinth seed on record yet" in s for s in sink))
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        sink2 = []
+        await bot._do_check_labyrinth_seed(FakeUpdate(user_id, "", sink2, chat_id=chat_id))
+        combined = " ".join(sink2)
+        self.assertIn("Current run", combined)
+        self.assertIn(str(run["seed"]), combined)
+        self.assertIn("Recent seeds", combined)
+
+    async def test_load_labyrinth_seed_reconstructs_the_exact_same_rooms(self):
+        """Real end-to-end replay: entering, leaving, then loading the SAME logged seed again produces byte-identical rooms to the first real generation -- not just comparing generator output in isolation."""
+        user_id, chat_id = 962043, -962043
+        make_basic_character(user_id, "SeedReplayTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        party_key = f"solo:{user_id}"
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        first_run = db.get_labyrinth_run(chat_id, party_key)
+        original_rooms = first_run["rooms"]
+        original_seed = first_run["seed"]
+
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        self.assertIsNone(db.get_labyrinth_run(chat_id, party_key))
+
+        sink = []
+        await bot._do_load_labyrinth_seed(FakeUpdate(user_id, "", sink, chat_id=chat_id), seed=original_seed, segment=1)
+        reloaded_run = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(reloaded_run["seed"], original_seed)
+        self.assertEqual(set(reloaded_run["rooms"].keys()), set(original_rooms.keys()))
+        for room_id, original_room in original_rooms.items():
+            self.assertEqual(reloaded_run["rooms"][room_id].get("connections"), original_room.get("connections"))
+            self.assertEqual(reloaded_run["rooms"][room_id].get("monsters"), original_room.get("monsters"))
+
+        # A completely new, never-before-seen seed number still produces a real, valid segment -- no whitelist, no error.
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        never_seen_seed = 424242424
+        self.assertIsNone(db.get_labyrinth_run(chat_id, party_key))
+        sink2 = []
+        await bot._do_load_labyrinth_seed(FakeUpdate(user_id, "", sink2, chat_id=chat_id), seed=never_seen_seed, segment=1)
+        fresh_run = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(fresh_run["seed"], never_seen_seed)
+        self.assertTrue(fresh_run["rooms"])
+
+        # Real progress fields are untouched by loading a specific seed except through the normal checkpoint/depth mechanism.
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["labyrinth_checkpoint_floor"], 0)
+
+    def test_load_labyrinth_seed_intent_extracts_a_real_seed_number(self):
+        """Real live example phrasing (Coffee): "Load labyrinth seed #123456" -- plus the bare variants he explicitly asked for ("load seed", "what is my seed", "show the seed", "current seed")."""
+        intent = _keyword_fallback("Load labyrinth seed #123456", [])
+        self.assertEqual(intent["action"], "load_labyrinth_seed")
+        self.assertEqual(intent["seed"], 123456)
+
+        intent2 = _keyword_fallback("load seed 42", [])
+        self.assertEqual(intent2["action"], "load_labyrinth_seed")
+        self.assertEqual(intent2["seed"], 42)
+
+        for text in ("what is my seed", "what's my seed", "Show the seed", "current seed", "check my seed"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_labyrinth_seed", f"text={text!r}")
 
     async def test_checkpoint_floor_and_best_floor_persist_to_the_real_character_not_whoever_is_active(self):
         """

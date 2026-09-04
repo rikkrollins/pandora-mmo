@@ -1978,6 +1978,28 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         if any(w in lowered for w in ["descend", "go down", "go deeper", "stairs down"]):
             return {**base, "action": "descend_labyrinth"}
 
+    # Real live feature (2026-09-04, per Coffee: "we left the labyrinth
+    # and when i went to return it reset?" -> "make a seed logging
+    # system so if that happen u can reload the seed... also let us
+    # load and play a seed with the generator" -- example phrasing he
+    # gave, "Load labyrinth seed #123456" -- then explicitly asked for
+    # bare "what is my seed"/"load seed"/"show the seed"/"current seed"
+    # to ALSO work without the word "labyrinth"). "seed" as a real
+    # number-loading concept never collides with this game's own
+    # unrelated "a seed"/"The Last Seed" quest item -- that content is
+    # only ever reached via gather/examine's own real trigger words
+    # (checked elsewhere in this file), never "load"/"what is"/"show"/
+    # "current" phrasing.
+    load_seed_match = re.search(r"\bload\b.*?\bseed\b\s*#?\s*(\d+)", lowered)
+    if load_seed_match:
+        result = {**base, "action": "load_labyrinth_seed", "seed": int(load_seed_match.group(1))}
+        segment_match = re.search(r"\bsegment\s*#?\s*(\d+)", lowered)
+        if segment_match:
+            result["segment"] = int(segment_match.group(1))
+        return result
+    if re.search(r"\b(?:what(?:'s| is)|show|check)\b.*\bseed\b", lowered) or "current seed" in lowered:
+        return {**base, "action": "check_labyrinth_seed"}
+
     move_words = ["go to", "goto", "head to", "heading to", "walk to", "walking to",
                   "travel to", "traveling to", "travelling to", "move to", "moving to",
                   "enter the", "descend", "ascend",
@@ -2807,6 +2829,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon", "push_down_pit",
                 "enter_labyrinth", "leave_labyrinth", "descend_labyrinth",
+                "check_labyrinth_seed", "load_labyrinth_seed",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
                 "check_remnants", "check_story", "check_magic", "check_affinity",
                 "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",

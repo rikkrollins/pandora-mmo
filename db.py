@@ -240,6 +240,30 @@ CREATE TABLE IF NOT EXISTS labyrinth_runs (
 );
 """
 
+# Real live incident (2026-09-04, Coffee: "we left the labyrinth and
+# when i went to return it reset?"): labyrinth_runs (above) is
+# deliberately ephemeral -- deleted the instant a party leaves -- so
+# every segment's real seed was permanently lost the moment that
+# happened, with no record anywhere of what it had been. This table is
+# the opposite: append-only, NEVER deleted, one row per real segment
+# ever generated (both a brand-new entry and each later descend), so a
+# seed can always be found again later even long after the run itself
+# is gone. party_names is a real, point-in-time SNAPSHOT (not a live
+# lookup) -- party composition can change after the fact, and "whose
+# game was this" should still answer correctly for an old row.
+CREATE_LABYRINTH_SEED_LOG_TABLE = """
+CREATE TABLE IF NOT EXISTS labyrinth_seed_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    party_key TEXT NOT NULL,
+    segment INTEGER NOT NULL,
+    seed INTEGER NOT NULL,
+    theme TEXT,
+    party_names TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+"""
+
 # Multi-tenant scaling Phase 3 (2026-08-02): a real registry of every
 # Telegram group that has ever run /set_topic, so another group can add
 # this bot and get its own working topic routing without touching
@@ -350,6 +374,7 @@ def init_db() -> None:
         conn.execute(CREATE_CHATS_TABLE)
         conn.execute(CREATE_CHAT_TOPIC_CONFIG_TABLE)
         conn.execute(CREATE_LABYRINTH_RUNS_TABLE)
+        conn.execute(CREATE_LABYRINTH_SEED_LOG_TABLE)
 
         # Older DBs created before fog-of-war/character-slots/proficiency
         # may already have the new characters table but be missing later
@@ -3644,6 +3669,41 @@ def update_labyrinth_run(chat_id: int, party_key: str, **fields) -> dict | None:
 def delete_labyrinth_run(chat_id: int, party_key: str) -> None:
     with get_connection() as conn:
         conn.execute("DELETE FROM labyrinth_runs WHERE chat_id = ? AND party_key = ?", (chat_id, party_key))
+
+
+def log_labyrinth_seed(
+    chat_id: int, party_key: str, segment: int, seed: int, theme: str | None, party_names: list[str],
+) -> None:
+    """
+    Real live incident (2026-09-04, Coffee: "we left the labyrinth and
+    when i went to return it reset?" / "make a seed logging system so
+    if that happen u can reload the seed"). Append-only, never deleted
+    (see CREATE_LABYRINTH_SEED_LOG_TABLE's own comment) -- called once
+    per real segment generation, both a brand-new run and each later
+    descend, so a seed always has a durable record even after
+    labyrinth_runs itself is long gone.
+    """
+    with get_connection() as conn:
+        conn.execute(
+            "INSERT INTO labyrinth_seed_log (chat_id, party_key, segment, seed, theme, party_names, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (chat_id, party_key, segment, seed, theme, json.dumps(party_names), datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def get_labyrinth_seed_log(chat_id: int, party_key: str, limit: int = 10) -> list[dict]:
+    """Most recent first -- real history a player can browse to find a past seed again."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM labyrinth_seed_log WHERE chat_id = ? AND party_key = ? ORDER BY id DESC LIMIT ?",
+            (chat_id, party_key, limit),
+        ).fetchall()
+    entries = []
+    for row in rows:
+        d = dict(row)
+        d["party_names"] = json.loads(d["party_names"])
+        entries.append(d)
+    return entries
 
 
 def bump_labyrinth_best_floor(telegram_user_id: int, chat_id: int, floor: int) -> None:

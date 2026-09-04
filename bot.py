@@ -9575,7 +9575,24 @@ async def _resolve_labyrinth_checkpoint(update: Update, character: dict, room: d
     )
 
 
-async def _do_enter_labyrinth(update: Update) -> None:
+async def _do_enter_labyrinth(update: Update, forced_seed: int | None = None, forced_segment: int | None = None) -> None:
+    """
+    forced_seed/forced_segment (2026-09-04, per Coffee: "make a seed
+    logging system so if that happen u can reload the seed... also let
+    us load and play a seed with the generator" -- example phrasing he
+    gave, "Load labyrinth seed #123456"). When given, these REPLACE the
+    normal random.randint(...) draw and the checkpoint-based resume
+    segment below -- everything else about entry (preconditions,
+    generation, logging, messaging) is identical. This is deliberately
+    the SAME code path a normal entry uses, not a separate "replay"
+    function: loading a previously-logged seed reproduces that exact
+    segment, and loading a brand-new number nobody's ever typed still
+    produces a real, valid segment either way -- random.Random(seed)
+    never fails for any int, and the seed log is a record of what's
+    been played, never a whitelist of what's allowed (confirmed against
+    Noita's own identical "type any seed number, always get a real
+    world back" design).
+    """
     chat_id = update.effective_chat.id
     character = db.get_character(update.effective_user.id, chat_id)
     if character is None:
@@ -9608,10 +9625,13 @@ async def _do_enter_labyrinth(update: Update) -> None:
         # FURTHEST one any current member has personally banked, so
         # nobody's own real progress is ever silently thrown away.
         members_for_start = _labyrinth_active_party_members(character)
-        checkpoint = max((m.get("labyrinth_checkpoint_floor", 0) for m in members_for_start), default=0)
-        start_floor = checkpoint + 1
-        segment = labyrinth_module.segment_number_for_floor(start_floor)
-        seed = random.randint(0, 2**31 - 1)
+        if forced_segment is not None:
+            segment = forced_segment
+        else:
+            checkpoint = max((m.get("labyrinth_checkpoint_floor", 0) for m in members_for_start), default=0)
+            start_floor = checkpoint + 1
+            segment = labyrinth_module.segment_number_for_floor(start_floor)
+        seed = forced_seed if forced_seed is not None else random.randint(0, 2**31 - 1)
         segment_data = labyrinth_module.generate_segment(CAMPAIGN, segment, random.Random(seed))
         entry_room = segment_data["rooms"][segment_data["entry_room_id"]]
         run = db.create_labyrinth_run(
@@ -9620,6 +9640,10 @@ async def _do_enter_labyrinth(update: Update) -> None:
             visited_floors=[entry_room["floor"]],
         )
         new_segment_theme = segment_data["theme"]
+        db.log_labyrinth_seed(
+            chat_id, party_key, segment, seed, segment_data["theme"]["name"],
+            [m["name"] for m in members_for_start],
+        )
 
     members = _labyrinth_active_party_members(character)
     for m in members:
@@ -9780,7 +9804,8 @@ async def _do_descend_labyrinth(update: Update) -> None:
         return
 
     new_segment = labyrinth_module.segment_number_for_floor(run["floor"]) + 1
-    segment_data = labyrinth_module.generate_segment(CAMPAIGN, new_segment, random.Random(run["seed"] + new_segment))
+    new_segment_seed = run["seed"] + new_segment
+    segment_data = labyrinth_module.generate_segment(CAMPAIGN, new_segment, random.Random(new_segment_seed))
     entry_room = segment_data["rooms"][segment_data["entry_room_id"]]
     entry_room["visited"] = True
     run = db.update_labyrinth_run(
@@ -9791,6 +9816,10 @@ async def _do_descend_labyrinth(update: Update) -> None:
     members = _labyrinth_active_party_members(character)
     for m in members:
         db.bump_labyrinth_best_floor_by_id(m["character_id"], entry_room["floor"])  # 2026-09-04: character_id, not telegram_user_id -- see bump_labyrinth_best_floor_by_id's own docstring
+    db.log_labyrinth_seed(
+        chat_id, party_key, new_segment, new_segment_seed, segment_data["theme"]["name"],
+        [m["name"] for m in members],
+    )
 
     body = _labyrinth_room_text(character, entry_room, run, chat_id, announce_modifier=True)
     await _safe_send(
@@ -9800,6 +9829,51 @@ async def _do_descend_labyrinth(update: Update) -> None:
     )
     await _maybe_send_labyrinth_room_image(update, character, entry_room, chat_id)
     await _send_labyrinth_segment_flavor_when_ready(update, segment_data["theme"], entry_room["floor"])
+
+
+async def _do_check_labyrinth_seed(update: Update) -> None:
+    """
+    Real live incident (2026-09-04, Coffee: "we left the labyrinth and
+    when i went to return it reset?" -> "make a seed logging system...
+    i want a way i can ask for a seed #"). Two parts: the LIVE run's
+    own real seed/segment if the party is currently inside one, and the
+    party's own durable history from labyrinth_seed_log (which survives
+    forever, unlike labyrinth_runs itself) -- so a past seed is always
+    something a player can find again, not just visible while it's
+    live.
+    """
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!", speak=False)
+        return
+    party_key = _labyrinth_party_key(character)
+    history = db.get_labyrinth_seed_log(chat_id, party_key, limit=5)
+    lines = []
+    if character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        run = db.get_labyrinth_run(chat_id, party_key)
+        if run is not None:
+            current_segment = labyrinth_module.segment_number_for_floor(run["floor"])
+            logged_theme = next(
+                (e["theme"] for e in history if e["segment"] == current_segment and e["seed"] == run["seed"]), None,
+            )
+            theme_note = f" ({logged_theme})" if logged_theme else ""
+            lines.append(f"🌱 **Current run:** segment {current_segment}, seed `{run['seed']}`{theme_note}")
+    if history:
+        lines.append("📜 **Recent seeds** (most recent first):")
+        for entry in history:
+            when = entry["created_at"].split("T")[0]
+            party = ", ".join(entry["party_names"]) or "unknown party"
+            lines.append(f"  • segment {entry['segment']}, seed `{entry['seed']}` — {entry['theme'] or 'unknown theme'} — {party} — {when}")
+    if not lines:
+        lines.append("No Labyrinth seed on record yet — enter it at least once first.")
+    lines.append("\nSay \"load labyrinth seed <number>\" to play any of these again, or a brand new number you make up.")
+    await _safe_send(update, "\n".join(lines), speak=False)
+
+
+async def _do_load_labyrinth_seed(update: Update, seed: int, segment: int | None = None) -> None:
+    """Free-text entry point for a specific seed (Coffee's own example phrasing: "Load labyrinth seed #123456") -- thin wrapper so _dispatch_intent has one obvious place to route to, same shape as every other Labyrinth dispatch branch."""
+    await _do_enter_labyrinth(update, forced_seed=seed, forced_segment=segment)
 
 
 async def _send_labyrinth_segment_flavor_when_ready(update: Update, theme: dict, floor: int) -> None:
@@ -32996,7 +33070,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
         "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant", "find_merchant",
-        "rest", "go_inactive",
+        "rest", "go_inactive", "check_labyrinth_seed", "load_labyrinth_seed",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
@@ -33027,6 +33101,17 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_leave_labyrinth(update)
     elif action == "descend_labyrinth":
         await _do_descend_labyrinth(update)
+    elif action == "check_labyrinth_seed":
+        await _do_check_labyrinth_seed(update)
+    elif action == "load_labyrinth_seed":
+        # Deliberately skips _do_labyrinth_entry_prompt's own "are you
+        # ready?" confirmation -- a player explicit enough to name a
+        # real seed number already knows exactly what they're doing,
+        # same reasoning as force_model skipping the normal fallback-
+        # trust rule for an explicit /redo. Preconditions (Colosseum,
+        # unlocked, no existing run) still apply unconditionally via
+        # _do_enter_labyrinth's own real checks.
+        await _do_load_labyrinth_seed(update, intent.get("seed"), intent.get("segment"))
     elif action == "start_combat" and _in_labyrinth:
         # "Start the battle"/"begin fight"/etc. classify as the separate
         # "start_combat" action (COMBAT_START_WORDS), not "attack" --
