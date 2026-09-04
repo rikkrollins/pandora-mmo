@@ -29181,6 +29181,42 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(image.format, "PNG")
         self.assertGreaterEqual(image.size[0], map_render._MIN_CANVAS_WIDTH)
 
+    def test_render_layer_map_draws_a_real_warp_line_only_once_both_ends_are_visited(self):
+        """
+        Real warp-line port to the overworld renderer (2026-09-04, per
+        Coffee's own correction that this belongs in the generator now,
+        not deferred -- render_labyrinth_map already draws these,
+        render_layer_map never did). Confirms: no crash with a real
+        warp present, the legend line only appears when a warp is
+        actually drawn, and fog-of-war is respected (an unvisited warp
+        destination must not be drawn or mentioned).
+        """
+        import copy
+        import io
+        from unittest.mock import patch
+        import map_render
+        from PIL import Image
+        layer = copy.deepcopy(bot.CAMPAIGN["locations"]["surface"])
+        layer["fx_warp_a"] = {
+            "name": "Warp Test Room A", "description": "One end of a real warp.",
+            "connections": [], "warps": ["fx_warp_b"], "grid_position": {"x": 50, "y": 50},
+        }
+        layer["fx_warp_b"] = {
+            "name": "Warp Test Room B", "description": "The other end of a real warp.",
+            "connections": [], "warps": ["fx_warp_a"], "grid_position": {"x": 55, "y": 55},
+        }
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png_with_warp = map_render.render_layer_map(
+                "surface", layer, {"fx_warp_a", "fx_warp_b"}, set(), "fx_warp_a",
+            )
+            png_without_warp_visited = map_render.render_layer_map(
+                "surface", layer, {"fx_warp_a"}, set(), "fx_warp_a",
+            )
+        image = Image.open(io.BytesIO(png_with_warp))
+        self.assertEqual(image.format, "PNG")
+        self.assertGreater(len(png_with_warp), 0)
+        self.assertGreater(len(png_without_warp_visited), 0)
+
     def test_render_layer_map_handles_a_single_visited_location(self):
         """Real edge case: a brand-new character has visited exactly one place (their start) -- must not crash with no edges at all."""
         from unittest.mock import patch
@@ -32044,6 +32080,57 @@ class DungeonAuditTests(unittest.TestCase):
         failures = dungeon_audit.check_level_band(campaign, "fixture_dungeon")
         self.assertEqual(failures, [])
 
+    def test_warps_reference_real_rooms_fails_on_a_dangling_destination(self):
+        campaign = _minimal_dungeon_campaign()
+        campaign["locations"]["underground"]["fx_side_room"]["warps"] = ["fx_room_that_does_not_exist"]
+        failures = dungeon_audit.check_warps_reference_real_rooms(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("isn't a real room", failures[0])
+
+    def test_warps_reference_real_rooms_fails_on_a_one_sided_warp(self):
+        campaign = _minimal_dungeon_campaign()
+        campaign["locations"]["underground"]["fx_side_room"]["warps"] = ["fx_lever_room"]
+        # fx_lever_room deliberately has no warp back -- not bidirectional.
+        failures = dungeon_audit.check_warps_reference_real_rooms(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("must be bidirectional", failures[0])
+
+    def test_warps_reference_real_rooms_passes_on_a_real_bidirectional_pair(self):
+        campaign = _minimal_dungeon_campaign()
+        campaign["locations"]["underground"]["fx_side_room"]["warps"] = ["fx_lever_room"]
+        campaign["locations"]["underground"]["fx_lever_room"]["warps"] = ["fx_side_room"]
+        failures = dungeon_audit.check_warps_reference_real_rooms(campaign, "fixture_dungeon")
+        self.assertEqual(failures, [])
+
+    def test_collapse_never_orphans_a_room_fails_when_it_would_cut_off_the_boss(self):
+        campaign = _minimal_dungeon_campaign()
+        # fx_branch_b (the real boss room) is only reachable via the key-gated door on fx_hub --
+        # sealing that exact edge would cut off the only path to it.
+        campaign["locations"]["underground"]["fx_hub"]["collapsing_connections"] = {"fx_branch_b": "fixture_key_gate"}
+        failures = dungeon_audit.check_collapse_never_orphans_a_room(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("cut off the boss room", failures[0])
+
+    def test_collapse_never_orphans_a_room_fails_when_it_would_strand_a_needed_switch(self):
+        campaign = _minimal_dungeon_campaign()
+        campaign["locations"]["underground"]["fx_branch_a"]["lockables"] = [
+            {"id": "fixture_switch", "kind": "switch", "name": "a fixture crystal", "element": "fire"},
+        ]
+        campaign["locations"]["underground"]["fx_side_room"]["lockables"] = [
+            {"id": "fixture_other_gate", "kind": "multi_switch_gate", "name": "a real other gate", "requires": ["fixture_switch"]},
+        ]
+        campaign["locations"]["underground"]["fx_hub"]["collapsing_connections"] = {"fx_branch_a": "fixture_lever"}
+        failures = dungeon_audit.check_collapse_never_orphans_a_room(campaign, "fixture_dungeon")
+        self.assertTrue(failures)
+        self.assertIn("would strand", failures[0])
+
+    def test_collapse_never_orphans_a_room_passes_when_the_seal_target_has_no_other_dependents(self):
+        """The Labyrinth's own real, intended shape: sealing a genuine dead-end (fx_lever_room, reached only via the hub, holding nothing another gate needs) is a real, allowed trade -- not a failure."""
+        campaign = _minimal_dungeon_campaign()
+        campaign["locations"]["underground"]["fx_hub"]["collapsing_connections"] = {"fx_lever_room": "fixture_key_gate"}
+        failures = dungeon_audit.check_collapse_never_orphans_a_room(campaign, "fixture_dungeon")
+        self.assertEqual(failures, [])
+
     def test_add_room_stamps_the_required_tags(self):
         campaign = {"locations": {}}
         room = dungeon_audit.add_room(campaign, "underground", "some_dungeon", "some_room", "Some Room", "A room.")
@@ -32483,6 +32570,154 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             room_b = campaign_b["locations"]["underground"][room_id]
             self.assertEqual(room_a.get("monsters", []), room_b.get("monsters", []))
             self.assertEqual(room_a.get("connections", []), room_b.get("connections", []))
+
+    def test_evolve_dungeon_sometimes_places_a_real_bidirectional_warp(self):
+        """
+        Real warp port (2026-09-04, per Coffee's own correction:
+        "the warp and other things was a misclassification -- they are
+        supposed to be in the generator, not in the final chapter also
+        the final chapter does use them, i want them in the generator
+        too"). Ported from rules/labyrinth.py's identical mechanic.
+        Statistical across real seeds, same discipline as the switch/
+        plate gates above; also confirms the new
+        check_warps_reference_real_rooms audit check never itself
+        fails against real generated output.
+        """
+        import copy
+        hits = 0
+        for seed in range(40):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_warp_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            failures = dungeon_audit.audit_dungeon(campaign, new_id)
+            self.assertFalse(failures["warps_reference_real_rooms"], failures["warps_reference_real_rooms"])
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            warp_rooms = [rid for rid, r in rooms.items() if r.get("warps")]
+            if warp_rooms:
+                hits += 1
+                for rid in warp_rooms:
+                    for dest_id in rooms[rid]["warps"]:
+                        self.assertIn(rid, rooms[dest_id].get("warps", []), "expected a warp to be real and bidirectional")
+        self.assertGreater(hits, 0, "expected at least one warp-bearing evolve across 40 real seeds")
+        self.assertLess(hits, 40, "expected at least one evolve WITHOUT a warp across 40 real seeds -- it should be a real fraction, not every time")
+
+    def test_evolve_dungeon_sometimes_places_a_real_collapse_puzzle_that_stays_solvable(self):
+        """
+        Real single-switch collapse-puzzle port (2026-09-04, same
+        correction as the warp test above). Confirms, across real
+        seeds: the trigger switch is never inside the branch it seals
+        (it must stay reachable to ever be thrown), the new shortcut
+        gate references the same real trigger, and the new
+        check_collapse_never_orphans_a_room audit check never itself
+        fails against real generated output -- the exact real bug this
+        test caught once already (2026-09-04): the check's own BFS
+        originally walked plain `connections` only, wrongly treating
+        the boss room (reached exclusively via a locked_connections
+        gate, by design) as already unreachable before any seal even
+        fired.
+        """
+        import copy
+        hits = 0
+        for seed in range(60):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_collapse_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            failures = dungeon_audit.audit_dungeon(campaign, new_id)
+            self.assertFalse(failures["collapse_never_orphans_a_room"], failures["collapse_never_orphans_a_room"])
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            collapse_rooms = {rid: r for rid, r in rooms.items() if r.get("collapsing_connections")}
+            if not collapse_rooms:
+                continue
+            hits += 1
+            for rid, room in collapse_rooms.items():
+                for dest_id, trigger_id in room["collapsing_connections"].items():
+                    self.assertIn(dest_id, rooms)
+                    # The trigger's OWN required switch must live outside the sealed branch.
+                    trigger_lockable = next(lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("id") == trigger_id)
+                    switch_id = trigger_lockable["requires"][0]
+                    switch_owner = next(rid2 for rid2, r in rooms.items() if any(lk.get("id") == switch_id for lk in r.get("lockables", [])))
+                    self.assertNotIn(switch_owner, (rid, dest_id), "the collapse trigger's own switch must not live inside the branch it seals")
+        self.assertGreater(hits, 0, "expected at least one collapse-puzzle evolve across 60 real seeds")
+        self.assertLess(hits, 60, "expected at least one evolve WITHOUT a collapse puzzle across 60 real seeds -- it should be a real fraction, not every time")
+
+    async def test_evolve_dungeon_warp_is_a_real_nameable_move_destination_end_to_end(self):
+        """Real end-to-end: a generated warp shows up in bot._do_move's own reachable set, not just as inert generator data (the confirmed real gap this port had to close, unlike the Labyrinth's own separate _do_labyrinth_move code path)."""
+        import copy
+        from unittest.mock import patch
+        for seed in range(40):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_warp_move_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            warp_room_id = next((rid for rid, r in rooms.items() if r.get("warps")), None)
+            if warp_room_id is None:
+                continue
+            dest_id = rooms[warp_room_id]["warps"][0]
+            with patch.object(bot, "CAMPAIGN", campaign):
+                user_id = 960920 + seed
+                make_basic_character(user_id, f"WarpMoveTester{seed}", current_location=warp_room_id)
+                sink = []
+                await bot._do_move(FakeUpdate(user_id, "", sink), f"go to {rooms[dest_id]['name']}")
+                character = db.get_character(user_id, -999)
+                self.assertEqual(character["current_location"], dest_id, "expected a real warp to be a real, nameable move destination")
+            return
+        self.fail("expected at least one warp-bearing evolve across 40 real seeds to test a real move through it")
+
+    async def test_evolve_dungeon_collapse_trigger_blocks_then_opens_the_shortcut_end_to_end(self):
+        """Real end-to-end: solving the collapse trigger's own switch (via bot._do_lockpick, the exact same real dispatch a player's own hit action already uses) blocks the sealed connection and opens the new shortcut through bot._do_move -- not just inert generator data."""
+        import copy
+        from unittest.mock import patch
+        for seed in range(60):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_collapse_move_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            seal_room_id = next((rid for rid, r in rooms.items() if r.get("collapsing_connections")), None)
+            if seal_room_id is None:
+                continue
+            seal_room = rooms[seal_room_id]
+            seal_dest_id, trigger_id = next(iter(seal_room["collapsing_connections"].items()))
+            trigger_lockable = next(lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("id") == trigger_id)
+            switch_id = trigger_lockable["requires"][0]
+            switch_room_id = next(rid for rid, r in rooms.items() if any(lk.get("id") == switch_id for lk in r.get("lockables", [])))
+            shortcut_room_id, shortcut_dest_id, echo_id = next(
+                (rid, dest_id, lk_id)
+                for rid, r in rooms.items()
+                for dest_id, lk_id in r.get("locked_connections", {}).items()
+                if lk_id.startswith(f"{trigger_id}_echo_")
+            )
+            with patch.object(bot, "CAMPAIGN", campaign), \
+                 patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("no Ollama in tests")):
+                user_id = 960930 + seed
+                make_basic_character(user_id, f"CollapseMoveTester{seed}", current_location=seal_room_id)
+                sink = []
+                await bot._do_move(FakeUpdate(user_id, "", sink), f"go to {rooms[seal_dest_id]['name']}")
+                self.assertEqual(
+                    db.get_character(user_id, -999)["current_location"], seal_dest_id,
+                    "expected the seal target to still be freely reachable before the trigger fires",
+                )
+                db.update_character(user_id, -999, current_location=switch_room_id)
+                sink2 = []
+                await bot._do_skill_check(FakeUpdate(user_id, "", sink2), "dexterity", "hit the crystal")
+                sink3 = []
+                await bot._do_move(FakeUpdate(user_id, "", sink3), f"go to {rooms[seal_dest_id]['name']}")
+                self.assertNotEqual(
+                    db.get_character(user_id, -999)["current_location"], seal_dest_id,
+                    "expected the seal target to be blocked once the trigger has fired",
+                )
+                db.update_character(user_id, -999, current_location=shortcut_room_id)
+                sink4 = []
+                await bot._do_move(FakeUpdate(user_id, "", sink4), f"go to {rooms[shortcut_dest_id]['name']}")
+                self.assertEqual(
+                    db.get_character(user_id, -999)["current_location"], shortcut_dest_id,
+                    "expected the new shortcut to open once the same trigger has fired",
+                )
+            return
+        self.fail("expected at least one collapse-puzzle evolve across 60 real seeds to test a real move through it")
 
 
 def _switch_test_campaign() -> dict:
@@ -35941,6 +36176,57 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             "expected the real character sitting in the Labyrinth to be reset even after the owner switched active alts",
         )
         self.assertIsNone(db.get_labyrinth_run(chat_id, f"party:{party_id}"))
+
+    async def test_labyrinth_leave_resets_a_benched_or_inactive_member_stuck_at_the_sentinel(self):
+        """
+        Real live incident (2026-09-04, dev-bridge: Sugar's characters
+        "Laurienna"/"Charvenna" -- Fast Travel and the Character Sheet
+        both crashed for her, and "look around" replied "You're not in
+        the Labyrinth right now" with no way back). Both were found
+        stuck at LABYRINTH_LOCATION_SENTINEL with no matching
+        labyrinth_runs row, traced to a leave_labyrinth call that
+        predates the sentinel-fallback fix directly above this test.
+        Manually rescued live via db.update_character_by_id -- this
+        test covers the real, still-present GAP that fix left behind:
+        _labyrinth_active_party_members's is_benched/is_inactive
+        exclusion runs UNCONDITIONALLY, before the sentinel fallback
+        the above fix added for the is_active_character case -- so a
+        party member who goes benched/inactive while genuinely stuck
+        at the sentinel is skipped by that helper entirely, and every
+        one of its callers (including leave's own reset loop) never
+        sees them. Gameplay call sites (hazard damage, checkpoint
+        heals) are RIGHT to keep excluding a benched/inactive member --
+        Coffee's own explicit ask (2026-09-03: "the trap ... shouldn't
+        definitely be hurting inactive members") -- but leaving the
+        Labyrinth must still rescue them, or they're orphaned with no
+        way back at all, strictly worse than being swept into a fight
+        they're not part of. Fixed in _do_leave_labyrinth itself (not
+        _labyrinth_active_party_members, so the gameplay call sites are
+        untouched): its own reset loop now also catches any raw party
+        member whose current_location genuinely is the sentinel,
+        regardless of is_benched/is_inactive.
+        """
+        owner_id, chat_id = 962038, -962038
+        leader = make_basic_character(owner_id, "LeaderTester2", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character_by_id(leader["character_id"], defeated_monsters=["colosseum_champion"])
+        party_id = db.create_party(owner_id, chat_id)
+        db.update_character_by_id(leader["character_id"], party_id=party_id)
+        db.switch_character(owner_id, chat_id, leader["character_id"])
+
+        benched_owner_id = 962039
+        benched = make_basic_character(benched_owner_id, "BenchedTester2", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character_by_id(benched["character_id"], party_id=party_id, is_benched=True)
+
+        await bot._do_enter_labyrinth(FakeUpdate(owner_id, "", [], chat_id=chat_id))
+        self.assertEqual(db.get_character_by_id(leader["character_id"])["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        # A benched member who was along for the entry is stuck at the sentinel too, same as any real member.
+        db.update_character_by_id(benched["character_id"], current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+
+        await bot._do_leave_labyrinth(FakeUpdate(owner_id, "", [], chat_id=chat_id))
+        self.assertEqual(
+            db.get_character_by_id(benched["character_id"])["current_location"], "the_colosseum",
+            "expected a benched member stuck at the sentinel to be rescued on leave, not orphaned",
+        )
 
     def test_labyrinth_antagonist_is_never_a_real_campaign_character(self):
         """Phase L3, per Coffee: "don't use characters that are in the storyline, make sure they are separate from the actual game"."""

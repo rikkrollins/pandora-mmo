@@ -515,6 +515,95 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
             if miniboss not in miniboss_room["monsters"]:
                 miniboss_room["monsters"].append(miniboss)
 
+    # Real warp shortcut (2026-09-04, ported from rules/labyrinth.py's
+    # identical mechanic -- per Coffee's own correction that this was
+    # never meant to be deferred to the final chapter: "the warp and
+    # other things was a misclassification -- they are supposed to be
+    # in the generator, not in the final chapter also the final chapter
+    # does use them, i want them in the generator too"). Picked from
+    # two DIFFERENT non-boss branches' own tails -- never the hub or
+    # the boss branch, so a warp is always a genuine bonus link, never
+    # a way to skip the real climax gate. Stored separately from
+    # `connections` (same reasoning as the Labyrinth: a warp's own map
+    # line is drawn differently -- straight across the map, not a
+    # doorway between grid-adjacent cells) -- confirmed harmless to
+    # every existing dungeon_audit.py check; a new
+    # check_warps_reference_real_rooms check verifies the new field
+    # itself is well-formed.
+    non_boss_branches = [b for b in branches if b["idx"] != branch_idx]
+    if len(non_boss_branches) >= 2 and rng.random() < 0.35:
+        warp_a_branch, warp_b_branch = rng.sample(non_boss_branches, 2)
+        warp_a, warp_b = warp_a_branch["tail_id"], warp_b_branch["tail_id"]
+        _, warp_a_room = _find_room(campaign, warp_a)
+        _, warp_b_room = _find_room(campaign, warp_b)
+        warp_a_room.setdefault("warps", []).append(warp_b)
+        warp_b_room.setdefault("warps", []).append(warp_a)
+        warp_a_room["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else in this dungeon."
+        warp_b_room["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else in this dungeon."
+
+    # Real Eagle's Tower-style single-switch collapse puzzle (2026-09-04,
+    # same port). Solving it seals a previously-open dead-end branch
+    # (the inverse of locked_connections -- starts open, becomes
+    # blocked once its own multi_switch_gate trigger is thrown) while
+    # opening a genuine new shortcut elsewhere -- "the floor's
+    # structure shifts beneath you," never a silent loss with no real
+    # trade. Never targets the switch- or plate-gated branch (those
+    # branches' own hub edge is already a locked_connections gate, not
+    # a plain `connections` entry -- there'd be nothing plain left to
+    # seal), matching the exact same exclusion rules/labyrinth.py's own
+    # sealable_candidates already applies. A new
+    # check_collapse_never_orphans_a_room audit check (wired into
+    # evolve_dungeon's existing retry loop) catches the one real risk
+    # this introduces: sealing a branch that happens to host a switch
+    # some OTHER gate still depends on, or the boss room itself -- if
+    # that happens, this whole generation attempt is simply retried
+    # with a fresh RNG draw, same as any other check failure.
+    seal_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx)]
+    if len(seal_eligible) >= 1 and len(non_boss_branches) >= 3 and rng.random() < 0.3:
+        seal_branch = rng.choice(seal_eligible)
+        seal_leaf = seal_branch["tail_id"]
+        seal_parent = hub_id if seal_branch["next_step"] <= 1 else f"{new_dungeon_id}_b{seal_branch['idx']}_r{seal_branch['next_step'] - 2}"
+        other_branches = [b for b in non_boss_branches if b["idx"] != seal_branch["idx"]]
+        if len(other_branches) >= 2:
+            switch_host_branch = rng.choice(other_branches)
+            switch_host_id = f"{new_dungeon_id}_b{switch_host_branch['idx']}_r0"
+            _, switch_host_room = _find_room(campaign, switch_host_id)
+            element = rng.choice(["fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical"])
+            trigger_switch_id = f"{new_dungeon_id}_collapse_switch"
+            switch_host_room.setdefault("lockables", []).append({
+                "id": trigger_switch_id, "kind": "switch", "name": f"a shuddering {element} crystal", "element": element,
+            })
+            trigger_id = f"{new_dungeon_id}_collapse_trigger"
+            _, seal_parent_room = _find_room(campaign, seal_parent)
+            seal_parent_room.setdefault("lockables", []).append({
+                "id": trigger_id, "kind": "multi_switch_gate", "name": "a real structural trigger",
+                "requires": [trigger_switch_id],
+            })
+            seal_parent_room.setdefault("collapsing_connections", {})[seal_leaf] = trigger_id
+            seal_parent_room["description"] += " Something here feels structurally unstable -- like it's rigged to give way."
+            # The switch's own branch is a perfectly valid shortcut
+            # endpoint (matches rules/labyrinth.py's own identical
+            # mechanic exactly -- its shortcut_pair is drawn from
+            # `other_chains`, with no exclusion for whichever chain
+            # hosts the switch). Excluding it here was a real bug in
+            # this port found via testing: with the overworld's fixed
+            # 3 non-boss branches, excluding both the sealed branch AND
+            # the switch's own branch leaves only 1 candidate, so the
+            # 2-sample shortcut/reward could never actually fire --
+            # sealing something with no compensating shortcut ever
+            # created, which contradicts the whole "solving it is a
+            # real trade, never just a loss" design.
+            if len(other_branches) >= 2:
+                shortcut_a_branch, shortcut_b_branch = rng.sample(other_branches, 2)
+                shortcut_a, shortcut_b = shortcut_a_branch["tail_id"], shortcut_b_branch["tail_id"]
+                _, shortcut_a_room = _find_room(campaign, shortcut_a)
+                echo_id = f"{trigger_id}_echo_{shortcut_a}"
+                shortcut_a_room.setdefault("lockables", []).append({
+                    "id": echo_id, "kind": "multi_switch_gate", "name": "a newly-opened shortcut",
+                    "requires": [trigger_switch_id],
+                })
+                shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = echo_id
+
     # Bonus/optional room (2026-09-01, ALTTP research: reward exploration
     # off the critical path). Extends a random NON-BOSS branch one room
     # further, in that branch's own already-established direction (so

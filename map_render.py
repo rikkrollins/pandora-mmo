@@ -451,6 +451,15 @@ def render_layer_map(
     legend_lines = _build_legend_lines(revealed_here, layer_locations, bool(floor_levels))
     if floor_filter is not None:
         legend_lines.append("dashed grey = a real room here, on another floor you've reached")
+    # Real warp shortcut (2026-09-04) -- the legend line must be decided
+    # BEFORE canvas sizing below, same fix already applied on the
+    # Labyrinth's own render_labyrinth_map (computing it after height
+    # is already fixed would draw the extra line past the bottom edge).
+    has_visible_warp = any(
+        w in visited_set for room_id in visited_here for w in layer_locations.get(room_id, {}).get("warps", [])
+    )
+    if has_visible_warp:
+        legend_lines.append("purple line = a real warp shortcut between two distant rooms")
     legend_row_count = len(legend_lines) + 1  # +1 for the icon-swatch line, drawn separately
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
     height = min(
@@ -500,6 +509,32 @@ def render_layer_map(
                 stacked_levels=sorted({floor_levels.get(lid, 0) for lid in cell_ids} - {floor_levels.get(primary, 0)}),
                 icons=_location_icons(layer_locations[primary], monsters, quests, primary, layer_locations),
             )
+
+    # Real warp shortcut, ported from render_labyrinth_map's identical
+    # drawing pass (2026-09-04, per Coffee: warps belong in the
+    # generator, not deferred to the final chapter -- see rules/
+    # dungeon_evolve.py's own new warp-placement block). Drawn as a
+    # real line straight across the grid, same fog-of-war discipline
+    # as every cell above: only drawn once BOTH ends are actually
+    # visited.
+    def _warp_cell_center(room_id: str) -> tuple[float, float] | None:
+        pos = layer_locations.get(room_id, {}).get("grid_position")
+        if pos is None:
+            return None
+        gx2 = pos["x"] - min_x
+        gy2 = max_y - pos["y"]
+        return (_MARGIN + gx2 * CELL_SIZE + CELL_SIZE / 2, grid_top + gy2 * CELL_SIZE + CELL_SIZE / 2)
+
+    drawn_warp_pairs = set()
+    for room_id in visited_here:
+        for warp_dest in layer_locations.get(room_id, {}).get("warps", []):
+            pair = frozenset((room_id, warp_dest))
+            if pair in drawn_warp_pairs or warp_dest not in visited_set:
+                continue
+            drawn_warp_pairs.add(pair)
+            a, b = _warp_cell_center(room_id), _warp_cell_center(warp_dest)
+            if a is not None and b is not None:
+                draw.line([a, b], fill=_WARP_LINE_COLOR, width=3)
 
     legend_font = _load_font(13)
     legend_y = height - legend_row_count * _LEGEND_LINE_HEIGHT - 8

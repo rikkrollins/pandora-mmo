@@ -2,6 +2,98 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.501] — feature: warps + collapse puzzle ported to the overworld dungeon generator
+
+Per Coffee's own correction (2026-09-04): an earlier plan had mis-
+scoped porting the Labyrinth's warp/collapse-puzzle mechanics to
+`rules/dungeon_evolve.py` (the overworld generator) as deferred work
+for "the final chapter" — Coffee clarified this was wrong: "the warp
+and other things was a misclassification -- they are supposed to be in
+the generator, not in the final chapter also the final chapter does
+use them, i want them in the generator too." Built and shipped now,
+not deferred.
+
+**Generator side** (`rules/dungeon_evolve.py`): `_generate_once` now
+places a real bidirectional warp between two distant non-boss branch
+tails (~35% of generations), and a real single-switch Eagle's Tower-
+style collapse puzzle (~30%) — solving a real elemental switch seals a
+dead-end branch elsewhere while opening a genuine new shortcut, same
+mechanism the Labyrinth already ships. Two new `rules/dungeon_audit.py`
+checks (`check_warps_reference_real_rooms`, `check_collapse_never_
+orphans_a_room`) wired into the existing retry loop.
+
+**Gameplay side** (the real gap a generator-only port would have left
+inert): `bot._do_move` and `_look_action_keyboard` now handle
+`collapsing_connections`/`warps` exactly like the Labyrinth's own
+`_do_labyrinth_move`/`_labyrinth_exits` already do — without this, a
+generated warp or collapse trigger would be unusable data, not a real
+travel option. `map_render.py`'s `render_layer_map` (the overworld's
+own minimap) now draws a warp's line across the grid, same as
+`render_labyrinth_map` already does, with its own legend line.
+
+**One real bug caught and fixed during testing**: the new
+`check_collapse_never_orphans_a_room` check's own BFS originally walked
+only `connections`, wrongly treating the boss room (reached exclusively
+through a `locked_connections` gate, by design) as already unreachable
+before any seal even fired — forcing every generation with a collapse
+puzzle into unnecessary retries and silently starving an unrelated
+statistical test (`test_evolve_dungeon_sometimes_places_a_real_remote_
+torch_gate`) of its expected hits. Fixed by walking `locked_connections`
+destinations too. A second real bug (found the same way): the
+shortcut-reward pool wrongly excluded the switch's own branch, which
+with the overworld's fixed 3 non-boss branches left too few candidates
+for the reward to ever actually generate — removed the exclusion
+(matches `rules/labyrinth.py`'s own original mechanic, which never had
+it either).
+
+Explicitly **not** included this pass, per a direct scope discussion
+with Coffee: the bigger Eagle's-Tower carry-and-collapse puzzle (carry
+an object between rooms, strike multiple pillars) needs its own new
+persistent-state design first, since overworld dungeons are permanent
+multi-visit locations with no ephemeral "run" row to hang carry-state
+off of, unlike the Labyrinth. Tracked as a real follow-up.
+
+9 new tests (statistical seed sweeps for both mechanics, real
+end-to-end moves through a generated warp and across a fired collapse
+trigger via `bot._do_move`, a real map render with a warp line, and 6
+new unit tests for the two audit checks). Full `DungeonEvolveTests`
+(24 tests) and `DungeonAuditTests` (21 tests) pass.
+
+## [1.27.500] — fix: a benched/inactive party member stuck at the Labyrinth sentinel could be orphaned forever on "leave"
+
+Real live incident (2026-09-04, dev-bridge): Sugar's characters
+"Laurienna" and "Charvenna" were both stuck at the internal Labyrinth
+sentinel location with no matching `labyrinth_runs` row — Fast Travel
+and the Character Sheet both crashed for her (`AttributeError`/
+`TypeError` on a `None` location lookup), and "look around" correctly
+but unhelpfully replied "You're not in the Labyrinth right now," with
+no way back to anywhere. Manually rescued live via `db.update_
+character_by_id` while investigating.
+
+Root cause: the damage predates this fix (from before v1.27.495's own
+sentinel-fallback), but a real, still-present gap in the current code
+would have reproduced it: `_labyrinth_active_party_members`'s is_
+benched/is_inactive exclusion runs *unconditionally*, before the
+sentinel fallback that same v1.27.495 fix added for the "not the
+globally active character" case — so a party member who goes benched
+or inactive while genuinely stuck at the sentinel is invisible to that
+helper entirely, and `_do_leave_labyrinth`'s own reset loop (built on
+top of it) never sees them, orphaning them with no run and no valid
+location. Gameplay call sites (hazard damage, checkpoint heals) are
+right to keep excluding a benched/inactive member — Coffee's own
+explicit ask, 2026-09-03: "the trap ... shouldn't definitely be hurting
+inactive members" — but leaving the Labyrinth must still rescue them,
+since being orphaned is strictly worse than being swept into a fight
+they're not part of.
+
+Fixed in `_do_leave_labyrinth` itself, not the shared helper — its own
+reset loop now also catches any raw party member whose `current_
+location` genuinely is the sentinel, regardless of benched/inactive
+status, leaving every other call site unchanged. New regression test
+reproduces the exact incident shape and confirms the fix; full
+`LabyrinthTests` suite (108 tests) passes (2 known, pre-existing
+RNG-dependent hazard-save flakes confirmed harmless in isolation).
+
 ## [1.27.499] — polish: every Labyrinth theme now has real hazard variety (hourly self-improvement pass)
 
 Found during the hourly monitoring pass's own creative-improvement

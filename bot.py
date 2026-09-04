@@ -9653,6 +9653,29 @@ async def _do_leave_labyrinth(update: Update) -> None:
         return
     db.delete_labyrinth_run(chat_id, party_key)
     members = _labyrinth_active_party_members(character)
+    # Real live incident (2026-09-04, dev-bridge: Sugar's characters
+    # "Laurienna"/"Charvenna" stuck at the sentinel with no matching
+    # run, Fast Travel and the Character Sheet both crashing for her).
+    # _labyrinth_active_party_members's own is_benched/is_inactive
+    # exclusion runs unconditionally, before the sentinel fallback the
+    # is_active_character fix (see that helper's own docstring) checks
+    # -- so a party member who goes benched/inactive while genuinely
+    # stuck at the sentinel is invisible to that helper entirely, and
+    # every one of its callers (checkpoint heals, hazard damage, and
+    # this reset loop) never sees them. Those OTHER call sites are
+    # right to keep excluding a benched/inactive member (Coffee's own
+    # explicit ask, 2026-09-03: "the trap ... shouldn't definitely be
+    # hurting inactive members") -- but leaving the Labyrinth must
+    # still rescue them, or they're orphaned with no way back at all,
+    # strictly worse than being swept into a fight they're not part
+    # of. Widened HERE only, not in the shared helper itself, so those
+    # other call sites are untouched.
+    reset_ids = {m["character_id"] for m in members}
+    if character.get("party_id"):
+        for m in db.get_party_members_by_id(character["party_id"]):
+            if m["character_id"] not in reset_ids and m.get("current_location") == LABYRINTH_LOCATION_SENTINEL:
+                members.append(m)
+                reset_ids.add(m["character_id"])
     for m in members:
         db.update_character_by_id(m["character_id"], current_location="the_colosseum")
     checkpoint = character.get("labyrinth_checkpoint_floor", 0)
@@ -22874,7 +22897,15 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id:
         dest_id for dest_id, lockable_id in location.get("locked_connections", {}).items()
         if _lockable_is_open(location, lockable_id, chat_id)
     }
-    connections = list(location.get("connections", [])) + [
+    # Real Eagle's Tower-style collapse puzzle, ported to the overworld
+    # generator (2026-09-04) -- a `collapsing_connections` destination
+    # stops showing here once its own trigger has fired, same real
+    # blocking check _do_move applies, mirroring _labyrinth_exits.
+    collapsed_dests = {
+        dest_id for dest_id, trigger_id in location.get("collapsing_connections", {}).items()
+        if _lockable_is_open(location, trigger_id, chat_id)
+    }
+    connections = [d for d in location.get("connections", []) if d not in collapsed_dests] + [
         d for d in already_unlocked_dests if d not in location.get("connections", [])
     ]
     direction_for_dest = {dest: word for word, dest in location.get("directions", {}).items()}
@@ -22900,6 +22931,14 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id:
             emoji = "🚶"
             label = dest["name"]
         rows.append([InlineKeyboardButton(f"{emoji} {label}", callback_data=f"travel|go|{dest_id}")])
+    # Real warp shortcut, same port as the collapse puzzle just above --
+    # never a compass word (the destination usually isn't grid-
+    # adjacent at all), same distinct icon _labyrinth_exits already
+    # uses for its own warp rows.
+    for dest_id in location.get("warps", []):
+        dest = cl.get_location(CAMPAIGN, dest_id)
+        if dest is not None:
+            rows.append([InlineKeyboardButton(f"🌀 Warp: {dest['name']}", callback_data=f"travel|go|{dest_id}")])
     return InlineKeyboardMarkup(rows) if rows else None
 
 
@@ -26739,7 +26778,21 @@ async def _do_move(update: Update, text: str) -> None:
         return
 
     current = cl.get_location(CAMPAIGN, character["current_location"])
-    reachable = list(current.get("connections", []))
+    # Real Eagle's Tower-style structural puzzle, ported to the
+    # overworld generator (2026-09-04, per Coffee: "the warp and other
+    # things was a misclassification -- they are supposed to be in the
+    # generator, not in the final chapter also the final chapter does
+    # use them, i want them in the generator too"). A
+    # `collapsing_connections` entry is the INVERSE of locked_
+    # connections -- it starts OPEN (a plain connections entry) and
+    # becomes BLOCKED once its own trigger (a real multi_switch_gate)
+    # is solved -- mirrors _do_labyrinth_move's own identical handling
+    # line for line, since the underlying data shape is identical.
+    collapsed_ids = {
+        dest_id for dest_id, trigger_id in current.get("collapsing_connections", {}).items()
+        if _lockable_is_open(current, trigger_id, update.effective_chat.id)
+    }
+    reachable = [loc_id for loc_id in current.get("connections", []) if loc_id not in collapsed_ids]
     if "descends_to" in current:
         reachable.append(current["descends_to"])
     if "ascends_to" in current:
@@ -26751,6 +26804,11 @@ async def _do_move(update: Update, text: str) -> None:
     reachable.extend(
         loc_id for loc_id in current.get("locked_connections", {}) if loc_id not in reachable
     )
+    # Real warp shortcut, same port as the collapse puzzle just above --
+    # a genuine second exit list, never pretending to be an ordinary
+    # lateral connection (see rules/labyrinth.py's own generate_floor
+    # docstring for why it's stored separately from `connections`).
+    reachable.extend(w for w in current.get("warps", []) if w not in reachable)
 
     destination_id = None
     lowered = text.lower()

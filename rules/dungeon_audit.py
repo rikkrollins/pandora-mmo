@@ -433,6 +433,117 @@ def check_level_band(campaign: dict, dungeon_id: str) -> list[str]:
     return failures
 
 
+def check_warps_reference_real_rooms(campaign: dict, dungeon_id: str) -> list[str]:
+    """
+    New for the overworld warp port (2026-09-04, per Coffee: warps
+    belong in the generator now, not deferred to the final chapter --
+    see rules/dungeon_evolve.py's own new warp-placement block). A
+    warp is stored outside `connections` (rules/labyrinth.py's own
+    established precedent -- it's drawn as a real line across the map,
+    not a doorway between grid-adjacent cells), so none of the other 7
+    checks ever see it at all. This check exists purely to catch a
+    dangling or malformed warp: a destination that isn't a real room
+    in this dungeon, a self-warp, or a one-sided link (the Labyrinth's
+    own generator always writes both ends together; this check makes
+    that a verified invariant here too, not just a convention).
+    """
+    rooms = _dungeon_rooms(campaign, dungeon_id)
+    room_ids = set(rooms.keys())
+    failures = []
+    for room_id, room in rooms.items():
+        for dest_id in room.get("warps", []):
+            if dest_id == room_id:
+                failures.append(f"{room_id!r} has a warp pointing at itself")
+            elif dest_id not in room_ids:
+                failures.append(f"{room_id!r} has a warp to {dest_id!r}, which isn't a real room in this dungeon")
+            elif room_id not in rooms.get(dest_id, {}).get("warps", []):
+                failures.append(f"{room_id!r} warps to {dest_id!r} but not vice versa (warps must be bidirectional)")
+    return failures
+
+
+def check_collapse_never_orphans_a_room(campaign: dict, dungeon_id: str) -> list[str]:
+    """
+    New for the overworld collapse-puzzle port (2026-09-04). A
+    `collapsing_connections` entry is ALLOWED to make its own
+    destination room permanently unreachable once triggered -- that's
+    the intended Eagle's-Tower-style trade-off (the Labyrinth's own
+    identical mechanic already ships with exactly this: sealing a
+    genuine dead-end branch is the point, not a bug). What must never
+    happen is the seal taking something ELSE down with it: a switch
+    lockable some OTHER gate's own `requires` list still depends on
+    sitting in the room(s) this edge cuts off, or the dungeon's own
+    boss room becoming unreachable. Both computed by a real BFS over
+    `connections` with the one sealed edge removed, not assumed.
+    """
+    rooms = _dungeon_rooms(campaign, dungeon_id)
+    room_ids = set(rooms.keys())
+    if not room_ids:
+        return []
+    hub_ids = [rid for rid, r in rooms.items() if r.get("dungeon_hub")]
+    entry_id = hub_ids[0] if hub_ids else max(rooms, key=lambda rid: len(rooms[rid].get("connections", [])))
+
+    switch_room: dict[str, str] = {}
+    other_gates: list[tuple[str, str, list[str]]] = []  # (gate_room_id, gate_lockable_id, requires)
+    for room_id, room in rooms.items():
+        for lk in room.get("lockables", []):
+            if lk.get("kind") == "switch":
+                switch_room[lk["id"]] = room_id
+            elif lk.get("kind") == "multi_switch_gate":
+                other_gates.append((room_id, lk.get("id"), lk.get("requires", [])))
+
+    monsters = campaign.get("monsters", {})
+    boss_room_ids = {
+        room_id for room_id, room in rooms.items()
+        for monster_key in room.get("monsters", [])
+        if monsters.get(monster_key, {}).get("is_boss") and remnants.remnant_for_monster_key(monster_key) is None
+    }
+
+    failures = []
+    for room_id, room in rooms.items():
+        for dest_id, trigger_id in room.get("collapsing_connections", {}).items():
+            if dest_id not in room_ids:
+                continue
+            # Walks `connections` AND `locked_connections` destinations
+            # together -- a door/switch-gated branch (the boss branch,
+            # or a switch/plate branch) is still a real, eventually-
+            # reachable room to a player willing to solve its gate, not
+            # a dead end; only `connections`-based reachability would
+            # wrongly treat every one of those as already unreachable
+            # BEFORE the collapse even fires (a real bug found testing
+            # this fix: the boss room is normally reached exclusively
+            # through a locked_connections gate, never a plain
+            # connections edge from the hub, by design).
+            reachable = {entry_id}
+            queue = deque([entry_id])
+            while queue:
+                cur = queue.popleft()
+                cur_room = rooms.get(cur, {})
+                neighbors = list(cur_room.get("connections", [])) + list(cur_room.get("locked_connections", {}))
+                for nxt in neighbors:
+                    if nxt not in room_ids:
+                        continue
+                    if (cur == room_id and nxt == dest_id) or (cur == dest_id and nxt == room_id):
+                        continue
+                    if nxt not in reachable:
+                        reachable.add(nxt)
+                        queue.append(nxt)
+            orphaned = room_ids - reachable
+            if not orphaned:
+                continue
+            if orphaned & boss_room_ids:
+                failures.append(f"{room_id!r}->{dest_id!r} collapsing_connections (trigger {trigger_id!r}) would cut off the boss room")
+            for gate_room_id, gate_id, requires in other_gates:
+                if gate_id == trigger_id:
+                    continue  # the collapse's own trigger is allowed to sit inside the branch it seals -- solved before it collapses
+                for switch_id in requires:
+                    if switch_room.get(switch_id) in orphaned:
+                        failures.append(
+                            f"{room_id!r}->{dest_id!r} collapsing_connections (trigger {trigger_id!r}) would strand "
+                            f"switch {switch_id!r} needed by gate {gate_id!r} in room {gate_room_id!r}"
+                        )
+    return failures
+
+
 CHECKS = {
     "hub_branches": check_hub_branches,
     "hub_revisited": check_hub_revisited,
@@ -441,6 +552,8 @@ CHECKS = {
     "reciprocity": check_reciprocity,
     "lock_density": check_lock_density,
     "level_band": check_level_band,
+    "warps_reference_real_rooms": check_warps_reference_real_rooms,
+    "collapse_never_orphans_a_room": check_collapse_never_orphans_a_room,
 }
 
 
