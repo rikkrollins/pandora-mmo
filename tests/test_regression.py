@@ -35111,9 +35111,21 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         run = db.get_labyrinth_run(chat_id, party_key)
         rooms = run["rooms"]
         hub = rooms[run["current_room_id"]]
-        # hub["connections"][0] is always the floor's own connector room (stairs/checkpoint) -- pick a real side room instead.
-        gated_dest_id = hub["connections"][1]
-        hub["connections"].remove(gated_dest_id)
+        # Real live gap found and fixed (2026-09-04, mandatory main-path
+        # gating): real (unseeded) generation now always claims at
+        # least one hub connection for the new mandatory gate, on top
+        # of whatever optional gates also happen to fire -- assuming
+        # `hub["connections"]` still has >= 2 plain entries left over is
+        # no longer reliable. Synthesizing a real, guaranteed-plain side
+        # room directly (same spirit as this test already manually
+        # injecting its own switch/lockable) sidesteps the question
+        # entirely, rather than gambling on how many plain connections
+        # real generation happened to leave this run.
+        gated_dest_id = "test_switch_gate_target"
+        rooms[gated_dest_id] = {
+            "id": gated_dest_id, "floor": run["floor"], "name": "A Real Test Side Chamber",
+            "description": "A plain test room.", "connections": [], "monsters": [],
+        }
         hub.setdefault("lockables", []).append({"id": "laby_switch_1", "kind": "switch", "name": "a real crystal", "element": "fire"})
         hub.setdefault("locked_connections", {})[gated_dest_id] = "laby_switch_1"
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
@@ -35258,10 +35270,17 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot._find_lockable(room, "Cast fireball onto the crystal")["id"], "seg1_switch_0")
         self.assertEqual(bot._find_lockable(room, "open the cache")["id"], "f1_gate_cache")
         self.assertEqual(bot._find_lockable(room, "loot the cache")["id"], "f1_gate_cache")
-        # Genuinely ambiguous phrasing (no distinctive word at all,
-        # "lock" matches both kind-word lists) correctly refuses to
-        # guess rather than silently picking the wrong one.
-        self.assertIsNone(bot._find_lockable(room, "Pick the lock"))
+        # Real live bug found and fixed (2026-09-04, Coffee, dev-bridge:
+        # "Picking the lock didn't work for some reason the cache is
+        # still there and I didn't get the item" -- this exact room
+        # shape): "lock" used to live in EVERY kind's word list
+        # (switch/lever/pressure_plate included), so "Pick the lock"
+        # matched both the chest AND the switch here and this correctly
+        # refused to guess -- but a switch/crystal isn't a real lock in
+        # any literal sense, so the refusal itself was the bug. "lock"
+        # now lives only on chest/door (an actual, literal lock);
+        # "Pick the lock" here unambiguously means the real cache.
+        self.assertEqual(bot._find_lockable(room, "Pick the lock")["id"], "f1_gate_cache")
 
     async def test_cast_fire_spell_onto_a_labyrinth_switch_actually_activates_it(self):
         """
@@ -36566,6 +36585,43 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                     for rid, r in rooms.items():
                         self.assertNotIn(r["name"], line, f"hint line spoils a real room name: {line!r}")
         self.assertTrue(statue_seen, "expected at least one real hint statue across 80 real seeds")
+
+    async def test_pick_the_lock_opens_the_real_chest_not_a_coexisting_switch_end_to_end(self):
+        """
+        Real live bug found and fixed (2026-09-04, Coffee, dev-bridge:
+        "Picking the lock didn't work for some reason the cache is
+        still there and I didn't get the item" -- a real room holding
+        both a locked chest and an elemental switch): "lock" used to
+        live in every kind's word list, so "Pick the lock" matched both
+        the chest and the switch, _find_lockable correctly refused to
+        guess, and the whole action silently fell through to a generic,
+        ungrounded ability check that narrated a fake success while the
+        chest stayed locked and no item was ever granted. Full
+        _do_skill_check dispatch, not just _find_lockable in isolation
+        -- confirms the real chest actually opens and the real loot
+        actually lands in the party's stash.
+        """
+        user_id, chat_id = 962071, -962071
+        make_basic_character(user_id, "PickLockChestTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub["lockables"] = [
+            {"id": "test_cache", "kind": "chest", "name": "a real, hastily-buried cache", "loot": {"healing_potion": 1}, "gold": 20},
+            {"id": "test_crystal", "kind": "switch", "name": "a shuddering lightning crystal", "element": "lightning"},
+        ]
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+        character = db.get_character(user_id, chat_id)
+        before_potions = character["inventory"].get("healing_potion", 0)
+
+        sink = []
+        await bot._do_skill_check(FakeUpdate(user_id, "Pick the lock", sink, chat_id=chat_id), "dexterity", "Pick the lock", forced_roll=20)
+        self.assertIn("test_cache", bot._UNLOCKED.get(chat_id, set()), f"expected the real chest to actually unlock, got: {sink}")
+        self.assertNotIn("test_crystal", bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id), "the coexisting switch must never be toggled by this")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["inventory"].get("healing_potion", 0), before_potions + 1, f"expected the real loot to actually be granted, got: {sink}")
 
     async def test_labyrinth_examine_hint_statue_reveals_real_non_spoiler_facts(self):
         """End-to-end: examining a real hint statue reveals its real hint_lines text, and a pressure plate coexisting in the same room never makes 'examine the statue' ambiguous."""

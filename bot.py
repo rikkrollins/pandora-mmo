@@ -13260,17 +13260,35 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
     # jammed mechanism ("pick the lock") fail to match the lever at
     # all, falling through to an unrelated, misleadingly-successful-
     # sounding generic ability check that never actually unlocked
-    # anything. "lock" is back in every kind's word list now.
+    # anything.
     # "switch" (2026-09-01, elemental crystal switches/torches) and
     # "breakable_wall"/"breakable_floor" (cracked walls/floors) are
     # real, distinct kinds from "lever" -- each gets its own word
     # list rather than piggybacking on lever's, even though a
     # crystal switch is colloquially still "a switch" too.
+    #
+    # Real live bug (2026-09-04, Coffee, dev-bridge: "Picking the lock
+    # didn't work for some reason the cache is still there and I didn't
+    # get the item" -- a real room holding both "a real, hastily-buried
+    # cache" (chest) and "a shuddering lightning crystal" (switch)):
+    # putting "lock" back into EVERY kind's word list (the 2026-08-31
+    # fix above) over-corrected -- a switch/lever/pressure_plate isn't
+    # a real lock in any literal sense, but "lock" being in all of
+    # their word lists meant "pick the lock" matched BOTH the chest AND
+    # the switch here, `kind_matches` came back with 2 entries, and the
+    # len==1 check below correctly refused to guess -- falling through
+    # to the exact same "unrelated, misleadingly-successful generic
+    # ability check that never actually unlocks anything" failure mode
+    # the 2026-08-31 fix was written to close. "lock" now lives ONLY on
+    # the two kinds that are an actual, literal lock (chest/door); the
+    # lone-mechanism fallback just below (kind-agnostic, only when
+    # there's genuinely nothing else it could mean) is what preserves
+    # the 2026-08-31 case instead.
     kind_words = {
         "chest": ("chest", "lock"),
         "door": ("door", "lock", "gate"),
-        "lever": ("lever", "switch", "wheel", "valve", "lock"),
-        "switch": ("switch", "crystal", "torch", "brazier", "lantern", "lock"),
+        "lever": ("lever", "switch", "wheel", "valve"),
+        "switch": ("switch", "crystal", "torch", "brazier", "lantern"),
         "breakable_wall": ("wall", "crack", "cracked", "bomb", "explode"),
         "breakable_floor": ("floor", "crack", "cracked", "bomb", "explode"),
         # "statue" deliberately dropped (2026-09-03) -- no real
@@ -13294,8 +13312,22 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
     # the SAME kind both match (genuinely ambiguous), this correctly
     # returns None rather than guessing wrong, same disambiguation
     # philosophy _find_monster_mentioned_in_text already uses.
-    kind_matches = [lk for lk in lockables if any(w in lowered for w in kind_words.get(lk["kind"], ("lock",)))]
-    return kind_matches[0] if len(kind_matches) == 1 else None
+    kind_matches = [lk for lk in lockables if any(w in lowered for w in kind_words.get(lk["kind"], ()))]
+    if len(kind_matches) == 1:
+        return kind_matches[0]
+    if kind_matches:
+        return None
+    # Lone-mechanism fallback (preserves the real 2026-08-31 fix): "lock"
+    # generically names whatever the one jammed thing here is when
+    # there's genuinely nothing else it could mean -- a lever, switch,
+    # or pressure plate all count, same as a literal chest/door would.
+    # Never fires with 2+ lockables present (kind_matches would already
+    # have caught a real chest/door "lock" mention above, and beyond
+    # that, guessing among genuinely different mechanisms is exactly
+    # the wrong-target risk this whole function exists to avoid).
+    if len(lockables) == 1 and "lock" in lowered:
+        return lockables[0]
+    return None
 
 
 # Real, non-canonical mapping used only for a switch's own flavor emoji

@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.510] — fix: "pick the lock" silently no-oped when a room held both a chest and a switch/lever
+
+Real live bug (Coffee, dev-bridge: "Picking the lock didn't work for
+some reason the cache is still there and I didn't get the item"): a
+real room held both "a real, hastily-buried cache" (chest) and "a
+shuddering lightning crystal" (switch). `bot._find_lockable`'s own
+kind-word disambiguation had "lock" in EVERY kind's word list (chest,
+door, lever, switch, pressure_plate) since the 2026-08-31 fix for a
+lone jammed mechanism — but that meant "Pick the lock" matched BOTH
+the chest and the switch here, correctly refused to guess between two
+genuinely different lockables, and fell through to a generic,
+ungrounded ability check that narrated a fake "Success!" while the
+chest stayed locked and no loot was ever granted.
+
+Fixed by recognizing that a switch/lever/pressure-plate was never a
+real *lock* in any literal sense — "lock" now lives only on the two
+kinds that actually are one (chest, door). A separate, narrow fallback
+preserves the real 2026-08-31 case (a lone jammed mechanism, whatever
+kind, genuinely can be called "the lock" when it's the only thing in
+the room) without reintroducing the new ambiguity: it only fires when
+zero kind-word matches were found at all AND exactly one lockable
+exists in the room.
+
+Also fixed, found while re-verifying: a pre-existing regression from
+v1.27.509's mandatory main-path gating — one Labyrinth test assumed
+`hub["connections"]` always had >= 2 plain entries left over for real
+(unseeded) generation to hand it, which the new mandatory gate (always
+claiming one hub connection) made unreliable. Now synthesizes its own
+guaranteed-plain side room instead of gambling on generation's leftovers.
+
+82 tests re-verified across `_find_lockable`/lockpick/switch/breakable/
+carry-puzzle/hint-statue coverage, all passing; the fixed switch-gate
+test also stress-tested 5x against real randomness.
+
 ## [1.27.509] — feature: Locked Rune Doorways + real Fighting Style/mastery-gated dual wielding + mandatory main-path gating
 
 Three real, separately-planned features shipped together this session.
