@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.505] — feature: real combat gating — a miniboss/boss/gated encounter now genuinely blocks movement until defeated
+
+Real live dev-bridge exchange (2026-09-04): Coffee saw a room flagged
+as a miniboss on the Labyrinth map and asked "we shouldn't be able to
+go to the next location until this boss is defeated" — then expanded
+this into "if there are battles, you can gate it so we cant go certain
+directions until enemies are beaten." Confirmed by direct code read:
+until now, a room's own `monsters` list was purely decorative for
+movement — a player could always just walk past a miniboss (or
+anything else) without ever engaging.
+
+**The real gate**: from a room whose `monsters` list is non-empty,
+only already-visited destinations remain reachable — genuinely new
+ground is blocked with an honest refusal ("Enemies bar the other
+paths — deal with them first, or retreat the way you came."), and the
+blocked directions don't even show up as tappable/nameable exits.
+Retreating anywhere the party has already been always stays open, so
+a fled or lost fight can never turn this into a permanent trap —
+`room["monsters"]` is only ever cleared on a real party victory.
+
+**Scope, corrected mid-build after a real test failure**: gating on
+*any* room with monsters would have turned ordinary exploration into
+a forced fight-every-room gauntlet, since most Labyrinth/evolved-
+dungeon rooms carry 1-2 ordinary trash monsters by default — confirmed
+directly via 3 real end-to-end test failures before this shipped.
+Scoped instead to only a room genuinely flagged as a deliberate
+encounter: a miniboss, a boss, or a new, sparingly-placed
+`is_gated_encounter` room (a new probabilistic mechanic in both
+generators, giving real "advanced pathway gating" variety without
+punishing ordinary exploration). Ported to the overworld generator too
+(`bot._do_move`, scoped narrowly to `dungeon_interior` rooms only — an
+ordinary town/wilderness location with monsters is completely
+unaffected).
+
+18 new tests across `LabyrinthTests`/`DungeonEvolveTests` (blocked vs.
+retreat-open, gate lifts only after a real victory not just an
+attempted fight, exits/keyboard hide blocked directions, an ordinary
+trash-monster room is never gated, ordinary overworld locations are
+never gated). Full `DungeonEvolveTests`/`DungeonAuditTests` suites
+(48 tests) pass clean; `LabyrinthTests` verified test-by-test near
+every touched area (a full-suite single run currently takes longer
+than fits one CI pass — tracked separately, not a functional issue).
+
 ## [1.27.504] — feature: durable Labyrinth seed logging + "load labyrinth seed #"
 
 Direct follow-up to the checkpoint/best-floor fix in v1.27.503: that

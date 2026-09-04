@@ -70,6 +70,18 @@ from scripts import build_location_grid
 # from LONGER branches, not more of them (see _generate_once below).
 _HUB_NON_BOSS_BRANCHES = 3
 
+# Real "gated encounter" room, ported from rules/labyrinth.py's own
+# identical mechanic (2026-09-04, per Coffee: after being told that
+# gating movement on ANY monster room would turn ordinary evolved-
+# dungeon exploration into a forced fight-every-room gauntlet -- every
+# _new_room call below already gives most rooms 1-2 trash monsters --
+# "def number 1 [miniboss/boss rooms only for the real movement gate]
+# but you can use number two [gate-on-any-monster] with the rng and
+# the seeds to create ur dungeons and labyrinths with advanced
+# pathways and gating"). Applied sparingly, like every other special
+# mechanic here, not as a blanket rule.
+_GATED_ENCOUNTER_CHANCE = 0.3
+
 # Loop-back connections (rules/labyrinth.py's own "densify the tree
 # into a real grid" mechanic) were tried here too (2026-09-03) and
 # deliberately NOT shipped: real testing across 3 source dungeons x 40
@@ -493,6 +505,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     boss_room.setdefault("monsters", [])
     if boss_monster not in boss_room["monsters"]:
         boss_room["monsters"].append(boss_monster)
+    boss_room["is_boss_room"] = True
 
     # Miniboss (2026-09-01, per the ALTTP research: dungeons almost
     # always have one "you're not ready yet" encounter partway through,
@@ -514,6 +527,24 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
             miniboss_room.setdefault("monsters", [])
             if miniboss not in miniboss_room["monsters"]:
                 miniboss_room["monsters"].append(miniboss)
+            miniboss_room["is_miniboss_room"] = True
+
+    # Real gated encounter (2026-09-04) -- see _GATED_ENCOUNTER_CHANCE's
+    # own comment for the full reasoning. Never the entrance/hub/buffer
+    # rooms, never a room already flagged is_miniboss_room/is_boss_room
+    # (those already gate movement on their own).
+    gated_encounter_candidates = []
+    for rid in room_ids:
+        if rid in (entrance_id, hub_id) or "_approach_" in rid:
+            continue
+        _, candidate_room = _find_room(campaign, rid)
+        if candidate_room.get("monsters") and not candidate_room.get("is_miniboss_room") and not candidate_room.get("is_boss_room"):
+            gated_encounter_candidates.append(rid)
+    if gated_encounter_candidates and rng.random() < _GATED_ENCOUNTER_CHANCE:
+        gated_room_id = rng.choice(gated_encounter_candidates)
+        _, gated_room = _find_room(campaign, gated_room_id)
+        gated_room["is_gated_encounter"] = True
+        gated_room["description"] += " Something about this space feels sealed -- like the way beyond won't truly open until whatever's here is dealt with."
 
     # Real warp shortcut (2026-09-04, ported from rules/labyrinth.py's
     # identical mechanic -- per Coffee's own correction that this was
@@ -662,6 +693,8 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         hint_lines.append("A passage further in stays sealed until something elsewhere here is answered.")
     if plate_branch_idx is not None:
         hint_lines.append("A passage further in waits on something heavy, placed just right.")
+    if gated_encounter_candidates and any(_find_room(campaign, rid)[1].get("is_gated_encounter") for rid in gated_encounter_candidates):
+        hint_lines.append("Somewhere here, a real fight is standing between you and the rest of this place.")
     if hint_lines:
         hub_room.setdefault("lockables", []).append({
             "id": f"{new_dungeon_id}_hint_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing",

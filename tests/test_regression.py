@@ -32704,6 +32704,87 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             return
         self.fail("expected at least one warp-bearing evolve across 40 real seeds to test a real move through it")
 
+    async def test_dungeon_move_blocked_past_live_monsters_but_retreat_always_open(self):
+        """
+        Real live feature (2026-09-04, per Coffee: "if there are
+        battles, you can gate it so we cant go certain directions until
+        enemies are beaten... add these things to the generators").
+        Ported to the overworld's real _do_move, scoped to a genuine
+        generated dungeon room (dungeon_interior) -- same rule as
+        _do_labyrinth_move's own identical gate: a live-monster room
+        blocks moving to anywhere not already visited, but retreating
+        to an already-visited room always stays open.
+        """
+        import copy
+        from unittest.mock import patch
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        dungeon_audit.add_room(campaign, "underground", "fx_gate_dungeon", "fx_gate_hub", "Gate Hub", "A hub.", monsters=["goblin"], is_gated_encounter=True)
+        dungeon_audit.add_room(campaign, "underground", "fx_gate_dungeon", "fx_gate_cleared", "Cleared Landing", "Cleared.")
+        dungeon_audit.add_room(campaign, "underground", "fx_gate_dungeon", "fx_gate_untouched", "Untouched Landing", "Untouched.")
+        dungeon_audit.connect(campaign, "fx_gate_hub", "fx_gate_cleared")
+        dungeon_audit.connect(campaign, "fx_gate_hub", "fx_gate_untouched")
+
+        with patch.object(bot, "CAMPAIGN", campaign), \
+             patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("no Ollama in tests")):
+            user_id = 960950
+            make_basic_character(user_id, "DungeonGateTester", current_location="fx_gate_hub")
+            db.update_character(user_id, -999, visited_locations=["fx_gate_hub", "fx_gate_cleared"])
+
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink), "go to untouched landing")
+            self.assertTrue(any("Enemies bar the other paths" in s for s in sink))
+            self.assertEqual(db.get_character(user_id, -999)["current_location"], "fx_gate_hub")
+
+            sink2 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink2), "go to cleared landing")
+            self.assertEqual(db.get_character(user_id, -999)["current_location"], "fx_gate_cleared")
+
+    async def test_ordinary_overworld_location_with_monsters_is_never_gated(self):
+        """Control case for the dungeon-only scoping above: an ordinary town/wilderness location (no dungeon_interior) with monsters present must NOT block movement -- this is a generated-dungeon-only feature, never a game-wide combat-avoidance change."""
+        import copy
+        from unittest.mock import patch
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        campaign["locations"]["surface"]["fx_wild_hub"] = {
+            "name": "Wild Hub", "description": "An ordinary wild place.", "monsters": ["goblin"],
+            "connections": ["fx_wild_far"],
+        }
+        campaign["locations"]["surface"]["fx_wild_far"] = {
+            "name": "Wild Far Reach", "description": "Further out.", "connections": ["fx_wild_hub"],
+        }
+        with patch.object(bot, "CAMPAIGN", campaign), \
+             patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("no Ollama in tests")):
+            user_id = 960951
+            make_basic_character(user_id, "OrdinaryLocationTester", current_location="fx_wild_hub")
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink), "go to wild far reach")
+            self.assertFalse(any("Enemies bar the other paths" in s for s in sink))
+            self.assertEqual(db.get_character(user_id, -999)["current_location"], "fx_wild_far")
+
+    async def test_ordinary_trash_monster_room_inside_a_dungeon_is_never_gated(self):
+        """
+        Real live finding (2026-09-04): most evolved-dungeon/Labyrinth
+        rooms carry ordinary 1-2 trash monsters by default -- gating
+        movement on ANY monster room would turn normal exploration into
+        a forced fight-every-room gauntlet. Confirmed here directly:
+        a dungeon_interior room with monsters but WITHOUT is_miniboss_
+        room/is_boss_room/is_gated_encounter never blocks movement,
+        same as it always has.
+        """
+        import copy
+        from unittest.mock import patch
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        dungeon_audit.add_room(campaign, "underground", "fx_trash_dungeon", "fx_trash_hub", "Trash Hub", "A hub.", monsters=["goblin"])
+        dungeon_audit.add_room(campaign, "underground", "fx_trash_dungeon", "fx_trash_far", "Untouched Reach", "Further in.")
+        dungeon_audit.connect(campaign, "fx_trash_hub", "fx_trash_far")
+        with patch.object(bot, "CAMPAIGN", campaign), \
+             patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("no Ollama in tests")):
+            user_id = 960952
+            make_basic_character(user_id, "TrashRoomTester", current_location="fx_trash_hub")
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink), "go to untouched reach")
+            self.assertFalse(any("Enemies bar the other paths" in s for s in sink))
+            self.assertEqual(db.get_character(user_id, -999)["current_location"], "fx_trash_far")
+
     async def test_evolve_dungeon_collapse_trigger_blocks_then_opens_the_shortcut_end_to_end(self):
         """Real end-to-end: solving the collapse trigger's own switch (via bot._do_lockpick, the exact same real dispatch a player's own hit action already uses) blocks the sealed connection and opens the new shortcut through bot._do_move -- not just inert generator data."""
         import copy
@@ -33144,6 +33225,34 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             room = run["rooms"][run["current_room_id"]]
             if room.get("is_checkpoint"):
                 return run
+            # Real live feature (2026-09-04): a miniboss/boss/gated-
+            # encounter room now genuinely blocks moving onward until
+            # its own real monsters are cleared -- fight it here before
+            # trying to continue, same as a real player would have to.
+            # Real gotcha found writing this fix: a miniboss can win
+            # real initiative and one-shot a bare test character clean
+            # through death saves to an actual death, all inside this
+            # ONE _do_labyrinth_attack call, before this helper ever
+            # gets a chance to intervene and zero the enemy's own HP --
+            # temporarily overhealing the acting character first
+            # guarantees they survive to the point this helper can
+            # force the real win, same spirit as every other test in
+            # this class using an inflated hp_max for exactly this
+            # reason.
+            if bot._is_gated_combat_room(room):
+                pre_gate_character = db.get_character(user_id, chat_id)
+                original_hp_current, original_hp_max = pre_gate_character["hp_current"], pre_gate_character["hp_max"]
+                db.update_character(user_id, chat_id, hp_current=999999, hp_max=999999)
+                await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+                gate_session = sessions.get_session_for_user(chat_id, user_id)
+                if gate_session is not None:
+                    for enemy in [p for p in gate_session.participants if gate_session.sides.get(p["telegram_user_id"]) == "enemy"]:
+                        enemy["hp_current"] = 0
+                    await bot._check_labyrinth_progress(FakeUpdate(user_id, "", [], chat_id=chat_id), gate_session)
+                    sessions.end_session(chat_id, gate_session)
+                # Restore the character's own real stats -- the overheal above is a test-only survival guarantee, never a real reward.
+                db.update_character(user_id, chat_id, hp_current=original_hp_current, hp_max=original_hp_max)
+                continue
             if room.get("descends_to"):
                 await bot._do_labyrinth_move(FakeUpdate(user_id, "go down", [], chat_id=chat_id), "go down")
             else:
@@ -33274,6 +33383,97 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(room_a.get("monsters"), room_b.get("monsters"))
             self.assertEqual(room_a.get("lockables"), room_b.get("lockables"))
             self.assertEqual(room_a.get("hazard"), room_b.get("hazard"))
+
+    async def test_labyrinth_move_blocked_past_live_monsters_but_retreat_always_open(self):
+        """
+        Real live feature (2026-09-04, per Coffee: "if there are
+        battles, you can gate it so we cant go certain directions until
+        enemies are beaten"). A room with live monsters blocks moving
+        to a genuinely NEW (unvisited) destination, but retreating to
+        an already-visited one always stays open -- guarantees no real
+        softlock regardless of how a fight goes.
+        """
+        user_id, chat_id = 962044, -962044
+        make_basic_character(user_id, "CombatGateTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        party_key = f"solo:{user_id}"
+        rooms = {
+            "f1_hub": {"id": "f1_hub", "floor": 1, "name": "The Hub", "description": "A test room.", "connections": ["f1_r0", "f1_r1"], "monsters": ["goblin"], "is_gated_encounter": True, "visited": True},
+            "f1_r0": {"id": "f1_r0", "floor": 1, "name": "Cleared Landing", "description": "A test room.", "connections": ["f1_hub"], "monsters": [], "visited": True},
+            "f1_r1": {"id": "f1_r1", "floor": 1, "name": "Untouched Landing", "description": "A test room.", "connections": ["f1_hub"], "monsters": []},
+        }
+        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=1, current_room_id="f1_hub", rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "go to untouched landing")
+        self.assertTrue(any("Enemies bar the other paths" in s for s in sink))
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_hub")
+
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to cleared landing")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_r0")
+
+    async def test_labyrinth_move_gate_lifts_only_after_a_real_victory(self):
+        """The gate holds while a fight is merely started/unresolved, and only lifts once _check_labyrinth_progress actually clears the room's real monsters on a genuine party win -- never just because combat was attempted."""
+        import sessions
+        user_id, chat_id = 962045, -962045
+        make_basic_character(user_id, "CombatGateVictoryTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        party_key = f"solo:{user_id}"
+        rooms = {
+            "f1_hub": {"id": "f1_hub", "floor": 1, "name": "The Hub", "description": "A test room.", "connections": ["f1_r1"], "monsters": ["goblin"], "is_gated_encounter": True, "visited": True},
+            "f1_r1": {"id": "f1_r1", "floor": 1, "name": "Unvisited Room", "description": "A test room.", "connections": ["f1_hub"], "monsters": []},
+        }
+        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=1, current_room_id="f1_hub", rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", sink, chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session)
+
+        # Gate still holds -- a started, unresolved fight is not a real victory.
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to unvisited room")
+        self.assertTrue(any("Enemies bar the other paths" in s for s in sink2))
+
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+        sessions.end_session(chat_id, session)
+
+        # Real victory clears the room's own monsters -- the gate lifts for real.
+        sink3 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink3, chat_id=chat_id), "go to unvisited room")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_r1")
+
+    def test_labyrinth_exits_hides_blocked_directions_while_monsters_are_present(self):
+        rooms = {
+            "f1_hub": {"id": "f1_hub", "floor": 1, "name": "The Hub", "description": "A test room.", "connections": ["f1_r0", "f1_r1"], "monsters": ["goblin"], "is_gated_encounter": True, "visited": True},
+            "f1_r0": {"id": "f1_r0", "floor": 1, "name": "Visited Room", "description": "A test room.", "connections": ["f1_hub"], "monsters": [], "visited": True},
+            "f1_r1": {"id": "f1_r1", "floor": 1, "name": "Unvisited Room", "description": "A test room.", "connections": ["f1_hub"], "monsters": []},
+        }
+        exits = bot._labyrinth_exits(rooms["f1_hub"], rooms, -1)
+        dest_ids = {dest["id"] for _, _, dest in exits}
+        self.assertIn("f1_r0", dest_ids)
+        self.assertNotIn("f1_r1", dest_ids)
+
+        # Once the room's own monsters are cleared, every real exit is visible again.
+        rooms["f1_hub"]["monsters"] = []
+        exits_after = bot._labyrinth_exits(rooms["f1_hub"], rooms, -1)
+        self.assertEqual({dest["id"] for _, _, dest in exits_after}, {"f1_r0", "f1_r1"})
+
+    async def test_labyrinth_ordinary_trash_monster_room_is_never_gated(self):
+        """Real live finding (2026-09-04): most Labyrinth rooms carry ordinary trash monsters by default -- an unflagged monster room (no is_miniboss_room/is_boss_room/is_gated_encounter) must never block movement, same as it always has."""
+        user_id, chat_id = 962046, -962046
+        make_basic_character(user_id, "TrashRoomLabyrinthTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        party_key = f"solo:{user_id}"
+        rooms = {
+            "f1_hub": {"id": "f1_hub", "floor": 1, "name": "The Hub", "description": "A test room.", "connections": ["f1_r1"], "monsters": ["goblin"], "visited": True},
+            "f1_r1": {"id": "f1_r1", "floor": 1, "name": "Untouched Landing", "description": "A test room.", "connections": ["f1_hub"], "monsters": []},
+        }
+        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=1, current_room_id="f1_hub", rooms=rooms)
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "go to untouched landing")
+        self.assertFalse(any("Enemies bar the other paths" in s for s in sink))
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_r1")
 
     def test_labyrinth_depth_multiplier_strictly_increases_monster_stats(self):
         floor1 = bot._build_labyrinth_enemy("goblin", 1, 0, 1)
@@ -34985,6 +35185,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 or any(r.get("locked_connections") for r in rooms.values())
                 or any(r.get("collapsing_connections") for r in rooms.values())
                 or any(r.get("warps") for r in rooms.values())
+                or any(r.get("is_gated_encounter") for r in rooms.values())
             )
             if statue is not None:
                 statue_seen = True

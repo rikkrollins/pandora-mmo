@@ -110,6 +110,22 @@ _COLLAPSE_PUZZLE_CHANCE = 0.2
 # (never both on one floor).
 _CARRY_PUZZLE_CHANCE = 0.15
 
+# Real "gated encounter" room (2026-09-04, per Coffee: after asking
+# whether EVERY room with monsters should block movement onward until
+# cleared, and being told that would turn ordinary exploration into a
+# forced fight-every-room gauntlet -- "def number 1 [miniboss/boss
+# rooms only for the real movement gate] but you can use number two
+# [gate-on-any-monster] with the rng and the seeds to create ur
+# dungeons and labyrinths with advanced pathways and gating"). Rather
+# than a blanket rule, this is the SAME real movement-block mechanic
+# (see bot._do_labyrinth_move's own is_miniboss_room/is_boss_room/
+# is_gated_encounter check) applied sparingly and deliberately, like
+# every other special mechanic here -- an occasional, flagged ordinary
+# monster room the party genuinely cannot bypass, narrated honestly so
+# it reads as a real design choice, not a random room that happened to
+# trap them.
+_GATED_ENCOUNTER_CHANCE = 0.3
+
 # Real, more foundational research follow-up (2026-09-03, per Coffee:
 # "research dungeons of infinity and all other research to achieve
 # what our editor needs" -- see [[project_zelda_dungeon_algorithm_
@@ -1092,6 +1108,19 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 })
                 rooms[shortcut_a]["locked_connections"][shortcut_b] = f"{trigger_id}_echo_{shortcut_a}"
 
+    # Real gated encounter (2026-09-04) -- see _GATED_ENCOUNTER_CHANCE's
+    # own comment for the full reasoning. Never the hub (the hub's own
+    # exits already have plenty of other gates competing for it), never
+    # a room already flagged is_miniboss_room (that one already gates
+    # movement on its own, no need to double up).
+    gated_encounter_candidates = [
+        r for r in rooms.values() if r.get("monsters") and r is not hub and not r.get("is_miniboss_room")
+    ]
+    if gated_encounter_candidates and rng.random() < _scaled_chance(_GATED_ENCOUNTER_CHANCE, floor, 0.002, 0.6):
+        gated_room = rng.choice(gated_encounter_candidates)
+        gated_room["is_gated_encounter"] = True
+        gated_room["description"] += " Something about this space feels sealed -- like the way beyond won't truly open until whatever's here is dealt with."
+
     # Real owl-statue-style hint (2026-09-03, Link's Awakening research
     # -- an optional, non-spoiler ambient warning before committing to
     # a room). Strictly honest and vague, matching this project's own
@@ -1107,6 +1136,8 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         hint_lines.append("A passage further in feels unstable, like a well-placed blow could change its shape.")
     if any(r.get("warps") for r in rooms.values()):
         hint_lines.append("A shimmer somewhere on this floor doesn't belong here -- it leads somewhere else entirely.")
+    if any(r.get("is_gated_encounter") for r in rooms.values()):
+        hint_lines.append("Somewhere here, a real fight is standing between you and the rest of this floor.")
     if hint_lines:
         hub.setdefault("lockables", []).append({
             "id": f"f{floor}_hint_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing",

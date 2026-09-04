@@ -9341,6 +9341,27 @@ def _labyrinth_direction(from_room: dict, to_room: dict) -> str:
     return (ns + ew) if (ns and ew) else (ns or ew or "nearby")
 
 
+def _is_gated_combat_room(room: dict) -> bool:
+    """
+    Real live feature (2026-09-04, per Coffee: "if there are battles,
+    you can gate it so we cant go certain directions until enemies are
+    beaten"). Deliberately NOT "any room with monsters" -- confirmed
+    live via a real test failure that most evolved-dungeon/Labyrinth
+    rooms carry 1-2 ordinary trash monsters by default, so that blanket
+    rule would turn normal exploration into a forced fight-every-room
+    gauntlet. Scoped to only the rooms actually flagged as a real,
+    deliberate encounter: a miniboss, a boss, or the new, sparingly-
+    placed `is_gated_encounter` room (per Coffee's own follow-up:
+    "you can use ... the rng and the seeds to create ur dungeons and
+    labyrinths with advanced pathways and gating" -- an occasional,
+    deliberate gate, not a universal one). An ordinary trash-monster
+    room stays freely skippable, same as it always has.
+    """
+    return bool(room.get("monsters")) and bool(
+        room.get("is_miniboss_room") or room.get("is_boss_room") or room.get("is_gated_encounter")
+    )
+
+
 def _labyrinth_exits(room: dict, rooms: dict, chat_id: int) -> list[tuple[str, str, dict]]:
     """
     Shared exit list for both the room keyboard and the room TEXT
@@ -9382,6 +9403,20 @@ def _labyrinth_exits(room: dict, rooms: dict, chat_id: int) -> list[tuple[str, s
         exits.append(("⬇️", "Down", rooms[room["descends_to"]]))
     if room.get("ascends_to") and rooms.get(room["ascends_to"]):
         exits.append(("⬆️", "Up", rooms[room["ascends_to"]]))
+    # Real live feature (2026-09-04, per Coffee: "if there are battles,
+    # you can gate it so we cant go certain directions until enemies
+    # are beaten"). A room's own live `monsters` list is reliably
+    # cleared to [] on a real party victory (_check_labyrinth_progress,
+    # gated on winner == "party") and never otherwise -- so gating on
+    # it can never survive a real win, and can never become a
+    # permanent lock. Retreating anywhere the party has ALREADY been
+    # stays open regardless (never trapped by a fled or lost fight) --
+    # only genuinely NEW ground is blocked, filtered out here so a
+    # blocked direction never even shows up as a real, tappable/
+    # nameable option (matches _do_labyrinth_move's own real refusal
+    # for the same rule).
+    if _is_gated_combat_room(room):
+        exits = [(emoji, label, dest) for emoji, label, dest in exits if dest.get("visited")]
     return exits
 
 
@@ -10172,6 +10207,23 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
     if destination_id is None:
         await update.effective_chat.send_message(
             "Nothing that way — try one of the paths you can already see.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    # Real live feature (2026-09-04, per Coffee: "if there are battles,
+    # you can gate it so we cant go certain directions until enemies
+    # are beaten"). Only a real, deliberately-flagged encounter gates
+    # movement -- see _is_gated_combat_room's own docstring for why
+    # this is never "any room with monsters." Only NEW ground is
+    # blocked -- retreating anywhere the party has already been
+    # (run["rooms"][x]["visited"]) always stays open, so a fled or
+    # lost fight can never turn this into a real, permanent trap.
+    # room["monsters"] is reliably cleared to [] on a real party
+    # victory (_check_labyrinth_progress), the only way this gate ever
+    # lifts.
+    if _is_gated_combat_room(room) and not run["rooms"][destination_id].get("visited"):
+        await update.effective_chat.send_message(
+            "Enemies bar the other paths — deal with them first, or retreat the way you came.",
             message_thread_id=topics.thread_id_for(chat_id, "adventure"),
         )
         return
@@ -27006,6 +27058,26 @@ async def _do_move(update: Update, text: str) -> None:
         return
 
     destination = cl.get_location(CAMPAIGN, destination_id)
+    # Real live feature (2026-09-04, per Coffee: "if there are battles,
+    # you can gate it so we cant go certain directions until enemies
+    # are beaten... add these things to the generators"). Scoped
+    # narrowly to a real generated dungeon room (`dungeon_interior`,
+    # the same marker every dungeon_evolve.add_room call already
+    # stamps) -- an ordinary town/wilderness location with wandering
+    # monsters is completely unaffected, this never becomes a
+    # game-wide combat-avoidance change. Only a real, deliberately-
+    # flagged encounter gates movement -- see _is_gated_combat_room's
+    # own docstring for why this is never "any room with monsters."
+    # Only NEW ground is blocked; retreating anywhere already visited
+    # always stays open, so a fled or lost fight can never turn this
+    # into a permanent trap -- same exact rule and reasoning as
+    # _do_labyrinth_move's own identical gate.
+    if current.get("dungeon_interior") and _is_gated_combat_room(current) and destination_id not in (character.get("visited_locations") or []):
+        await update.effective_chat.send_message(
+            "Enemies bar the other paths — deal with them first, or retreat the way you came.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
     if destination.get("requires_item") and destination["requires_item"] not in character["inventory"]:
         await update.effective_chat.send_message(
             f"Something stops **{character['name']}** from going any further — missing something needed first.",
