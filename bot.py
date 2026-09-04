@@ -10227,6 +10227,21 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
         destination_id = room["descends_to"]
     elif room.get("ascends_to") and re.search(r"\b(up|upstairs|climb|ascend|above)\b", lowered):
         destination_id = room["ascends_to"]
+    # Real live gap found via the AI-driven Labyrinth playtest tool
+    # (2026-09-04): the room text has always advertised real compass
+    # labels ("Exits: North (...), South (...)"), same as the
+    # overworld's own _do_move -- but unlike _do_move (which resolves
+    # a bare "go south" via current["directions"]), this never checked
+    # for the bare compass word itself, only a destination room's own
+    # id/full name. Reuses _labyrinth_exits's own real, already-
+    # computed (label, dest) pairs -- the exact same labels the player
+    # was just shown -- rather than recomputing anything new.
+    if destination_id is None:
+        words_in_text = set(re.findall(r"[a-z]+", lowered))
+        for _emoji, label, dest in _labyrinth_exits(room, run["rooms"], chat_id):
+            if label.lower() in words_in_text:
+                destination_id = dest["id"]
+                break
     if destination_id is None:
         for dest_id in reachable_ids:
             dest = run["rooms"].get(dest_id)
@@ -13632,6 +13647,28 @@ def _mentions_breakable_surface(text: str) -> bool:
     return bool(_BREAKABLE_SURFACE_RE.search(text.lower()))
 
 
+_LIGHT_A_SOURCE_RE = re.compile(r"\b(?:light|ignite|strike)\b.*\b(?:torch|lantern|lamp|fire)\b")
+
+
+def _mentions_lighting_a_source(text: str) -> bool:
+    """
+    Same grounding shape as _mentions_hidden_passage/_mentions_
+    breakable_surface, for a real gap found via the AI-driven
+    Labyrinth playtest tool (2026-09-04): "I light a torch here" in a
+    real `lightless` room, with no real torch in inventory, fell
+    through to a plain, un-grounded ability check -- the model
+    narrated a triumphant natural-20 "the flame spilled its molten
+    glow" success with ZERO actual effect (this game has no "light a
+    torch" mechanic at all; `_has_light_source` only ever checks
+    real, already-carried inventory). A player or AI companion reading
+    that prose has every reason to believe they can now see, when
+    they genuinely can't -- confusing and actively misleading, the
+    same failure shape the hidden-door/breakable-surface fixes above
+    already close for their own mechanics.
+    """
+    return bool(_LIGHT_A_SOURCE_RE.search(text.lower()))
+
+
 async def _do_skill_check(update: Update, ability: str, action_text: str, forced_roll: int | None = None) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -13737,6 +13774,15 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
         # free to invent (or vaguely gesture at) a mechanic that isn't
         # actually there.
         grounded_fact = "There is nothing here that actually breaks or gives way to force — no real crack, wall, or floor panel that responds to being hit."
+    elif _mentions_lighting_a_source(action_text) and not _has_light_source(character, update.effective_chat.id):
+        # Real live bug found via the AI-driven Labyrinth playtest tool
+        # (2026-09-04): this game has no "light a torch" mechanic at
+        # all -- _has_light_source only ever checks a real, already-
+        # carried torch/lantern in inventory -- so this fell through to
+        # a plain, un-grounded check that narrated a triumphant fake
+        # success with zero real effect. Same grounding discipline as
+        # the hidden-door/breakable-surface cases above.
+        grounded_fact = "You have nothing here that could actually be lit — no real torch, lantern, or other light source in hand."
 
     flavor = await asyncio.to_thread(
         narrate_skill_check, character, action_text, ability,
@@ -20305,7 +20351,21 @@ def _format_character_sheet(character: dict) -> str:
         f"{skills_line}"
         f"{proficiency_line}"
     ).rstrip("\n")
-    location_section = f"📍 Location: {cl.get_location(CAMPAIGN, character['current_location'])['name']}"
+    # Real live crash (2026-09-04, error log: Sheri/Charvenna and,
+    # independently, Coffee/Elduinn -- two unrelated players hitting
+    # this hours apart): character["current_location"] is
+    # LABYRINTH_LOCATION_SENTINEL for anyone genuinely inside a live
+    # Labyrinth run -- a real, ordinary, expected state, not an edge
+    # case -- and cl.get_location has no real CAMPAIGN entry for it,
+    # so the old unconditional ['name'] subscript crashed the whole
+    # sheet. Falls back to a plain, honest label for that (or any
+    # other unresolvable) location instead of assuming one always
+    # exists.
+    if character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        location_section = "📍 Location: Deep in the Labyrinth"
+    else:
+        current_location_data = cl.get_location(CAMPAIGN, character["current_location"])
+        location_section = f"📍 Location: {current_location_data['name'] if current_location_data else 'Unknown'}"
     # Per Coffee (2026-07-16): pending ASI points shown last, so a
     # player who missed the level-up prompt still sees it waiting every
     # time they check their sheet, not just buried mid-sheet.
@@ -27770,6 +27830,19 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     checkpoint_floor = character.get("labyrinth_checkpoint_floor", 0)
     if checkpoint_floor and character["current_location"] != LABYRINTH_LOCATION_SENTINEL and re.search(r"\b(labyrinth|waystation|way station)\b", text.lower()):
         await _do_enter_labyrinth(update)
+        return
+
+    # Real live crash (2026-09-04, error log, Sheri/Charvenna, count=3):
+    # LABYRINTH_LOCATION_SENTINEL is never a real CAMPAIGN location, so
+    # every lookup below this point (visited_locations filtering,
+    # `current = cl.get_location(...)`) assumed something that isn't
+    # true while genuinely inside the Labyrinth, crashing instead of
+    # ever reaching a clean refusal. Fast-traveling OUT of the
+    # Labyrinth to an ordinary overworld waypoint isn't a supported
+    # move today (the waystation/checkpoint case just above is the
+    # real, supported way back in) -- refuse honestly instead.
+    if character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        await _safe_send(update, "You're deep in the Labyrinth right now — leave it first, or fast-travel to the waystation/labyrinth to return to your last checkpoint.", speak=False)
         return
 
     visited = [

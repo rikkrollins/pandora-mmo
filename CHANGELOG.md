@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.508] — fix: batch of real live gaps/crashes found via the AI-driven Labyrinth playtest tool + monitoring
+
+Six real bugs, each found live (not by inspection) via the new
+AI-driven Labyrinth playtest tool or topic-activity monitoring on
+2026-09-04, all fixed the same day:
+
+- `ai/intent_parser.py`: "I explore Labyrinth A Mirrored Chamber (II)"
+  (explicitly naming a real, just-displayed exit) fell through to
+  silent `chat` — `explore ` added to `move_words`, same bare-verb
+  shape as `enter the`/`descend`/`ascend`.
+- `ai/intent_parser.py`: "I proceed toward floor 5." (a real AI
+  companion's own narration for a real descend) was silently
+  misclassified as `chat` — `move_words` only ever matched a fixed
+  "<verb> to" phrase; `proceed`/`advance`/`make my way` were never
+  covered at all, and `head toward` only worked before by accident
+  (`head to` is a literal substring of `head toward`). New regex
+  covers verb + `toward(s)?` generally.
+- `ai/intent_parser.py`: "I approach the structural trigger here"/"I
+  approach the locked door" fell through to silent `chat` — same
+  "verb not covered" gap as touch/peer/read/observe/gaze before it;
+  `approach(ed|ing)?` now recognized as "look closer at X" (this game
+  has no spatial positioning within a room).
+- `bot.py` (`_do_labyrinth_move`): the room text has always advertised
+  real compass labels ("Exits: North (...), South (...)"), same as the
+  overworld — but unlike the overworld's own `_do_move`, this never
+  resolved a bare compass word, only a destination room's own id/full
+  name. Now reuses `_labyrinth_exits`'s own already-computed
+  (label, dest) pairs.
+- `bot.py`: "I light a torch here" in a real `lightless` room, with no
+  real torch carried, got a triumphant fake-success narration with
+  zero actual effect — this game has no "light a torch" mechanic at
+  all, only a passive check for an already-carried source
+  (`_has_light_source`). New `_mentions_lighting_a_source` grounds the
+  skill check honestly, same discipline as the hidden-door/breakable-
+  surface cases.
+- `bot.py` (`_format_character_sheet`, `_do_fast_travel`): two real,
+  unrelated players (Sheri/Charvenna and Coffee/Elduinn) crashed hours
+  apart checking their sheet or fast-traveling while genuinely inside
+  a live Labyrinth run — `LABYRINTH_LOCATION_SENTINEL` was never a
+  real CAMPAIGN location, and both call sites assumed `cl.get_location`
+  always resolves. Sheet now shows "Deep in the Labyrinth"; fast-travel
+  now refuses cleanly ("leave it first, or fast-travel to the
+  waystation") instead of crashing.
+
+9 new regression tests, all passing.
+
 ## [1.27.507] — feature: Phase B key-item drops + key-gated doors (Labyrinth + evolved dungeons)
 
 Direct follow-up to v1.27.505's combat-gating Phase A, per Coffee:

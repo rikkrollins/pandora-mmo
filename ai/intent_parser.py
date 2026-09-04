@@ -2000,9 +2000,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\b(?:what(?:'s| is)|show|check)\b.*\bseed\b", lowered) or "current seed" in lowered:
         return {**base, "action": "check_labyrinth_seed"}
 
+    # "explore " added 2026-09-04 (found via the AI-driven Labyrinth
+    # playtest tool): "I explore Labyrinth A Mirrored Chamber (II)" --
+    # explicitly naming a real, just-displayed exit -- fell all the way
+    # through to the fully silent 'chat' default. No "to" needed, same
+    # bare-verb shape "enter the"/"descend"/"ascend" already use.
     move_words = ["go to", "goto", "head to", "heading to", "walk to", "walking to",
                   "travel to", "traveling to", "travelling to", "move to", "moving to",
-                  "enter the", "descend", "ascend",
+                  "enter the", "descend", "ascend", "explore ",
                   "climb down", "climb up", "leave the ", "leave this", "leave here", "go back",
                   "go downstairs", "go upstairs", "head downstairs", "head upstairs",
                   "downstairs", "upstairs", "exit this", "exit the", "step out", "walk out",
@@ -2024,6 +2029,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # e.g. a location/NPC name containing it).
     if re.search(r"\b(?:travel|go|goto|head|walk|move|ride|run|march|sail)\s+"
                  r"(?:north|south|east|west|northeast|northwest|southeast|southwest)\b", lowered):
+        return {**base, "action": "move"}
+
+    # Real live bug found via topic-activity monitoring (2026-09-04): an
+    # AI companion's own real narration for a real Labyrinth descend --
+    # "I proceed toward floor 5." -- was silently misclassified as chat.
+    # Same shape as the compass-direction fix just above (a movement
+    # VERB, here paired with "toward"/"towards" instead of a bare
+    # direction): move_words only ever matched a fixed "<verb> to"
+    # phrase, and "proceed"/"advance"/"make my way" were never in that
+    # list at all -- "head toward" only ever worked by accident, since
+    # "head to" happens to be a literal substring of "head toward".
+    if re.search(r"\b(?:travel(?:l?ing)?|go(?:ing)?|goto|head(?:ing)?|walk(?:ing)?|mov(?:e|ing)|ride|run(?:ning)?|march(?:ing)?|sail(?:ing)?|proceed(?:ing)?|advanc(?:e|ing)|continu(?:e|ing)|make my way|making my way)\s+"
+                 r"towards?\b", lowered):
         return {**base, "action": "move"}
 
     # Real live bug (2026-08-31, dev-bridge: a bare "look" from Elduinn
@@ -2107,9 +2125,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # this file has hit many times before (touch/peer/read/observe/
     # gaze), just one more common synonym for "look at" a specific
     # thing. No "at" required, same shape as read/observed/touch(ed)?.
+    # "approach(ed)?" added 2026-09-04 (found via the AI-driven
+    # Labyrinth playtest tool): "I approach the structural trigger
+    # here"/"I approach the locked door" both fell all the way through
+    # to the fully silent 'chat' default, the exact same "verb not
+    # covered" gap this file has hit many times before -- this game has
+    # no real spatial positioning within a room, so "approach X" (an
+    # already-visible object right here) means the same thing as "look
+    # closer at X".
     examine_verb_match = re.search(
         r"\b(?:read|observed|examined|inspected|searched|checked out|touch(?:ed)?|view(?:ed|ing)?|"
-        r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at|gaze(?:d)? at)\b\s+"
+        r"looked (?:at|closer at)|(?:peer|perr)(?:ed)? (?:at|into|in)|glanced? at|gaze(?:d)? at|approach(?:ed|ing)?)\b\s+"
         r"(?:the |a |an )?(.+)",
         lowered,
     )

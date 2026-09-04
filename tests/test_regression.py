@@ -211,6 +211,33 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         the new "view" examine trigger must not shadow it."""
         self.assertEqual(_keyword_fallback("view my inventory", [])["action"], "check_inventory")
 
+    def test_approach_classified_as_examine(self):
+        """
+        Real live gap found via the AI-driven Labyrinth playtest tool
+        (2026-09-04): "I approach the structural trigger here"/"I
+        approach the locked door" both fell all the way through to the
+        fully silent 'chat' default -- the exact same "verb not
+        covered" gap this file has hit many times before (touch/read/
+        gaze/view). This game has no real spatial positioning within a
+        room, so "approach X" (an already-visible object right here)
+        means the same thing as "look closer at X".
+        """
+        for text in ("I approach the structural trigger here.", "I approach the locked door.",
+                     "approaching the altar"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
+
+    def test_explore_a_named_destination_classifies_as_move_not_chat(self):
+        """
+        Real live gap found via the AI-driven Labyrinth playtest tool
+        (2026-09-04): "I explore Labyrinth A Mirrored Chamber (II)" --
+        explicitly naming a real, just-displayed exit -- fell all the
+        way through to the fully silent 'chat' default. No "to" needed,
+        same bare-verb shape "enter the"/"descend"/"ascend" already use.
+        """
+        for text in ("I explore Labyrinth A Mirrored Chamber (II).", "explore the market row",
+                     "let's explore the tavern"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "move", text)
+
     # -- "Feel the X" misclassified as silent chat, not examine
     #    (2026-08-06, real player, caught via topic-activity monitoring) --
     def test_feel_the_x_classified_as_examine(self):
@@ -8122,6 +8149,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_fast_travel(FakeUpdate(user_id, "warp to the ember font", sink), "warp to the ember font")
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "wrathflame_vault_ember_font")
+
+    async def test_fast_travel_refuses_cleanly_instead_of_crashing_while_deep_in_the_labyrinth(self):
+        """
+        Real live crash (2026-09-04, error log, Sheri/Charvenna at
+        01:22-01:23, count=3): _do_fast_travel's `current = cl.
+        get_location(CAMPAIGN, character["current_location"])` assumed
+        this always resolves to a real CAMPAIGN location -- but
+        LABYRINTH_LOCATION_SENTINEL doesn't, and the very next line
+        (`current.get(...)`) crashed with a raw AttributeError instead
+        of ever reaching the ordinary "you can only fast-travel
+        somewhere you've been" refusal. Only the plain "warp out"
+        phrasing hits this (asking for the labyrinth/waystation by name
+        is already handled earlier in this same function).
+        """
+        user_id = 900982
+        make_basic_character(user_id, "StuckDelver", current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        db.mark_visited(user_id, -999, "crossroads_tavern")
+        sink = []
+        await bot._do_fast_travel(FakeUpdate(user_id, "warp to the crossroads tavern", sink), "warp to the crossroads tavern")
+        self.assertTrue(any("Labyrinth" in s for s in sink), f"expected a clean refusal, got: {sink}")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
 
     # -- Real live request (2026-08-30, dev-bridge, Coffee: "when they
     #    reach those 'safe place' type locations can u give them an
@@ -21336,6 +21384,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # appearing as part of something else, must NOT false-positive.
         self.assertNotEqual(_keyword_fallback("west of here is dangerous", [])["action"], "move")
 
+    def test_verb_toward_a_destination_classifies_as_move_not_chat(self):
+        """
+        Real live bug found via topic-activity monitoring (2026-09-04):
+        an AI companion's own real narration for a real Labyrinth
+        descend action -- "I proceed toward floor 5." -- was silently
+        misclassified as chat, a fixed-list gap in move_words the exact
+        same shape as the compass-direction bug above. "I head toward
+        floor 5." happened to already work, but only by accident --
+        "head to" is a listed move_word, and "head to" is a literal
+        substring of "head toward", not a real, deliberate match.
+        "proceed" was never in that list at all.
+        """
+        for text in ["I proceed toward floor 5.", "I head toward floor 5.",
+                     "advancing toward the hub", "make my way toward the checkpoint"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "move", text)
+
     def test_progressive_tense_travel_verbs_classify_as_move(self):
         """
         Real live bug (2026-08-13, found investigating "go to the
@@ -22259,6 +22323,52 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotEqual(grounded_fact, "There is nothing here that actually breaks or gives way to force — no real crack, wall, or floor panel that responds to being hit.")
         finally:
             real_location["lockables"] = [lk for lk in real_location["lockables"] if lk["id"] != "test_breakable_floor"]
+
+    def test_mentions_lighting_a_source_catches_real_phrasing_without_false_positives(self):
+        for text in ("I light a torch here.", "light my torch", "Ignite the lantern", "strike a fire"):
+            self.assertTrue(bot._mentions_lighting_a_source(text), text)
+        for text in ("I sneak past the guard", "light on my feet", "torch the enemy with fire magic"):
+            self.assertFalse(bot._mentions_lighting_a_source(text), text)
+
+    async def test_skill_check_grounds_lighting_a_torch_with_none_actually_carried(self):
+        """
+        Real live bug found via the AI-driven Labyrinth playtest tool
+        (2026-09-04): "I light a torch here" in a real `lightless` room,
+        with no real torch in inventory, got a triumphant natural-20
+        "the flame spilled its molten glow" narration with ZERO actual
+        effect -- this game has no "light a torch" mechanic at all,
+        only a passive check for an already-carried torch/lantern
+        (_has_light_source). An AI companion (or a real human) reading
+        that prose has every reason to believe they can now see, when
+        they genuinely still can't.
+        """
+        from unittest.mock import patch
+        user_id = 900505
+        character = make_basic_character(user_id, "TorchlessTester", current_location="crossroads_tavern")
+        self.assertEqual(character["inventory"].get("torch", 0), 0)
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="Nothing happens.") as mock_narrate:
+            await bot._do_skill_check(
+                FakeUpdate(user_id, "I light a torch here.", sink), "dexterity", "I light a torch here.", forced_roll=20,
+            )
+        self.assertTrue(mock_narrate.called)
+        grounded_fact = mock_narrate.call_args.kwargs.get("grounded_fact")
+        self.assertIsNotNone(grounded_fact)
+        self.assertIn("nothing here", grounded_fact.lower())
+
+    async def test_skill_check_does_not_ground_lighting_a_torch_when_one_is_actually_carried(self):
+        """The grounding fix above must never fire for a character who genuinely already has a real torch -- _has_light_source already covers them, nothing false to correct."""
+        from unittest.mock import patch
+        user_id = 900506
+        make_basic_character(user_id, "TorchCarrierTester", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "torch", 1)
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="The torch catches.") as mock_narrate:
+            await bot._do_skill_check(
+                FakeUpdate(user_id, "I light a torch here.", sink), "dexterity", "I light a torch here.", forced_roll=20,
+            )
+        grounded_fact = mock_narrate.call_args.kwargs.get("grounded_fact")
+        self.assertNotEqual(grounded_fact, "You have nothing here that could actually be lit — no real torch, lantern, or other light source in hand.")
 
     # -- Rogue/Bard Expertise + Bard Jack of All Trades (2026-07-16) ----
     def test_rogue_expertise_doubles_proficiency_from_level_1(self):
@@ -23220,6 +23330,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = make_basic_character(user_id, "Undescribed")
         sheet = bot._format_character_sheet(character)
         self.assertNotIn('""', sheet)
+
+    def test_character_sheet_never_crashes_while_deep_in_the_labyrinth(self):
+        """
+        Real live crash (2026-09-04, error log: Sheri/Charvenna at
+        01:23:58 and Coffee/Elduinn at 05:30:39 -- both real, unrelated
+        players hitting the same bug independently, hours apart):
+        _format_character_sheet's location_section unconditionally
+        assumed character["current_location"] always resolves to a
+        real CAMPAIGN location via cl.get_location -- but
+        LABYRINTH_LOCATION_SENTINEL ("__labyrinth__") is a real,
+        legitimate value any character currently inside a live
+        Labyrinth run genuinely has, and cl.get_location returns None
+        for it, crashing on the very next ['name'] subscript. Checking
+        your own sheet while inside the Labyrinth is an entirely
+        ordinary, expected action, not an edge case.
+        """
+        user_id = 900514
+        character = make_basic_character(user_id, "DeepDelver", current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("Labyrinth", sheet)
 
     def test_character_sheet_shows_real_practiced_proficiency_percentages(self):
         """
@@ -34282,6 +34412,51 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             any(word in text for word in ("North", "South", "East", "West")),
             f"expected a real compass word in the exits line, got: {text}",
+        )
+
+    async def test_labyrinth_move_resolves_a_bare_compass_word_not_just_the_room_name(self):
+        """
+        Real live gap found via the AI-driven Labyrinth playtest tool
+        (2026-09-04): the room text has always advertised real compass
+        labels ("🧭 Exits: North (...), South (...)") -- ported from
+        the overworld per Coffee's own request -- but unlike the
+        overworld's own _do_move (which resolves a bare "go south"
+        via `current["directions"]`), _do_labyrinth_move only ever
+        matched a destination room's own ID or full NAME, never the
+        compass word actually shown to the player. A real AI companion
+        (and, just as easily, a real human) saying "go south" or "I
+        proceed toward South" got the honest-sounding but wrong
+        "Nothing that way" refusal despite South being a real, just-
+        displayed exit.
+        """
+        user_id = 962070
+        chat_id = -962070
+        make_basic_character(user_id, "CompassMoveTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub["grid_position"] = {"x": 0, "y": 0}
+        south_room = {
+            "id": "test_south_room", "floor": hub["floor"], "name": "Labyrinth -- A Room To The South",
+            "description": "test", "connections": [hub["id"]], "monsters": [],
+            "grid_position": {"x": 0, "y": -1},
+        }
+        # Replaces the hub's own real connections entirely -- a
+        # freshly-generated hub can easily already have another real
+        # neighbor that also happens to compute to "South", which
+        # would make this test ambiguous about which one the fix
+        # actually resolved to.
+        hub["connections"] = ["test_south_room"]
+        run["rooms"]["test_south_room"] = south_room
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "go south")
+        self.assertEqual(
+            db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "test_south_room",
+            f"expected the bare compass word to resolve to the real south exit, got: {sink}",
         )
 
     def test_labyrinth_room_image_prompt_leans_dungeon_crawl_but_stays_grounded(self):
