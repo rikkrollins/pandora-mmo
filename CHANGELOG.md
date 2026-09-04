@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.502] — fix: "stand on the pressure plate" misclassified as summoning a Remnant
+
+Real live report (2026-09-04, dev-bridge): Coffee typed "Stand on the
+pressure plate" while in the Labyrinth and got "Summon which Remnant?
+You've bound: The Wrathflame Unbound, The Root That Remembers." — a
+completely unrelated action.
+
+Root cause: `ai/intent_parser.py`'s pressure-plate regex only
+recognized `push/place/put/move/shove ... onto/on ... plate/switch/
+urn/crate/statue/block` — "stand"/"step" were missing from the verb
+list entirely, even though standing on a plate is arguably the single
+most natural way to describe triggering one. With no deterministic
+match, the text fell through to the AI classifier, which guessed
+wrong. `bot._do_activate_pressure_plate`'s own real mechanic doesn't
+care how the plate gets triggered (the verb is flavor text only, the
+state toggle is identical either way), so there was no reason to
+exclude this phrasing — same "carve out the real skill-check phrasing
+first" fix shape as the earlier "open the door"/"pull the lever" gaps.
+
+Added "stand"/"step" to the verb list. 2 new tests (intent
+classification + a real end-to-end plate toggle using the exact live
+phrasing from the report). Full `SwitchAndBreakableAndPitTests` suite
+(15 tests) passes.
+
 ## [1.27.501] — feature: warps + collapse puzzle ported to the overworld dungeon generator
 
 Per Coffee's own correction (2026-09-04): an earlier plan had mis-

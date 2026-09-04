@@ -32953,6 +32953,32 @@ class SwitchAndBreakableAndPitTests(unittest.IsolatedAsyncioTestCase):
         intent2 = _keyword_fallback("fill the urn with water", [])
         self.assertEqual(intent2["action"], "skill_check")
 
+    def test_pressure_plate_stand_on_intent_routes_through_the_real_parser(self):
+        """
+        Real live misclassification (2026-09-04, dev-bridge, Coffee:
+        "Stand on the pressure plate" got "Summon which Remnant? You've
+        bound..." instead). "stand"/"step" were missing from the verb
+        list entirely, so the text fell through to the AI classifier,
+        which guessed wrong -- same routing-gap class as the earlier
+        "open the door"/"pull the lever" fixes.
+        """
+        intent = _keyword_fallback("Stand on the pressure plate", [])
+        self.assertEqual(intent["action"], "skill_check")
+        intent2 = _keyword_fallback("Step on the plate", [])
+        self.assertEqual(intent2["action"], "skill_check")
+
+    async def test_pressure_plate_stand_on_toggles_the_real_plate_end_to_end(self):
+        """Real end-to-end: the exact live phrasing from the dev-bridge report actually triggers the real plate, not just a correct intent classification in isolation."""
+        from unittest.mock import patch
+        campaign = _switch_test_campaign()
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id, chat_id = 961010, -961010
+            make_basic_character(user_id, "PlateStandTester", chat_id=chat_id, current_location="fx_plate_room")
+            sink = []
+            await bot._do_skill_check(FakeUpdate(user_id, "Stand on the pressure plate", sink, chat_id=chat_id), "dexterity", "Stand on the pressure plate")
+            self.assertTrue(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("fx_plate_1"))
+            self.assertTrue(any("sinks into place" in s for s in sink))
+
     async def test_push_object_down_pit_activates_a_real_plate_below(self):
         """Real "as above, so below" mechanic -- pushing an object down a real pit activates a real pressure plate in the destination room, remotely."""
         from unittest.mock import patch

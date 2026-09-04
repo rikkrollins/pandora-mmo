@@ -2180,7 +2180,23 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # with liquid). Same routing shape as the switch/breakable fixes
     # above -- into skill_check -> _do_skill_check -> _find_lockable ->
     # _do_lockpick's own real "pressure_plate" branch.
-    if re.search(r"\b(?:push|place|put|move|shove)\b.*\b(?:onto|on)\b.*\b(?:plate|switch|urn|crate|statue|block)\b", lowered):
+    #
+    # Real live bug + real misclassification (2026-09-04, dev-bridge,
+    # Coffee: "Stand on the pressure plate" got "Summon which Remnant?
+    # You've bound..." -- a completely unrelated action). Root cause:
+    # this regex's own verb list never included "stand"/"step" -- the
+    # single most natural real-world way to trigger a pressure plate,
+    # arguably more natural than "push onto" for a plate specifically
+    # (unlike a crate/urn, which really is pushed) -- so the text fell
+    # all the way through the deterministic fallback chain and reached
+    # the AI classifier, which guessed wrong. bot._do_activate_
+    # pressure_plate's own real mechanic already doesn't care HOW the
+    # plate gets triggered (the `verb` argument is flavor text only,
+    # the state toggle is identical either way), so there's no real
+    # reason to keep "stand"/"step" out -- same "carve out the real
+    # skill-check phrasing first" fix shape as the door/lever gaps
+    # above.
+    if re.search(r"\b(?:push|place|put|move|shove|stand|step)\b.*\b(?:onto|on)\b.*\b(?:plate|switch|urn|crate|statue|block)\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
     if re.search(r"\bfill\b.*\b(?:urn|vessel|basin|jug|pot)\b.*\bwith\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
