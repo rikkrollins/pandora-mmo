@@ -163,6 +163,69 @@ def _location_image_prompt(location: dict) -> str:
     )
 
 
+def _labyrinth_room_image_seed(description: str) -> int:
+    """Identical formula to bot.py's own _deterministic_image_seed(f"labyrinth_room:{description}") -- same key, same seed, same real image."""
+    return int(hashlib.sha256(f"labyrinth_room:{description}".encode()).hexdigest(), 16) % (2 ** 31)
+
+
+def _labyrinth_room_image_prompt(room: dict) -> str:
+    """Identical formula to bot.py's own _labyrinth_room_image_prompt -- grounded only in the room's real description text."""
+    return (
+        f"{room['description']}, alternate-dimension fantasy dungeon environment concept art, "
+        "ancient stone corridors, weathered mechanisms and archways, dramatic torchlight and deep shadow, "
+        "a real sense of a structure built to be explored, atmospheric lighting, detailed digital painting, "
+        "no text or labels"
+    )
+
+
+def _fetch_labyrinth_room_tile(room: dict) -> Image.Image | None:
+    """
+    Real per-room-CONCEPT art for the Labyrinth's own map (2026-09-04,
+    per Coffee: "use the location images that you generate when we
+    look around on the map so it looks more visually stimulating").
+    Labyrinth FLOORS are ephemeral (fully regenerated on next descent,
+    see this module's own "no network calls" note above on why this
+    renderer was originally kept separate from render_layer_map), but a
+    room's DESCRIPTION concept is drawn from a real, bounded pool and
+    genuinely repeats across floors/players/sessions -- the same
+    reasoning bot.py's own _maybe_send_labyrinth_room_image already
+    relies on to key its narration image on the description rather
+    than the room's own structural id (which is never stable across a
+    regen). Cached to disk by that same deterministic seed, not room
+    id, so the first floor anywhere to roll a given room concept pays
+    the real network cost once and every later floor/player/session
+    gets it free from cache -- same "fetch once, cache forever"
+    discipline as _fetch_location_tile above, just keyed differently.
+    Skips lightless rooms entirely (never fetches, flat fill only) --
+    same "you can't see it, so no image either" rule bot.py's own
+    narration image already enforces.
+    """
+    if room.get("modifier") == "lightless":
+        return None
+    seed = _labyrinth_room_image_seed(room["description"])
+    cache_path = os.path.join(_TILE_CACHE_DIR, "labyrinth", f"{seed}.png")
+    if os.path.exists(cache_path):
+        try:
+            return Image.open(cache_path).convert("RGB")
+        except OSError:
+            pass
+    url = images_module.generate_image_url(
+        _labyrinth_room_image_prompt(room), width=CELL_SIZE, height=CELL_SIZE, seed=seed,
+    )
+    try:
+        resp = requests.get(url, timeout=60)
+        resp.raise_for_status()
+        tile = Image.open(io.BytesIO(resp.content)).convert("RGB")
+    except Exception:
+        return None
+    try:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        tile.save(cache_path, format="PNG")
+    except OSError:
+        pass
+    return tile
+
+
 def _fetch_location_tile(layer_name: str, loc_id: str, location: dict) -> Image.Image | None:
     """
     Real per-location art, fetched at most ONCE ever per location
@@ -932,12 +995,18 @@ def render_labyrinth_map(
     labyrinth - specially if they get larger, we shud be exploring
     them" -- reverses this function's original "a whole floor is
     always fully revealed" design). When given, a room NOT in this set
-    is drawn as a plain, unlabeled grey cell (its real shape/position
-    on the grid, so the maze's overall layout still guides exploration)
-    with no name and no monster/chest/hazard/switch icons -- those are
-    the actual reward for physically walking there. `None` (the
-    default) keeps the old fully-revealed behavior for any caller that
-    hasn't been updated to track visits yet.
+    is drawn IDENTICALLY to a grid position with no room at all (solid
+    black, no outline) -- real fog of war (2026-09-04, per Coffee's own
+    follow-up: "make sure any area that is unexplored that you don't
+    actually show the black box/outline on the map so we dont kno the
+    shape of the map"; the previous grey-box-with-outline rendering
+    still revealed exactly where every unvisited room sat and the
+    overall shape of the floor before it was ever walked). The ONLY
+    honest hint that more lies beyond a visited room is that room's own
+    real doorway rendering (a gap = a real passage, a gold wall = a
+    real gate) -- never the destination room's own shape or content.
+    `None` (the default) keeps the old fully-revealed behavior for any
+    caller that hasn't been updated to track visits yet.
     """
     locked_room_ids = locked_room_ids or set()
     positions = {rid: (r["grid_position"]["x"], r["grid_position"]["y"]) for rid, r in rooms.items()}
@@ -952,8 +1021,6 @@ def render_labyrinth_map(
         legend_lines.append("gold wall = a locked/gated connection")
     if locked_room_ids & set(rooms.keys()):
         legend_lines.append("dashed outline = seen, not yet reachable")
-    if visited_room_ids is not None and (set(rooms.keys()) - visited_room_ids):
-        legend_lines.append("grey = unexplored, walk there to reveal it")
     if any(lk.get("kind") in ("switch", "multi_switch_gate") for r in rooms.values() for lk in r.get("lockables", [])):
         legend_lines.append("switch dot color = its element, dim grey = inactive")
     if any(lk.get("kind") == "pressure_plate" for r in rooms.values() for lk in r.get("lockables", [])):
@@ -1007,11 +1074,28 @@ def render_labyrinth_map(
             is_unvisited = visited_room_ids is not None and room_id not in visited_room_ids and not is_current
 
             if is_unvisited:
-                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_OTHER_FLOOR_FILL)
-                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=_OTHER_FLOOR_OUTLINE, width=2)
+                # Real fog of war (2026-09-04) -- drawn IDENTICALLY to
+                # the room_id-is-None case just above, on purpose: no
+                # outline, no distinct fill, nothing that would let a
+                # player infer a room even exists here before they've
+                # actually walked into it.
+                draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_CELL_BLACK)
                 continue
 
+            # Real per-room generated art (2026-09-04, per Coffee: "use
+            # the location images that you generate when we look around
+            # on the map so it looks more visually stimulating") --
+            # drawn as the cell's real background, same paste-then-draw-
+            # walls-on-top order render_layer_map's own _draw_cell uses.
+            # Falls back to the plain flat fill on any failure (no
+            # network, a lightless room, a cold cache miss) -- never
+            # blocks or crashes the whole map render.
             draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=_LABYRINTH_ROOM_FILL)
+            tile = _fetch_labyrinth_room_tile(room)
+            if tile is not None:
+                if tile.size != (CELL_SIZE, CELL_SIZE):
+                    tile = tile.resize((CELL_SIZE, CELL_SIZE))
+                image.paste(tile, (px, py))
             if is_locked:
                 _draw_dashed_rect(draw, [px, py, px + CELL_SIZE, py + CELL_SIZE], _OTHER_FLOOR_OUTLINE)
             else:

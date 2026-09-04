@@ -975,6 +975,27 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     _ENVIRONMENT_USE_PHRASES = ("use the environment", "use my surroundings", "use the surroundings",
                                  "interact with the environment", "use the room against", "environment attack",
                                  "use the area against")
+
+    # Real live bug (2026-09-04, dev-bridge screenshot): "Use the key on
+    # the door" got "Use what, exactly? Name a consumable you're
+    # actually carrying." instead of actually trying the lock. Root
+    # cause: the generic "use ... on ..." -> use_item check right below
+    # has no awareness of lockables at all -- exactly the same gap the
+    # "open the door"/"pull the lever" fixes elsewhere in this function
+    # already closed for their own phrasings. A key/item used ON a real
+    # lockable object must reach _do_skill_check -> _find_lockable ->
+    # _do_lockpick's own requires_key_item branch (which checks the
+    # player's REAL inventory by item id, not by matching this text) --
+    # never the generic consumable-use guess. Checked BEFORE that block,
+    # same "carve out the real skill-check phrasing first" shape; the
+    # lockable-word list mirrors bot._find_lockable's own kind_words.
+    if re.search(
+        r"\buse\s+\S.*\bon\b.*\b(?:door|gate|lock|lever|switch|chest|crystal|torch|brazier|lantern|"
+        r"plate|urn|crate|pillar|column|wall|floor)\b",
+        lowered,
+    ):
+        return {**base, "action": "skill_check", "ability": "dexterity"}
+
     if not any(w in lowered for w in _ENVIRONMENT_USE_PHRASES) and re.search(r"\buse\s+\S.*\bon\b", lowered):
         return {**base, "action": "use_item"}
 

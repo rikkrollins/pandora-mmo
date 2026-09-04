@@ -2,6 +2,63 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.512] — fix: "use key on door" misclassification + real Labyrinth fog-of-war and per-room map art
+
+Two real live fixes from the Development topic.
+
+**"Use the key on the door" was silently swallowed as a consumable-use
+guess** (Coffee, dev-bridge screenshot: "Use what, exactly? Name a
+consumable you're actually carrying" instead of trying the lock).
+`ai/intent_parser.py`'s generic `"use ... on ..."` -> use_item check
+had no awareness of lockables, exactly the same class of gap the
+existing "open the door"/"pull the lever" fixes already closed for
+their own phrasings. Any "use X on <door/gate/lock/lever/switch/
+chest/crystal/torch/brazier/lantern/plate/urn/crate/pillar/column/
+wall/floor>" now routes to the real skill_check -> `_find_lockable` ->
+`_do_lockpick` pipeline instead, which already checks the lockable's
+own `requires_key_item` against real inventory regardless of the
+player's exact wording. "Use health potion on Vesh Nightglass" and
+"use a scroll on Wren" are unaffected (no lockable word present).
+
+**Real Labyrinth fog-of-war + per-room map art** (Coffee, dev-bridge
+screenshots: "make sure any area that is unexplored that you don't
+actually show the black box/outline on the map so we dont kno the
+shape of the map... I want it to use fog of war" + "use the location
+images that you generate when we look around on the map so it looks
+more visually stimulating"). Two real gaps in `map_render.py`'s
+`render_labyrinth_map`:
+- A "seen but not yet visited" room used to draw as a plain grey box
+  with a real outline -- honestly showing every unvisited room's exact
+  shape and position before the player ever walked there. Now drawn
+  IDENTICALLY to a grid position with no room at all (solid black, no
+  outline) -- real fog of war, matching Coffee's own literal ask. The
+  only honest hint that more lies beyond a visited room is that room's
+  own real doorway rendering (a gap or a gold gate), never the
+  destination's own shape.
+- Visited rooms now get real per-room-CONCEPT generated art pasted
+  into their cell, the same Pollinations service and deterministic-seed
+  discipline `bot.py`'s own Labyrinth room narration image already
+  uses (seeded on the room's DESCRIPTION, not its structural id, since
+  the id never survives a floor regen but the description concept
+  does) -- cached to disk exactly like the overworld map's own tiles,
+  so the same room concept anywhere ever pays the real network cost
+  once. Lightless rooms and any network failure degrade to the old
+  flat fill, never crash the render. 6 existing tests updated to mock
+  the new fetch (no network in the regular suite, matching the
+  overworld renderer's own tests); 2 new tests cover the real paste and
+  the lightless/failure fallback.
+
+Also fixed while re-verifying: a genuinely flaky (not batch-order) test
+found by this pass, `test_labyrinth_map_fog_of_war_only_reveals_
+actually_visited_rooms` -- it grabbed an arbitrary "_r0"-suffixed room
+to walk into, which the real, unseeded mandatory main-path gating
+(v1.27.509) can legitimately place behind a locked gate on any given
+real generation, intermittently failing the walk-in assertion for
+reasons that had nothing to do with fog of war. Now picks from the
+hub's own real, always-open `connections` list instead, guaranteeing a
+one-hop walkable room regardless of which mandatory gate kind that run
+happened to roll -- confirmed stable across 8 real consecutive runs.
+
 ## [1.27.511] — fix: Labyrinth/dungeon map no longer draws the purple warp line
 
 Real live request (Coffee, dev-bridge, screenshot of Floor 1 with a

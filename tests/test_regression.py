@@ -24905,6 +24905,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("recruit Vesh Nightglass", known)["action"], "recruit_npc")
         self.assertEqual(_keyword_fallback("talk to Wren Hollowbrook", known)["action"], "talk_npc")
 
+    def test_use_key_on_a_lockable_routes_to_skill_check_not_use_item(self):
+        """
+        Real live bug (2026-09-04, dev-bridge screenshot): "Use the key
+        on the door" got "Use what, exactly? Name a consumable you're
+        actually carrying." instead of actually trying the lock, since
+        the generic "use ... on ..." check has no awareness of
+        lockables. Must reach skill_check (-> _find_lockable ->
+        _do_lockpick's real requires_key_item branch), never use_item,
+        for any of the real lockable kinds -- and must NOT regress the
+        "use item on a named ally" case just above.
+        """
+        for text in (
+            "Use the key on the door",
+            "use my key on the gate",
+            "use the crystal key on the lock",
+            "use the torch on the brazier",
+            "use the lever on the switch",
+        ):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "skill_check", text)
+        self.assertEqual(_keyword_fallback("Use health potion on Vesh Nightglass", ["Vesh Nightglass"])["action"], "use_item")
+
+    async def test_use_key_on_the_door_end_to_end_opens_a_real_key_gate(self):
+        """
+        Same real bug as the classification test above, verified all
+        the way through the real handler pipeline: _do_skill_check's
+        own _find_lockable resolution must find the real key-gated door
+        and open it, exactly as "open the door" already does -- the
+        player's literal wording of WHICH item they meant is flavor
+        text only, _do_lockpick checks the lockable's own
+        requires_key_item against real inventory regardless.
+        """
+        from unittest.mock import patch
+        user_id, chat_id = 960209, -960209
+        character = make_basic_character(user_id, "UseKeyOnDoorTester", chat_id=chat_id, current_location="the_colosseum")
+        db.add_item(user_id, chat_id, "labyrinth_floor_key", 1)
+        character = db.get_character(user_id, chat_id)
+        location = {"id": "fx_use_key_gate_room", "name": "Key Gate Room", "connections": []}
+        lockable = {"id": "fx_use_key_gate", "kind": "door", "name": "a locked gate", "requires_key_item": "labyrinth_floor_key"}
+        with patch.object(bot, "_location_or_labyrinth_room", return_value=location), \
+             patch.object(bot, "_find_lockable", return_value=dict(lockable)):
+            await bot._do_skill_check(FakeUpdate(user_id, "use the key on the door", [], chat_id=chat_id), "dexterity", "use the key on the door", forced_roll=1)
+        self.assertIn("fx_use_key_gate", bot._UNLOCKED.get(chat_id, set()))
+
     def test_leaderboard_trigger_recognized(self):
         from ai.intent_parser import _keyword_fallback
         for text in ("show me the leaderboard", "who's the best"):
@@ -35872,13 +35915,66 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("__labyrinth__", combined, "the sentinel id must never leak into the ordinary quest board section")
 
     def test_render_labyrinth_map_produces_a_real_png_with_the_current_room_marked(self):
-        """Phase L2h: a lean, purpose-built renderer -- no network calls."""
+        """
+        Phase L2h: a lean, purpose-built renderer. Real per-room art
+        (2026-09-04) does add a real network dependency for visited
+        rooms now -- mocked here, same "no network in the regular
+        suite" discipline render_layer_map's own tests already use for
+        _fetch_location_tile.
+        """
         import map_render
+        from unittest.mock import patch
         floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(5))
         rooms = floor_data["rooms"]
-        png_bytes = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"])
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_bytes = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"])
         self.assertGreater(len(png_bytes), 100)
         self.assertTrue(png_bytes.startswith(b"\x89PNG"))
+
+    def test_render_labyrinth_map_pastes_real_room_art_only_for_visited_rooms(self):
+        """
+        Real live request (2026-09-04, Coffee, dev-bridge screenshot:
+        "can you please use the location images that you generate when
+        we look around on the map so it looks more visually
+        stimulating?"). The visited hub must actually get the fetched
+        tile pasted into its cell; an unvisited room must never trigger
+        a fetch at all (real fog of war -- no reason to spend a real
+        network call on art the player isn't shown anyway).
+        """
+        import map_render
+        from unittest.mock import patch
+        from PIL import Image
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(5))
+        rooms = floor_data["rooms"]
+        hub_id = floor_data["hub_room_id"]
+        fake_tile = Image.new("RGB", (map_render.CELL_SIZE, map_render.CELL_SIZE), (1, 2, 3))
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=fake_tile) as mock_fetch:
+            png_bytes = map_render.render_labyrinth_map(1, rooms, hub_id, set(), {hub_id})
+        fetched_room_ids = [call.args[0]["id"] for call in mock_fetch.call_args_list]
+        self.assertEqual(fetched_room_ids, [hub_id], "only the visited hub should ever trigger a real tile fetch")
+        import io
+        image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        used_colors = {color for _count, color in image.getcolors(maxcolors=1_000_000)}
+        self.assertIn((1, 2, 3), used_colors, "the fetched tile's own color must actually be pasted into the hub's cell")
+
+    def test_fetch_labyrinth_room_tile_skips_lightless_rooms_and_never_raises_on_a_network_failure(self):
+        """
+        Same "you can't see it, so no image either" rule bot.py's own
+        _maybe_send_labyrinth_room_image already enforces for the
+        narration image -- a lightless room must never even attempt a
+        fetch. And a real network failure must degrade to None, never
+        raise, so one bad room never crashes the whole map render.
+        """
+        import map_render
+        from unittest.mock import patch
+        lightless_room = {"id": "r1", "description": "A pitch-black chamber.", "modifier": "lightless"}
+        with patch("requests.get") as mock_get:
+            self.assertIsNone(map_render._fetch_labyrinth_room_tile(lightless_room))
+            mock_get.assert_not_called()
+
+        lit_room = {"id": "r2", "description": "A real unique room description for this test."}
+        with patch("map_render.requests.get", side_effect=OSError("no network")):
+            self.assertIsNone(map_render._fetch_labyrinth_room_tile(lit_room))
 
     def test_generate_floor_produces_real_branching_depth_across_seeds(self):
         """
@@ -36968,6 +37064,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         cleanly with no line and no legend mention of it.
         """
         import map_render
+        from unittest.mock import patch
         warp_floor_data = None
         for seed in range(150):
             floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
@@ -36976,7 +37073,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 break
         self.assertIsNotNone(warp_floor_data, "expected at least one warp across 150 real seeds")
         rooms = warp_floor_data["rooms"]
-        png_bytes = map_render.render_labyrinth_map(20, rooms, warp_floor_data["hub_room_id"], set(), set(rooms.keys()), {}, None)
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_bytes = map_render.render_labyrinth_map(20, rooms, warp_floor_data["hub_room_id"], set(), set(rooms.keys()), {}, None)
         self.assertGreater(len(png_bytes), 0)
         import io
         from PIL import Image
@@ -37012,29 +37110,33 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         severed (a real doorway gap vs. a plain solid wall).
         """
         import map_render
+        from unittest.mock import patch
         floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(3))
         rooms = floor_data["rooms"]
         hub_id = floor_data["hub_room_id"]
         connected_room = rooms[hub_id]["connections"][0]
-        png_with_door = map_render.render_labyrinth_map(1, rooms, hub_id)
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_with_door = map_render.render_labyrinth_map(1, rooms, hub_id)
 
-        import copy
-        severed_rooms = copy.deepcopy(rooms)
-        severed_rooms[hub_id]["connections"].remove(connected_room)
-        severed_rooms[connected_room]["connections"] = [
-            cid for cid in severed_rooms[connected_room]["connections"] if cid != hub_id
-        ]
-        png_without_door = map_render.render_labyrinth_map(1, severed_rooms, hub_id)
+            import copy
+            severed_rooms = copy.deepcopy(rooms)
+            severed_rooms[hub_id]["connections"].remove(connected_room)
+            severed_rooms[connected_room]["connections"] = [
+                cid for cid in severed_rooms[connected_room]["connections"] if cid != hub_id
+            ]
+            png_without_door = map_render.render_labyrinth_map(1, severed_rooms, hub_id)
         self.assertNotEqual(png_with_door, png_without_door, "a real connection must render visibly differently from no connection")
 
     def test_render_labyrinth_map_shows_the_real_segment_honeycomb_strip(self):
         """Real "5 levels of honeycombing" visualization (Coffee's own earlier framing) -- passing segment_floors must produce a visibly different (taller) image than omitting it."""
         import map_render
+        from unittest.mock import patch
         floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(4))
         rooms = floor_data["rooms"]
         hub_id = floor_data["hub_room_id"]
-        png_without_strip = map_render.render_labyrinth_map(3, rooms, hub_id)
-        png_with_strip = map_render.render_labyrinth_map(3, rooms, hub_id, segment_floors=[1, 2, 3, 4, 5])
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_without_strip = map_render.render_labyrinth_map(3, rooms, hub_id)
+            png_with_strip = map_render.render_labyrinth_map(3, rooms, hub_id, segment_floors=[1, 2, 3, 4, 5])
         self.assertTrue(png_with_strip.startswith(b"\x89PNG"))
         self.assertNotEqual(png_without_strip, png_with_strip)
 
@@ -37106,8 +37208,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(unstruck_color, struck_color)
 
         # And the map actually renders without crashing, with a real legend line for each.
+        from unittest.mock import patch
         rooms = {"r1": {**room, "grid_position": {"x": 0, "y": 0}, "name": "Test Room", "connections": []}}
-        png_bytes = map_render.render_labyrinth_map(1, rooms, "r1", set(), set(rooms.keys()), {}, None)
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_bytes = map_render.render_labyrinth_map(1, rooms, "r1", set(), set(rooms.keys()), {}, None)
         self.assertGreater(len(png_bytes), 0)
 
     def test_render_labyrinth_map_marks_a_locked_room_without_crashing_or_using_emoji_text(self):
@@ -37123,11 +37227,13 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         (real mistake caught and fixed in this same pass).
         """
         import map_render
+        from unittest.mock import patch
         floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(2))
         rooms = floor_data["rooms"]
         any_side_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
-        png_locked = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"], {any_side_room_id})
-        png_unlocked = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"], set())
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_locked = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"], {any_side_room_id})
+            png_unlocked = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"], set())
         self.assertTrue(png_locked.startswith(b"\x89PNG"))
         self.assertNotEqual(png_locked, png_unlocked, "a locked room must render visibly differently from an unlocked one")
 
@@ -37180,7 +37286,13 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         hub_id = run["current_room_id"]
         rooms = run["rooms"]
         self.assertTrue(rooms[hub_id].get("visited"), "the room the party actually enters into must be marked visited")
-        unvisited_side_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        # Real mandatory main-path gating (v1.27.509) means a blind
+        # "any _r0 room" pick can land on a room now genuinely behind a
+        # locked gate -- picking from the hub's own real, PLAIN
+        # `connections` (never `locked_connections`) guarantees a
+        # one-hop, always-walkable room regardless of which mandatory
+        # gate kind this particular real generation happened to roll.
+        unvisited_side_room_id = next(rid for rid in rooms[hub_id]["connections"] if not rooms[rid].get("visited"))
         self.assertFalse(rooms[unvisited_side_room_id].get("visited"), "a side room never walked into must not be pre-visited")
 
         with patch("map_render.render_labyrinth_map") as mock_render:
@@ -37190,10 +37302,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(hub_id, visited_ids_arg)
         self.assertNotIn(unvisited_side_room_id, visited_ids_arg)
 
-        # Real render: the unvisited room draws as a plain grey cell (no name/icons), the visited hub does not.
+        # Real render: the unvisited room draws as pure fog (identical to a nonexistent cell), the visited hub does not.
         floor_rooms = {rid: r for rid, r in rooms.items() if r.get("floor") == rooms[hub_id]["floor"]}
-        png_fog = map_render_module.render_labyrinth_map(1, floor_rooms, hub_id, set(), {hub_id})
-        png_no_fog = map_render_module.render_labyrinth_map(1, floor_rooms, hub_id, set(), None)
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_fog = map_render_module.render_labyrinth_map(1, floor_rooms, hub_id, set(), {hub_id})
+            png_no_fog = map_render_module.render_labyrinth_map(1, floor_rooms, hub_id, set(), None)
         self.assertTrue(png_fog.startswith(b"\x89PNG"))
         self.assertNotEqual(png_fog, png_no_fog, "fogged and fully-revealed renders of the same floor must differ")
 
