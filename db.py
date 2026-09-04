@@ -966,6 +966,15 @@ def init_db() -> None:
         if "labyrinth_intro_seen" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_intro_seen INTEGER NOT NULL DEFAULT 0")
 
+        # fighting_style / equipped_offhand_weapon (2026-09-04, real
+        # Fighting Style + mastery-gated dual wielding feature) -- see
+        # bot.FIGHTING_STYLES/_do_choose_fighting_style and
+        # can_dual_wield/equip_offhand_weapon/bot._do_equip_offhand.
+        if "fighting_style" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN fighting_style TEXT")
+        if "equipped_offhand_weapon" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN equipped_offhand_weapon TEXT")
+
         # labyrinth_runs.modifier (2026-09-02, Phase L2 floor modifiers)
         # -- a real DB already running Phase L1's CREATE TABLE IF NOT
         # EXISTS won't pick up a column added to that CREATE statement
@@ -1806,7 +1815,16 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
         # here without duplicating BASE_ARMOR_CLASS.
         for _ in range(draconic_points):
             foundation += max(1, round(foundation * 0.10))
-        new_ac = foundation + current_shield_bonus + ring_bonus + set_delta
+        # Real Fighting Style: Defense (2026-09-04) -- "+1 AC while
+        # wearing armor," folded into this same recompute so it
+        # survives every future armor swap, same as the Draconic
+        # Resilience compounding just above. _do_choose_fighting_style
+        # applies this same +1 immediately if armor is already worn at
+        # the moment Defense is chosen; there's no unequip_item in this
+        # codebase (armor is only ever swapped, never removed), so
+        # there's no "AC drops when you take armor off" case to handle.
+        defense_bonus = 1 if character.get("fighting_style") == "Defense" else 0
+        new_ac = foundation + current_shield_bonus + ring_bonus + set_delta + defense_bonus
         updated = update_character(telegram_user_id, chat_id, equipped_armor=item_id, armor_class=new_ac)
         return True, f"You put on the {item['name']} (AC {new_ac}).", updated
 
@@ -1848,6 +1866,74 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
 
     updated = update_character(telegram_user_id, chat_id, **updates)
     return True, " ".join(note_parts), updated
+
+
+def can_dual_wield(character: dict) -> tuple[bool, str]:
+    """
+    Real Fighting Style: Two-Weapon Fighting's own precondition
+    (2026-09-04, per Coffee: ship all 6 styles, then build mastery-
+    gated dual wielding "for players that have attained mastery"). Real
+    5E gates dual wielding on wielding two LIGHT weapons -- this
+    catalog has no "light" property at all, so this house-rules the
+    gate onto the character's own weapon_proficiency_pct instead,
+    matching this game's existing "100% = Mastery" grind/language (see
+    bot._format_proficiency_line's own header) -- a real reward for
+    grinding, not a free starting option. Returns (eligible, reason) so
+    a refusal can always be honest about exactly how far off the
+    character still is, same "grounded fact" discipline as every other
+    refusal shipped alongside this feature.
+    """
+    equipped_id = character.get("equipped_weapon")
+    if not equipped_id:
+        return False, "You need a real weapon equipped in your main hand first."
+    main_weapon = items_module.get_item(equipped_id)
+    if main_weapon is None or main_weapon.get("type") != "weapon":
+        return False, "You need a real weapon equipped in your main hand first."
+    category = main_weapon.get("weapon_category", "simple")
+    pct = (character.get("weapon_proficiency_pct") or {}).get(category, 0.0)
+    if pct < 100:
+        return False, f"You haven't mastered {category} weapons yet — {pct:.1f}% of the 100% needed."
+    return True, ""
+
+
+def equip_offhand_weapon(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool, str, dict | None]:
+    """
+    Real, mastery-gated dual wielding (2026-09-04) -- see
+    can_dual_wield's own docstring for the real precondition. Mirrors
+    equip_item's own weapon branch (validation, then a plain field
+    write) but targets the separate equipped_offhand_weapon slot
+    instead of overwriting the real main-hand equipped_weapon.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return False, "No character found.", None
+    if character["inventory"].get(item_id, 0) < 1:
+        return False, "You don't have that to equip.", character
+
+    item = items_module.get_item(item_id)
+    if item is None or item.get("type") != "weapon":
+        return False, f"{item['name'] if item else item_id} isn't a real weapon.", character
+
+    if not _meets_equip_requirement(character, item):
+        return (
+            False,
+            f"The {item['name']} resists your grasp — you haven't proven yourself enough yet to wield it.",
+            character,
+        )
+    if not _meets_proficiency_requirement(character, item):
+        category = item.get("weapon_category", "")
+        return (
+            False,
+            f"{character['name']} isn't trained to use a {category} weapon like the {item['name']} yet.",
+            character,
+        )
+
+    eligible, reason = can_dual_wield(character)
+    if not eligible:
+        return False, reason, character
+
+    updated = update_character(telegram_user_id, chat_id, equipped_offhand_weapon=item_id)
+    return True, f"You take up the {item['name']} in your off hand.", updated
 
 
 def _best_equippable_candidate(telegram_user_id: int, chat_id: int, candidate_ids: list[str], sort_key) -> tuple[str | None, dict | None]:

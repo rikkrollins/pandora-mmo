@@ -28,8 +28,14 @@ WEAPON_BASES = {
     "dagger": {"damage_dice": "1d4", "ability": "dexterity", "base_price": 2, "weapon_category": "simple"},
     "shortsword": {"damage_dice": "1d6", "ability": "dexterity", "base_price": 10, "weapon_category": "simple"},
     "longsword": {"damage_dice": "1d8", "ability": "strength", "base_price": 15, "weapon_category": "martial"},
-    "greataxe": {"damage_dice": "1d12", "ability": "strength", "base_price": 30, "weapon_category": "martial"},
-    "longbow": {"damage_dice": "1d8", "ability": "dexterity", "base_price": 50, "weapon_category": "martial"},
+    # two_handed/ranged (2026-09-04, real Fighting Style feature): same
+    # "match items.py's own static catalog exactly" discipline this
+    # dict's own comment already states for weapon_category -- a
+    # generated "legendary greataxe" needs the same real two_handed
+    # flag its static counterpart has, or Great Weapon Fighting would
+    # silently never trigger for it.
+    "greataxe": {"damage_dice": "1d12", "ability": "strength", "base_price": 30, "weapon_category": "martial", "two_handed": True},
+    "longbow": {"damage_dice": "1d8", "ability": "dexterity", "base_price": 50, "weapon_category": "martial", "ranged": True},
 }
 
 ARMOR_BASES = {
@@ -286,6 +292,8 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
         "damage_dice": base["damage_dice"],
         "ability": base["ability"],
         "weapon_category": base["weapon_category"],
+        "two_handed": base.get("two_handed", False),
+        "ranged": base.get("ranged", False),
         "generated": True,
         "generated_base": base_id,
         "set_id": _maybe_set_id(tier),

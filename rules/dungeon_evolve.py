@@ -51,6 +51,7 @@ from rules.dungeon_audit import (
     add_key_gate,
     add_lever_shortcut,
     add_room,
+    add_rune_gate,
     connect,
 )
 from scripts import build_location_grid
@@ -504,6 +505,49 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                     "loot": {"labyrinth_floor_key": 1}, "gold": rng.randint(20, 60),
                 })
 
+    # Real Locked Rune Doorway (2026-09-04, Phase B port of rules/
+    # labyrinth.py's identical mechanic -- per Coffee: "have the mini
+    # boss, and boss and scatter them around, have it collected by
+    # battle and by chests" -- "use it in variations with the other
+    # mechanics", explicitly not the main one). A fourth, independent
+    # branch gate, never the same branch as the switch/plate/key gate
+    # above. Unlike the key (one unique item), this needs a variable
+    # COUNT of the fungible "labyrinth_rune" item -- "if a gateway
+    # needs 3 the player will need 3 runes" (Coffee's own words) -- so
+    # the guaranteed find is scattered across that many separate
+    # branches instead of just one.
+    rune_branch_idx = None
+    rune_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx, key_branch_idx)]
+    if rune_eligible and rng.random() < 0.2:
+        rune_branch = rng.choice(rune_eligible)
+        rune_branch_idx = rune_branch["idx"]
+        rune_branch_first_id = f"{new_dungeon_id}_b{rune_branch['idx']}_r0"
+        _, hub_room_for_rune = _find_room(campaign, hub_id)
+        _, rune_gate_far_room = _find_room(campaign, rune_branch_first_id)
+        hub_room_for_rune["connections"].remove(rune_branch_first_id)
+        rune_gate_far_room["connections"].remove(hub_id)
+        rune_gate_far_room.setdefault("connections", []).append(hub_id)
+
+        rune_source_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx, rune_branch_idx)]
+        rune_count = min(rng.randint(2, 4), len(rune_source_eligible))
+        if rune_count > 0:
+            door_id = f"{new_dungeon_id}_rune_gate"
+            add_rune_gate(campaign, hub_id, rune_branch_first_id, door_id, "a locked rune doorway", "labyrinth_rune", rune_count)
+            rune_gate_far_room["description"] += f" A locked rune doorway seals this path -- it looks like it needs {rune_count} real Labyrinth Runes, not brute force or a steady hand."
+
+            rune_source_branches = rng.sample(rune_source_eligible, rune_count)
+            for i, rune_source_branch in enumerate(rune_source_branches):
+                rune_source_room_id = f"{new_dungeon_id}_b{rune_source_branch['idx']}_r0"
+                _, rune_source_room = _find_room(campaign, rune_source_room_id)
+                if rng.random() < 0.5 and rune_source_room.get("monsters"):
+                    rune_source_room["guaranteed_rune_drop"] = True
+                    rune_source_room["description"] += " Something here looks like it might be carrying something worth taking."
+                else:
+                    rune_source_room.setdefault("lockables", []).append({
+                        "id": f"{new_dungeon_id}_rune_cache_{i}", "kind": "chest", "name": "a small, rune-etched cache",
+                        "loot": {"labyrinth_rune": 1}, "gold": rng.randint(20, 60),
+                    })
+
     # Extra chest lockables -- comfortable lock_density padding, real
     # loot from items already known-good elsewhere in this same
     # catalog. Real bug found testing this fix: a fixed 1-2 chests was
@@ -611,9 +655,26 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     # every existing dungeon_audit.py check; a new
     # check_warps_reference_real_rooms check verifies the new field
     # itself is well-formed.
+    # Real live bug found and fixed (2026-09-04, building the Locked
+    # Rune Doorway feature -- exposed by a real end-to-end test, a
+    # pre-existing gap unrelated to that feature's own logic): a
+    # branch's tail room can ALSO be flagged is_miniboss_room/
+    # is_boss_room/is_gated_encounter by the placements just above,
+    # each of which genuinely blocks all movement out of that room
+    # (bot._is_gated_combat_room) until its real monsters are
+    # defeated -- including through a warp planted on that same room,
+    # making the warp itself unusable from that side until then.
+    # Excluded from candidacy entirely, same "don't compound one
+    # mechanic onto a room another already claimed" discipline every
+    # other gate in this function already follows.
+    def _tail_room_is_gated(tail_id: str) -> bool:
+        _, tail_room = _find_room(campaign, tail_id)
+        return bool(tail_room.get("monsters") and (tail_room.get("is_miniboss_room") or tail_room.get("is_boss_room") or tail_room.get("is_gated_encounter")))
+
     non_boss_branches = [b for b in branches if b["idx"] != branch_idx]
-    if len(non_boss_branches) >= 2 and rng.random() < 0.35:
-        warp_a_branch, warp_b_branch = rng.sample(non_boss_branches, 2)
+    warp_eligible_branches = [b for b in non_boss_branches if not _tail_room_is_gated(b["tail_id"])]
+    if len(warp_eligible_branches) >= 2 and rng.random() < 0.35:
+        warp_a_branch, warp_b_branch = rng.sample(warp_eligible_branches, 2)
         warp_a, warp_b = warp_a_branch["tail_id"], warp_b_branch["tail_id"]
         _, warp_a_room = _find_room(campaign, warp_a)
         _, warp_b_room = _find_room(campaign, warp_b)

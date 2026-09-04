@@ -2,6 +2,125 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.509] — feature: Locked Rune Doorways + real Fighting Style/mastery-gated dual wielding + mandatory main-path gating
+
+Three real, separately-planned features shipped together this session.
+
+**Locked Rune Doorways** — per Coffee: "have the mini boss, and boss
+and scatter them around, have it collected by battle and by chests...
+if a gateway needs 3 the player will need 3 runes." A new `labyrinth_
+rune` item and a fourth branch-gate kind (alongside the existing
+switch/pressure-plate/key gates) in both `rules/labyrinth.py` and
+`rules/dungeon_evolve.py`, needing a variable count (2-4) of runes
+scattered across guaranteed real sources (monster drop or chest),
+solvable by construction (verified across 800+ generator seeds). Mini-
+boss kills also grant a rune (the Labyrinth's existing miniboss reward
+hook already covers "mini-boss and boss" here — no separate boss-room
+concept exists). `bot._do_lockpick` gets a new `requires_rune_item`/
+`rune_count` branch (never pickable, same as a key-gated door, but
+checks a quantity instead of mere presence).
+
+Two real pre-existing bugs found and fixed building this:
+- `_check_overworld_key_drop` (and now its rune sibling) mutated a
+  throwaway copy `campaign_loader.get_location` returns, not the real
+  `CAMPAIGN` dict — the "already claimed" flag never actually
+  persisted, so an evolved dungeon's guaranteed key/rune drop could
+  re-grant forever. Fixed via a new `bot._real_campaign_location`.
+- `rules/dungeon_evolve.py`'s warp-shortcut mechanic could place a warp
+  endpoint on a room also flagged `is_miniboss_room`/`is_boss_room`/
+  `is_gated_encounter` — genuinely blocking all movement out of that
+  room (including through the warp) until its fight was cleared.
+
+**Real Fighting Style + mastery-gated dual wielding** — root-caused
+from a live dev-bridge report: a Fighter read "Fighting Style: a combat
+specialization (e.g. Defense, Dueling, Great Weapon Fighting)" and
+reasonably expected a real mechanic behind it. Confirmed this was pure
+flavor text — no DB field, no choice, zero mechanical effect anywhere.
+Now real for Fighter/Paladin/Ranger, all 6 5E styles, chosen via
+`_do_choose_fighting_style` (same "I choose X" natural-language flow as
+subclass): Archery (+2 ranged attack rolls), Defense (+1 AC, folded
+into `db.equip_item`'s armor-AC recompute so it survives future armor
+swaps), Dueling (+2 damage, one-handed only), Great Weapon Fighting
+(reroll 1s/2s on two-handed weapon damage — `rules/dice.roll_damage`'s
+new `reroll_low`), Protection (reaction: impose disadvantage on an
+attack against a party member, reusing the existing Shield/Uncanny
+Dodge reaction economy), and Two-Weapon Fighting.
+
+Two-Weapon Fighting's own precondition — dual wielding — didn't exist
+in this engine at all, so it's built for real too, per Coffee: ship all
+6 styles, "then build the dual wield system for players that have
+attained mastery." Gated behind the character's own weapon mastery
+(100% `weapon_proficiency_pct`, this game's existing grind) rather than
+5E RAW's "light weapon" property (no such field in this catalog) —
+`db.can_dual_wield`/`equip_offhand_weapon`, a new `equipped_offhand_weapon`
+slot, and a real extra swing via the existing Extra Attack loop
+(`bot._attacks_per_turn`/`_offhand_weapon_for_attacker`). Two-Weapon
+Fighting's real payoff (ability modifier added to the off-hand attack)
+is a genuinely new bonus term, since this engine's main-attack formula
+never added an ability modifier to damage at all before this.
+
+Real gap found and fixed building this: `bot._weapon_for_attacker`
+never propagated the new `two_handed`/`ranged` item fields onto the
+combat-ready weapon dict — Archery/Dueling/Great Weapon Fighting would
+have silently never fired for any real player's actual equipped
+weapon, only in a synthetic test handed the raw item dict directly.
+
+37 new regression tests across both features, all passing; full
+`LabyrinthTests`/`DungeonEvolveTests`/`DungeonAuditTests` suites and a
+combat/equip/proficiency-focused regression batch (84 tests) re-verified
+clean.
+
+**Mandatory main-path gating + real warp distance check** — live
+feedback from Coffee, backed by two screenshots and a ChatGPT-authored
+"Zelda Dungeon Path & Gateway System" reference he asked to be added to
+our research: a floor's map showed a switch with no visible connected
+gate anywhere and a straight corridor to the stairs ("there was no
+challenge on this floor... it doesn't keep like a Zelda dungeon at
+all"), and a warp connected two rooms that already had a plain direct
+doorway between them ("I don't understand what the point of this warp
+was because we were already able to access this room").
+
+Root cause: every existing gate mechanic (switch/plate/key/rune) only
+ever targeted an *optional* side branch — the *main chain* (the one
+guaranteed path to the stairs) was structurally never gated at all, so
+a floor could roll zero gates and read as a pure corridor. Fixed with a
+new, unconditional (no chance roll) block in `rules/labyrinth.py`'s
+`generate_floor`: every floor, from floor 1, now guarantees exactly one
+real gate on its own main path, randomly picked from the same 4 real
+mechanics every optional gate already uses — no new mechanic, just a
+guaranteed application of what's already built, with its own key/
+switch/runes always placed in a genuinely reachable side branch (never
+double-purposed by an optional gate on top). Verified solvable-by-
+construction across 500 real seeds, all 4 mechanic kinds represented.
+
+Separately, the warp generator (`rules/labyrinth.py`) now requires both
+connected branches to be genuinely deep (>= 2 rooms, not just a bare
+root) before considering them warp candidates — guaranteeing hub→leaf
+is itself >= 2 hops on each side, so a warp always saves real distance
+(>= 4 hops the long way vs. 1 hop through the warp), never connecting
+two rooms that were already one hop apart via the hub. Verified via a
+real BFS-distance check across every generated warp in 500 seeds, zero
+violations. (`rules/dungeon_evolve.py`'s own warp mechanic was checked
+and confirmed NOT to share this bug — its branches are always >= 2
+rooms deep by construction already.)
+
+Fixing this exposed real fragility in several existing tests that
+assumed frictionless floor traversal (a shared `_walk_to_checkpoint`
+test helper, and one test with its own inline copy of the same BFS) —
+both now correctly treat `locked_connections` as real, auto-solvable
+graph edges for their own test-only walkthroughs (same "never a real
+reward" discipline the helper's existing gated-combat handling already
+documents), branching correctly by lockable kind since `bot.
+_lockable_is_open`'s own real logic checks `_SWITCH_STATE` for switch/
+plate/multi-switch-gate kinds and `_UNLOCKED` for everything else. Also
+fixed: one statistical test's naive edge-counting formula silently
+undercounted any floor with a real gate (a gated edge is stored
+asymmetrically — removed from only one room's own `connections` list),
+now uses a proper edge set instead; and one test's "a floor can have
+nothing real to hint at" premise, now structurally impossible since
+every floor always has a real mandatory gate, had its now-impossible
+half removed.
+
 ## [1.27.508] — fix: batch of real live gaps/crashes found via the AI-driven Labyrinth playtest tool + monitoring
 
 Six real bugs, each found live (not by inspection) via the new

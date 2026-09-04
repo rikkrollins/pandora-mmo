@@ -112,11 +112,18 @@ def roll_ability_check(character: dict, ability: str, proficient: bool = False,
 
 def roll_attack(character: dict, target_ac: int, ability: str = "strength",
                  proficient: bool = True, advantage: bool = False,
-                 disadvantage: bool = False, forced_roll: int | None = None) -> dict:
+                 disadvantage: bool = False, forced_roll: int | None = None,
+                 bonus: int = 0) -> dict:
     """
     Roll an attack for a character against a target AC.
     Returns hit/miss, whether it was a critical hit/fail, and the roll details.
     `forced_roll`: see roll_d20's own docstring (physical-dice mode).
+    `bonus` (2026-09-04, real Fighting Style: Archery): a flat, real
+    add-on to the attack roll's total, separate from `mod`/`prof` since
+    it isn't derived from the character's own ability score or
+    proficiency -- the caller (rules/combat.py's resolve_attack) is
+    what actually knows whether Archery's real precondition (a ranged
+    weapon) is met, this function stays weapon-agnostic.
     """
     score = character[ability.lower()]
     mod = ability_modifier(score)
@@ -125,7 +132,7 @@ def roll_attack(character: dict, target_ac: int, ability: str = "strength",
 
     critical_hit = raw == 20
     critical_fail = raw == 1
-    total = raw + mod + prof
+    total = raw + mod + prof + bonus
 
     if critical_fail:
         hit = False
@@ -150,7 +157,7 @@ _DICE_NOTATION_RE = re.compile(r"^(\d+)d(\d+)\s*([+-]\s*\d+)?$")
 
 
 def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, extra_dice: int = 0,
-                 forced_roll: int | None = None) -> dict:
+                 forced_roll: int | None = None, reroll_low: bool = False) -> dict:
     """
     Parse dice notation like '1d8', '2d6', or '1d8+2' and return damage
     rolled. An explicit `modifier` argument is ADDED to any modifier
@@ -171,6 +178,13 @@ def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, e
     roll_d20 already established for advantage/disadvantage. Clamped
     into this die's real range (a physical d8 can't report a 9) rather
     than trusting free-text extraction blindly.
+
+    `reroll_low` (2026-09-04, real Fighting Style: Great Weapon
+    Fighting): real 5E wording exactly -- any die showing a 1 or 2 gets
+    rolled again ONCE, and the new result is used even if it's also a
+    1 or 2. Applied AFTER `forced_roll`'s own substitution, so a
+    player's real physical low roll still gets its real reroll rather
+    than being treated as untouchable.
     """
     match = _DICE_NOTATION_RE.match(dice_notation.strip())
     if not match:
@@ -187,6 +201,8 @@ def roll_damage(dice_notation: str, modifier: int = 0, critical: bool = False, e
     rolls = roll(num_dice, sides)
     if forced_roll is not None and rolls:
         rolls[0] = min(max(forced_roll, 1), sides)
+    if reroll_low:
+        rolls = [roll(1, sides)[0] if r <= 2 else r for r in rolls]
     total = sum(rolls) + total_modifier
 
     return {

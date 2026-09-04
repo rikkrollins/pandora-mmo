@@ -6119,6 +6119,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("labyrinth_floor_key", character_after["inventory"])
         self.assertIn("fx_key_gate", bot._UNLOCKED.get(chat_id, set()))
 
+    async def test_rune_doorway_refuses_cleanly_when_holding_fewer_runes_than_required(self):
+        """
+        Real live feature (2026-09-04, per Coffee: "have the mini boss,
+        and boss and scatter them around, have it collected by battle
+        and by chests" -- "use it in variations with the other
+        mechanics", not the main one). A "Locked Rune Doorway" needs a
+        COUNT of the fungible labyrinth_rune item, unlike a unique
+        story key's mere presence check.
+        """
+        user_id, chat_id = 960207, -960207
+        character = make_basic_character(user_id, "TooFewRunesTester", chat_id=chat_id, current_location="the_colosseum")
+        db.add_item(user_id, chat_id, "labyrinth_rune", 2)
+        character = db.get_character(user_id, chat_id)
+        location = {"id": "fx_rune_gate_room", "name": "Rune Gate Room", "connections": []}
+        lockable = {"id": "fx_rune_gate", "kind": "door", "name": "a locked rune doorway", "requires_rune_item": "labyrinth_rune", "rune_count": 3}
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "open the doorway", sink, chat_id=chat_id), character, dict(lockable), "open the doorway", forced_roll=1)
+        self.assertNotIn("fx_rune_gate", bot._UNLOCKED.get(chat_id, set()))
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["inventory"]["labyrinth_rune"], 2, "must never partially consume runes on a failed attempt")
+
+    async def test_rune_doorway_opens_and_consumes_exactly_the_required_count(self):
+        user_id, chat_id = 960208, -960208
+        character = make_basic_character(user_id, "EnoughRunesTester", chat_id=chat_id, current_location="the_colosseum")
+        db.add_item(user_id, chat_id, "labyrinth_rune", 3)
+        character = db.get_character(user_id, chat_id)
+        lockable = {"id": "fx_rune_gate_2", "kind": "door", "name": "a locked rune doorway", "requires_rune_item": "labyrinth_rune", "rune_count": 3}
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "open the doorway", sink, chat_id=chat_id), character, dict(lockable), "open the doorway", forced_roll=1)
+        self.assertIn("fx_rune_gate_2", bot._UNLOCKED.get(chat_id, set()))
+        character_after = db.get_character(user_id, chat_id)
+        self.assertNotIn("labyrinth_rune", character_after["inventory"], "exactly 3 of 3 held runes must be consumed, leaving none")
+
     async def test_wrathflame_vault_shortcut_lever_only_works_from_the_far_room_and_opens_a_quick_way_back(self):
         """The genuine Zelda beat: pull the lever at the FAR end of the branch and gain a quick way straight back to the hub -- not the hub reaching into the branch."""
         alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
@@ -22371,6 +22404,318 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(grounded_fact, "You have nothing here that could actually be lit — no real torch, lantern, or other light source in hand.")
 
     # -- Rogue/Bard Expertise + Bard Jack of All Trades (2026-07-16) ----
+    # -- Real Fighting Style (2026-09-04) -------------------------------
+    async def test_choose_fighting_style_matches_and_lists_options_on_no_match(self):
+        user_id, chat_id = 900600, -900600
+        make_basic_character(user_id, "StyleTester", chat_id=chat_id, char_class="Fighter")
+        sink = []
+        await bot._do_choose_fighting_style(FakeUpdate(user_id, "what styles are there", sink, chat_id=chat_id), "what styles are there")
+        self.assertTrue(any("Archery" in s and "Defense" in s for s in sink), sink)
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(character.get("fighting_style"))
+
+        sink2 = []
+        await bot._do_choose_fighting_style(FakeUpdate(user_id, "I choose Great Weapon Fighting", sink2, chat_id=chat_id), "I choose Great Weapon Fighting")
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["fighting_style"], "Great Weapon Fighting")
+        self.assertTrue(any("Great Weapon Fighting" in s for s in sink2), sink2)
+
+    async def test_choose_fighting_style_rejected_for_non_eligible_class(self):
+        user_id, chat_id = 900601, -900601
+        make_basic_character(user_id, "WizardStyleTester", chat_id=chat_id, char_class="Wizard")
+        sink = []
+        await bot._do_choose_fighting_style(FakeUpdate(user_id, "I choose Archery", sink, chat_id=chat_id), "I choose Archery")
+        self.assertTrue(any("isn't a real class feature" in s for s in sink), sink)
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(character.get("fighting_style"))
+
+    async def test_choose_fighting_style_two_weapon_fighting_explains_not_yet_active(self):
+        """
+        Real live feature (2026-09-04, per Coffee: ship all 6 styles,
+        then build mastery-gated dual wielding). Two-Weapon Fighting's
+        real bonus needs Phase 2 -- never a silent no-op with no
+        explanation, matching this project's hard "never leave a player
+        thinking something worked when it didn't" convention.
+        """
+        user_id, chat_id = 900602, -900602
+        make_basic_character(user_id, "TwfTester", chat_id=chat_id, char_class="Fighter")
+        sink = []
+        await bot._do_choose_fighting_style(FakeUpdate(user_id, "I choose Two-Weapon Fighting", sink, chat_id=chat_id), "I choose Two-Weapon Fighting")
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["fighting_style"], "Two-Weapon Fighting")
+        self.assertTrue(any("activates once you've mastered" in s for s in sink), sink)
+
+    async def test_choose_fighting_style_defense_applies_ac_bonus_immediately_when_armor_worn(self):
+        user_id, chat_id = 900603, -900603
+        character = make_basic_character(user_id, "DefenseTester", chat_id=chat_id, char_class="Fighter")
+        db.add_item(user_id, chat_id, "leather_armor", 1)
+        db.equip_item(user_id, chat_id, "leather_armor")
+        before_ac = db.get_character(user_id, chat_id)["armor_class"]
+        sink = []
+        await bot._do_choose_fighting_style(FakeUpdate(user_id, "I choose Defense", sink, chat_id=chat_id), "I choose Defense")
+        after_ac = db.get_character(user_id, chat_id)["armor_class"]
+        self.assertEqual(after_ac, before_ac + 1, "Defense's +1 AC must apply immediately when armor is already worn")
+
+    def test_defense_fighting_style_ac_bonus_persists_across_a_later_armor_swap(self):
+        """Real bug shape this must avoid: baking +1 in only at choice time would silently vanish on the next unrelated armor swap, since equip_item's armor branch recomputes armor_class from scratch (same class of bug Draconic Resilience was fixed for, 2026-08-21)."""
+        from rules.dice import ability_modifier
+        user_id, chat_id = 900604, -900604
+        make_basic_character(user_id, "DefenseSwapTester", chat_id=chat_id, char_class="Fighter")
+        db.update_character(user_id, chat_id, fighting_style="Defense")
+        db.add_item(user_id, chat_id, "leather_armor", 1)
+        db.add_item(user_id, chat_id, "chain_shirt", 1)
+        db.equip_item(user_id, chat_id, "leather_armor")
+        ac_with_leather = db.get_character(user_id, chat_id)["armor_class"]
+        db.equip_item(user_id, chat_id, "chain_shirt")
+        ac_with_chain = db.get_character(user_id, chat_id)["armor_class"]
+        dex_mod = ability_modifier(db.get_character(user_id, chat_id)["dexterity"])
+        self.assertEqual(ac_with_leather, 11 + dex_mod + 1)
+        self.assertEqual(ac_with_chain, 13 + dex_mod + 1, "the +1 must survive an unrelated armor swap")
+
+    def test_archery_fighting_style_adds_attack_bonus_only_for_a_ranged_weapon(self):
+        from rules import combat
+        attacker = {"name": "Attacker", "strength": 10, "dexterity": 16, "proficiency_bonus": 2, "fighting_style": "Archery"}
+        longbow = items_module.get_item("longbow")
+        longsword = items_module.get_item("longsword")
+        self.assertTrue(longbow.get("ranged"))
+        self.assertFalse(longsword.get("ranged", False))
+        defender = {"name": "Defender", "armor_class": 10, "hp_current": 20, "conditions": []}
+        with_bow = combat.resolve_attack(dict(attacker), dict(defender), longbow, forced_roll=10)
+        without_style = combat.resolve_attack({**attacker, "fighting_style": None}, dict(defender), longbow, forced_roll=10)
+        self.assertEqual(with_bow["attack_roll"], without_style["attack_roll"] + 2, "Archery should add +2 to the attack roll for a ranged weapon")
+        # And a melee weapon (no "ranged" flag) never gets Archery's bonus.
+        melee_with_style = combat.resolve_attack(dict(attacker), dict(defender), longsword, forced_roll=10)
+        melee_without_style = combat.resolve_attack({**attacker, "fighting_style": None}, dict(defender), longsword, forced_roll=10)
+        self.assertEqual(melee_with_style["attack_roll"], melee_without_style["attack_roll"], "Archery must never apply to a melee weapon")
+
+    def test_weapon_for_attacker_propagates_two_handed_and_ranged_flags(self):
+        """
+        Real live gap found building the Fighting Style feature
+        (2026-09-04): _weapon_for_attacker builds the actual dict every
+        real attack resolves against, and it never copied the new
+        two_handed/ranged fields from items.py -- Archery/Dueling/Great
+        Weapon Fighting would have silently never fired for any real
+        player's actual equipped weapon, only in a synthetic test that
+        hands resolve_attack the raw item dict directly.
+        """
+        user_id, chat_id = 900605, -900605
+        character = make_basic_character(user_id, "WeaponFlagTester", chat_id=chat_id, char_class="Fighter")
+        db.add_item(user_id, chat_id, "greataxe", 1)
+        db.equip_item(user_id, chat_id, "greataxe")
+        character = db.get_character(user_id, chat_id)
+        weapon = bot._weapon_for_attacker(character)
+        self.assertTrue(weapon.get("two_handed"))
+        db.add_item(user_id, chat_id, "longbow", 1)
+        db.equip_item(user_id, chat_id, "longbow")
+        character = db.get_character(user_id, chat_id)
+        weapon = bot._weapon_for_attacker(character)
+        self.assertTrue(weapon.get("ranged"))
+
+    def test_dueling_fighting_style_adds_damage_only_for_a_one_handed_weapon(self):
+        from rules import combat
+        longsword = items_module.get_item("longsword")
+        greataxe = items_module.get_item("greataxe")
+        self.assertTrue(greataxe.get("two_handed"))
+        self.assertFalse(longsword.get("two_handed", False))
+        attacker_dueling = {"name": "Attacker", "strength": 16, "dexterity": 10, "proficiency_bonus": 2, "fighting_style": "Dueling", "char_class": "Fighter"}
+        attacker_none = {**attacker_dueling, "fighting_style": None}
+        defender = {"name": "Defender", "armor_class": 1, "hp_current": 100, "conditions": []}
+        with_dueling = combat.resolve_attack(dict(attacker_dueling), dict(defender), longsword, forced_roll=15, forced_damage_roll=1)
+        without_dueling = combat.resolve_attack(dict(attacker_none), dict(defender), longsword, forced_roll=15, forced_damage_roll=1)
+        self.assertEqual(with_dueling["damage_dealt"], without_dueling["damage_dealt"] + 2, "Dueling should add +2 damage on a one-handed weapon")
+        with_two_handed = combat.resolve_attack(dict(attacker_dueling), dict(defender), greataxe, forced_roll=15, forced_damage_roll=1)
+        without_two_handed = combat.resolve_attack(dict(attacker_none), dict(defender), greataxe, forced_roll=15, forced_damage_roll=1)
+        self.assertEqual(with_two_handed["damage_dealt"], without_two_handed["damage_dealt"], "Dueling must never apply to a two-handed weapon")
+        # Real 5E: Dueling requires "no other weapon" -- now checkable for real since mastery-gated dual wielding exists.
+        attacker_dual_wielding = {**attacker_dueling, "equipped_offhand_weapon": "shortsword"}
+        with_offhand_equipped = combat.resolve_attack(dict(attacker_dual_wielding), dict(defender), longsword, forced_roll=15, forced_damage_roll=1)
+        self.assertEqual(with_offhand_equipped["damage_dealt"], without_dueling["damage_dealt"], "Dueling must not apply once a real off-hand weapon is also equipped")
+
+    def test_great_weapon_fighting_rerolls_low_damage_dice_for_a_two_handed_weapon_only(self):
+        from unittest.mock import patch
+        from rules import combat
+        greataxe = items_module.get_item("greataxe")
+        longsword = items_module.get_item("longsword")
+        attacker = {"name": "Attacker", "strength": 16, "dexterity": 10, "proficiency_bonus": 2, "fighting_style": "Great Weapon Fighting", "char_class": "Fighter"}
+        defender = {"name": "Defender", "armor_class": 1, "hp_current": 100, "conditions": []}
+        # forced_roll only substitutes the FIRST rolled die (see roll_damage's own docstring) -- roll() is mocked
+        # here instead so every real die in the sequence is forced low, making the reroll's real effect observable.
+        with patch("rules.dice.roll", side_effect=[[1], [9]]):
+            with_gwf = combat.resolve_attack(dict(attacker), dict(defender), greataxe, forced_roll=15)
+        self.assertEqual(with_gwf["damage_dealt"], 9, "a rolled 1 must be rerolled to the mocked 9 for a two-handed weapon")
+        with patch("rules.dice.roll", return_value=[1]):
+            no_style = combat.resolve_attack(dict({**attacker, "fighting_style": None}), dict(defender), greataxe, forced_roll=15)
+        self.assertEqual(no_style["damage_dealt"], 1, "no reroll without the style")
+        with patch("rules.dice.roll", return_value=[1]):
+            one_handed = combat.resolve_attack(dict(attacker), dict(defender), longsword, forced_roll=15)
+        self.assertEqual(one_handed["damage_dealt"], 1, "GWF must never reroll a one-handed weapon's damage die")
+
+    async def test_protection_fighting_style_imposes_disadvantage_on_an_ally_attack(self):
+        """
+        Real Fighting Style: Protection (2026-09-04) -- real 5E's
+        precondition/payoff pair, minus the "within 5 ft." positioning
+        this game has no equivalent of (same simplification every other
+        proximity-flavored rule here already gets).
+        """
+        import sessions
+        from unittest.mock import patch
+        protector_id, target_id, enemy_id = 900610, 900611, -1
+        protector = {
+            "telegram_user_id": protector_id, "name": "Protector", "hp_current": 20, "hp_max": 20,
+            "fighting_style": "Protection", "equipped_shield": "wooden_shield", "conditions": [],
+        }
+        target = {
+            "telegram_user_id": target_id, "name": "Target", "hp_current": 20, "hp_max": 20,
+            "armor_class": 15, "dexterity": 10, "strength": 10, "conditions": [],
+        }
+        enemy = {
+            "telegram_user_id": enemy_id, "name": "Enemy", "hp_current": 20, "hp_max": 20,
+            "strength": 10, "dexterity": 10, "conditions": [],
+        }
+        session = sessions.Session(
+            chat_id=-900610, participants=[protector, target, enemy],
+            turn_order=[enemy_id, protector_id, target_id],
+            sides={enemy_id: "enemy", protector_id: "party", target_id: "party"},
+            round_number=1,
+        )
+        weapon = items_module.get_item("rusty_dagger")
+        with patch("rules.dice.roll_d20", side_effect=[15, 3]) as mock_d20:
+            result = await bot._resolve_attack_with_reaction_check(
+                FakeUpdate(enemy_id, "", [], chat_id=-900610), enemy, target, weapon,
+                round_number=1, session=session,
+            )
+        self.assertTrue(mock_d20.called)
+        self.assertEqual(protector.get("reaction_used_round"), 1, "the protector's reaction must be spent")
+        # With disadvantage forced (rolls of 15 then 3), the LOWER of the two must be used.
+        self.assertEqual(result["raw_roll"], 3, "Protection's disadvantage must make the attack use the lower roll")
+
+    def test_intent_parser_choose_fighting_style_not_swallowed_by_resolve_choice(self):
+        """Same real collision this file already fixed for subclass names (2026-07-24) -- "I choose Great Weapon Fighting" must not fall into the generic "i choose" -> resolve_choice trap."""
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("I choose Great Weapon Fighting", [])["action"], "choose_fighting_style")
+        self.assertEqual(_keyword_fallback("I choose the Archery fighting style", [])["action"], "choose_fighting_style")
+        self.assertEqual(_keyword_fallback("I choose to keep it and collect the reward", [])["action"], "resolve_choice")
+
+    # -- Real, mastery-gated dual wielding (2026-09-04) -----------------
+    def test_can_dual_wield_refuses_below_mastery_and_allows_at_100_percent(self):
+        user_id, chat_id = 900620, -900620
+        character = make_basic_character(user_id, "DualWieldGateTester", chat_id=chat_id, char_class="Fighter")
+        db.add_item(user_id, chat_id, "longsword", 1)
+        db.equip_item(user_id, chat_id, "longsword")
+        character = db.get_character(user_id, chat_id)
+        eligible, reason = db.can_dual_wield(character)
+        self.assertFalse(eligible)
+        self.assertIn("haven't mastered", reason)
+        db.update_character(user_id, chat_id, weapon_proficiency_pct={"martial": 100.0})
+        character = db.get_character(user_id, chat_id)
+        eligible, reason = db.can_dual_wield(character)
+        self.assertTrue(eligible, reason)
+
+    async def test_equip_offhand_refuses_below_mastery_and_succeeds_at_100_percent(self):
+        user_id, chat_id = 900621, -900621
+        make_basic_character(user_id, "OffhandEquipTester", chat_id=chat_id, char_class="Fighter")
+        db.add_item(user_id, chat_id, "longsword", 2)
+        db.equip_item(user_id, chat_id, "longsword")
+        sink = []
+        await bot._do_equip_offhand(FakeUpdate(user_id, "dual wield longsword", sink, chat_id=chat_id), "dual wield longsword")
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(character.get("equipped_offhand_weapon"))
+        self.assertTrue(any("haven't mastered" in s for s in sink), sink)
+
+        db.update_character(user_id, chat_id, weapon_proficiency_pct={"martial": 100.0})
+        sink2 = []
+        await bot._do_equip_offhand(FakeUpdate(user_id, "dual wield longsword", sink2, chat_id=chat_id), "dual wield longsword")
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character.get("equipped_offhand_weapon"), "longsword")
+
+    def test_attacks_per_turn_grants_a_real_extra_swing_only_with_a_real_offhand_weapon(self):
+        character = {"char_class": "Wizard", "level": 1, "equipped_offhand_weapon": None}
+        self.assertEqual(bot._attacks_per_turn(character), 1)
+        character["equipped_offhand_weapon"] = "longsword"
+        self.assertEqual(bot._attacks_per_turn(character), 2, "a real equipped off-hand weapon must grant a real extra swing, even for a non-martial class")
+
+    def test_offhand_weapon_for_attacker_none_without_a_real_offhand_weapon(self):
+        self.assertIsNone(bot._offhand_weapon_for_attacker({"equipped_offhand_weapon": None}))
+        self.assertIsNone(bot._offhand_weapon_for_attacker({}))
+
+    def test_two_weapon_fighting_adds_ability_modifier_only_to_the_offhand_weapon(self):
+        """
+        Real 5E's exact precondition/payoff pair, finally meaningful:
+        this engine's own main-attack damage formula never adds an
+        ability modifier at all (confirmed building this feature), so
+        this is a real, distinct bonus unique to the off-hand swing with
+        this specific style chosen -- never applied without it.
+        """
+        attacker_twf = {"strength": 16, "equipped_offhand_weapon": "longsword", "fighting_style": "Two-Weapon Fighting"}
+        attacker_none = {"strength": 16, "equipped_offhand_weapon": "longsword", "fighting_style": None}
+        weapon_twf = bot._offhand_weapon_for_attacker(attacker_twf)
+        weapon_none = bot._offhand_weapon_for_attacker(attacker_none)
+        from rules.dice import ability_modifier
+        self.assertEqual(weapon_twf["damage_bonus"], ability_modifier(16), "Two-Weapon Fighting must add the real ability modifier")
+        self.assertEqual(weapon_none["damage_bonus"], 0, "without the style, the off-hand attack gets no ability modifier bonus")
+
+    async def test_dual_wielding_fighter_actually_swings_twice_in_real_combat(self):
+        """
+        Real end-to-end (2026-09-04): confirms the off-hand swing this
+        feature adds actually fires through the real _do_attack combat
+        loop, not just in isolation against the helper functions above.
+        A level-1 Fighter has no real 5E Extra Attack yet (that needs
+        level 5), so exactly 2 hits (main + off-hand) is the whole real
+        signal here. The expected per-hit damage is measured from a real
+        SINGLE-attack baseline run (same character, same mocked 10
+        damage per roll_damage call, no off-hand equipped) rather than
+        hand-computed, since a real hit already passes through several
+        other pre-existing multiplicative bonuses (power_scale_ratio,
+        world_damage_multiplier, etc.) unrelated to this feature --
+        measuring instead of predicting keeps this test honest about
+        what it's actually checking (exactly 2 real hits), not a
+        brittle restatement of unrelated damage-formula internals.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+
+        def make_dummy_session(user_id, enemy_id, offhand: bool):
+            sessions.end_session(-999)
+            make_basic_character(user_id, f"DualWieldTester{user_id}", char_class="Fighter", current_location="crossroads_tavern", inventory={"longsword": 2})
+            db.equip_item(user_id, -999, "longsword")
+            if offhand:
+                db.update_character(user_id, -999, weapon_proficiency_pct={"martial": 100.0})
+                equip_success, equip_message, _ = db.equip_offhand_weapon(user_id, -999, "longsword")
+                self.assertTrue(equip_success, equip_message)
+            player = db.get_character(user_id, -999)
+            player["telegram_user_id"] = user_id
+            enemy = {"telegram_user_id": enemy_id, "name": f"DualWieldDummy{enemy_id}", "dexterity": 10, "strength": 10,
+                     "armor_class": 1, "hp_current": 100000, "hp_max": 100000, "is_ai": 1, "monster_key": "goblin"}
+            session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+            session.turn_order = [user_id, enemy_id]
+            session.current_turn_index = 0
+            return enemy
+
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.roll_damage", return_value={"total": 10}), \
+             patch("rules.combat.roll_damage", return_value={"total": 10}), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            baseline_enemy = make_dummy_session(960030, -960030, offhand=False)
+            await bot._do_attack(FakeUpdate(960030, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
+            per_hit_damage = 100000 - baseline_enemy["hp_current"]
+            sessions.end_session(-999)
+
+            dual_enemy = make_dummy_session(960031, -960031, offhand=True)
+            await bot._do_attack(FakeUpdate(960031, "attack the dummy", []), "attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
+            total_damage = 100000 - dual_enemy["hp_current"]
+            sessions.end_session(-999)
+
+        self.assertEqual(total_damage, per_hit_damage * 2, f"expected exactly 2 real hits (main + off-hand) at {per_hit_damage} damage each, got {total_damage}")
+
+    def test_intent_parser_dual_wield_phrasing_not_swallowed_by_equip_item(self):
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("dual wield my dagger", [])["action"], "equip_offhand")
+        self.assertEqual(_keyword_fallback("equip the shortsword in my off hand", [])["action"], "equip_offhand")
+        self.assertEqual(_keyword_fallback("equip my longsword", [])["action"], "equip_item")
+
     def test_rogue_expertise_doubles_proficiency_from_level_1(self):
         from rules.leveling import skill_check_proficiency_bonus
         self.assertEqual(skill_check_proficiency_bonus("Rogue", 1, "dexterity", 2), 4)
@@ -32367,6 +32712,22 @@ class DungeonAuditTests(unittest.TestCase):
         lockable = a["lockables"][0]
         self.assertEqual(lockable["requires_key_item"], "the_key")
 
+    def test_add_rune_gate_produces_a_real_requires_rune_item_lockable(self):
+        """
+        Real live feature (2026-09-04): a "Locked Rune Doorway" needs a
+        COUNT of a fungible item, unlike add_key_gate's single unique
+        key -- mirrors that test exactly, plus the count field.
+        """
+        campaign = {"locations": {"underground": {}}}
+        dungeon_audit.add_room(campaign, "underground", "d", "a", "A", "A room.")
+        dungeon_audit.add_room(campaign, "underground", "d", "b", "B", "A room.")
+        dungeon_audit.add_rune_gate(campaign, "a", "b", "gate_1", "a locked rune doorway", "labyrinth_rune", 3)
+        a = campaign["locations"]["underground"]["a"]
+        self.assertEqual(a["locked_connections"], {"b": "gate_1"})
+        lockable = a["lockables"][0]
+        self.assertEqual(lockable["requires_rune_item"], "labyrinth_rune")
+        self.assertEqual(lockable["rune_count"], 3)
+
     def test_dump_dungeon_graph_names_every_room_and_lockable(self):
         campaign = _minimal_dungeon_campaign()
         text = dungeon_audit.dump_dungeon_graph(campaign, "fixture_dungeon")
@@ -32715,6 +33076,121 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(key_room_id, locked_destinations, "the key must sit in a plainly-reachable branch, not behind an unrelated existing gate")
         self.assertGreater(hits, 0, "expected at least one key-gated evolve across 40 real seeds")
         self.assertLess(hits, 40, "expected at least one evolve WITHOUT a key gate across 40 real seeds -- it should be a real fraction, not every time")
+
+    def test_evolve_dungeon_sometimes_places_a_real_rune_gate_solvable_by_construction(self):
+        """
+        Real live feature (2026-09-04, Phase B port of rules/labyrinth.
+        py's identical rune-gate mechanic, per Coffee: "have the mini
+        boss, and boss and scatter them around, have it collected by
+        battle and by chests" -- "if a gateway needs 3 the player will
+        need 3 runes"). Statistical, same discipline as the key gate
+        above: the door is a real add_rune_gate wiring, never shares a
+        branch with the switch/plate/key gate, and the total number of
+        guaranteed real rune sources (chest loot or guaranteed drop)
+        always meets or exceeds the door's own required count, none of
+        them sitting behind the gate itself or any other existing gate.
+        """
+        import copy
+        hits = 0
+        for seed in range(40):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_rune_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            failures = dungeon_audit.audit_dungeon(campaign, new_id)
+            for check_name, check_failures in failures.items():
+                self.assertFalse(check_failures, f"seed {seed}, {check_name}: {check_failures}")
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            door = next((lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("requires_rune_item") == "labyrinth_rune"), None)
+            if door is None:
+                continue
+            hits += 1
+            needed = door["rune_count"]
+            hub_id = next(rid for rid, r in rooms.items() if r.get("dungeon_hub"))
+            gated_room_id = next(d for d, lid in rooms[hub_id]["locked_connections"].items() if lid == door["id"])
+            rune_chest_rooms = [
+                rid for rid, r in rooms.items() if any(lk.get("kind") == "chest" and "labyrinth_rune" in lk.get("loot", {}) for lk in r.get("lockables", []))
+            ]
+            rune_drop_rooms = [rid for rid, r in rooms.items() if r.get("guaranteed_rune_drop")]
+            total_sources = len(rune_chest_rooms) + len(rune_drop_rooms)
+            self.assertGreaterEqual(total_sources, needed, f"seed {seed}: door needs {needed} runes but only {total_sources} real sources were placed")
+            locked_destinations = set(rooms[hub_id].get("locked_connections", {}).keys())
+            for rid in rune_chest_rooms + rune_drop_rooms:
+                self.assertNotEqual(rid, gated_room_id, "a rune source must never sit inside the very branch it gates")
+                self.assertNotIn(rid, locked_destinations, "a rune source must sit in a plainly-reachable branch, not behind an unrelated existing gate")
+            for rid in rune_drop_rooms:
+                self.assertTrue(rooms[rid].get("monsters"), "a guaranteed rune drop must sit on a room with a real monster to defeat")
+        self.assertGreater(hits, 0, "expected at least one rune-gated evolve across 40 real seeds")
+
+    async def test_check_overworld_key_drop_grants_once_and_actually_persists_the_claim(self):
+        """
+        Real live bug found and fixed (2026-09-04) building the Locked
+        Rune Doorway feature: campaign_loader.get_location returns a
+        fresh copy, not the real dict living inside CAMPAIGN, so this
+        function's old `location["key_drop_claimed"] = True` silently
+        never persisted -- a repeat combat win at the same location
+        would re-grant the key forever. Now fixed via
+        bot._real_campaign_location; this guards the fix directly on
+        the ORIGINAL sibling function (not just its new rune cousin).
+        """
+        import sessions
+        loc_id = "key_drop_persistence_test_location"
+        bot.CAMPAIGN["locations"]["underground"][loc_id] = {
+            "name": "A Real Test Chamber", "connections": [], "guaranteed_key_drop": True,
+        }
+        try:
+            user_id, chat_id = 962062, -962062
+            make_basic_character(user_id, "OverworldKeyDropTester", chat_id=chat_id, current_location=loc_id)
+            session = sessions.Session(chat_id=chat_id, participants=[], turn_order=[user_id], sides={user_id: "party"})
+            before = (db.get_character(user_id, chat_id).get("inventory") or {}).get("labyrinth_floor_key", 0)
+            sink = []
+            await bot._check_overworld_key_drop(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
+            after = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_floor_key", 0)
+            self.assertEqual(after, before + 1, f"expected exactly one real key granted, got {sink}")
+            self.assertTrue(bot.CAMPAIGN["locations"]["underground"][loc_id].get("key_drop_claimed"), "the claim must persist onto the real CAMPAIGN dict, not a throwaway copy")
+
+            sink2 = []
+            await bot._check_overworld_key_drop(FakeUpdate(user_id, "", sink2, chat_id=chat_id), session)
+            after2 = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_floor_key", 0)
+            self.assertEqual(after2, before + 1, "expected the guaranteed overworld key drop to be one-time only")
+        finally:
+            del bot.CAMPAIGN["locations"]["underground"][loc_id]
+
+    async def test_check_overworld_rune_drop_grants_once_and_actually_persists_the_claim(self):
+        """
+        Real live bug found and fixed (2026-09-04) building this same
+        feature: campaign_loader.get_location returns a fresh copy, not
+        the real dict living inside CAMPAIGN, so the old
+        `location["key_drop_claimed"] = True` pattern in
+        _check_overworld_key_drop silently never persisted -- a repeat
+        combat win at the same location would re-grant the item
+        forever. bot._real_campaign_location fixes this for both
+        siblings; this test guards the fix by calling the function
+        TWICE against the real module-level bot.CAMPAIGN, confirming
+        the second call is a genuine no-op.
+        """
+        import sessions
+        loc_id = "rune_drop_persistence_test_location"
+        bot.CAMPAIGN["locations"]["underground"][loc_id] = {
+            "name": "A Real Test Chamber", "connections": [], "guaranteed_rune_drop": True,
+        }
+        try:
+            user_id, chat_id = 962061, -962061
+            make_basic_character(user_id, "OverworldRuneDropTester", chat_id=chat_id, current_location=loc_id)
+            session = sessions.Session(chat_id=chat_id, participants=[], turn_order=[user_id], sides={user_id: "party"})
+            before = (db.get_character(user_id, chat_id).get("inventory") or {}).get("labyrinth_rune", 0)
+            sink = []
+            await bot._check_overworld_rune_drop(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
+            after = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_rune", 0)
+            self.assertEqual(after, before + 1, f"expected exactly one real Labyrinth Rune granted, got {sink}")
+            self.assertTrue(bot.CAMPAIGN["locations"]["underground"][loc_id].get("rune_drop_claimed"), "the claim must persist onto the real CAMPAIGN dict, not a throwaway copy")
+
+            sink2 = []
+            await bot._check_overworld_rune_drop(FakeUpdate(user_id, "", sink2, chat_id=chat_id), session)
+            after2 = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_rune", 0)
+            self.assertEqual(after2, before + 1, "expected the guaranteed overworld rune drop to be one-time only")
+        finally:
+            del bot.CAMPAIGN["locations"]["underground"][loc_id]
 
     def test_evolve_dungeon_monsters_fall_inside_the_resolved_target_band(self):
         import copy
@@ -33568,6 +34044,36 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             room = run["rooms"][run["current_room_id"]]
             if room.get("is_checkpoint"):
                 return run
+            # Real live feature (2026-09-04): every floor now guarantees
+            # a real mandatory gate somewhere on its own main path (see
+            # rules/labyrinth.py's own new "MANDATORY main-path gate"
+            # block) -- this helper isn't testing gating itself, same
+            # spirit as the gated-combat-room handling just below (a
+            # real mechanic genuinely fires; this helper gets past it
+            # rather than hand-solving every possible mechanic kind).
+            # Auto-unlocking here, directly, is the test-only shortcut
+            # (never a real reward, same discipline the overheal-then-
+            # restore combat handling below already documents). Per
+            # bot._lockable_is_open's own real branching: a plain door/
+            # chest/lever checks _UNLOCKED, but switch/pressure_plate/
+            # multi_switch_gate all check _SWITCH_STATE instead (a
+            # multi_switch_gate is never itself a _SWITCH_STATE key --
+            # it ANDs over its own `requires` list of real switch ids)
+            # -- setting only _UNLOCKED would silently leave a switch-
+            # gated room exactly as blocked as before.
+            if room.get("locked_connections"):
+                for lockable_id in room["locked_connections"].values():
+                    lockable = next((lk for lk in room.get("lockables", []) if lk["id"] == lockable_id), None)
+                    if lockable is None:
+                        continue
+                    if lockable.get("kind") == "multi_switch_gate":
+                        switch_state = bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)
+                        for req_id in lockable.get("requires", []):
+                            switch_state[req_id] = True
+                    elif lockable.get("kind") in ("switch", "pressure_plate", "pillar"):
+                        bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)[lockable_id] = True
+                    else:
+                        bot._chat_scoped_set(bot._UNLOCKED, chat_id).add(lockable_id)
             # Real live feature (2026-09-04): a miniboss/boss/gated-
             # encounter room now genuinely blocks moving onward until
             # its own real monsters are cleared -- fight it here before
@@ -33609,7 +34115,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                     if cur != start and (cur_room.get("descends_to") or cur_room.get("is_checkpoint")):
                         target_id = cur
                         break
-                    for nb in cur_room.get("connections", []):
+                    # locked_connections destinations are included too --
+                    # this helper already auto-unlocks whatever it meets
+                    # above, so a room only reachable via a real gate is
+                    # just as real a neighbor as a plain connection.
+                    for nb in list(cur_room.get("connections", [])) + list(cur_room.get("locked_connections", {}).keys()):
                         if nb not in came_from and nb in run["rooms"]:
                             came_from[nb] = cur
                             queue.append(nb)
@@ -34112,6 +34622,26 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         run = db.get_labyrinth_run(chat_id, f"party:{party_id}")
         while not run["rooms"][run["current_room_id"]].get("descends_to"):
             start = run["current_room_id"]
+            start_room = run["rooms"][start]
+            # Real live feature (2026-09-04): every floor now guarantees
+            # a real mandatory gate on its own main path -- this test
+            # isn't testing gating, same test-only auto-unlock shortcut
+            # _walk_to_checkpoint above already uses (never a real
+            # reward), branching by kind the same way bot._lockable_is_
+            # open itself does (switch/pressure_plate/multi_switch_gate
+            # check _SWITCH_STATE, everything else checks _UNLOCKED).
+            for lockable_id in start_room.get("locked_connections", {}).values():
+                lockable = next((lk for lk in start_room.get("lockables", []) if lk["id"] == lockable_id), None)
+                if lockable is None:
+                    continue
+                if lockable.get("kind") == "multi_switch_gate":
+                    switch_state = bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)
+                    for req_id in lockable.get("requires", []):
+                        switch_state[req_id] = True
+                elif lockable.get("kind") in ("switch", "pressure_plate", "pillar"):
+                    bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)[lockable_id] = True
+                else:
+                    bot._chat_scoped_set(bot._UNLOCKED, chat_id).add(lockable_id)
             came_from = {start: None}
             queue = deque([start])
             target_id = None
@@ -34120,7 +34650,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 if cur != start and run["rooms"][cur].get("descends_to"):
                     target_id = cur
                     break
-                for nb in run["rooms"][cur].get("connections", []):
+                for nb in list(run["rooms"][cur].get("connections", [])) + list(run["rooms"][cur].get("locked_connections", {}).keys()):
                     if nb not in came_from and nb in run["rooms"]:
                         came_from[nb] = cur
                         queue.append(nb)
@@ -34828,7 +35358,17 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         run = db.get_labyrinth_run(chat_id, party_key)
         rooms = run["rooms"]
         hub_id = run["current_room_id"]
-        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        # Real live gap found and fixed (2026-09-04, building the Locked
+        # Rune Doorway feature): the old "_r0" name-suffix guess could
+        # land on a DIFFERENT floor's own room (a segment's `rooms`
+        # dict holds every floor at once) or a room genuinely gated
+        # behind a real switch/plate/key/rune lock -- either way, "go to
+        # X" from the hub then fails instead of ever reaching the
+        # hazard. The hub's own real `connections` list is exactly the
+        # set of plain, already-unlocked, one-hop-reachable rooms on
+        # THIS floor -- picking from it directly is correct by
+        # construction, no guessing needed.
+        hazard_room_id = rooms[hub_id]["connections"][0]
         rooms[hazard_room_id]["hazard"] = "collapsing_floor"
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
@@ -34860,7 +35400,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         party_key = f"solo:{user_id}"
         run = db.get_labyrinth_run(chat_id, party_key)
         rooms = run["rooms"]
-        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        # Same real fix as the hazard test above -- the hub's own
+        # `connections` list is exactly the set of plain, already-
+        # unlocked, one-hop-reachable rooms on the current floor.
+        hazard_room_id = rooms[run["current_room_id"]]["connections"][0]
         rooms[hazard_room_id]["hazard"] = "spike_pit"
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
@@ -34883,7 +35426,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         party_key = f"solo:{user_id}"
         run = db.get_labyrinth_run(chat_id, party_key)
         rooms = run["rooms"]
-        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        # Same real fix as the hazard test above -- the hub's own
+        # `connections` list is exactly the set of plain, already-
+        # unlocked, one-hop-reachable rooms on the current floor.
+        hazard_room_id = rooms[run["current_room_id"]]["connections"][0]
         rooms[hazard_room_id]["hazard"] = "bottomless_pit"
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
@@ -34906,7 +35452,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         party_key = f"solo:{user_id}"
         run = db.get_labyrinth_run(chat_id, party_key)
         rooms = run["rooms"]
-        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        # Same real fix as the hazard test above -- the hub's own
+        # `connections` list is exactly the set of plain, already-
+        # unlocked, one-hop-reachable rooms on the current floor.
+        hazard_room_id = rooms[run["current_room_id"]]["connections"][0]
         rooms[hazard_room_id]["hazard"] = "bottomless_pit"
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
@@ -35085,17 +35634,72 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
         expected_item_id = labyrinth_module._milestone_item_for_floor(20)
         before = (db.get_character(user_id, chat_id).get("inventory") or {}).get(expected_item_id, 0)
+        runes_before = (db.get_character(user_id, chat_id).get("inventory") or {}).get("labyrinth_rune", 0)
         sink = []
         await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
         after = db.get_character(user_id, chat_id).get("inventory", {}).get(expected_item_id, 0)
         self.assertEqual(after, before + 1, f"expected exactly one real {expected_item_id} granted, got {sink}")
         self.assertTrue(any("mini-boss falls" in s for s in sink), sink)
+        # Real live feature (2026-09-04, per Coffee: "have the mini
+        # boss, and boss and scatter them around" -- the Labyrinth has
+        # no separate is_boss_room, so its miniboss room already IS the
+        # boss-tier encounter here). Same one-time trigger, a second
+        # real grant.
+        runes_after = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_rune", 0)
+        self.assertEqual(runes_after, runes_before + 1, f"expected exactly one real Labyrinth Rune granted alongside the milestone item, got {sink}")
+        self.assertTrue(any("Labyrinth Rune" in s for s in sink), sink)
 
         # Defeating it again (a real room the player could re-enter) never grants a second copy.
         sink2 = []
         await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink2, chat_id=chat_id), session)
         after2 = db.get_character(user_id, chat_id).get("inventory", {}).get(expected_item_id, 0)
+        runes_after2 = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_rune", 0)
         self.assertEqual(after2, before + 1, "expected the guaranteed reward to be one-time only")
+        self.assertEqual(runes_after2, runes_before + 1, "expected the guaranteed rune grant to be one-time only")
+        sessions.end_session(chat_id, session)
+
+    async def test_labyrinth_guaranteed_rune_drop_grants_once_only(self):
+        """
+        Real live feature (2026-09-04, per Coffee: "scatter them
+        around, have it collected by battle" -- a Locked Rune Doorway's
+        own guaranteed source room, placed by rules/labyrinth.py's
+        generate_floor). Same one-time-flag shape as the sibling
+        guaranteed_key_drop mechanic.
+        """
+        import sessions
+        user_id, chat_id = 962056, -962056
+        make_basic_character(user_id, "RuneDropTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        rune_room_id = "laby_rune_drop_test"
+        rooms[rune_room_id] = {
+            "id": rune_room_id, "floor": 5, "name": "A Real Rune-Source Chamber",
+            "connections": [hub_id], "monsters": ["goblin"], "guaranteed_rune_drop": True,
+        }
+        rooms[hub_id]["connections"].append(rune_room_id)
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=rune_room_id)
+
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session)
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+
+        before = (db.get_character(user_id, chat_id).get("inventory") or {}).get("labyrinth_rune", 0)
+        sink = []
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
+        after = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_rune", 0)
+        self.assertEqual(after, before + 1, f"expected exactly one real Labyrinth Rune granted, got {sink}")
+        self.assertTrue(any("Labyrinth Rune" in s for s in sink), sink)
+
+        sink2 = []
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink2, chat_id=chat_id), session)
+        after2 = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_rune", 0)
+        self.assertEqual(after2, before + 1, "expected the guaranteed rune drop to be one-time only")
         sessions.end_session(chat_id, session)
 
     def test_enter_labyrinth_button_only_shows_once_unlocked(self):
@@ -35324,6 +35928,16 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         behind the very gate it opens, and never in a room that's
         itself locked behind some other unsolved gate. Statistical,
         checked across real seeds.
+
+        Real live change (2026-09-04, mandatory main-path gating, per
+        Coffee: "we should not be able to walk from one floor to the
+        next... it should feel like a maze or a labyrinth"): every
+        floor now guarantees AT LEAST one real gate, of a randomly
+        picked kind -- `locked_connections` can now hold a plate/key/
+        rune-door gate instead of (or alongside) this test's own
+        switch-gate mechanic, so this only ever inspects the
+        `multi_switch_gate`-kind entries specifically, same as it always
+        meant to test just this one mechanic in isolation.
         """
         gate_seen = False
         for seed in range(80):
@@ -35331,10 +35945,14 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             rooms = floor_data["rooms"]
             hub = rooms[floor_data["hub_room_id"]]
             locked = hub.get("locked_connections", {})
-            if not locked:
+            switch_gates = [
+                (gate_room_id, gate_lockable_id) for gate_room_id, gate_lockable_id in locked.items()
+                if next((lk for lk in hub["lockables"] if lk["id"] == gate_lockable_id), {}).get("kind") == "multi_switch_gate"
+            ]
+            if not switch_gates:
                 continue
             gate_seen = True
-            for gate_room_id, gate_lockable_id in locked.items():
+            for gate_room_id, gate_lockable_id in switch_gates:
                 gate_lockable = next(lk for lk in hub["lockables"] if lk["id"] == gate_lockable_id)
                 self.assertEqual(gate_lockable["kind"], "multi_switch_gate")
                 for switch_id in gate_lockable["requires"]:
@@ -35372,7 +35990,27 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         for seed in range(80):
             floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
             rooms = floor_data["rooms"]
-            edge_count = sum(len(r.get("connections", [])) for r in rooms.values()) // 2
+            # Real live gap found and fixed (2026-09-04, building the
+            # mandatory main-path gate): a gated edge is stored
+            # ASYMMETRICALLY -- removed from the gating room's own
+            # `connections` but left in place on the gated room's own
+            # side (confirmed by direct inspection) -- so the old naive
+            # `sum(len(connections)) // 2` silently undercounted any
+            # floor with a real gate on it (now EVERY floor, since the
+            # mandatory gate always creates one such edge). A proper
+            # edge SET, counting locked_connections as real topological
+            # edges too (the "tree vs. grid" claim is about the graph's
+            # shape, not which edges happen to be currently open), is
+            # correct regardless of which side(s) list a given edge.
+            edges = set()
+            for rid, r in rooms.items():
+                for nb in r.get("connections", []):
+                    if nb in rooms:
+                        edges.add(frozenset((rid, nb)))
+                for nb in r.get("locked_connections", {}):
+                    if nb in rooms:
+                        edges.add(frozenset((rid, nb)))
+            edge_count = len(edges)
             if edge_count > len(rooms) - 1:
                 loop_seen = True
                 break
@@ -35532,6 +36170,193 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(key_gate_seen, "expected at least one real key gate across 100 real seeds")
         self.assertTrue(chest_style_seen, "expected the chest placement style to appear across 100 real seeds")
         self.assertTrue(drop_style_seen, "expected the guaranteed-drop placement style to appear across 100 real seeds")
+
+    def test_generate_floor_places_a_real_rune_gate_with_enough_runes_solvable_by_construction(self):
+        """
+        Real live feature (2026-09-04, per Coffee: "have the mini boss,
+        and boss and scatter them around, have it collected by battle
+        and by chests" -- "if a gateway needs 3 the player will need 3
+        runes"). Statistical: a Locked Rune Doorway, when it fires,
+        never gates a branch already claimed by another gate, and the
+        total number of guaranteed real rune sources placed always
+        meets or exceeds the door's own required count -- solvable by
+        construction, same discipline as the key gate above.
+        """
+        rune_gate_seen = False
+        chest_style_seen = False
+        drop_style_seen = False
+        for seed in range(300):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub = rooms[floor_data["hub_room_id"]]
+            door = next((lk for lk in hub.get("lockables", []) if lk.get("requires_rune_item") == "labyrinth_rune"), None)
+            if door is None:
+                continue
+            rune_gate_seen = True
+            needed = door["rune_count"]
+            gated_ids = [d for d, lid in hub.get("locked_connections", {}).items() if lid == door["id"]]
+            self.assertEqual(len(gated_ids), 1, "expected the rune gate to gate exactly one real destination")
+            gated_room_id = gated_ids[0]
+            rune_chest_rooms = [
+                rid for rid, r in rooms.items()
+                if any(lk.get("kind") == "chest" and "labyrinth_rune" in lk.get("loot", {}) for lk in r.get("lockables", []))
+            ]
+            rune_drop_rooms = [rid for rid, r in rooms.items() if r.get("guaranteed_rune_drop")]
+            total_sources = len(rune_chest_rooms) + len(rune_drop_rooms)
+            self.assertGreaterEqual(total_sources, needed, f"seed {seed}: door needs {needed} runes but only {total_sources} real sources were placed")
+            for rid in rune_chest_rooms + rune_drop_rooms:
+                self.assertNotEqual(rid, gated_room_id, "a rune source must never be placed behind its own gate")
+            if rune_chest_rooms:
+                chest_style_seen = True
+            if rune_drop_rooms:
+                drop_style_seen = True
+                for rid in rune_drop_rooms:
+                    self.assertTrue(rooms[rid].get("monsters"), "a guaranteed rune drop must sit on a room with a real monster to defeat")
+        self.assertTrue(rune_gate_seen, "expected at least one real rune gate across 300 real seeds")
+        self.assertTrue(chest_style_seen, "expected the chest placement style to appear across 300 real seeds")
+        self.assertTrue(drop_style_seen, "expected the guaranteed-drop placement style to appear across 300 real seeds")
+
+    def test_generate_floor_always_gates_the_main_path_solvable_by_construction(self):
+        """
+        Real live feature (2026-09-04, per Coffee, dev-bridge: "we
+        should not be able to walk from one floor to the next we should
+        be having to clear the paths and the different gates... It
+        should feel like a maze or a labyrinth" -- backed by a real
+        "Zelda Dungeon Path & Gateway System" reference he shared).
+        Every OTHER gate mechanic only ever targets an optional side
+        branch -- main_chain (the one guaranteed path to the stairs)
+        was structurally never gated at all, so a floor could roll zero
+        of them and read as a bare corridor. This is unconditional (no
+        chance roll): every single floor, from floor 1, must have a
+        real gate on its own main path, randomly picked from the same 4
+        real mechanics (switch/plate/key/rune) every optional gate
+        already uses, and whichever one fires must be genuinely
+        solvable -- its key/switch/runes findable somewhere that isn't
+        itself locked away.
+        """
+        kinds_seen = set()
+        for seed in range(500):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub = rooms[floor_data["hub_room_id"]]
+            locked = hub.get("locked_connections", {})
+            self.assertTrue(locked, f"seed {seed}: expected the main path to be gated on every floor, found no locked_connections at all")
+            main_gate = next(
+                (lk for lk in hub.get("lockables", []) if "_maingate" in lk["id"] or "_mainplate" in lk["id"]), None,
+            )
+            self.assertIsNotNone(main_gate, f"seed {seed}: expected a real mandatory main-path gate lockable")
+            kind = main_gate["kind"]
+            kinds_seen.add(kind if kind != "door" else ("rune" if main_gate.get("requires_rune_item") else "key"))
+            gated_ids = [d for d, lid in locked.items() if lid == main_gate["id"]]
+            self.assertEqual(len(gated_ids), 1, f"seed {seed}: expected the mandatory gate to gate exactly one real destination")
+            gated_room_id = gated_ids[0]
+            if kind == "multi_switch_gate":
+                switch_id = main_gate["requires"][0]
+                found = any(any(lk2["id"] == switch_id for lk2 in r.get("lockables", [])) for r in rooms.values())
+                self.assertTrue(found, f"seed {seed}: switch gate's own switch must be findable somewhere")
+            elif kind == "pressure_plate":
+                self.assertTrue(hub.get("movable_objects"), f"seed {seed}: expected a real movable object alongside the plate")
+            elif kind == "door" and main_gate.get("requires_key_item"):
+                key_found = any(r.get("guaranteed_key_drop") for r in rooms.values()) or any(
+                    any(lk2.get("kind") == "chest" and "labyrinth_floor_key" in lk2.get("loot", {}) for lk2 in r.get("lockables", []))
+                    for r in rooms.values()
+                )
+                self.assertTrue(key_found, f"seed {seed}: key gate's own key must be findable somewhere")
+            elif kind == "door" and main_gate.get("requires_rune_item"):
+                needed = main_gate["rune_count"]
+                total_sources = sum(1 for r in rooms.values() if r.get("guaranteed_rune_drop")) + sum(
+                    1 for r in rooms.values() for lk2 in r.get("lockables", [])
+                    if lk2.get("kind") == "chest" and "labyrinth_rune" in lk2.get("loot", {})
+                )
+                self.assertGreaterEqual(total_sources, needed, f"seed {seed}: rune gate needs {needed} runes but only {total_sources} sources were placed")
+            else:
+                self.fail(f"seed {seed}: unrecognized mandatory gate kind {kind!r}")
+        self.assertEqual(kinds_seen, {"multi_switch_gate", "pressure_plate", "key", "rune"}, "expected all 4 real mechanics to appear across 500 real seeds")
+
+    async def test_labyrinth_mandatory_pressure_plate_gate_genuinely_blocks_the_stairs_until_solved(self):
+        """
+        Real end-to-end (2026-09-04): before solving the mandatory
+        main-path gate, the stairs room must be genuinely unreachable
+        via the real move handler -- not just inert generator data.
+        Pressure plate picked as the one mechanic that needs no extra
+        find-the-key step, so this drives the full real "push the crate
+        onto the plate" interaction, same as a real player would.
+        """
+        import sessions
+        user_id, chat_id = 962070, -962070
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "MandatoryGateTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL, hp_max=999999)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=999999)
+        found_case = False
+        for seed in range(200):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub_id = floor_data["hub_room_id"]
+            hub = rooms[hub_id]
+            plate = next((lk for lk in hub.get("lockables", []) if lk.get("kind") == "pressure_plate" and "_mainplate" in lk["id"]), None)
+            if plate is None:
+                continue
+            found_case = True
+            gated_room_id = next(d for d, lid in hub["locked_connections"].items() if lid == plate["id"])
+            bot._reset_labyrinth_lockable_state(chat_id)
+            db.create_labyrinth_run(chat_id, party_key, floor=1, seed=seed, current_room_id=hub_id, rooms=rooms)
+            character = db.get_character(user_id, chat_id)
+
+            sink_blocked = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink_blocked, chat_id=chat_id), rooms[gated_room_id]["name"])
+            self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], hub_id, "the gated room must be genuinely unreachable before the plate is solved")
+
+            await bot._do_lockpick(FakeUpdate(user_id, "push the crate onto the plate", [], chat_id=chat_id), character, dict(plate), "push the crate onto the plate")
+            sink_after = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink_after, chat_id=chat_id), rooms[gated_room_id]["name"])
+            self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], gated_room_id, f"expected the stairs-side room reachable once the plate is solved, got: {sink_after}")
+            db.delete_labyrinth_run(chat_id, party_key)
+            break
+        self.assertTrue(found_case, "expected at least one real mandatory pressure-plate gate across 200 real seeds")
+
+    def test_generate_floor_warps_never_connect_two_already_adjacent_branches(self):
+        """
+        Real live bug found and fixed (2026-09-04, Coffee, dev-bridge:
+        "I don't understand what the point of this warp was because we
+        were already able to access this room. The point of warps are
+        to bring us to an area of the dungeon that we weren't able to
+        get to before"): a warp used to connect two branch ROOTS (each
+        only one hop from the hub), which never actually saved any real
+        distance. Statistical, BFS-verified: every generated warp must
+        connect two rooms whose real graph distance (ignoring the warp
+        itself) is genuinely greater than what the warp provides (1
+        hop) -- i.e. always a real shortcut, never a no-op.
+        """
+        from collections import deque
+
+        def bfs_distance(rooms, start, end):
+            visited = {start: 0}
+            queue = deque([start])
+            while queue:
+                cur = queue.popleft()
+                neighbors = list(rooms[cur].get("connections", [])) + list(rooms[cur].get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if nb not in visited and nb in rooms:
+                        visited[nb] = visited[cur] + 1
+                        queue.append(nb)
+            return visited.get(end)
+
+        checked = 0
+        for seed in range(500):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(seed))
+            rooms = floor_data["rooms"]
+            seen_pairs = set()
+            for rid, r in rooms.items():
+                for warp_target in r.get("warps", []):
+                    pair = tuple(sorted((rid, warp_target)))
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    checked += 1
+                    dist = bfs_distance(rooms, pair[0], pair[1])
+                    self.assertIsNotNone(dist, f"seed {seed}: warp pair {pair} must still be reachable via the plain graph")
+                    self.assertGreaterEqual(dist, 4, f"seed {seed}: warp pair {pair} only {dist} hops apart the long way -- not a real shortcut")
+        self.assertGreater(checked, 0, "expected at least one real warp across 500 real seeds")
 
     async def test_labyrinth_key_gate_end_to_end_chest_and_drop_and_consumption(self):
         """Real end-to-end: find/obtain the key (via the real chest-loot path or a real combat victory), open the real gated door with it, and confirm the key is gone afterward -- not just comparing generator output in isolation."""
@@ -35708,8 +36533,19 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         hub when the floor genuinely has a miniboss/gate/collapse/warp
         to hint at, and its real hint_lines never name a room or exact
         position (feedback_never_spoil_puzzle_answers).
+
+        Real live change (2026-09-04, mandatory main-path gating, per
+        Coffee: "we should not be able to walk from one floor to the
+        next... it should feel like a maze or a labyrinth"): every
+        floor now guarantees a real `locked_connections` entry (the new
+        mandatory gate), so "a floor with nothing real to hint at" no
+        longer exists at all -- the complementary "no_statue_seen" half
+        of this test's original claim is now structurally impossible
+        and has been dropped; the still-real, still-important half
+        (a statue never appears with NOTHING real behind it) is
+        unaffected and stays.
         """
-        statue_seen = no_statue_seen = False
+        statue_seen = False
         for seed in range(80):
             floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 20, random.Random(seed))
             rooms = floor_data["rooms"]
@@ -35729,10 +36565,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 for line in statue["hint_lines"]:
                     for rid, r in rooms.items():
                         self.assertNotIn(r["name"], line, f"hint line spoils a real room name: {line!r}")
-            elif not has_real_feature:
-                no_statue_seen = True
         self.assertTrue(statue_seen, "expected at least one real hint statue across 80 real seeds")
-        self.assertTrue(no_statue_seen, "expected at least one plain floor with nothing to hint at across 80 real seeds")
 
     async def test_labyrinth_examine_hint_statue_reveals_real_non_spoiler_facts(self):
         """End-to-end: examining a real hint statue reveals its real hint_lines text, and a pressure plate coexisting in the same room never makes 'examine the statue' ambiguous."""
@@ -37116,7 +37949,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         party_key = f"party:{party_id}"
         run = db.get_labyrinth_run(chat_id, party_key)
         rooms = run["rooms"]
-        hazard_room_id = next(rid for rid in rooms if rid.endswith("_r0"))
+        # Same real fix as the hazard test above -- the hub's own
+        # `connections` list is exactly the set of plain, already-
+        # unlocked, one-hop-reachable rooms on the current floor.
+        hazard_room_id = rooms[run["current_room_id"]]["connections"][0]
         rooms[hazard_room_id]["hazard"] = "fire"
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]

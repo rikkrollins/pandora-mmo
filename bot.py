@@ -194,6 +194,13 @@ def _weapon_for_attacker(attacker: dict) -> dict:
                 "weapon_category": item.get("weapon_category", "simple"),
                 "name": item["name"],
                 "damage_type": item.get("damage_type", "physical"),
+                # two_handed/ranged (2026-09-04, real Fighting Style
+                # feature): without these, Archery/Dueling/Great Weapon
+                # Fighting would never fire for a real player's actual
+                # equipped weapon at all -- only ever seeing the raw
+                # items.py dict directly, as a synthetic test would.
+                "two_handed": item.get("two_handed", False),
+                "ranged": item.get("ranged", False),
             }
     # Monster/echo natural attack (2026-07-26, monster/area rebalance):
     # every monster template used to deal DEFAULT_WEAPON's flat 1d8
@@ -232,6 +239,50 @@ def _weapon_for_attacker(attacker: dict) -> dict:
             "damage_type": attacker.get("damage_type", "physical"),
         }
     return DEFAULT_WEAPON
+
+
+def _offhand_weapon_for_attacker(attacker: dict) -> dict | None:
+    """
+    Real, mastery-gated dual wielding (2026-09-04) -- a real player
+    only, via the separate equipped_offhand_weapon slot db.
+    equip_offhand_weapon writes (see db.can_dual_wield's own docstring
+    for the real precondition). Returns None whenever there's nothing
+    real to swing (no monster/NPC ever has this field, same as
+    equipped_weapon), so a caller can just skip the extra swing rather
+    than needing its own separate eligibility check.
+
+    Two-Weapon Fighting (2026-09-04): real 5E's exact payoff -- "add
+    your ability modifier to your off-hand attack's damage." This
+    engine's own main-attack damage formula never adds an ability
+    modifier at all (confirmed by direct read of resolve_attack's own
+    roll_damage call -- a deliberate existing simplification, not
+    something this feature should quietly change for every attack).
+    Folding it into THIS weapon's own damage_bonus, only for the
+    off-hand swing, only with this specific style chosen, keeps that
+    existing simplification completely intact everywhere else while
+    still giving Two-Weapon Fighting a real, distinct payoff.
+    """
+    equipped_id = attacker.get("equipped_offhand_weapon")
+    if not equipped_id:
+        return None
+    item = items_module.get_item(equipped_id)
+    if item is None or item.get("type") != "weapon":
+        return None
+    pct = (item.get("elemental_damage_bonus_pct", 0))
+    pct_bonus = round(average_damage(item["damage_dice"]) * pct / 100) if pct else 0
+    damage_bonus = item.get("damage_bonus", 0) + pct_bonus
+    if attacker.get("fighting_style") == "Two-Weapon Fighting":
+        damage_bonus += ability_modifier(attacker.get(item.get("ability", "strength"), 10))
+    return {
+        "ability": item.get("ability", "strength"),
+        "damage_dice": item["damage_dice"],
+        "damage_bonus": damage_bonus,
+        "weapon_category": item.get("weapon_category", "simple"),
+        "name": item["name"],
+        "damage_type": item.get("damage_type", "physical"),
+        "two_handed": item.get("two_handed", False),
+        "ranged": item.get("ranged", False),
+    }
 
 
 def _is_assassin(character: dict) -> bool:
@@ -607,6 +658,13 @@ def _grind_profession_mastery(telegram_user_id: int, chat_id: int, character: di
 
 EXTRA_ATTACK_CLASSES = {"fighter", "barbarian", "paladin", "ranger", "monk"}
 
+# Real Fighting Style (2026-09-04) -- canonical FIGHTING_STYLES/
+# FIGHTING_STYLE_CLASSES now live in class_features.py so ai/intent_
+# parser.py can share the exact same name list without a circular
+# import; bot.py just aliases them here for its own call sites.
+FIGHTING_STYLE_CLASSES = class_features_module.FIGHTING_STYLE_CLASSES
+FIGHTING_STYLES = class_features_module.FIGHTING_STYLES
+
 
 def _attacks_per_turn(character: dict) -> int:
     """
@@ -640,6 +698,15 @@ def _attacks_per_turn(character: dict) -> int:
     # unconditionally, since it's meant to matter even for a caster or
     # low-level character wielding it, not just already-martial builds.
     if character.get("free_extra_attack"):
+        base_attacks += 1
+    # Real, mastery-gated dual wielding (2026-09-04) -- same "+1,
+    # unconditionally checked" shape free_extra_attack just above
+    # already uses. _offhand_weapon_for_attacker returns None for
+    # anyone without a real, currently-equipped off-hand weapon
+    # (db.equip_offhand_weapon already gated that behind real weapon
+    # mastery), so this never grants a free extra swing to anyone who
+    # hasn't actually earned and equipped one.
+    if _offhand_weapon_for_attacker(character) is not None:
         base_attacks += 1
     return base_attacks
 
@@ -6897,6 +6964,61 @@ async def _do_choose_subclass(update: Update, text: str) -> None:
         )
 
 
+async def _do_choose_fighting_style(update: Update, text: str) -> None:
+    """
+    Real, chosen Fighting Style (2026-09-04) -- direct structural mirror
+    of _do_choose_subclass above, for the exact reason that function's
+    own "describe before commit" fix exists: a player choosing blind
+    from bare names is a real gap. See FIGHTING_STYLES for the 6 real
+    5E styles and their actual mechanical effects.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    if character["char_class"] not in FIGHTING_STYLE_CLASSES:
+        await _safe_send(update, f"Fighting Style isn't a real class feature for {character['char_class']}.")
+        return
+    lowered = text.lower()
+    match = next((s for s in FIGHTING_STYLES if s.lower() in lowered), None)
+    if match is None:
+        option_lines = "; ".join(f"{s} ({desc})" for s, desc in FIGHTING_STYLES.items())
+        await _safe_send(update, f"Which Fighting Style? Options: {option_lines}.")
+        return
+    # Real 5E lets you pick once, permanently -- but this game has no
+    # "undo" concept for any other one-time class choice either
+    # (subclass, ASI) and Coffee hasn't asked for one, so a re-pick here
+    # just overwrites the old choice the same permissive way subclass
+    # already does.
+    db.update_character(update.effective_user.id, update.effective_chat.id, fighting_style=match)
+    if match == "Defense" and character.get("equipped_armor"):
+        # Folded in immediately if armor is already worn, same "apply
+        # right now, not just on the next equip" discipline Draconic
+        # Resilience's own rework already established -- otherwise a
+        # Fighter who chose Defense mid-fight would see no real AC
+        # change until their next unrelated armor swap.
+        db.update_character(update.effective_user.id, update.effective_chat.id, armor_class=character["armor_class"] + 1)
+    if match == "Two-Weapon Fighting":
+        # Honest about the real precondition -- never a silent no-op
+        # with no explanation, matching the same "grounded fact"
+        # discipline behind e.g. _mentions_lighting_a_source's fix
+        # earlier today. Its real bonus activates once dual wielding
+        # is actually possible (mastery-gated, see db.can_dual_wield).
+        await _safe_send(
+            update,
+            f"⚔️ **{character['name']}** adopts **Two-Weapon Fighting** — its real bonus (your ability "
+            f"modifier added to your off-hand attack's damage) activates once you've mastered your main "
+            f"weapon (100% proficiency) and can actually dual-wield.",
+        )
+        return
+    await _safe_send(
+        update,
+        f"⚔️ **{character['name']}** adopts the **{match}** fighting style — {FIGHTING_STYLES[match]}.",
+    )
+
+
 async def _do_level_up(update: Update, text: str) -> None:
     """
     Real player-driven Ability Score Improvement (2026-07-16, per
@@ -7263,6 +7385,7 @@ async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bo
         await _check_echo_trial_progress(update, session)
         await _check_labyrinth_progress(update, session)
         await _check_overworld_key_drop(update, session)
+        await _check_overworld_rune_drop(update, session)
     await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
     for note in level_up_notes:
         await _notify_main_topic(update, note)
@@ -7864,6 +7987,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                     update, current, target, _weapon_for_attacker(current), advantage=adv, disadvantage=disadv,
                     defender_relentless_endurance_available=_relentless_endurance_available(target),
                     round_number=session.round_number,
+                    session=session,
                 )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], update.effective_chat.id, "relentless_endurance")
@@ -7970,6 +8094,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             await _check_echo_trial_progress(update, session)
             await _check_labyrinth_progress(update, session)
             await _check_overworld_key_drop(update, session)
+            await _check_overworld_rune_drop(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         for note in level_up_notes:
             await _notify_main_topic(update, note)
@@ -10642,6 +10767,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     # ASI/skill-point grant already uses. Guarded by a real one-time
     # flag, same convention as the checkpoint/hazard triggers.
     reward_line = None
+    miniboss_rune_line = None
     if room.get("is_miniboss_room") and not room.get("miniboss_reward_claimed"):
         room["miniboss_reward_claimed"] = True
         item_id = labyrinth_module._milestone_item_for_floor(room.get("floor", run["floor"]))
@@ -10651,6 +10777,17 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             if not m.get("is_ai"):
                 db.add_item(m["telegram_user_id"], update.effective_chat.id, item_id, 1)
         reward_line = f"🏆 The mini-boss falls, and leaves behind something real: **{item['name'] if item else item_id}** (added to the party's stash)."
+        # Real live feature (2026-09-04, per Coffee: "have the mini
+        # boss, and boss and scatter them around" -- the Labyrinth has
+        # no separate is_boss_room concept at all, so its miniboss room
+        # already IS the boss-tier encounter here). Reuses this same
+        # one-time miniboss_reward_claimed flag -- one trigger, two
+        # real grants, same "no extra step" shape as the milestone item.
+        rune_item = items_module.get_item("labyrinth_rune")
+        for m in members:
+            if not m.get("is_ai"):
+                db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_rune", 1)
+        miniboss_rune_line = f"🔹 It also drops **{rune_item['name'] if rune_item else 'a Labyrinth Rune'}** — added to the party's stash."
     # Real live feature (2026-09-04, Phase B of the combat-gating work,
     # per Coffee: "keys can be dropped by enemies or found in another
     # room"). Same real one-time-flag shape as the miniboss reward just
@@ -10665,13 +10802,47 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             if not m.get("is_ai"):
                 db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_floor_key", 1)
         key_drop_line = f"🔑 Something here was carrying **{item['name'] if item else 'a real key'}** — added to the party's stash."
+    # Real live feature (2026-09-04, per Coffee: "scatter them around,
+    # have it collected by battle" -- a Locked Rune Doorway's own
+    # guaranteed source rooms, placed by rules/labyrinth.py's
+    # generate_floor). Same shape as the key drop just above.
+    rune_drop_line = None
+    if room.get("guaranteed_rune_drop") and not room.get("rune_drop_claimed"):
+        room["rune_drop_claimed"] = True
+        item = items_module.get_item("labyrinth_rune")
+        members = _labyrinth_active_party_members(character)
+        for m in members:
+            if not m.get("is_ai"):
+                db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_rune", 1)
+        rune_drop_line = f"🔹 Something here was carrying **{item['name'] if item else 'a Labyrinth Rune'}** — added to the party's stash."
     db.update_labyrinth_run(update.effective_chat.id, party_key, rooms=run["rooms"])
     if hint_line:
         await _safe_send(update, hint_line)
     if reward_line:
         await _safe_send(update, reward_line)
+    if miniboss_rune_line:
+        await _safe_send(update, miniboss_rune_line)
     if key_drop_line:
         await _safe_send(update, key_drop_line)
+    if rune_drop_line:
+        await _safe_send(update, rune_drop_line)
+
+
+def _real_campaign_location(location_id: str) -> dict | None:
+    """
+    Real live bug found and fixed (2026-09-04, building the Locked Rune
+    Doorway feature): campaign_loader.get_location returns a fresh
+    `{**loc, "id": ...}` COPY, not the actual dict living inside
+    CAMPAIGN -- so a caller mutating a `guaranteed_*_claimed`-style flag
+    on its return value (as _check_overworld_key_drop/
+    _check_overworld_rune_drop both need to) was silently discarding
+    that write, since it never touched the real object. This looks up
+    and returns the genuine, mutable CAMPAIGN location dict instead.
+    """
+    for layer_locations in CAMPAIGN["locations"].values():
+        if location_id in layer_locations:
+            return layer_locations[location_id]
+    return None
 
 
 async def _check_overworld_key_drop(update: Update, session: sessions.Session) -> None:
@@ -10696,7 +10867,7 @@ async def _check_overworld_key_drop(update: Update, session: sessions.Session) -
     character = db.get_character(party_side_ids[0], update.effective_chat.id)
     if character is None:
         return
-    location = cl.get_location(CAMPAIGN, character["current_location"])
+    location = _real_campaign_location(character["current_location"])
     if location is None or not location.get("guaranteed_key_drop") or location.get("key_drop_claimed"):
         return
     location["key_drop_claimed"] = True
@@ -10706,6 +10877,33 @@ async def _check_overworld_key_drop(update: Update, session: sessions.Session) -
         if member is not None and not member.get("is_ai"):
             db.add_item(pid, update.effective_chat.id, "labyrinth_floor_key", 1)
     await _safe_send(update, f"🔑 Something here was carrying **{item['name'] if item else 'a real key'}** — added to the party's stash.")
+
+
+async def _check_overworld_rune_drop(update: Update, session: sessions.Session) -> None:
+    """
+    Real overworld sibling of _check_overworld_key_drop just above, for
+    the exact same reason: Phase B's Locked Rune Doorway port to
+    rules/dungeon_evolve.py (2026-09-04) can place `guaranteed_rune_drop`
+    on a real generated dungeon room, which is otherwise pure dead data
+    outside the Labyrinth. Same permanent-campaign-location shape,
+    same unconditional-and-safe call pattern.
+    """
+    party_side_ids = [pid for pid in session.turn_order if session.sides.get(pid) == "party"]
+    if not party_side_ids:
+        return
+    character = db.get_character(party_side_ids[0], update.effective_chat.id)
+    if character is None:
+        return
+    location = _real_campaign_location(character["current_location"])
+    if location is None or not location.get("guaranteed_rune_drop") or location.get("rune_drop_claimed"):
+        return
+    location["rune_drop_claimed"] = True
+    item = items_module.get_item("labyrinth_rune")
+    for pid in party_side_ids:
+        member = db.get_character(pid, update.effective_chat.id)
+        if member is not None and not member.get("is_ai"):
+            db.add_item(pid, update.effective_chat.id, "labyrinth_rune", 1)
+    await _safe_send(update, f"🔹 Something here was carrying **{item['name'] if item else 'a Labyrinth Rune'}** — added to the party's stash.")
 
 
 def _npc_combatant_from_stats(npc_id: str, npc_data: dict, party_levels: list[int] | None = None) -> dict:
@@ -11601,6 +11799,7 @@ async def _resolve_attack_with_reaction_check(
     defender_relentless_endurance_available: bool = False,
     round_number: int = 0, forced_roll: int | None = None,
     forced_damage_roll: int | None = None, damage_multiplier: int = 1,
+    session: "sessions.Session | None" = None,
 ) -> dict:
     """
     Drop-in replacement for a bare resolve_attack(...) call (2026-08-22
@@ -11614,7 +11813,34 @@ async def _resolve_attack_with_reaction_check(
     already-decided confirmation instead of letting resolve_attack
     silently auto-decide (which it no longer can -- it just trusts
     what it's told).
+
+    Real Fighting Style: Protection (2026-09-04) -- "impose
+    disadvantage on an attack against a party member in the fight,"
+    real 5E's exact precondition/payoff pair, minus the "within 5 ft."
+    positioning this game has no equivalent of anywhere (same
+    simplification every other proximity-flavored 5E rule here already
+    gets). Applied automatically, no confirm prompt -- same as every
+    other Fighting Style's passive bonus, unlike Shield/Uncanny Dodge's
+    genuinely optional resource spend. Needs `session` to see the
+    defender's own party and find an eligible protector; a caller with
+    no session (or an enemy defender) simply gets no Protection check,
+    same as today.
     """
+    protection_disadvantage = False
+    if session is not None and session.sides.get(defender.get("telegram_user_id")) == "party":
+        for member in session.participants:
+            if (
+                member.get("telegram_user_id") != defender.get("telegram_user_id")
+                and session.sides.get(member.get("telegram_user_id")) == "party"
+                and member.get("fighting_style") == "Protection"
+                and member.get("equipped_shield")
+                and member.get("hp_current", 0) > 0
+                and member.get("reaction_used_round") != round_number
+            ):
+                member["reaction_used_round"] = round_number
+                protection_disadvantage = True
+                break
+    disadvantage = disadvantage or protection_disadvantage
     precheck = reaction_precheck(
         attacker, defender, weapon, round_number, advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll,
     )
@@ -12283,7 +12509,13 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             # the proficiency roll falls all the way back to an ordinary
             # x1 attack, never a partial/guaranteed backstab.
             backstab_triggered = _is_assassin(attacker) and _roll_backstab_proficiency(attacker)
-            weapon_used = _weapon_for_attacker(attacker)
+            # Real, mastery-gated dual wielding (2026-09-04) -- the LAST
+            # swing of the turn is the real off-hand attack whenever one
+            # is actually equipped (see _attacks_per_turn's own +1 for
+            # this same real weapon). Every earlier swing this turn
+            # still uses the real main-hand weapon unchanged.
+            offhand_weapon = _offhand_weapon_for_attacker(attacker) if attack_num == attack_count - 1 else None
+            weapon_used = offhand_weapon or _weapon_for_attacker(attacker)
             # Mastery Overflow (2026-08-20, per Coffee: "add the extra %
             # to the damage so it scales", uncapped) -- once Backstab's
             # own proficiency climbs past 100%, the overflow stacks
@@ -12300,6 +12532,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 forced_roll=forced_roll if attack_num == 0 else None,
                 forced_damage_roll=forced_damage_roll if attack_num == 0 else None,
                 damage_multiplier=_effective_backstab_multiplier(attacker) * backstab_overflow if backstab_triggered else 1,
+                session=session,
             )
             if result["relentless_endurance_triggered"]:
                 db.use_feature(target["telegram_user_id"], update.effective_chat.id, "relentless_endurance")
@@ -12456,6 +12689,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     await _check_echo_trial_progress(update, session)
                     await _check_labyrinth_progress(update, session)
                     await _check_overworld_key_drop(update, session)
+                    await _check_overworld_rune_drop(update, session)
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
                 for note in level_up_notes:
                     await _notify_main_topic(update, note)
@@ -12603,6 +12837,7 @@ async def _do_throw_weapon(update: Update, action_text: str) -> None:
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
                 await _check_overworld_key_drop(update, session)
+                await _check_overworld_rune_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -13360,6 +13595,34 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
         # all of them without needing a name-by-name special case.
         await update.effective_chat.send_message(
             f"🔑 **{character['name']}** uses {items_module.get_item(key_item)['name']} — {lockable['name'].lower()} opens.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]),
+        )
+        return
+
+    rune_item = lockable.get("requires_rune_item")
+    if rune_item:
+        # Real live feature (2026-09-04, per Coffee: "have the mini
+        # boss, and boss and scatter them around, have it collected by
+        # battle and by chests"). Same "never pickable, returns before
+        # the DC13 roll" shape as requires_key_item just above, but
+        # checks a COUNT of a fungible item instead of mere presence of
+        # one unique key -- "if a gateway needs 3 the player will need
+        # 3 runes" (Coffee's own words), always consumed on success
+        # since a stackable resource is always meant to be spent (no
+        # opt-in consume flag needed, unlike a unique story key).
+        needed = lockable.get("rune_count", 1)
+        held = character.get("inventory", {}).get(rune_item, 0)
+        if held < needed:
+            await update.effective_chat.send_message(
+                f"{lockable['name'].capitalize()} won't budge — it needs {needed} Labyrinth Runes, and you're carrying {held}.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
+        _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        db.remove_item(update.effective_user.id, update.effective_chat.id, rune_item, needed)
+        await update.effective_chat.send_message(
+            f"🔹 **{character['name']}** slots {needed} Labyrinth Runes into {lockable['name'].lower()} — it grinds open.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             reply_markup=_travel_button_for_unlocked_destination(location, lockable["id"]),
         )
@@ -14220,6 +14483,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         enemy_weapon = _weapon_for_attacker(enemy)
         atk_result = await _resolve_attack_with_reaction_check(
             update, enemy, fleeing, enemy_weapon, round_number=session.round_number,
+            session=session,
         )
         opportunity_blocks.append(_format_combat_result(
             "", atk_result, enemy["name"], fleeing["name"],
@@ -22693,6 +22957,7 @@ async def _do_breath_weapon(update: Update) -> None:
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
                 await _check_overworld_key_drop(update, session)
+                await _check_overworld_rune_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -22800,6 +23065,7 @@ async def _do_use_environment(update: Update) -> None:
                 enemy_weapon = _weapon_for_attacker(enemy)
                 atk_result = await _resolve_attack_with_reaction_check(
                     update, enemy, live_actor, enemy_weapon, round_number=session.round_number,
+                    session=session,
                 )
                 retaliation_blocks.append(_format_combat_result(
                     "", atk_result, enemy["name"], live_actor["name"], weapon_name=enemy_weapon.get("name"),
@@ -22864,6 +23130,7 @@ async def _do_use_environment(update: Update) -> None:
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
                 await _check_overworld_key_drop(update, session)
+                await _check_overworld_rune_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -28284,6 +28551,7 @@ async def _do_use_item(update: Update, text: str) -> None:
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
                 await _check_overworld_key_drop(update, session)
+                await _check_overworld_rune_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -29024,6 +29292,40 @@ async def _do_equip_item(update: Update, text: str) -> None:
         if item_data:
             await _maybe_send_item_image(update, item_id, item_data)
     await _check_and_award_achievements(update, db.get_character(target["telegram_user_id"], update.effective_chat.id))
+
+
+async def _do_equip_offhand(update: Update, text: str) -> None:
+    """
+    Real, mastery-gated dual wielding (2026-09-04, per Coffee: ship all
+    6 Fighting Styles, then build this "for players that have attained
+    mastery") -- db.equip_offhand_weapon/db.can_dual_wield do the real
+    validation and gating; this just parses which weapon from free
+    text, same shape as _do_equip_item just below.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+
+    weapon_ids = [
+        item_id for item_id in character["inventory"]
+        if (items_module.get_item(item_id) or {}).get("type") == "weapon"
+    ]
+    items_wanted = _extract_item_list(text, weapon_ids)
+    if not items_wanted:
+        await update.effective_chat.send_message(
+            "Dual-wield what, exactly? Name a real weapon you're actually carrying.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+
+    item_id, _quantity = items_wanted[0]
+    success, message, updated = db.equip_offhand_weapon(update.effective_user.id, update.effective_chat.id, item_id)
+    await _safe_send(update, f"🗡️ {message}" if success else message)
+    if success and updated:
+        _sync_live_combat_equipment(update.effective_user.id, update.effective_chat.id, updated)
 
 
 async def _do_unequip_item(update: Update, text: str) -> None:
@@ -31021,6 +31323,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                     await _check_echo_trial_progress(update, session)
                     await _check_labyrinth_progress(update, session)
                     await _check_overworld_key_drop(update, session)
+                    await _check_overworld_rune_drop(update, session)
                 await update.effective_chat.send_message(
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
                     message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -32262,6 +32565,7 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
                 await _check_overworld_key_drop(update, session)
+                await _check_overworld_rune_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -33741,6 +34045,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_drink_water(update)
     elif action == "choose_subclass":
         await _do_choose_subclass(update, intent.get("raw_text", text))
+    elif action == "choose_fighting_style":
+        await _do_choose_fighting_style(update, intent.get("raw_text", text))
     elif action == "start_echo_trial":
         await _do_start_echo_trial(update, intent.get("raw_text", text))
     elif action == "check_professions":
@@ -33749,6 +34055,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_equip_item(update, intent.get("raw_text", text))
     elif action == "unequip_item":
         await _do_unequip_item(update, intent.get("raw_text", text))
+    elif action == "equip_offhand":
+        await _do_equip_offhand(update, intent.get("raw_text", text))
     elif action == "auto_equip":
         await _do_auto_equip_gear(update, intent.get("raw_text", text))
     elif action == "show_map":

@@ -655,6 +655,16 @@ def add_key_gate(campaign: dict, room_id: str, dest_id: str, lockable_id: str, n
     room.setdefault("locked_connections", {})[dest_id] = lockable_id
 
 
+def add_rune_gate(campaign: dict, room_id: str, dest_id: str, lockable_id: str, name: str, rune_item: str, count: int) -> None:
+    """Same idea as add_key_gate, for the requires_rune_item pattern -- a fungible COUNT of a stackable item instead of one unique key."""
+    found = _find_room(campaign, room_id)
+    if not found:
+        raise KeyError(f"add_rune_gate: no existing room {room_id!r} -- add_room it first")
+    _, room = found
+    room.setdefault("lockables", []).append({"id": lockable_id, "kind": "door", "name": name, "requires_rune_item": rune_item, "rune_count": count})
+    room.setdefault("locked_connections", {})[dest_id] = lockable_id
+
+
 def dump_dungeon_graph(campaign: dict, dungeon_id: str) -> str:
     """A quick, readable text rendering of one dungeon's current room graph -- for Claude Code to read BEFORE editing, replacing hand-tracing raw connections dicts."""
     rooms = _dungeon_rooms(campaign, dungeon_id)
@@ -663,7 +673,8 @@ def dump_dungeon_graph(campaign: dict, dungeon_id: str) -> str:
         lines.append(f"- {room_id} ({room.get('name', '?')}): connections={room.get('connections', [])}")
         for lk in room.get("lockables", []):
             key_note = f" requires {lk['requires_key_item']}" if lk.get("requires_key_item") else ""
-            lines.append(f"    lockable {lk['id']!r} ({lk.get('kind')}): {lk.get('name')}{key_note}")
+            rune_note = f" requires {lk['rune_count']}x {lk['requires_rune_item']}" if lk.get("requires_rune_item") else ""
+            lines.append(f"    lockable {lk['id']!r} ({lk.get('kind')}): {lk.get('name')}{key_note}{rune_note}")
         for dest, lid in room.get("locked_connections", {}).items():
             lines.append(f"    locked_connections: -> {dest} via {lid!r}")
     return "\n".join(lines)

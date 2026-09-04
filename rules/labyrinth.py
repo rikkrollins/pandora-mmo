@@ -99,6 +99,16 @@ _BREAKABLE_CHANCE = 0.3
 # a real, different, already-reachable branch, is the only way through.
 _KEY_GATE_CHANCE = 0.3
 
+# Real live feature (2026-09-04, per Coffee: "have the mini boss, and
+# boss and scatter them around, have it collected by battle and by
+# chests" -- "use it in variations with the other mechanics", not the
+# main one). A fourth, independent branch-gate kind, mirroring the key
+# gate immediately above but needing a variable count of a fungible
+# "labyrinth_rune" item instead of one specific unique key. Lower than
+# _KEY_GATE_CHANCE since this is one option among several, not a
+# default.
+_RUNE_GATE_CHANCE = 0.2
+
 # Real live follow-up (2026-09-03, Coffee: "do all of them" -- warps,
 # a floor-altering puzzle, and an owl-statue-style hint, after the same
 # 3 Link's Awakening maps). Warps are a real, one-way-declared-but-
@@ -831,9 +841,104 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # itself lives in, and it's already proven safe by L2e/generate_
     # segment's own cross-floor puzzle.
     other_chains = [c for c in branch_chains if c is not main_chain]
+
+    # Real MANDATORY main-path gate (2026-09-04, per Coffee, dev-bridge:
+    # "we should not be able to walk from one floor to the next we
+    # should be having to clear the paths and the different gates...
+    # It should feel like a maze or a labyrinth" -- backed by a real
+    # "Zelda Dungeon Path & Gateway System" reference he shared: the
+    # player's own critical path should run through real gateways, not
+    # just optional side rooms). Every OTHER gate below only ever
+    # targets `other_chains` -- main_chain (the one guaranteed path to
+    # the stairs) was structurally NEVER gated at all, so a floor could
+    # roll zero of the optional gates below and read as a bare
+    # corridor, with any switch that DID spawn only ever wired to an
+    # optional detour, never the path actually being walked. This is
+    # unconditional (no chance roll) -- randomly picked from the SAME 4
+    # real mechanics every optional gate below already uses (per
+    # Coffee: "random from the full existing set" -- no new mechanic,
+    # just a guaranteed application of what's already built).
+    # _SIDE_ROOM_COUNT_RANGE's own floor of 3 branch roots guarantees
+    # `other_chains` always has >= 2 entries in practice; the `if
+    # other_chains else "plate"` fallback only matters for the
+    # theoretical zero-side-branch case, since pressure_plate is the
+    # one mechanic that's entirely self-contained in the hub.
+    mandatory_kind = rng.choice(("switch", "plate", "key", "rune")) if other_chains else "plate"
+    mandatory_gate_room_id = main_chain[0]
+    mandatory_source_chains: list = []
+    if mandatory_kind == "switch":
+        mandatory_source_chains = [rng.choice(other_chains)]
+        switch_room_id = mandatory_source_chains[0][0]
+        element = rng.choice(_SWITCH_ELEMENTS)
+        switch_id = f"f{floor}_mainswitch"
+        rooms[switch_room_id].setdefault("lockables", []).append({
+            "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+        })
+        hub["connections"].remove(mandatory_gate_room_id)
+        hub.setdefault("locked_connections", {})[mandatory_gate_room_id] = f"f{floor}_maingate"
+        hub.setdefault("lockables", []).append({
+            "id": f"f{floor}_maingate", "kind": "multi_switch_gate", "name": "a real sealed archway",
+            "requires": [switch_id],
+        })
+        rooms[mandatory_gate_room_id]["description"] += " A real elemental ward seals the only way onward -- something elsewhere on this floor must open it."
+    elif mandatory_kind == "plate":
+        plate_id = f"f{floor}_mainplate"
+        hub.setdefault("lockables", []).append({"id": plate_id, "kind": "pressure_plate", "name": "a stone pressure plate"})
+        hub.setdefault("movable_objects", []).append({"id": f"f{floor}_maincrate", "name": "a heavy crate"})
+        hub["connections"].remove(mandatory_gate_room_id)
+        hub.setdefault("locked_connections", {})[mandatory_gate_room_id] = plate_id
+        rooms[mandatory_gate_room_id]["description"] += " A weight-locked mechanism seals the only way onward -- something heavy, placed just right, would hold it open."
+    elif mandatory_kind == "key":
+        mandatory_source_chains = [rng.choice(other_chains)]
+        key_room_id = mandatory_source_chains[0][0]
+        door_id = f"f{floor}_maingate"
+        hub["connections"].remove(mandatory_gate_room_id)
+        hub.setdefault("locked_connections", {})[mandatory_gate_room_id] = door_id
+        hub.setdefault("lockables", []).append({
+            "id": door_id, "kind": "door", "name": "a real, heavily-barred door",
+            "requires_key_item": "labyrinth_floor_key", "consume_key": True,
+        })
+        rooms[mandatory_gate_room_id]["description"] += " A real, heavily-barred door seals the only way onward -- it looks like it needs an actual key, not brute force or a steady hand."
+        if rng.random() < 0.5 and rooms[key_room_id].get("monsters"):
+            rooms[key_room_id]["guaranteed_key_drop"] = True
+            rooms[key_room_id]["description"] += " Something here looks like it might be carrying something worth taking."
+        else:
+            rooms[key_room_id].setdefault("lockables", []).append({
+                "id": f"f{floor}_maingate_key_cache", "kind": "chest", "name": "a small, dusty lockbox",
+                "loot": {"labyrinth_floor_key": 1}, "gold": rng.randint(20, 60),
+            })
+    else:  # "rune"
+        rune_count = min(rng.randint(2, 4), len(other_chains))
+        mandatory_source_chains = rng.sample(other_chains, rune_count)
+        door_id = f"f{floor}_maingate"
+        hub["connections"].remove(mandatory_gate_room_id)
+        hub.setdefault("locked_connections", {})[mandatory_gate_room_id] = door_id
+        hub.setdefault("lockables", []).append({
+            "id": door_id, "kind": "door", "name": "a locked rune doorway",
+            "requires_rune_item": "labyrinth_rune", "rune_count": rune_count,
+        })
+        rooms[mandatory_gate_room_id]["description"] += f" A locked rune doorway seals the only way onward -- it looks like it needs {rune_count} real Labyrinth Runes, not brute force or a steady hand."
+        for i, src_chain in enumerate(mandatory_source_chains):
+            rune_room_id = src_chain[0]
+            if rng.random() < 0.5 and rooms[rune_room_id].get("monsters"):
+                rooms[rune_room_id]["guaranteed_rune_drop"] = True
+                rooms[rune_room_id]["description"] += " Something here looks like it might be carrying something worth taking."
+            else:
+                rooms[rune_room_id].setdefault("lockables", []).append({
+                    "id": f"f{floor}_maingate_rune_cache_{i}", "kind": "chest", "name": "a small, rune-etched cache",
+                    "loot": {"labyrinth_rune": 1}, "gold": rng.randint(20, 60),
+                })
+    room_ids = [
+        rid for rid in room_ids
+        if rid != mandatory_gate_room_id and rid not in {c[0] for c in mandatory_source_chains}
+    ]
+
     gated_chain = None
     if len(other_chains) >= 2 and rng.random() < _scaled_chance(_BRANCH_GATE_CHANCE, floor, 0.002, 0.55):
-        gated_chain, switch_chain = rng.sample(other_chains, 2)
+        _branch_gate_eligible = [c for c in other_chains if c not in mandatory_source_chains]
+        if len(_branch_gate_eligible) < 2:
+            _branch_gate_eligible = other_chains
+        gated_chain, switch_chain = rng.sample(_branch_gate_eligible, 2)
         gate_room_id = gated_chain[0]
         switch_room_id = switch_chain[0]
         element = rng.choice(_SWITCH_ELEMENTS)
@@ -869,7 +974,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # to work around that) would silently never open -- dungeon_evolve.
     # py's own version already gets this right by keeping everything
     # local, reused here as-is.
-    plate_eligible = [c for c in other_chains if c is not gated_chain]
+    plate_eligible = [c for c in other_chains if c is not gated_chain and c not in mandatory_source_chains]
     plated_chain = None
     if plate_eligible and rng.random() < _scaled_chance(_PRESSURE_PLATE_CHANCE, floor, 0.002, 0.5):
         plated_chain = rng.choice(plate_eligible)
@@ -898,7 +1003,8 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # in a real, DIFFERENT branch than the one it unlocks (guaranteed
     # solvable by construction, same discipline as every other gate
     # here), is the only way through.
-    key_gate_eligible = [c for c in other_chains if c is not gated_chain and c is not plated_chain]
+    key_gate_eligible = [c for c in other_chains if c is not gated_chain and c is not plated_chain and c not in mandatory_source_chains]
+    key_gated_chain = None
     if key_gate_eligible and rng.random() < _scaled_chance(_KEY_GATE_CHANCE, floor, 0.002, 0.5):
         key_gated_chain = rng.choice(key_gate_eligible)
         key_gate_room_id = key_gated_chain[0]
@@ -909,7 +1015,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         # above, silently requiring an unrelated puzzle be solved first
         # to reach a "guaranteed" find. Same discipline plate_eligible/
         # key_gate_eligible already apply to their own candidate lists.
-        key_source_candidates = [c for c in other_chains if c is not key_gated_chain and c is not gated_chain and c is not plated_chain]
+        key_source_candidates = [c for c in other_chains if c is not key_gated_chain and c is not gated_chain and c is not plated_chain and c not in mandatory_source_chains]
         if key_source_candidates:
             key_source_chain = rng.choice(key_source_candidates)
             key_room_id = key_source_chain[0]
@@ -943,6 +1049,51 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             # onto a room already used" exclusion key_gate_room_id
             # already gets, just for the room hosting the key itself.
             room_ids = [rid for rid in room_ids if rid != key_gate_room_id and rid != key_room_id]
+
+    # Real Locked Rune Doorway (2026-09-04, per Coffee: "have the mini
+    # boss, and boss and scatter them around, have it collected by
+    # battle and by chests" -- "use it in variations with the other
+    # mechanics", explicitly not the main one). A fourth, independent
+    # branch gate -- never a branch already claimed by the switch,
+    # plate, or key gate above. Unlike the key (one unique item), this
+    # needs a variable COUNT of the fungible "labyrinth_rune" item --
+    # "if a gateway needs 3 the player will need 3 runes" (Coffee's own
+    # words) -- so the guaranteed find is scattered across that many
+    # separate sources instead of just one.
+    rune_gate_eligible = [c for c in other_chains if c is not gated_chain and c is not plated_chain and c is not key_gated_chain and c not in mandatory_source_chains]
+    if rune_gate_eligible and rng.random() < _scaled_chance(_RUNE_GATE_CHANCE, floor, 0.002, 0.5):
+        rune_gated_chain = rng.choice(rune_gate_eligible)
+        rune_gate_room_id = rune_gated_chain[0]
+        rune_source_candidates = [c for c in other_chains if c is not rune_gated_chain and c is not gated_chain and c is not plated_chain and c is not key_gated_chain and c not in mandatory_source_chains]
+        if rune_source_candidates:
+            rune_count = min(rng.randint(2, 4), len(rune_source_candidates))
+            rune_source_chains = rng.sample(rune_source_candidates, rune_count)
+            door_id = f"f{floor}_rune_gate"
+            hub["connections"].remove(rune_gate_room_id)
+            hub.setdefault("locked_connections", {})[rune_gate_room_id] = door_id
+            hub.setdefault("lockables", []).append({
+                "id": door_id, "kind": "door", "name": "a locked rune doorway",
+                "requires_rune_item": "labyrinth_rune", "rune_count": rune_count,
+            })
+            rooms[rune_gate_room_id]["description"] += f" A locked rune doorway seals this path -- it looks like it needs {rune_count} real Labyrinth Runes, not brute force or a steady hand."
+            rune_room_ids = [rune_source_chain[0] for rune_source_chain in rune_source_chains]
+            for i, rune_room_id in enumerate(rune_room_ids):
+                # Same "dropped by enemies OR found in another room"
+                # 50/50 split the key gate uses, one guaranteed real
+                # rune per chosen source room.
+                if rng.random() < 0.5 and rooms[rune_room_id].get("monsters"):
+                    rooms[rune_room_id]["guaranteed_rune_drop"] = True
+                    rooms[rune_room_id]["description"] += " Something here looks like it might be carrying something worth taking."
+                else:
+                    rooms[rune_room_id].setdefault("lockables", []).append({
+                        "id": f"f{floor}_rune_cache_{i}", "kind": "chest", "name": "a small, rune-etched cache",
+                        "loot": {"labyrinth_rune": 1}, "gold": rng.randint(20, 60),
+                    })
+            # Same exclusion discipline as the key gate just above --
+            # keep later mechanics (mirror-pair, collapse puzzle) from
+            # compounding an unrelated puzzle onto any room this gate
+            # already claimed.
+            room_ids = [rid for rid in room_ids if rid != rune_gate_room_id and rid not in rune_room_ids]
 
     # Real breakable-wall/floor secret (2026-09-03, per Coffee's same
     # research request): a genuine ALTTP/Bottle-Grotto-style optional
@@ -1041,7 +1192,20 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # from `connections` (a warp's own map line is drawn differently --
     # straight across the floor, not a doorway between grid-adjacent
     # cells) rather than pretending it's an ordinary lateral exit.
-    warp_candidates = [c[-1] for c in branch_chains if c is not main_chain and len(c) >= 1]
+    #
+    # Real live bug found and fixed (2026-09-04, Coffee, dev-bridge: "I
+    # don't understand what the point of this warp was because we were
+    # already able to access this room. The point of warps are to bring
+    # us to an area of the dungeon that we weren't able to get to
+    # before"): `len(c) >= 1` let a warp connect two branch ROOTS --
+    # each only ONE hop from the hub -- meaning the "shortcut" (1 hop)
+    # was never shorter than the real path it replaced (hub -> A, 1 hop,
+    # or hub -> B, 1 hop; A and B are each already just 2 hops apart via
+    # the hub). Requiring real depth (>= 2, i.e. root + at least one
+    # deeper room) on BOTH ends guarantees hub->leaf is itself >= 2 hops,
+    # so warping between two such leaves always saves real distance
+    # (>= 4 hops the long way vs. 1 hop through the warp).
+    warp_candidates = [c[-1] for c in branch_chains if c is not main_chain and len(c) >= 2]
     if len(warp_candidates) >= 2 and rng.random() < _scaled_chance(_WARP_CHANCE, floor, 0.002, 0.5):
         warp_a, warp_b = rng.sample(warp_candidates, 2)
         rooms[warp_a].setdefault("warps", []).append(warp_b)

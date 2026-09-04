@@ -513,6 +513,9 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     effective_defender_ac = (
         defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
     )
+    # Real Fighting Style: Archery (2026-09-04) -- "+2 to attack rolls
+    # with ranged weapons," real 5E's exact wording and value.
+    archery_bonus = 2 if (attacker.get("fighting_style") == "Archery" and weapon.get("ranged")) else 0
     attack_result = roll_attack(
         attacker,
         target_ac=effective_defender_ac,
@@ -521,6 +524,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         advantage=advantage,
         disadvantage=disadvantage,
         forced_roll=forced_roll,
+        bonus=archery_bonus,
     )
 
     # Bless (real 5E spell, 2026-08-04): a real, flat +2 to attack rolls
@@ -619,6 +623,21 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # taste of a second class's damage-flavored feature -- see
         # hybrid_features.py's own docstring for the shared design.
         hybrid_bonus_gained = hybrid_features.hybrid_damage_bonus(attacker)
+        # Real Fighting Style: Dueling (2026-09-04) -- "+2 damage when
+        # wielding a one-handed melee weapon with no other weapon."
+        # "no other weapon" is real and checkable now that mastery-
+        # gated dual wielding exists (bot._offhand_weapon_for_attacker/
+        # equipped_offhand_weapon) -- a Dueling character who has since
+        # taken up a real off-hand weapon no longer qualifies, same as
+        # real 5E (you can't have both Dueling's bonus and a second
+        # weapon active at once).
+        dueling_bonus = (
+            2 if (
+                attacker.get("fighting_style") == "Dueling"
+                and not weapon.get("two_handed")
+                and not attacker.get("equipped_offhand_weapon")
+            ) else 0
+        )
         # Task #143: a physical-dice-mode player's own reported damage
         # roll (see roll_damage's forced_roll docstring) only ever
         # substitutes into THIS main weapon die -- Sneak Attack's
@@ -627,10 +646,14 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # later swings are for the attack-roll forced_roll above.
         dmg = roll_damage(
             weapon["damage_dice"],
-            modifier=weapon.get("damage_bonus", 0) + rage_bonus + wild_shape_bonus + warden_bonus + hybrid_bonus_gained,
+            modifier=weapon.get("damage_bonus", 0) + rage_bonus + wild_shape_bonus + warden_bonus + hybrid_bonus_gained + dueling_bonus,
             critical=attack_result["critical_hit"],
             extra_dice=savage_attacks_die,
             forced_roll=forced_damage_roll,
+            # Real Fighting Style: Great Weapon Fighting (2026-09-04) --
+            # reroll any 1 or 2 on damage dice from a two-handed melee
+            # weapon, once per die (see roll_damage's own docstring).
+            reroll_low=(attacker.get("fighting_style") == "Great Weapon Fighting" and bool(weapon.get("two_handed"))),
         )
         damage_dealt = max(dmg["total"], 0)
         # Command's "Drop" word (real 5E spell, 2026-08-04): the target's

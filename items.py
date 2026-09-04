@@ -45,13 +45,13 @@ ITEMS = {
     "greataxe": {
         "name": "Greataxe", "type": "weapon", "rarity": "common",
         "price": 30, "weight": 7, "damage_dice": "1d12", "ability": "strength",
-        "weapon_category": "martial", "damage_type": "physical",
+        "weapon_category": "martial", "damage_type": "physical", "two_handed": True,
         "description": "Deals 1d12 physical damage. Heavy enough that swinging it wrong would hurt you as much as anything else.",
     },
     "longbow": {
         "name": "Longbow", "type": "weapon", "rarity": "common",
         "price": 50, "weight": 2, "damage_dice": "1d8", "ability": "dexterity",
-        "weapon_category": "martial", "damage_type": "physical",
+        "weapon_category": "martial", "damage_type": "physical", "ranged": True,
         "description": "Deals 1d8 physical damage. Strung tight, the wood still flexes like it was cut yesterday.",
     },
     "silvered_dagger": {
@@ -73,7 +73,7 @@ ITEMS = {
         "price": 0, "weight": 3, "damage_dice": "2d8+3", "ability": "strength",
         "note": "The carving stops repeating itself the instant your hand closes around the hilt.",
         "description": "Deals 2d8+3 physical damage. The carving stops repeating itself the instant your hand closes around the hilt.",
-        "weapon_category": "martial", "damage_type": "physical",
+        "weapon_category": "martial", "damage_type": "physical", "two_handed": True,
     },
     # Elemental Foundations (2026-08-30): before this, flametongue_
     # shortsword (fire) was the ONLY elemental weapon in the entire
@@ -809,6 +809,19 @@ ITEMS = {
         "name": "A Tarnished Floor Key", "type": "quest_item", "rarity": "common",
         "price": 0, "weight": 0.1,
         "description": "Worn smooth by hands that needed it just as badly, somewhere else, some other time.",
+    },
+    # Real live feature (2026-09-04, per Coffee: "have the mini boss,
+    # and boss and scatter them around, have it collected by battle
+    # and by chests" -- one variation among the Labyrinth's existing
+    # branch-gate rotation, not the main mechanic, per his own
+    # follow-up: "use it in variations with the other mechanics").
+    # Same reusable/common shape as labyrinth_floor_key just above --
+    # a "Locked Rune Doorway" needs N of these rather than one unique
+    # key, so this same item id is found and spent over and over.
+    "labyrinth_rune": {
+        "name": "A Labyrinth Rune", "type": "quest_item", "rarity": "common",
+        "price": 0, "weight": 0.1,
+        "description": "It hums faintly against your palm, in tune with something you haven't found yet.",
     },
     "the_vein_key": {
         "name": "The Vein Key", "type": "quest_item", "rarity": "unique",

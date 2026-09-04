@@ -16,6 +16,7 @@ import re
 
 import requests
 
+import class_features
 import config
 import items as items_module
 import rules.leveling as leveling
@@ -1672,6 +1673,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if "path of" in lowered and any(name in lowered for name in _subclass_names_early):
         return {**base, "action": "choose_subclass"}
 
+    # Real Fighting Style (2026-09-04): same real collision this file
+    # already fixed for subclass names just above -- "I choose Great
+    # Weapon Fighting" would otherwise be swallowed whole by the
+    # generic "i choose" -> resolve_choice trigger right below.
+    _fighting_style_names_early = tuple(s.lower() for s in class_features.FIGHTING_STYLES)
+    if any(name in lowered for name in _fighting_style_names_early) and any(
+        w in lowered for w in ["choose", "fighting style", "specializ", "adopt", "i'll take", "ill take", "i'll go with", "ill go with"]
+    ):
+        return {**base, "action": "choose_fighting_style"}
+
     if any(w in lowered for w in ["i choose", "i decide to", "i decided to", "i've decided", "ive decided",
                                     "i have decided", "i'll go with", "ill go with",
                                     "my choice is", "i'll take the", "ill take the",
@@ -2316,6 +2327,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.fullmatch(r"equip(\s+(gear|menu|screen))?", lowered.strip(" .!?")):
         return {**base, "action": "check_equip_menu"}
 
+    # Real, mastery-gated dual wielding (2026-09-04) -- checked BEFORE
+    # the generic equip_item trigger just below, same "more specific
+    # phrasing wins first" discipline unequip_item's own check above
+    # already follows, since "dual wield X"/"equip X in my off hand"
+    # would otherwise share the bare "equip "/"wield " trigger word.
+    if any(w in lowered for w in ["dual wield", "dual-wield", "off hand", "off-hand", "offhand", "second weapon"]):
+        return {**base, "action": "equip_offhand"}
+
     if any(w in lowered for w in ["equip ", "wield ", "wear ", "put on the", "put on my",
                                     "i equip", "i wield"]):
         return {**base, "action": "equip_item"}
@@ -2852,7 +2871,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "cancel_market",
                 "sell_market", "buy_market", "view_market_listing", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",
-                "drink_water", "choose_subclass", "start_echo_trial", "check_professions",
+                "drink_water", "choose_subclass", "choose_fighting_style", "equip_offhand", "start_echo_trial", "check_professions",
                 "talk_party", "use_environment", "throw_weapon", "push_down_pit",
                 "enter_labyrinth", "leave_labyrinth", "descend_labyrinth",
                 "check_labyrinth_seed", "load_labyrinth_seed",

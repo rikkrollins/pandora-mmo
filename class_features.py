@@ -109,6 +109,19 @@ Ranger's Favored Enemy/Natural Explorer/Danger Sense remain passive-only
 of their own before level 3's subcategory choice (no in-game subclass-
 choice mechanism exists in this build, same fixed-default convention as
 every other class above).
+
+2026-09-04 correction: Fighter/Paladin/Ranger's "Fighting Style" was
+pure flavor text below (an example list, "e.g. Defense, Dueling, Great
+Weapon Fighting") with no in-game choice mechanism and zero mechanical
+effect anywhere -- a real player reasonably read the example names as
+things their character already had (a real dev-bridge report). Now a
+real, chosen, mechanical feature for all three classes: see
+FIGHTING_STYLES/FIGHTING_STYLE_CLASSES below and bot.py's
+_do_choose_fighting_style. All 6 real 5E styles ship; Two-Weapon
+Fighting's own real payoff needed a real dual-wielding mechanic this
+game never had either (mastery-gated, see db.can_dual_wield/
+equip_offhand_weapon and bot._offhand_weapon_for_attacker), built
+alongside it the same day.
 """
 
 CLASS_FEATURES_LEVEL_1 = {
@@ -140,7 +153,9 @@ CLASS_FEATURES_LEVEL_1 = {
         "bonus damage and temporary HP scaling with level, 2 uses per rest",
     ],
     "Fighter": [
-        "Fighting Style: a combat specialization (e.g. Defense, Dueling, Great Weapon Fighting)",
+        "Fighting Style: a real, chosen combat specialization — say \"I choose "
+        "[style]\" (Archery, Defense, Dueling, Great Weapon Fighting, Protection, "
+        "or Two-Weapon Fighting)",
         "Second Wind: bonus action, regain 1d10 + fighter level HP once per short/long rest",
     ],
     "Monk": [
@@ -151,11 +166,17 @@ CLASS_FEATURES_LEVEL_1 = {
     "Paladin": [
         "Divine Sense: action, detect celestials/fiends/undead within 60 ft.",
         "Lay on Hands: heal a pool of HP (5 x paladin level) by touch",
+        "Fighting Style: a real, chosen combat specialization — say \"I choose "
+        "[style]\" (Archery, Defense, Dueling, Great Weapon Fighting, Protection, "
+        "or Two-Weapon Fighting)",
     ],
     "Ranger": [
         "Favored Enemy: Goblinoids — advantage on attack rolls against goblins, "
         "goblin shamans, and goblin bosses",
         "Natural Explorer: expertise navigating and surviving in a chosen terrain type",
+        "Fighting Style: a real, chosen combat specialization — say \"I choose "
+        "[style]\" (Archery, Defense, Dueling, Great Weapon Fighting, Protection, "
+        "or Two-Weapon Fighting)",
         "Danger Sense (level 2+): advantage on Dexterity saving throws",
     ],
     "Rogue": [
@@ -188,6 +209,30 @@ CLASS_FEATURES_LEVEL_1 = {
 
 def get_class_features(char_class: str) -> list[str]:
     return CLASS_FEATURES_LEVEL_1.get(char_class, [])
+
+
+# Real Fighting Style (2026-09-04, per Coffee, dev-bridge: his Fighter
+# read "Fighting Style: a combat specialization (e.g. Defense, Dueling,
+# Great Weapon Fighting)" on his own sheet and reasonably expected a
+# real, chosen mechanic behind it -- confirmed by grep this was pure
+# flavor text with no DB field, no choice mechanic, and zero mechanical
+# effect anywhere, unlike every other class feature in this game.
+# Real 5E grants this to Fighter/Paladin/Ranger; all 6 real styles ship
+# (including Two-Weapon Fighting, whose own real payoff needs mastery-
+# gated dual wielding -- see bot._can_dual_wield). Lives here (not
+# bot.py) so ai/intent_parser.py can share this exact same name list
+# for its own "I choose X" collision pre-check (same reasoning
+# leveling.CLASS_SUBCLASSES already gets imported there for) without a
+# circular import back into bot.py.
+FIGHTING_STYLE_CLASSES = {"Fighter", "Paladin", "Ranger"}
+FIGHTING_STYLES = {
+    "Archery": "+2 to attack rolls with ranged weapons",
+    "Defense": "+1 AC while wearing armor",
+    "Dueling": "+2 damage when wielding a one-handed melee weapon with no other weapon",
+    "Great Weapon Fighting": "reroll any 1 or 2 on damage dice from a two-handed melee weapon (once per die)",
+    "Protection": "reaction: impose disadvantage on an attack against a party member in the fight, once per round, if you have a shield equipped",
+    "Two-Weapon Fighting": "add your ability modifier to your off-hand attack's damage, once you've mastered dual wielding",
+}
 
 
 # Task #223, per Coffee: weapon/armor proficiency, previously modeled
