@@ -33415,7 +33415,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
     async def test_labyrinth_move_gate_lifts_only_after_a_real_victory(self):
         """The gate holds while a fight is merely started/unresolved, and only lifts once _check_labyrinth_progress actually clears the room's real monsters on a genuine party win -- never just because combat was attempted."""
         import sessions
-        user_id, chat_id = 962045, -962045
+        user_id, chat_id = 962049, -962049
         make_basic_character(user_id, "CombatGateVictoryTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
         party_key = f"solo:{user_id}"
         rooms = {
@@ -34781,6 +34781,36 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         line = bot._labyrinth_progress_line(character2)
         self.assertIn("7", line)
         self.assertIn("5", line)
+
+    async def test_achievements_and_quests_screens_show_the_real_current_seed(self):
+        """Real live ask (2026-09-04, per Coffee: "can u show our current seed beside the labyrinth info in quests and in achievements?")."""
+        user_id, chat_id = 962047, -962047
+        make_basic_character(user_id, "SeedVisibilityTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        character = db.get_character(user_id, chat_id)
+        db.bump_labyrinth_best_floor_by_id(character["character_id"], 1)
+        character = db.get_character(user_id, chat_id)
+
+        line = bot._labyrinth_progress_line(character)
+        self.assertIn(str(run["seed"]), line)
+
+        sink = []
+        await bot._do_check_quests(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any(str(run["seed"]) in s for s in sink))
+
+    async def test_labyrinth_map_caption_shows_the_real_current_seed(self):
+        from unittest.mock import patch, AsyncMock
+        user_id, chat_id = 962048, -962048
+        make_basic_character(user_id, "MapSeedTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        with patch.object(bot, "_safe_send_photo", new=AsyncMock(return_value=None)) as mock_send:
+            await bot._do_show_labyrinth_map(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        caption = mock_send.call_args.kwargs.get("caption", "")
+        self.assertIn(str(run["seed"]), caption)
 
     def test_labyrinth_room_text_states_the_real_objective_until_the_checkpoint(self):
         """

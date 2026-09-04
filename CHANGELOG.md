@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.506] — feature: the current Labyrinth seed is now visible in Achievements, Quests, and the map
+
+Direct follow-up to v1.27.504's seed logging, per Coffee: "can u show
+our current seed beside the labyrinth info in quests and in
+achievements? where else is it located so players can see it?" The
+live run's own real seed now shows in three places a player would
+naturally already look, rather than only on request via "what is my
+seed":
+
+- **Achievements** (`_labyrinth_progress_line`): appended after the
+  existing best-floor/checkpoint line, only while a real run is
+  actually live (never a stale/misleading number once the run is
+  gone).
+- **Quests** (`_do_check_quests`): appended to the existing real
+  Labyrinth objective line.
+- **The Labyrinth map caption** (`_do_show_labyrinth_map`): shown once
+  per map render, not spammed onto every plain look/move message.
+
+Deliberately NOT added to the per-room arrival text (`_labyrinth_room_
+text`, shown on every single look/move) — that would repeat the seed
+far more often than it's useful, especially after this same session's
+own feedback about unwanted visual clutter on the map. 3 new tests
+(achievements + quests together, and the map caption) plus a real
+fix to keep `_labyrinth_progress_line` safe for any caller not
+carrying a `current_location`/`chat_id` key. Full `LabyrinthTests`
+suite (119 tests) passes clean.
+
 ## [1.27.505] — feature: real combat gating — a miniboss/boss/gated encounter now genuinely blocks movement until defeated
 
 Real live dev-bridge exchange (2026-09-04): Coffee saw a room flagged

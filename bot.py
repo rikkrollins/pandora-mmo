@@ -17578,14 +17578,18 @@ async def _do_check_quests(update: Update) -> None:
         if labyrinth_run is not None:
             current_room = labyrinth_run["rooms"][labyrinth_run["current_room_id"]]
             current_floor = current_room.get("floor", labyrinth_run["floor"])
+            # Real live ask (2026-09-04, per Coffee: "can u show our
+            # current seed beside the labyrinth info in quests and in
+            # achievements?").
+            seed_note = f" (seed `{labyrinth_run['seed']}`)"
             if current_room.get("is_checkpoint"):
-                lines.append(f"You're at this segment's waystation (floor {current_floor}) — say \"go deeper\" when you're ready to continue.")
+                lines.append(f"You're at this segment's waystation (floor {current_floor}){seed_note} — say \"go deeper\" when you're ready to continue.")
             else:
                 segment_end = labyrinth_module.segment_start_floor(labyrinth_module.segment_number_for_floor(current_floor)) + labyrinth_module.SEGMENT_SIZE - 1
                 remaining = segment_end - current_floor
                 lines.append(
                     f"🎯 Objective: reach floor {segment_end} for this segment's waystation "
-                    f"({remaining} floor{'s' if remaining != 1 else ''} to go) — you're on floor {current_floor} now."
+                    f"({remaining} floor{'s' if remaining != 1 else ''} to go) — you're on floor {current_floor} now{seed_note}."
                 )
         else:
             checkpoint = character.get("labyrinth_checkpoint_floor", 0)
@@ -25463,7 +25467,13 @@ async def _do_show_labyrinth_map(update: Update, floor: int | None = None) -> No
     # a grid cell's own label ever fits (_fit_label_to_width truncates
     # with "..."), so the full, untruncated name for every room the
     # fog-of-war has actually revealed is also listed in plain text.
-    caption = f"🌀 The Labyrinth — Floor {target_floor}."
+    # Real live ask (2026-09-04, per Coffee: "can u show our current
+    # seed beside the labyrinth info in quests and in achievements?
+    # where else is it located so players can see it?") -- the map is
+    # a natural third spot: it's real, chat-scoped, per-party context
+    # every time someone actually looks, not spammed onto every plain
+    # look/move message.
+    caption = f"🌀 The Labyrinth — Floor {target_floor} (seed `{run['seed']}`)."
     visited_names = [
         f"{r['name']}{' (you are here)' if rid == current_room_id else ''}"
         for rid, r in floor_rooms.items() if rid in visited_room_ids or rid == current_room_id
@@ -26667,7 +26677,18 @@ def _labyrinth_progress_line(character: dict) -> str | None:
     checkpoint = character.get("labyrinth_checkpoint_floor", 0)
     if not best:
         return None
-    return f"🌀 **Labyrinth:** deepest floor reached {best} · last waystation cleared: floor {checkpoint or 'none yet'}"
+    line = f"🌀 **Labyrinth:** deepest floor reached {best} · last waystation cleared: floor {checkpoint or 'none yet'}"
+    # Real live ask (2026-09-04, per Coffee: "can u show our current
+    # seed beside the labyrinth info in quests and in achievements?")
+    # -- the seed only means anything while a real run is actually
+    # live (labyrinth_runs is deleted on leave, see db.py's own
+    # comment on that table), so this is silent otherwise rather than
+    # showing a stale/misleading number.
+    if character.get("current_location") == LABYRINTH_LOCATION_SENTINEL:
+        run = db.get_labyrinth_run(character["chat_id"], _labyrinth_party_key(character))
+        if run is not None:
+            line += f" · current seed: `{run['seed']}`"
+    return line
 
 
 async def _do_check_achievements(update: Update) -> None:
