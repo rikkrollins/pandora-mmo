@@ -589,6 +589,19 @@ def add_room(campaign: dict, layer: str, dungeon_id: str, room_id: str, name: st
         "dungeon_id": dungeon_id,
         "dungeon_interior": True,
         "grid_position": grid_position or {"x": 0, "y": 0},
+        # Real live bug found 2026-09-04 (Phase B testing, first real
+        # combat ever run inside a generated dungeon room in this
+        # test suite): every hand-authored campaign.json location
+        # carries an explicit "layer" field, and several real code
+        # paths index it directly (bot.py's weather/hazard checks,
+        # _attack_advantage_disadvantage's own rain-disadvantage roll)
+        # -- a room created here without it would KeyError the moment
+        # anyone actually fought inside it, not on generation itself,
+        # which is exactly why 3+ days of evolved-dungeon shipping
+        # never caught it. `layer` is always known here (the caller's
+        # own required positional arg), so there's no reason it should
+        # ever be missing from the room it's building.
+        "layer": layer,
         **fields,
     }
     campaign.setdefault("locations", {}).setdefault(layer, {})[room_id] = room

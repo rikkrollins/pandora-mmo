@@ -2,6 +2,59 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.507] — feature: Phase B key-item drops + key-gated doors (Labyrinth + evolved dungeons)
+
+Direct follow-up to v1.27.505's combat-gating Phase A, per Coffee:
+"you can have locked doors requireing 'keys'... keys can be dropped by
+enemies or found in another room." A key-gated door is never pickable
+(`bot._do_lockpick`'s existing `requires_key_item` branch already
+returned unconditionally before any DC13 roll) — the only way through
+is a real, plain (non-unique) `labyrinth_floor_key` item, found via a
+real chest or a guaranteed monster drop, always in a branch OUTSIDE
+the one it gates. New opt-in `lockable["consume_key"]` flag (default
+False, so every existing hand-authored story key like The Cinder Key
+is completely unaffected) removes the key on use, since a per-floor
+key must be found fresh each time.
+
+Shipped in both real generators:
+- `rules/labyrinth.py`'s `generate_floor` — a new `_KEY_GATE_CHANCE`
+  branch gate, mirroring the existing collapse-puzzle's own exclusion
+  discipline.
+- `rules/dungeon_evolve.py`'s `_generate_once` — the same mechanic,
+  reusing `dungeon_audit.add_key_gate` for the door wiring.
+
+Four real bugs found and fixed building this:
+- The key could land in a branch already gated by an unrelated
+  switch/pressure-plate lock, silently requiring an unrelated puzzle
+  be solved first to reach a "guaranteed" find — fixed in both
+  generators by excluding those branches from the key's own source
+  candidates.
+- **Real, live, permanent softlock** (pre-existing since v1.27.505,
+  not new): an evolved dungeon's boss/miniboss/gated-encounter
+  movement gate never actually lifted after a real victory, because
+  (unlike the Labyrinth's own per-run room dict) an overworld
+  location's `monsters` list is shared, campaign-wide state that
+  nothing ever cleared. Fixed by checking the real, already-existing
+  per-player `cleared_locations` flag instead.
+- **Real, live crash**: every `dungeon_audit.add_room`-created room
+  (i.e. every evolved-dungeon room ever generated) was missing the
+  `layer` field every hand-authored campaign.json location carries —
+  invisible until the first real combat inside one, which crashed on
+  `location["layer"]` in the weather-hazard check. Fixed by stamping
+  it at creation.
+- `_find_lockable`'s name-word disambiguation could be defeated by two
+  same-kind lockables in one room whose names both contain the kind's
+  own generic word (e.g. two "door"s) — "open the barred door" matched
+  both and neither, falling through to a loot-less generic check.
+  Fixed to only count words unique to exactly one candidate.
+
+New overworld hook `_check_overworld_key_drop` (mirrors the
+Labyrinth's own `_check_labyrinth_progress` key-drop code) grants a
+guaranteed drop on real combat victory outside the Labyrinth too.
+Full `LabyrinthTests`/`DungeonAuditTests`/`DungeonEvolveTests` suites
+(172 tests) pass clean (one pre-existing, documented RNG-flaky pit-
+hazard test aside, unrelated to this change).
+
 ## [1.27.506] — feature: the current Labyrinth seed is now visible in Achievements, Quests, and the map
 
 Direct follow-up to v1.27.504's seed logging, per Coffee: "can u show

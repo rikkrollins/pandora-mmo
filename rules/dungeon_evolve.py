@@ -48,6 +48,7 @@ from rules.dungeon_audit import (
     _dungeon_rooms,
     _find_room,
     _owning_arc_id,
+    add_key_gate,
     add_lever_shortcut,
     add_room,
     connect,
@@ -454,6 +455,55 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         )
         hub_room_for_plate.setdefault("locked_connections", {})[plate_branch_first_id] = plate_id
 
+    # Real key-gated door (2026-09-04, Phase B port of rules/labyrinth.
+    # py's identical mechanic -- per Coffee: "you can have locked doors
+    # requireing 'keys'... keys can be dropped by enemies or found in
+    # another room"). A third, independent kind of branch gate, never
+    # the same branch as the switch or plate gate above. The key itself
+    # is placed in a DIFFERENT branch than the one it gates, and that
+    # source branch also excludes the switch/plate-gated branches --
+    # real bug already found and fixed in the Labyrinth's own port of
+    # this exact mechanic: a "guaranteed" find behind an unrelated,
+    # already-existing gate isn't actually guaranteed without solving
+    # that other gate first.
+    key_branch_idx = None
+    key_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx)]
+    if key_eligible and rng.random() < 0.3:
+        key_branch = rng.choice(key_eligible)
+        key_branch_idx = key_branch["idx"]
+        key_branch_first_id = f"{new_dungeon_id}_b{key_branch['idx']}_r0"
+        _, hub_room_for_key = _find_room(campaign, hub_id)
+        _, key_gate_far_room = _find_room(campaign, key_branch_first_id)
+        hub_room_for_key["connections"].remove(key_branch_first_id)
+        key_gate_far_room["connections"].remove(hub_id)
+        key_gate_far_room.setdefault("connections", []).append(hub_id)
+        door_id = f"{new_dungeon_id}_key_gate"
+        add_key_gate(campaign, hub_id, key_branch_first_id, door_id, "a real, heavily-barred door", "labyrinth_floor_key")
+        for lk in hub_room_for_key.get("lockables", []):
+            if lk["id"] == door_id:
+                lk["consume_key"] = True
+        key_gate_far_room["description"] += " A real, heavily-barred door seals this path -- it looks like it needs an actual key, not brute force or a steady hand."
+
+        # Coffee's own "dropped by enemies OR found in another room" --
+        # chosen randomly each time, always a guaranteed real find
+        # either way (never a coin-flip that could leave the key
+        # genuinely absent). The source room is the gated branch's own
+        # analogue -- a DIFFERENT branch's first room, guaranteed to
+        # still be a plain, reachable hub connection.
+        key_source_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx, key_branch_idx)]
+        if key_source_eligible:
+            key_source_branch = rng.choice(key_source_eligible)
+            key_source_room_id = f"{new_dungeon_id}_b{key_source_branch['idx']}_r0"
+            _, key_source_room = _find_room(campaign, key_source_room_id)
+            if rng.random() < 0.5 and key_source_room.get("monsters"):
+                key_source_room["guaranteed_key_drop"] = True
+                key_source_room["description"] += " Something here looks like it might be carrying something worth taking."
+            else:
+                key_source_room.setdefault("lockables", []).append({
+                    "id": f"{new_dungeon_id}_key_cache", "kind": "chest", "name": "a small, dusty lockbox",
+                    "loot": {"labyrinth_floor_key": 1}, "gold": rng.randint(20, 60),
+                })
+
     # Extra chest lockables -- comfortable lock_density padding, real
     # loot from items already known-good elsewhere in this same
     # catalog. Real bug found testing this fix: a fixed 1-2 chests was
@@ -589,7 +639,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     # some OTHER gate still depends on, or the boss room itself -- if
     # that happens, this whole generation attempt is simply retried
     # with a fresh RNG draw, same as any other check failure.
-    seal_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx)]
+    seal_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx, key_branch_idx)]
     if len(seal_eligible) >= 1 and len(non_boss_branches) >= 3 and rng.random() < 0.3:
         seal_branch = rng.choice(seal_eligible)
         seal_leaf = seal_branch["tail_id"]

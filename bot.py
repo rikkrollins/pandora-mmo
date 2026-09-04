@@ -18,7 +18,7 @@ import os
 import random
 import re
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -740,6 +740,32 @@ _UNLOCKED: dict[int, set[str]] = {}
 # already assume membership means "open forever." Chat-scoped the same
 # way, real boolean state that flips both ways.
 _SWITCH_STATE: dict[int, dict[str, bool]] = {}
+
+_LABYRINTH_LOCKABLE_ID_RE = re.compile(r"^f\d+_")
+
+
+def _reset_labyrinth_lockable_state(chat_id: int) -> None:
+    """
+    Real latent bug found via the Phase B key-gate end-to-end test
+    (2026-09-04): every Labyrinth lockable id is a bare `f{floor}_...`
+    string with no seed/run namespacing at all, but `_UNLOCKED`/
+    `_SWITCH_STATE` are chat-scoped ONLY -- keyed just by that id. A
+    brand-new run (a fresh character starting at floor 1, or the seed-
+    reload feature replaying an old segment) can regenerate the exact
+    same floor number with entirely different content, and would
+    silently inherit "already unlocked"/"already flipped" state left
+    over from whatever a PREVIOUS run at that same floor number did in
+    this chat. Only Labyrinth-shaped ids are cleared -- every other
+    dungeon/overworld lockable id is a real, distinct, non-`f<N>_`
+    string (hand-authored or dungeon_evolve's own id scheme), so this
+    can never touch unrelated state.
+    """
+    unlocked = _chat_scoped_set(_UNLOCKED, chat_id)
+    for lockable_id in [lid for lid in unlocked if _LABYRINTH_LOCKABLE_ID_RE.match(lid)]:
+        unlocked.discard(lockable_id)
+    switch_state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
+    for lockable_id in [lid for lid in switch_state if _LABYRINTH_LOCKABLE_ID_RE.match(lid)]:
+        switch_state.pop(lockable_id, None)
 
 # Named hostile NPCs (campaign.json npc ids) already defeated in combat —
 # in-memory, same reasoning as _UNLOCKED. A defeated antagonist doesn't
@@ -7236,6 +7262,7 @@ async def _try_end_stale_combat(update: Update, session: sessions.Session) -> bo
         await _check_guild_quest_completion(update, session)
         await _check_echo_trial_progress(update, session)
         await _check_labyrinth_progress(update, session)
+        await _check_overworld_key_drop(update, session)
     await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
     for note in level_up_notes:
         await _notify_main_topic(update, note)
@@ -7942,6 +7969,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             await _check_guild_quest_completion(update, session)
             await _check_echo_trial_progress(update, session)
             await _check_labyrinth_progress(update, session)
+            await _check_overworld_key_drop(update, session)
         await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
         for note in level_up_notes:
             await _notify_main_topic(update, note)
@@ -9669,6 +9697,7 @@ async def _do_enter_labyrinth(update: Update, forced_seed: int | None = None, fo
         seed = forced_seed if forced_seed is not None else random.randint(0, 2**31 - 1)
         segment_data = labyrinth_module.generate_segment(CAMPAIGN, segment, random.Random(seed))
         entry_room = segment_data["rooms"][segment_data["entry_room_id"]]
+        _reset_labyrinth_lockable_state(chat_id)
         run = db.create_labyrinth_run(
             chat_id, party_key, floor=entry_room["floor"], seed=seed,
             current_room_id=segment_data["entry_room_id"], rooms=segment_data["rooms"],
@@ -10607,11 +10636,61 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             if not m.get("is_ai"):
                 db.add_item(m["telegram_user_id"], update.effective_chat.id, item_id, 1)
         reward_line = f"🏆 The mini-boss falls, and leaves behind something real: **{item['name'] if item else item_id}** (added to the party's stash)."
+    # Real live feature (2026-09-04, Phase B of the combat-gating work,
+    # per Coffee: "keys can be dropped by enemies or found in another
+    # room"). Same real one-time-flag shape as the miniboss reward just
+    # above -- defeating this room's own real monsters IS the trigger,
+    # granted directly, never a second step.
+    key_drop_line = None
+    if room.get("guaranteed_key_drop") and not room.get("key_drop_claimed"):
+        room["key_drop_claimed"] = True
+        item = items_module.get_item("labyrinth_floor_key")
+        members = _labyrinth_active_party_members(character)
+        for m in members:
+            if not m.get("is_ai"):
+                db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_floor_key", 1)
+        key_drop_line = f"🔑 Something here was carrying **{item['name'] if item else 'a real key'}** — added to the party's stash."
     db.update_labyrinth_run(update.effective_chat.id, party_key, rooms=run["rooms"])
     if hint_line:
         await _safe_send(update, hint_line)
     if reward_line:
         await _safe_send(update, reward_line)
+    if key_drop_line:
+        await _safe_send(update, key_drop_line)
+
+
+async def _check_overworld_key_drop(update: Update, session: sessions.Session) -> None:
+    """
+    Real overworld sibling of _check_labyrinth_progress's own
+    guaranteed_key_drop hook, needed because Phase B's port to
+    rules/dungeon_evolve.py (2026-09-04) can place the exact same
+    `guaranteed_key_drop` flag on a real generated dungeon room --
+    without this, that flag would be pure dead data outside the
+    Labyrinth, never actually granting anything. Unlike the
+    Labyrinth's own per-run room dict, an evolved dungeon's room is a
+    permanent, shared campaign-shaped location -- `key_drop_claimed`
+    is stamped directly onto it (same permanence as `is_boss_room`/
+    `is_miniboss_room`), not per-run state. Safe to call
+    unconditionally alongside _check_labyrinth_progress at every
+    combat-resolution site: no-ops the instant the location isn't a
+    real, unclaimed guaranteed-drop room.
+    """
+    party_side_ids = [pid for pid in session.turn_order if session.sides.get(pid) == "party"]
+    if not party_side_ids:
+        return
+    character = db.get_character(party_side_ids[0], update.effective_chat.id)
+    if character is None:
+        return
+    location = cl.get_location(CAMPAIGN, character["current_location"])
+    if location is None or not location.get("guaranteed_key_drop") or location.get("key_drop_claimed"):
+        return
+    location["key_drop_claimed"] = True
+    item = items_module.get_item("labyrinth_floor_key")
+    for pid in party_side_ids:
+        member = db.get_character(pid, update.effective_chat.id)
+        if member is not None and not member.get("is_ai"):
+            db.add_item(pid, update.effective_chat.id, "labyrinth_floor_key", 1)
+    await _safe_send(update, f"🔑 Something here was carrying **{item['name'] if item else 'a real key'}** — added to the party's stash.")
 
 
 def _npc_combatant_from_stats(npc_id: str, npc_data: dict, party_levels: list[int] | None = None) -> dict:
@@ -12361,6 +12440,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     await _check_guild_quest_completion(update, session)
                     await _check_echo_trial_progress(update, session)
                     await _check_labyrinth_progress(update, session)
+                    await _check_overworld_key_drop(update, session)
                 await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
                 for note in level_up_notes:
                     await _notify_main_topic(update, note)
@@ -12507,6 +12587,7 @@ async def _do_throw_weapon(update: Update, action_text: str) -> None:
                 await _check_guild_quest_completion(update, session)
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
+                await _check_overworld_key_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -12887,11 +12968,27 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
     # lockable's own DISTINCTIVE name words (skipping short/common
     # ones) are real, specific vocabulary that should resolve
     # unambiguously even with an unrelated lockable also present.
+    # Real live bug found 2026-09-04 (Phase B end-to-end testing): two
+    # SAME-kind lockables in one room (e.g. dungeon_evolve.py's own
+    # boss door, "a sealed stone door", alongside the new key-gate
+    # door, "a real, heavily-barred door") both genuinely contain the
+    # word "door" -- counted as "distinctive" for both, "open the
+    # barred door" matched both of them, and the len==1 check below
+    # correctly refused to guess, falling through to a loot-less
+    # generic ability check instead of ever reaching either real door.
+    # A word shared by more than one lockable's own name provides zero
+    # real disambiguation info, so it's dropped before matching --
+    # only a word unique to exactly one candidate here counts.
     name_stopwords = {"a", "an", "the", "of", "in", "at", "on", "is", "here", "behind", "with", "still"}
+    word_sets = {
+        id(lockable): {w for w in re.findall(r"[a-z']+", lockable["name"].lower()) if w not in name_stopwords and len(w) > 3}
+        for lockable in lockables
+    }
+    word_counts = Counter(w for words in word_sets.values() for w in words)
     name_word_matches = []
     for lockable in lockables:
-        words = {w for w in re.findall(r"[a-z']+", lockable["name"].lower()) if w not in name_stopwords and len(w) > 3}
-        if any(w in lowered for w in words):
+        distinctive_words = {w for w in word_sets[id(lockable)] if word_counts[w] == 1}
+        if any(w in lowered for w in distinctive_words):
             name_word_matches.append(lockable)
     if len(name_word_matches) == 1:
         return name_word_matches[0]
@@ -13230,6 +13327,16 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
             )
             return
         _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        # Real live feature (2026-09-04, Phase B of the combat-gating
+        # work, per Coffee: "keys can be dropped by enemies or found in
+        # another room"). Opt-in, default False -- every EXISTING named
+        # story key (e.g. The Cinder Key) has no consume_key flag at
+        # all, so this changes nothing for them; a per-floor, freshly-
+        # generated key must be consumed here or a player could
+        # stockpile one and skip needing to find a fresh one on every
+        # later gate.
+        if lockable.get("consume_key"):
+            db.remove_item(update.effective_user.id, update.effective_chat.id, key_item, 1)
         # Real live grammar bug (2026-08-31, dev-bridge screenshot):
         # every dungeon key item this redesign added is already named
         # "The X Key", so prepending "uses the" doubled up into "uses
@@ -22525,6 +22632,7 @@ async def _do_breath_weapon(update: Update) -> None:
                 await _check_guild_quest_completion(update, session)
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
+                await _check_overworld_key_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -22695,6 +22803,7 @@ async def _do_use_environment(update: Update) -> None:
                 await _check_guild_quest_completion(update, session)
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
+                await _check_overworld_key_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -27093,7 +27202,27 @@ async def _do_move(update: Update, text: str) -> None:
     # always stays open, so a fled or lost fight can never turn this
     # into a permanent trap -- same exact rule and reasoning as
     # _do_labyrinth_move's own identical gate.
-    if current.get("dungeon_interior") and _is_gated_combat_room(current) and destination_id not in (character.get("visited_locations") or []):
+    #
+    # Real live bug found while building Phase B (2026-09-04): unlike
+    # the Labyrinth's own per-run room dict, an overworld location's
+    # `monsters` list is SHARED campaign-wide state that nothing ever
+    # clears on victory (a real player can still re-fight the same
+    # ambient goblin later, and other players' own progress shouldn't
+    # vanish that goblin out from under them) -- so gating purely on
+    # `_is_gated_combat_room(current)` would never lift once triggered,
+    # a genuine permanent softlock at any real boss/miniboss/gated-
+    # encounter room in a generated dungeon. `_mark_location_cleared_
+    # for_party` already records a real, PER-PLAYER "cleared" flag on
+    # every party-side combatant at the exact moment they win (db.
+    # mark_location_cleared, called from every combat-resolution site)
+    # -- checking it here is the correct, already-existing mechanism,
+    # not a new one: this player's own win lifts the gate for them
+    # without touching the shared monster list other players still see.
+    if (
+        current.get("dungeon_interior") and _is_gated_combat_room(current)
+        and destination_id not in (character.get("visited_locations") or [])
+        and character["current_location"] not in (character.get("cleared_locations") or [])
+    ):
         await update.effective_chat.send_message(
             "Enemies bar the other paths — deal with them first, or retreat the way you came.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -28081,6 +28210,7 @@ async def _do_use_item(update: Update, text: str) -> None:
                 await _check_guild_quest_completion(update, session)
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
+                await _check_overworld_key_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)
@@ -30817,6 +30947,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                     await _check_guild_quest_completion(update, session)
                     await _check_echo_trial_progress(update, session)
                     await _check_labyrinth_progress(update, session)
+                    await _check_overworld_key_drop(update, session)
                 await update.effective_chat.send_message(
                     f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}",
                     message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
@@ -32057,6 +32188,7 @@ async def _do_summon_remnant(update: Update, text: str, forced_roll: int | None 
                 await _check_guild_quest_completion(update, session)
                 await _check_echo_trial_progress(update, session)
                 await _check_labyrinth_progress(update, session)
+                await _check_overworld_key_drop(update, session)
             await _safe_send(update, f"🏆 **Combat over!** The {winner} side is victorious!{xp_summary}")
             for note in level_up_notes:
                 await _notify_main_topic(update, note)

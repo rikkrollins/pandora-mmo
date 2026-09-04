@@ -87,6 +87,18 @@ _MINIBOSS_CHANCE = 0.3
 _PRESSURE_PLATE_CHANCE = 0.3
 _BREAKABLE_CHANCE = 0.3
 
+# Real live feature (2026-09-04, per Coffee: "you can have locked
+# doors requireing 'keys'... keys can be dropped by enemies or found
+# in another room" -- Phase B of the combat-gating work). A third,
+# independent kind of branch gate alongside the elemental switch and
+# pressure plate above, deliberately never the same branch as either
+# (see key_gate_eligible's own exclusion at its usage site) -- unlike
+# those two, this one is never pickable at all (bot._do_lockpick's
+# requires_key_item branch returns unconditionally before it can ever
+# fall through to the generic DC13 roll), so the key itself, placed in
+# a real, different, already-reachable branch, is the only way through.
+_KEY_GATE_CHANCE = 0.3
+
 # Real live follow-up (2026-09-03, Coffee: "do all of them" -- warps,
 # a floor-altering puzzle, and an owl-statue-style hint, after the same
 # 3 Link's Awakening maps). Warps are a real, one-way-declared-but-
@@ -858,6 +870,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # py's own version already gets this right by keeping everything
     # local, reused here as-is.
     plate_eligible = [c for c in other_chains if c is not gated_chain]
+    plated_chain = None
     if plate_eligible and rng.random() < _scaled_chance(_PRESSURE_PLATE_CHANCE, floor, 0.002, 0.5):
         plated_chain = rng.choice(plate_eligible)
         plate_room_id = plated_chain[0]
@@ -873,6 +886,63 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         hub.setdefault("locked_connections", {})[plate_room_id] = plate_id
         rooms[plate_room_id]["description"] += " A weight-locked mechanism seals this path -- something heavy, placed just right, would hold it open."
         room_ids = [rid for rid in room_ids if rid != plate_room_id]
+
+    # Real key-gated door (2026-09-04, per Coffee: "you can have locked
+    # doors requireing 'keys'... keys can be dropped by enemies or
+    # found in another room" -- Phase B of the combat-gating work). A
+    # third, independent kind of branch gate -- never the same branch
+    # as the switch or plate gate above. Unlike those two, a key-gated
+    # door is NEVER pickable at all (bot._do_lockpick's requires_key_
+    # item branch returns unconditionally before the generic DC13 roll
+    # further down that function ever runs) -- the key, always placed
+    # in a real, DIFFERENT branch than the one it unlocks (guaranteed
+    # solvable by construction, same discipline as every other gate
+    # here), is the only way through.
+    key_gate_eligible = [c for c in other_chains if c is not gated_chain and c is not plated_chain]
+    if key_gate_eligible and rng.random() < _scaled_chance(_KEY_GATE_CHANCE, floor, 0.002, 0.5):
+        key_gated_chain = rng.choice(key_gate_eligible)
+        key_gate_room_id = key_gated_chain[0]
+        # Real bug found via the end-to-end key-gate test (2026-09-04):
+        # this must also exclude gated_chain/plated_chain -- otherwise
+        # the key can land in a branch that's ITSELF already sealed
+        # behind the unrelated elemental-switch or pressure-plate gate
+        # above, silently requiring an unrelated puzzle be solved first
+        # to reach a "guaranteed" find. Same discipline plate_eligible/
+        # key_gate_eligible already apply to their own candidate lists.
+        key_source_candidates = [c for c in other_chains if c is not key_gated_chain and c is not gated_chain and c is not plated_chain]
+        if key_source_candidates:
+            key_source_chain = rng.choice(key_source_candidates)
+            key_room_id = key_source_chain[0]
+            door_id = f"f{floor}_key_gate"
+            hub["connections"].remove(key_gate_room_id)
+            hub.setdefault("locked_connections", {})[key_gate_room_id] = door_id
+            hub.setdefault("lockables", []).append({
+                "id": door_id, "kind": "door", "name": "a real, heavily-barred door",
+                "requires_key_item": "labyrinth_floor_key", "consume_key": True,
+            })
+            rooms[key_gate_room_id]["description"] += " A real, heavily-barred door seals this path -- it looks like it needs an actual key, not brute force or a steady hand."
+            # Coffee's own "dropped by enemies OR found in another
+            # room" -- chosen randomly each time real content allows
+            # it, always a guaranteed real find either way (never a
+            # coin-flip that could leave the key genuinely absent).
+            if rng.random() < 0.5 and rooms[key_room_id].get("monsters"):
+                rooms[key_room_id]["guaranteed_key_drop"] = True
+                rooms[key_room_id]["description"] += " Something here looks like it might be carrying something worth taking."
+            else:
+                rooms[key_room_id].setdefault("lockables", []).append({
+                    "id": f"f{floor}_key_cache", "kind": "chest", "name": "a small, dusty lockbox",
+                    "loot": {"labyrinth_floor_key": 1}, "gold": rng.randint(20, 60),
+                })
+            # Real bug found testing this fix: the mirror-pair mechanic
+            # further down picks freely from `room_ids` and OVERWRITES
+            # whichever room it calls chest_room_id's own monsters/
+            # lockables outright -- if that happened to land on this
+            # same key room, it would silently wipe the guaranteed
+            # drop's own monsters (or the real key chest just placed)
+            # after the fact. Same "don't compound an unrelated puzzle
+            # onto a room already used" exclusion key_gate_room_id
+            # already gets, just for the room hosting the key itself.
+            room_ids = [rid for rid in room_ids if rid != key_gate_room_id and rid != key_room_id]
 
     # Real breakable-wall/floor secret (2026-09-03, per Coffee's same
     # research request): a genuine ALTTP/Bottle-Grotto-style optional

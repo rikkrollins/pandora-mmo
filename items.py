@@ -794,6 +794,22 @@ ITEMS = {
     # Dungeon redesign Phase 4 (2026-08-30) -- Goblin Warrens' own key
     # item, opening the scavenged iron grate from The Old Seam into The
     # Deep Stash.
+    # Real live feature (2026-09-04, per Coffee: "you can have locked
+    # doors requireing 'keys'... keys can be dropped by enemies or
+    # found in another room"), Phase B of the combat-gating work. A
+    # single, plain, REUSABLE key (unlike every key above, which is a
+    # unique, hand-authored story item tied to one specific real door)
+    # -- the Labyrinth and evolved dungeons regenerate a brand new key
+    # gate on demand, so this same item id is placed and consumed over
+    # and over rather than needing a fresh unique id invented per
+    # floor. rarity is deliberately "common", not "unique" like the
+    # named story keys above -- a player should never be blocked from
+    # holding a second one.
+    "labyrinth_floor_key": {
+        "name": "A Tarnished Floor Key", "type": "quest_item", "rarity": "common",
+        "price": 0, "weight": 0.1,
+        "description": "Worn smooth by hands that needed it just as badly, somewhere else, some other time.",
+    },
     "the_vein_key": {
         "name": "The Vein Key", "type": "quest_item", "rarity": "unique",
         "price": 0, "weight": 0.1,
