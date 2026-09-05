@@ -52,14 +52,6 @@
         "grid_position": {
           "x": 0,
           "y": 0
-        },
-        "story_gates": {
-          "stonearch_bridge": {
-            "requires_completed_quest": "the_sources_reckoning"
-          },
-          "whispering_wood": {
-            "requires_completed_quest": "the_downs_last_watchs_reckoning"
-          }
         }
       },
       "market_row": {
@@ -392,9 +384,6 @@
         "story_gates": {
           "wrathflame_vault_threshold": {
             "requires_defeated_monster": "wolf"
-          },
-          "whispering_wood": {
-            "requires_completed_quest": "the_downs_last_watchs_reckoning"
           }
         },
         "real_shrine": true
@@ -445,12 +434,6 @@
           },
           "greymoor_downs_sunken_barrow": {
             "requires_cleared_location": "greymoor_downs"
-          },
-          "stonearch_bridge": {
-            "requires_completed_quest": "the_sources_reckoning"
-          },
-          "whispering_wood": {
-            "requires_completed_quest": "the_downs_last_watchs_reckoning"
           }
         },
         "grid_position": {
@@ -726,15 +709,7 @@
           "y": -1
         },
         "dungeon_id": "stonearch_bridge",
-        "dungeon_interior": true,
-        "story_gates": {
-          "sunken_root_caverns": {
-            "requires_completed_quest": "the_true_paymasters_reckoning"
-          },
-          "stonearch_bridge": {
-            "requires_completed_quest": "the_sources_reckoning"
-          }
-        }
+        "dungeon_interior": true
       },
       "tavern_cellar": {
         "name": "The Tavern Cellar",
@@ -1971,9 +1946,6 @@
             "requires_cleared_location": "goblin_warrens",
             "requires_completed_quest": "the_suns_thresholds_secret"
           },
-          "sunken_root_caverns": {
-            "requires_completed_quest": "the_true_paymasters_reckoning"
-          },
           "goblin_warrens_collapsed_tunnel": {
             "requires_completed_quest": "the_suns_thresholds_secret"
           }
@@ -2026,9 +1998,6 @@
           "glimmerdeep_grotto_glimmering_pool": {
             "requires_cleared_location": "glimmerdeep_grotto",
             "requires_completed_quest": "the_deep_root_chambers_warden"
-          },
-          "sunken_root_caverns": {
-            "requires_completed_quest": "the_true_paymasters_reckoning"
           }
         },
         "grid_position": {

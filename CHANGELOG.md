@@ -2,6 +2,62 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.519] — fix: real, total, live-reported soft-lock -- Whispering Wood and Stonearch Bridge were unreachable by anyone
+
+Live dev-bridge report, Coffee: "It's not letting me travel to the
+bridge" (a screenshot of Crossroads Tavern refusing "South: Stonearch
+Bridge"). Investigation found this was far worse than one blocked
+exit: v1.27.456 ("chapter dungeons now gated behind the prior
+chapter's climax quest") added `requires_completed_quest` story_gates
+to several zone entrances, but got the direction backwards for THREE
+of them -- each used a zone's own downstream climax quest to gate
+entry into the zone itself, rather than the correct prior-chapter
+quest:
+
+- Whispering Wood (arc_1, the very first chapter -- no prior arc
+  exists) was gated behind `the_downs_last_watchs_reckoning`, arc_8's
+  OWN climax quest, on all 3 of its real entrances (Crossroads Tavern,
+  Hollow Stump Shrine, Greymoor Downs).
+- Stonearch Bridge's real surface area (a giant_spider at level 5, not
+  arc_7's 60-75 band) was gated behind `the_sources_reckoning`, itself
+  only reachable through content past Stonearch Bridge, on all 3 of
+  its entrances (Crossroads Tavern, Greymoor Downs, the Weeping Well).
+- Sunken Root Caverns was gated behind `the_true_paymasters_reckoning`
+  -- a quest completed by defeating a monster inside Goblin Warrens,
+  which itself has no entrance anywhere in the campaign except through
+  Sunken Root Caverns (`requires_cleared_location: sunken_root_caverns`).
+  A perfect circular deadlock: neither zone could ever be entered.
+
+A genuinely fresh character could reach only 6 of the campaign's 290
+locations, and neither "unlock" quest was ever completable -- a real,
+total, unrecoverable soft-lock for any character created after
+2026-09-02, confirmed live by Coffee's own advanced character hitting
+the same wall on Stonearch Bridge specifically.
+
+Fixed by removing the 9 backwards gates and restoring their
+pre-v1.27.456 always-open state, while leaving every correctly-ordered
+gate from that same commit untouched (Goblin Warrens' own
+`requires_cleared_location` gate into Sunken Root Caverns, Stonearch
+Bridge -> Greymoor Downs, the deeper Hollow Verge/Wordless Choir
+descents, etc.). A fresh character can now reach 23 locations
+immediately, with the rest gated by real, correctly-ordered quest
+progression as designed.
+
+Added a general regression guard, not just a specific one:
+`test_no_story_gate_requires_a_quest_unreachable_without_crossing_that_same_gate`
+checks EVERY `requires_completed_quest` gate in the campaign against
+this exact failure shape (a quest whose own location is unreachable
+without first crossing the gate it unlocks) -- the same category of
+bug as the Waking Ember circular soft-lock fixed 2026-08-29, now
+caught automatically instead of only by a live player hitting a wall.
+
+Separately noted, not fixed here (a pre-existing, already-deferred
+gap, not something this pass broke): Goblin Warrens' own quest clue
+says it's "reached by descending into the Weeping Well," but the
+Weeping Well's real `descends_to` points to Sunken Root Caverns, not
+Goblin Warrens -- arc_1's own "Clear the Warrens" content has no real
+path to it yet. Needs its own follow-up.
+
 ## [1.27.518] — feature: spell tonics ("Ethers") now obtainable via real chest/miniboss RNG, including the Labyrinth
 
 Coffee, dev-bridge: "we need you to add ethers to the item list of

@@ -7618,14 +7618,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_stonearch_bridge_hub_entry_fires_the_teaser_reveal(self):
         user_id = 960285
         make_basic_character(user_id, "SBTeaserHubTester", current_location="crossroads_tavern")
-        # Real story-gate (2026-09-02, per Coffee: "we shudnt be able to
-        # even access [later-chapter dungeons]... there shud be quests
-        # to unlock the dungeons entry when the time is right") --
-        # crossroads_tavern -> stonearch_bridge now requires arc_6's own
-        # climax quest completed first, same real requires_completed_quest
-        # mechanism the bonus vaults already use. Satisfied directly here
-        # since this test is about the teaser reveal, not arc gating.
-        db.update_character(user_id, -999, completed_quests=["the_sources_reckoning"])
+        # crossroads_tavern -> stonearch_bridge is never story-gated (see
+        # test_crossroads_tavern_exits_to_whispering_wood_and_stonearch_
+        # bridge_are_never_gated -- Stonearch Bridge's own surface area
+        # is real level-5 content, not arc_7's 60-75 band), so no
+        # completed_quests setup is needed here at all.
         db.update_character(user_id, -999, visited_locations=["crossroads_tavern"], map_revealed_locations=[])
         sink = []
         await bot._do_move(FakeUpdate(user_id, "", sink), "go to stonearch bridge")
@@ -7646,6 +7643,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         every real chapter-dungeon entrance found by auditing the whole
         campaign for edges crossing into a later arc's own zone.
 
+        CORRECTED 2026-09-05 (real, total, live-reported soft-lock: "It's
+        not letting me travel to the bridge"): the original v1.27.456
+        pass got several of these backwards, using a zone's OWN climax
+        quest to gate entry into ITSELF (arc_1's Whispering Wood gated by
+        arc_8's climax; the real level-5 Stonearch Bridge/Weeping Well
+        surface gated by arc_6's climax; Sunken Root Caverns gated by a
+        quest only completable by first passing through Sunken Root
+        Caverns via Goblin Warrens) -- a fresh character could reach only
+        6 of 290 locations, and neither "unlock" quest was ever
+        completable at all. Those specific edges are now confirmed OPEN
+        below (see also test_crossroads_tavern_exits_to_whispering_wood_
+        and_stonearch_bridge_are_never_gated and test_no_story_gate_
+        requires_a_quest_unreachable_without_crossing_that_same_gate,
+        the general guard for this whole bug class); every OTHER edge
+        from the same original pass -- which really do follow correct
+        N-1 -> N chapter order -- is unchanged below.
+
         Calls _check_story_gate directly (the same real, pure function
         _do_move itself calls) rather than the full _do_move pipeline --
         a successful move into a brand-new location also triggers real
@@ -7654,24 +7668,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         bot for the same single Ollama slot) that has nothing to do with
         what this test is actually verifying.
         """
-        current = cl.get_location(bot.CAMPAIGN, "crossroads_tavern")
-        blocked = bot._check_story_gate({"completed_quests": []}, current, "stonearch_bridge")
-        self.assertIsNotNone(blocked)
-        admitted = bot._check_story_gate({"completed_quests": ["the_sources_reckoning"]}, current, "stonearch_bridge")
-        self.assertIsNone(admitted)
+        # Corrected: these are the real starting-zone/surface entrances
+        # that must NEVER require a completed quest (see above).
+        for src, dest in [
+            ("crossroads_tavern", "whispering_wood"),
+            ("crossroads_tavern", "stonearch_bridge"),
+            ("hollow_stump_shrine", "whispering_wood"),
+            ("greymoor_downs", "whispering_wood"),
+            ("greymoor_downs", "stonearch_bridge"),
+            ("the_weeping_well", "stonearch_bridge"),
+            ("the_weeping_well", "sunken_root_caverns"),
+            ("goblin_warrens", "sunken_root_caverns"),
+            ("glimmerdeep_grotto", "sunken_root_caverns"),
+        ]:
+            src_loc = cl.get_location(bot.CAMPAIGN, src)
+            self.assertIsNone(
+                bot._check_story_gate({"completed_quests": []}, src_loc, dest),
+                f"{src} -> {dest} must be open with no completed quests at all",
+            )
 
-        # Every other real chapter-dungeon entrance gate added in the same pass.
+        # Every other real chapter-dungeon entrance gate from the same
+        # pass -- correctly ordered (each gates the NEXT arc behind the
+        # PRIOR arc's own climax), left untouched by the fix above.
         for src, dest, quest_id in [
-            ("goblin_warrens", "sunken_root_caverns", "the_true_paymasters_reckoning"),
-            ("glimmerdeep_grotto", "sunken_root_caverns", "the_true_paymasters_reckoning"),
-            ("the_weeping_well", "sunken_root_caverns", "the_true_paymasters_reckoning"),
-            ("the_weeping_well", "stonearch_bridge", "the_sources_reckoning"),
             ("hollow_verge_threshold", "stonearch_bridge_far_end", "the_sources_reckoning"),
             ("whispering_wood", "greymoor_downs", "the_scouting_grounds_warning"),
             ("stonearch_bridge", "greymoor_downs", "the_scouting_grounds_warning"),
-            ("crossroads_tavern", "whispering_wood", "the_downs_last_watchs_reckoning"),
-            ("hollow_stump_shrine", "whispering_wood", "the_downs_last_watchs_reckoning"),
-            ("greymoor_downs", "whispering_wood", "the_downs_last_watchs_reckoning"),
             ("deep_root_vault_threshold", "whispering_wood_deep_glade", "the_downs_last_watchs_reckoning"),
             ("stonearch_bridge_far_end", "hollow_verge_threshold", "the_buried_glows_elder"),
             ("the_first_city_forgotten_depth", "wordless_choir_gate", "the_verge_wardens_toll"),
@@ -19756,6 +19778,113 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             bot._monster_visible_to_character("the_waking_ember", character),
             "the Waking Ember must be fightable as soon as arc_3 starts, with no other arc_3 quest required first",
         )
+
+    def test_crossroads_tavern_exits_to_whispering_wood_and_stonearch_bridge_are_never_gated(self):
+        """
+        Real, total game-breaking soft-lock (found 2026-09-05 via a live
+        dev-bridge report, "It's not letting me travel to the bridge"):
+        v1.27.456 ("chapter dungeons now gated behind the prior
+        chapter's climax quest") added a requires_completed_quest gate
+        to BOTH of crossroads_tavern's (the starting_location's own)
+        exits toward Whispering Wood and Stonearch Bridge -- but got the
+        direction backwards for both. Whispering Wood is arc_1 (the very
+        first chapter, no prior arc to require), yet its gate demanded
+        "the_downs_last_watchs_reckoning" -- arc_8's OWN climax quest,
+        the very last chapter. Stonearch Bridge's SURFACE area is real
+        level-5 content (giant_spider, fishing nodes), not arc_7's own
+        60-75 band -- gating it behind "the_sources_reckoning" (arc_6's
+        climax, itself only reachable through content past Stonearch
+        Bridge) created the exact same unrecoverable circular lock. A
+        genuinely fresh character could reach only 6 of 290 locations in
+        the whole campaign, and neither of the two "unlock" quests was
+        ever completable without first crossing the gate it unlocked --
+        a real, total, unrecoverable soft-lock for any new character
+        made after 2026-09-02, confirmed live by Coffee's own advanced
+        character hitting the same wall. Fixed by removing the 6 gates
+        v1.27.456 added onto these two zones' SURFACE entry points
+        (crossroads_tavern/hollow_stump_shrine/greymoor_downs ->
+        whispering_wood, and crossroads_tavern/greymoor_downs/
+        the_weeping_well -> stonearch_bridge) -- restoring their
+        pre-v1.27.456 always-open state -- while leaving every other
+        gate from that same commit (the real, correctly-ordered N-1 ->
+        N chapter chain, and the deeper in-zone descents like
+        stonearch_bridge -> stonearch_bridge_far_end) untouched.
+        """
+        crossroads = bot.CAMPAIGN["locations"]["surface"]["crossroads_tavern"]
+        self.assertNotIn("whispering_wood", crossroads.get("story_gates", {}), "arc_1's own zone must never require a completed quest to enter")
+        self.assertNotIn("stonearch_bridge", crossroads.get("story_gates", {}), "Stonearch Bridge's real level-5 surface area must never require a completed quest to enter")
+
+    def test_no_story_gate_requires_a_quest_unreachable_without_crossing_that_same_gate(self):
+        """
+        General regression guard for the WHOLE class of bug fixed above
+        (and the near-identical Waking Ember circular soft-lock fixed
+        2026-08-29, see test_the_waking_ember_is_visible_at_the_start_
+        of_arc_3_no_circular_softlock) -- a story_gates entry that
+        requires completing quest Q must never be the ONLY way to ever
+        reach Q's own quest location, or no fresh character could ever
+        satisfy it. For every real requires_completed_quest gate in the
+        campaign, cutting JUST that one edge (leaving every other real
+        gate exactly as strict as normal) must still leave that quest's
+        own location reachable from the starting_location by some other
+        path.
+        """
+        import collections
+        locs = {}
+        for layer_locs in bot.CAMPAIGN["locations"].values():
+            for lid, loc in layer_locs.items():
+                locs[lid] = loc
+
+        def neighbors_of(loc):
+            out = set(loc.get("connections", []))
+            if loc.get("ascends_to"):
+                out.add(loc["ascends_to"])
+            if loc.get("descends_to"):
+                out.add(loc["descends_to"])
+            return out
+
+        def reachable_ignoring_every_gate_except_one(cut_from, cut_to):
+            # Every OTHER gate is treated as freely passable -- standing
+            # in for "the player has, through some legitimate ordering,
+            # already satisfied every other real prerequisite" -- so the
+            # only real question this isolates is whether the ONE gate
+            # under test is the sole way to ever reach its own quest's
+            # location.
+            start = bot.CAMPAIGN["starting_location"]
+            visited = {start}
+            frontier = collections.deque([start])
+            while frontier:
+                cur = frontier.popleft()
+                loc = locs.get(cur, {})
+                for nb in neighbors_of(loc):
+                    if cur == cut_from and nb == cut_to:
+                        continue
+                    if nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            return visited
+
+        failures = []
+        for lid, loc in locs.items():
+            for target, gate in loc.get("story_gates", {}).items():
+                quest_id = gate.get("requires_completed_quest")
+                if not quest_id:
+                    continue
+                quest = bot.CAMPAIGN["quests"].get(quest_id)
+                if not quest or not quest.get("location"):
+                    continue
+                # solve_puzzle quests can genuinely be triggered from an
+                # adjacent, already-reachable room (the puzzle's own
+                # interactable need not sit inside quest["location"],
+                # which here just marks a reward/flavor spot) -- only
+                # reach_location/defeat_monster truly require physically
+                # standing in that exact room, so only those two trigger
+                # types are a real "must physically get there" claim.
+                if quest.get("trigger", {}).get("type") not in ("reach_location", "defeat_monster"):
+                    continue
+                reached_without_this_gate = reachable_ignoring_every_gate_except_one(lid, target)
+                if quest["location"] not in reached_without_this_gate:
+                    failures.append(f"{lid} -> {target} requires {quest_id}, but {quest['location']} is unreachable without crossing that exact gate")
+        self.assertEqual(failures, [], "\n".join(failures))
 
     async def test_conflict_at_crossroads_tavern_is_not_offerable_until_the_first_city_quest_is_done(self):
         """
@@ -36292,7 +36421,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         """Statistical: a mini-boss room, when it fires, must sit on the real main path (reachable en route to the connector), never a side branch."""
         miniboss_seen = False
         for seed in range(80):
-            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 15, random.Random(seed))
+            # Floor 16, not 15 -- checkpoint floors (every 5th) now
+            # always place a real boss on the main path instead of
+            # rolling the miniboss chance (2026-09-05), so a checkpoint
+            # floor would never fire this.
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 16, random.Random(seed))
             rooms = floor_data["rooms"]
             miniboss_rooms = [rid for rid, r in rooms.items() if r.get("is_miniboss_room")]
             if not miniboss_rooms:
@@ -36327,9 +36460,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         hierarchy"). A real, generated miniboss room must draw with its
         own distinct border color, not the plain generic outline --
         checked directly against real generate_floor output, not a
-        synthetic fixture. `is_boss_room` isn't set by any real
-        generator yet, so that half is checked via a synthetic room,
-        confirming the code path is ready for when it ships.
+        synthetic fixture. `is_boss_room` is now also set by a real
+        generator (2026-09-05, checkpoint floors' guaranteed end-of-
+        segment boss) -- kept as a synthetic room here anyway since a
+        real one requires a checkpoint floor plus real image assets,
+        and this test already proves the render path independently.
         """
         import map_render
         from unittest.mock import patch
@@ -36338,14 +36473,18 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
         miniboss_floor = miniboss_hub = None
         for seed in range(80):
-            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 15, random.Random(seed))
+            # Floor 16, not 15 -- checkpoint floors (every 5th) now
+            # always place a real boss on the main path instead of
+            # rolling the miniboss chance, so a checkpoint floor would
+            # never fire this.
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 16, random.Random(seed))
             if any(r.get("is_miniboss_room") for r in floor_data["rooms"].values()):
                 miniboss_floor = floor_data
                 break
         self.assertIsNotNone(miniboss_floor, "expected at least one miniboss room across 80 real seeds")
         rooms = miniboss_floor["rooms"]
         with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
-            png_bytes = map_render.render_labyrinth_map(15, rooms, miniboss_floor["hub_room_id"], set(), set(rooms.keys()), {}, None)
+            png_bytes = map_render.render_labyrinth_map(16, rooms, miniboss_floor["hub_room_id"], set(), set(rooms.keys()), {}, None)
         image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
         used_colors = {color for _count, color in image.getcolors(maxcolors=1_000_000)}
         self.assertIn(map_render._MINIBOSS_ROOM_OUTLINE, used_colors, "expected the real miniboss room's own distinct border color")
@@ -38788,6 +38927,129 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(name.split()[-1], monster_data.get("name", ""))
         for quest_data in bot.CAMPAIGN.get("quests", {}).values():
             self.assertNotIn(name, quest_data.get("description", ""))
+
+
+    def test_build_labyrinth_enemy_now_carries_the_real_boss_flag_and_signature_mechanics(self):
+        """
+        Prerequisite fix for real Labyrinth boss rooms. Before this,
+        _build_labyrinth_enemy hardcoded is_boss=False and copied none
+        of the real boss signature-mechanic flags _build_echo_enemy
+        already proves safe -- harmless while only non-boss trash ever
+        reached this function (_labyrinth_monster_pool excludes real
+        bosses), but a real boss placed in a Labyrinth room would have
+        fought like a stripped-down trash mob: no boss-only drop rolls,
+        no signature mechanic, nothing distinguishing the fight at all.
+        """
+        enemy = bot._build_labyrinth_enemy("the_unspoken", 10, 0, 1)
+        self.assertTrue(enemy["is_boss"], "a real boss template must carry is_boss=True through to the built enemy")
+        self.assertEqual(enemy["resistances"], ["psychic"], "must copy the real template's own signature resistance list")
+        enemy2 = bot._build_labyrinth_enemy("the_unbegun", 10, 0, 1)
+        self.assertTrue(enemy2["extra_attack_when_enraged"])
+        self.assertTrue(enemy2["resists_forge_guild"])
+        trash = bot._build_labyrinth_enemy("goblin", 10, 0, 1)
+        self.assertFalse(trash["is_boss"], "an ordinary trash monster must still never be flagged as a boss")
+
+    def test_generate_floor_guarantees_a_real_boss_room_on_every_checkpoint_floor(self):
+        """
+        Real end-of-segment boss (2026-09-05, per Coffee: "we should
+        have...something that we would deem a boss, something
+        significantly larger, this is the goal" -- the old miniboss was
+        only ever the toughest ordinary trash monster; real bosses were
+        explicitly excluded from the Labyrinth's own monster pool.
+        Guaranteed (not chance-rolled) on every checkpoint floor, always
+        on the main path, always a real catalog is_boss monster.
+        """
+        for seed in range(20):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = floor_data["rooms"]
+            boss_rooms = [rid for rid, r in rooms.items() if r.get("is_boss_room")]
+            self.assertEqual(len(boss_rooms), 1, f"seed {seed}: expected exactly one real boss room on a checkpoint floor")
+            boss_room = rooms[boss_rooms[0]]
+            self.assertFalse(rooms[boss_rooms[0]].get("is_miniboss_room"), "a boss room must never also be flagged as a miniboss room")
+            self.assertEqual(len(boss_room["monsters"]), 1)
+            monster_key = boss_room["monsters"][0]
+            self.assertTrue(bot.CAMPAIGN["monsters"][monster_key].get("is_boss"), f"seed {seed}: {monster_key} must be a real catalog boss")
+            # Must sit on the real main path -- walking connections from
+            # the boss room must reach the connector without ever
+            # passing back through the hub, same reachability check the
+            # miniboss test above already uses.
+            visited, frontier, reached_connector = {boss_rooms[0]}, [boss_rooms[0]], False
+            while frontier:
+                cur = frontier.pop()
+                if cur == floor_data["connector_room_id"]:
+                    reached_connector = True
+                    break
+                for nb in rooms[cur].get("connections", []):
+                    if nb not in visited and nb != floor_data["hub_room_id"]:
+                        visited.add(nb)
+                        frontier.append(nb)
+            self.assertTrue(reached_connector, f"seed {seed}: the boss room must sit on the real path to the connector")
+        # And a NON-checkpoint floor must never get one (the old miniboss
+        # chance still owns those floors).
+        non_checkpoint_boss_seen = False
+        for seed in range(40):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 16, random.Random(seed))
+            if any(r.get("is_boss_room") for r in floor_data["rooms"].values()):
+                non_checkpoint_boss_seen = True
+                break
+        self.assertFalse(non_checkpoint_boss_seen, "a real boss room must only ever appear on a checkpoint floor")
+
+    async def test_labyrinth_boss_room_gates_movement_and_grants_real_boss_tier_rewards(self):
+        """
+        Real end-to-end: a real, generator-placed Labyrinth boss (1)
+        genuinely blocks leaving the room until defeated (same
+        _is_gated_combat_room mechanism the miniboss already proved),
+        and (2) its kill is recognized by the SAME real boss-tier
+        reward system every other is_boss fight in the game already
+        uses (BOSS_SPELL_TONIC_DROP_CHANCE/GODSHARD_DROP_CHANCE via
+        _award_victory_xp) -- both were impossible before this fix,
+        since no Labyrinth participant could ever carry is_boss=True.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        user_id, chat_id = 962077, -962077
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "BossRoomTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL, hp_max=999999)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=999999)
+
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(0))
+        rooms = floor_data["rooms"]
+        boss_room_id = next(rid for rid, r in rooms.items() if r.get("is_boss_room"))
+        boss_monster_key = rooms[boss_room_id]["monsters"][0]
+        hub_id = floor_data["hub_room_id"]
+        rooms[boss_room_id]["visited"] = True
+        rooms[boss_room_id]["connections"] = list(set(rooms[boss_room_id].get("connections", [])) | {hub_id})
+        rooms[hub_id]["connections"] = list(set(rooms[hub_id].get("connections", [])) | {boss_room_id})
+        db.create_labyrinth_run(chat_id, party_key, floor=5, seed=0, current_room_id=boss_room_id, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", sink, chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session, "expected a real fight to have started")
+        enemy_participants = [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]
+        self.assertTrue(all(p.get("is_boss") for p in enemy_participants), "the real boss must reach combat flagged is_boss=True")
+
+        move_sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", move_sink, chat_id=chat_id), f"go to {rooms[hub_id]['name']}")
+        self.assertTrue(any("Enemies bar the other paths" in s for s in move_sink), "a live real boss must still gate movement, same as the miniboss")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], boss_room_id)
+
+        def fake_choice(seq):
+            return user_id if user_id in seq else seq[0]
+        with patch("bot.random.random", return_value=0.0), \
+             patch("bot.random.choices", return_value=["supreme_spell_tonic"]), \
+             patch("bot.random.choice", side_effect=fake_choice), \
+             patch("bot._grant_generated_loot", new=AsyncMock(return_value="")):
+            xp_summary, _ = await bot._award_victory_xp(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+            await bot._check_labyrinth_progress(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+        self.assertIn("boss's remains", xp_summary, f"expected the real boss-tier drop path to fire: {xp_summary}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertIn("supreme_spell_tonic", character_after["inventory"])
+        self.assertIn("godshard", character_after["inventory"])
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["rooms"][boss_room_id]["monsters"], [])
+
+        sessions.end_session(chat_id, session)
+        db.delete_labyrinth_run(chat_id, party_key)
 
 
 if __name__ == "__main__":
