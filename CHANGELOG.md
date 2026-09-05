@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.513] — fix: ambiguous same-kind switches now ask which one + chests grant Greater Healing Potions
+
+Two more real live fixes from the Development topic.
+
+**"Hitting these crystals doesn't seem to do anything"** (Coffee,
+dev-bridge screenshot: a real room held two unlabeled "necrotic
+crystal" switches; "Hit the crystal" narrated a hollow "Success!" that
+toggled neither one). Root cause: `bot._find_lockable` already
+correctly refused to guess between two same-kind lockables (a real fix
+from 2026-09-04), but its caller, `_do_skill_check`, had no way to
+tell "genuinely ambiguous" apart from "nothing here at all" and
+silently fell through to a generic, ungrounded ability check instead
+-- real dice rolled, real "Success!" narrated, zero actual game
+effect. `_find_lockable` now takes an optional `ambiguous_out` list
+(every other call site unaffected) that captures the real candidates
+when this happens; `_do_skill_check` uses it to ask "There's more than
+one of those here — which one?" naming both real lockables, instead of
+ever running the hollow check.
+
+**Chests now grant a Greater Healing Potion, not a plain one** (Coffee,
+dev-bridge: "Instead of healing potions, can you give greater healing
+potions?"). Every ordinary Labyrinth chest (the hastily-buried cache,
+the sealed-archway multi-switch reward, the mirrored-chamber twin) and
+the evolved-dungeon's own half-buried cache were still handing out the
+base-tier potion regardless of how deep a real party had already
+fought to reach them. Swapped to `greater_healing_potion` in
+`rules/labyrinth.py` and `rules/dungeon_evolve.py` -- a real,
+pre-existing, fully functional item (1,000 flat healing vs. the plain
+potion's 100), no new content needed.
+
 ## [1.27.512] — fix: "use key on door" misclassification + real Labyrinth fog-of-war and per-room map art
 
 Two real live fixes from the Development topic.

@@ -687,12 +687,17 @@ def _new_side_room(floor: int, hub_id: str, index: int, pool: list[str], modifie
         hazard = rng.choice(_MUNDANE_HAZARD_KINDS)
         room["hazard"] = hazard
         room["description"] += " " + HAZARD_FLAVOR[hazard]
-    # Real chest, doubled loot/gold under a "bountiful" floor.
+    # Real chest, doubled loot/gold under a "bountiful" floor. Grants a
+    # Greater Healing Potion, not a plain one (2026-09-05, per Coffee,
+    # dev-bridge: "Instead of healing potions, can you give greater
+    # healing potions?") -- every ordinary Labyrinth/dungeon chest
+    # below was still handing out the base tier regardless of how deep
+    # a real party has already fought to reach it.
     if rng.random() < 0.3:
         bountiful = modifier == "bountiful"
         room.setdefault("lockables", []).append({
             "id": f"f{floor}_cache_{index}", "kind": "chest", "name": "a real, hastily-buried cache",
-            "loot": {"healing_potion": rng.randint(2, 4) if bountiful else rng.randint(1, 2)},
+            "loot": {"greater_healing_potion": rng.randint(2, 4) if bountiful else rng.randint(1, 2)},
             "gold": (rng.randint(20, 80) * floor) * (2 if bountiful else 1),
         })
     return room, room_id
@@ -1118,7 +1123,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             "connections": [leaf_id], "modifier": modifier,
             "lockables": [{
                 "id": f"f{floor}_secret_cache", "kind": "chest", "name": "a real cache no one else has found",
-                "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(80, 200) * floor,
+                "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(80, 200) * floor,
             }],
         }
         rooms[leaf_id].setdefault("locked_connections", {})[bonus_id] = lockable_id
@@ -1148,7 +1153,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             "connections": [hub_id], "monsters": [], "modifier": modifier,
             "lockables": [{
                 "id": f"f{floor}_gate_cache", "kind": "chest", "name": "a real cache behind the archway",
-                "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
+                "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
             }],
         }
         rooms[gate_room_id] = gate_room
@@ -1179,7 +1184,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         chest_room["description"] = "This room feels like it's happening twice, somewhere else on this same floor."
         chest_room["lockables"] = [{
             "id": f"f{floor}_mirror_cache", "kind": "chest", "name": "an unguarded, matching cache",
-            "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
+            "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
         }]
 
     # Real warp shortcut (2026-09-03, per Coffee: "do all of them" --

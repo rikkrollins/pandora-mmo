@@ -36720,6 +36720,39 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         character_after = db.get_character(user_id, chat_id)
         self.assertEqual(character_after["inventory"].get("healing_potion", 0), before_potions + 1, f"expected the real loot to actually be granted, got: {sink}")
 
+    async def test_hit_the_crystal_asks_which_one_instead_of_a_hollow_fake_success(self):
+        """
+        Real live bug (2026-09-05, Coffee, dev-bridge: two real,
+        unlabeled "necrotic crystal" switches in one room -- "Hit the
+        crystal" got a narrated "Success!" that toggled nothing, exactly
+        matching his own report "Hitting these crystals doesn't seem to
+        do anything"). _find_lockable correctly refused to guess between
+        two same-kind lockables, but _do_skill_check had no way to tell
+        that apart from "nothing here at all" and silently ran a hollow
+        ability check instead. Must now ask which one, naming both real
+        candidates, and must never toggle either switch or roll any dice.
+        """
+        user_id, chat_id = 962072, -962072
+        make_basic_character(user_id, "TwoCrystalsTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub["lockables"] = [
+            {"id": "test_crystal_a", "kind": "switch", "name": "a necrotic crystal", "element": "necrotic"},
+            {"id": "test_crystal_b", "kind": "switch", "name": "a distant necrotic crystal, humming faintly", "element": "necrotic"},
+        ]
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._do_skill_check(FakeUpdate(user_id, "Hit the crystal", sink, chat_id=chat_id), "dexterity", "Hit the crystal", forced_roll=20)
+        self.assertTrue(sink, "expected a real clarifying reply")
+        self.assertIn("which one", sink[0].lower())
+        self.assertIn("necrotic crystal", sink[0])
+        self.assertNotIn("test_crystal_a", bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id))
+        self.assertNotIn("test_crystal_b", bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id))
+
     async def test_labyrinth_examine_hint_statue_reveals_real_non_spoiler_facts(self):
         """End-to-end: examining a real hint statue reveals its real hint_lines text, and a pressure plate coexisting in the same room never makes 'examine the statue' ambiguous."""
         user_id, chat_id = 962054, -962054

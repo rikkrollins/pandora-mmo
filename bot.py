@@ -13191,13 +13191,25 @@ def _lockable_block_message(location: dict, destination_name: str, lockable_id: 
     return f"The way to {destination_name} is blocked by {name}. Try {verb_hint} first."
 
 
-def _find_lockable(location: dict, action_text: str) -> dict | None:
+def _find_lockable(location: dict, action_text: str, ambiguous_out: list | None = None) -> dict | None:
     """
     Match a chest/door target mentioned in the player's text against this
     location's lockables. If exactly one PRESENT lockable's own kind-word
     list matches the text, that one is assumed -- unambiguous regardless
     of how many OTHER lockables (of a different kind) also happen to be
     in the same room.
+
+    ambiguous_out (2026-09-05, real live bug, Coffee: two real, unlabeled
+    "necrotic crystal" switches in one room -- "Hit the crystal" matched
+    both, this function correctly refused to guess, but the caller had
+    no way to tell "genuinely ambiguous" apart from "nothing here at
+    all" and silently ran a hollow, ungrounded ability check instead --
+    "Hitting these crystals doesn't seem to do anything", exactly true).
+    Optional, so every other call site is completely unaffected: when
+    given a list, it's populated with the real candidates whenever this
+    function returns None specifically because 2+ lockables of the SAME
+    kind matched, so the caller can ask the player to be more specific
+    instead of falling through to a fake success.
     """
     lockables = location.get("lockables", [])
     if not lockables:
@@ -13316,6 +13328,8 @@ def _find_lockable(location: dict, action_text: str) -> dict | None:
     if len(kind_matches) == 1:
         return kind_matches[0]
     if kind_matches:
+        if ambiguous_out is not None:
+            ambiguous_out.extend(kind_matches)
         return None
     # Lone-mechanism fallback (preserves the real 2026-08-31 fix): "lock"
     # generically names whatever the one jammed thing here is when
@@ -13973,7 +13987,8 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
         return
 
     location = _location_or_labyrinth_room(character, update.effective_chat.id)
-    lockable = _find_lockable(location, action_text) if location else None
+    ambiguous_lockables: list = []
+    lockable = _find_lockable(location, action_text, ambiguous_lockables) if location else None
 
     # Physical-dice mode checked here, BEFORE branching into lockpicking
     # vs. an ordinary ability check -- real bug found live 2026-07-18
@@ -13997,6 +14012,18 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
 
     if lockable is not None:
         await _do_lockpick(update, character, lockable, action_text, forced_roll=forced_roll)
+        return
+
+    # Real live bug (2026-09-05, dev-bridge, Coffee: two unlabeled
+    # "necrotic crystal" switches in one room, "Hit the crystal" ->
+    # "Hitting these crystals doesn't seem to do anything"). Genuinely
+    # ambiguous (2+ real lockables of the same kind) must ask which one,
+    # never silently fall through to the generic ability check below --
+    # that check has no real switch/chest to act on, so it can only ever
+    # narrate a hollow, misleading "Success!" with zero actual effect.
+    if ambiguous_lockables:
+        names = ", ".join(lk["name"] for lk in ambiguous_lockables)
+        await _safe_send(update, f"There's more than one of those here — which one? {names}")
         return
 
     has_advantage = (

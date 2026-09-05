@@ -572,7 +572,10 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         _, leaf_room = _find_room(campaign, leaf_id)
         leaf_room.setdefault("lockables", []).append({
             "id": f"{new_dungeon_id}_cache_{i}", "kind": "chest", "name": "a real, half-buried cache",
-            "loot": {"healing_potion": rng.randint(1, 2)}, "gold": rng.randint(40, 220),
+            # Greater, not plain (2026-09-05, per Coffee, dev-bridge:
+            # "Instead of healing potions, can you give greater healing
+            # potions?" -- same fix as rules/labyrinth.py's own chests).
+            "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(40, 220),
         })
 
     # Lever shortcut: from a non-boss branch leaf back to the new hub.
