@@ -2,6 +2,50 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.516] — feature: Advanced Dungeon Map System, phase 1 (gateway colors, room hierarchy, ornate frame)
+
+Second piece of the requested dungeon-improvement pass, per Coffee's
+own detailed "Advanced Dungeon Map System" design doc -- explicitly
+sequenced BEFORE the boss/puzzle/reward content work, so that work
+gets to use the richer map from day one. Reality-checked upfront
+against what a Telegram photo message can actually do (no true
+animation, no pinch-zoom, no client-side interactivity) and scoped to
+what static, regenerate-on-change PIL rendering can deliver honestly.
+All changes are in `map_render.py`'s `render_labyrinth_map`, pure
+presentation -- no dungeon logic touched.
+
+- **Gateway-type visual identity.** Every locked door used to draw in
+  one flat gold, or its gating switch's own element color if it had
+  one. Key gates (amber), rune gates (violet), and pressure-plate gates
+  (tan, matching their own icon dot) now each get their own real,
+  consistent color, matching the SAME dot color their own lockable's
+  map icon already uses -- "I know where I need to go, I just don't
+  have the ability to get there yet" is now something the map itself
+  communicates, not just the room text.
+- **Room visual hierarchy.** A real miniboss room now draws with a
+  thick, distinct purple border (its own icon's color) instead of the
+  plain generic outline -- visible even over a pasted per-room art
+  tile, since walls draw last, on top. A real boss room (flag doesn't
+  exist on any generator yet, but the render path is ready for it) gets
+  an even more ornate treatment: a thick red border plus a genuine
+  inset gold double-border line.
+- **Ornate frame.** The whole Labyrinth map now has a real bronze
+  double-line border with corner flourishes, drawn over everything
+  last -- a deliberately-designed dungeon map instead of a plain grid,
+  at zero added network cost. Scoped to the Labyrinth specifically (per
+  Coffee's own closing note about a distinct visual identity for this
+  game), not the overworld's shared renderer.
+
+New legend lines only appear for gate/room types actually present on
+that floor -- never a generic catch-all. 3 new tests (gateway colors,
+room-hierarchy borders including a synthetic boss-room check, the real
+ornate frame) plus 1 existing test updated for the now-more-precise
+pressure-plate color; full suite re-verified clean. Still queued from
+the same design doc: a one-shot "just discovered" highlight on a
+room's very next render after first entry (needs new state plumbing
+between bot.py and the renderer, deferred as its own pass) -- then the
+originally-queued bosses/puzzles/rewards content work.
+
 ## [1.27.515] — feature: longer, more interconnectable Labyrinth pathways (start of the generator improvement pass)
 
 First piece of the requested "make the dungeon better and more

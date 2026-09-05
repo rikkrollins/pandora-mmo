@@ -271,6 +271,40 @@ def _draw_background(draw: ImageDraw.ImageDraw, width: int, height: int) -> None
     draw.rectangle([0, 0, width, height], fill=_BG_COLOR)
 
 
+_ORNATE_FRAME_COLOR = (150, 115, 60)
+_ORNATE_FRAME_ACCENT = (95, 70, 38)
+
+
+def _draw_ornate_labyrinth_frame(draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
+    """
+    Real live request (2026-09-05, per Coffee's own "Advanced Dungeon
+    Map System" research: "Do NOT render it like a basic developer
+    flowchart... ornate borders, decorative corners... The map should
+    look like something the player would actually enjoy opening").
+
+    This is still a static Telegram photo, not an interactive canvas --
+    no texture asset, no animation, no real gradient blending -- but a
+    real double-line bronze border plus corner flourishes, drawn LAST
+    (over every grid cell, never under one), is enough to read as a
+    deliberately-designed dungeon map rather than a plain grid, at zero
+    added render cost or network dependency. Labyrinth-specific by
+    design (per Coffee's own closing note: a distinct visual identity
+    for THIS map, not necessarily the plain overworld one) -- never
+    touches render_layer_map or its shared `_draw_background` above.
+    """
+    outer = 6
+    draw.rectangle([outer, outer, width - outer, height - outer], outline=_ORNATE_FRAME_COLOR, width=3)
+    inner = outer + 7
+    draw.rectangle([inner, inner, width - inner, height - inner], outline=_ORNATE_FRAME_ACCENT, width=1)
+    corner_len = 22
+    corners = (
+        (outer, outer, 1, 1), (width - outer, outer, -1, 1),
+        (outer, height - outer, 1, -1), (width - outer, height - outer, -1, -1),
+    )
+    for cx, cy, dx, dy in corners:
+        draw.line([(cx, cy + dy * corner_len), (cx, cy), (cx + dx * corner_len, cy)], fill=_ORNATE_FRAME_COLOR, width=3)
+
+
 def _draw_dashed_rect(draw: ImageDraw.ImageDraw, box: list[int], color, width: int = 2, dash: int = 8, gap: int = 6) -> None:
     """PIL has no native dashed-rectangle primitive -- draws one as short line segments around the perimeter, used for the real 'attained, but on another floor' cell marker."""
     x0, y0, x1, y1 = box
@@ -732,6 +766,24 @@ _LABYRINTH_ICON_COLORS = {
 }
 _LABYRINTH_ROOM_FILL = (55, 48, 68)
 
+# Real room visual hierarchy (2026-09-05, per Coffee's own "Advanced
+# Dungeon Map System" research: "Not every room should look identical
+# ... Boss Room: make it significantly larger and visually important").
+# Actually resizing a boss cell would mean reserving real grid space in
+# rules/labyrinth.py's own placement algorithm -- a much bigger, riskier
+# change than this visual-only pass calls for. A distinctly-colored,
+# thicker (and for a real boss room, double) border achieves the same
+# "this room matters" read without touching any placement logic, and
+# survives even when a real per-room art tile is pasted over the flat
+# fill underneath it (walls are always drawn on top, last). No real
+# `is_boss_room` flag exists on any generated room yet (see this
+# session's own audit -- only `is_miniboss_room` is real today), so
+# only the miniboss tier actually fires until that feature ships; the
+# boss tier is ready for it.
+_MINIBOSS_ROOM_OUTLINE = _LABYRINTH_ICON_COLORS["miniboss"]
+_BOSS_ROOM_OUTLINE = (220, 45, 45)
+_BOSS_ROOM_ACCENT = (230, 190, 60)
+
 # Real live request (2026-09-03, Coffee, dev-bridge screenshot: circled
 # the generic blue diamond shown for every switch regardless of its own
 # real element -- "find appropriate emojis for the elemental colors...
@@ -748,6 +800,19 @@ _SWITCH_ELEMENT_COLORS = {
 }
 _SWITCH_INACTIVE_COLOR = (75, 75, 80)
 _LOCKED_DOOR_COLOR = (200, 150, 40)
+# Real live request (2026-09-05, per Coffee's own "Advanced Dungeon Map
+# System" research: "Every important gateway should have a visual
+# identity... The player should be able to understand: I know where I
+# need to go, I just don't have the ability to get there yet"). Every
+# elemental switch gate already drew in its own real element's color
+# (_labyrinth_locked_door_color, 2026-09-03); key/rune/plate gates all
+# fell back to the one flat generic gold regardless of which real
+# mechanic actually gates them. Each kind now gets its own real,
+# consistent color -- reused from the SAME dot each lockable's own map
+# icon already draws (_LABYRINTH_ICON_COLORS), so "the wall ahead" and
+# "the room with the thing that opens it" visually match at a glance.
+_KEY_GATE_COLOR = (225, 180, 70)
+_RUNE_GATE_COLOR = (170, 70, 190)
 _WALL_WIDTH = 4
 _DOOR_GAP_FRACTION = 0.4  # the middle 40% of a connected edge is left open
 _SEGMENT_STRIP_HEIGHT = 56
@@ -834,9 +899,14 @@ def _labyrinth_locked_door_color(room_id: str, neighbor_id: str, rooms: dict) ->
     for the switch-dot half of this already-shipped): a locked door
     gated by an elemental switch draws in THAT element's own color
     instead of the flat generic gold, so a player can visually match
-    "this door -> that switch" at a glance. Falls back to
-    `_LOCKED_DOOR_COLOR` for a plain DC13 door with no element to match
-    (nothing exists to color-code it to).
+    "this door -> that switch" at a glance.
+
+    Extended 2026-09-05 (per Coffee's own "Advanced Dungeon Map System"
+    research -- "Every important gateway should have a visual
+    identity"): key/rune/pressure-plate gates now each get their own
+    real, distinct, consistent color too (matching their own lockable's
+    map dot), not just switches. Falls back to `_LOCKED_DOOR_COLOR` only
+    for a plain DC13 door with no real mechanic to color-code it to.
     """
     room = rooms.get(room_id) or {}
     lockable_id = room.get("locked_connections", {}).get(neighbor_id)
@@ -849,6 +919,12 @@ def _labyrinth_locked_door_color(room_id: str, neighbor_id: str, rooms: dict) ->
     lockable = next((lk for lk in room.get("lockables", []) if lk["id"] == lockable_id), None)
     if lockable is None:
         return _LOCKED_DOOR_COLOR
+    if lockable.get("requires_key_item"):
+        return _KEY_GATE_COLOR
+    if lockable.get("requires_rune_item"):
+        return _RUNE_GATE_COLOR
+    if lockable.get("kind") == "pressure_plate":
+        return _LABYRINTH_ICON_COLORS["pressure_plate"]
     switch_ids = lockable.get("requires") or ([lockable["id"]] if lockable.get("kind") == "switch" else [])
     for switch_id in switch_ids:
         for r in rooms.values():
@@ -1017,20 +1093,39 @@ def render_labyrinth_map(
     grid_rows = max_y - min_y + 1
 
     legend_lines = ["red outline = you are here", "gap in the wall = a real doorway, solid wall = no connection"]
-    if any(r.get("locked_connections") for r in rooms.values()):
+    # Real gateway-type visual identity (2026-09-05, per Coffee's own
+    # "Advanced Dungeon Map System" research: "Every important gateway
+    # should have a visual identity... I know where I need to go, I
+    # just don't have the ability to get there yet"). Each real gate
+    # kind's wall color now matches the SAME color its own lockable's
+    # map dot already uses, so only the kinds actually present on this
+    # floor get a legend line -- never a generic catch-all that doesn't
+    # tell the player anything real.
+    if any(lk.get("requires_key_item") for r in rooms.values() for lk in r.get("lockables", [])):
+        legend_lines.append("amber wall = a key-gated door")
+    if any(lk.get("requires_rune_item") for r in rooms.values() for lk in r.get("lockables", [])):
+        legend_lines.append("violet wall = a rune-gated doorway")
+    if any(
+        r.get("locked_connections") and not any(lk.get("requires_key_item") or lk.get("requires_rune_item") or lk.get("kind") == "pressure_plate" for lk in r.get("lockables", []))
+        for r in rooms.values()
+    ):
         legend_lines.append("gold wall = a locked/gated connection")
     if locked_room_ids & set(rooms.keys()):
         legend_lines.append("dashed outline = seen, not yet reachable")
     if any(lk.get("kind") in ("switch", "multi_switch_gate") for r in rooms.values() for lk in r.get("lockables", [])):
-        legend_lines.append("switch dot color = its element, dim grey = inactive")
+        legend_lines.append("switch dot color = its element, dim grey = inactive (a gated door matches its own switch's color too)")
     if any(lk.get("kind") == "pressure_plate" for r in rooms.values() for lk in r.get("lockables", [])):
-        legend_lines.append("tan dot = a real pressure plate")
+        legend_lines.append("tan dot/wall = a real pressure plate and its own gate")
     if any(lk.get("kind") == "carry_object" for r in rooms.values() for lk in r.get("lockables", [])):
         legend_lines.append("brown dot = a real object you can carry")
     if any(lk.get("kind") == "pillar" for r in rooms.values() for lk in r.get("lockables", [])):
         legend_lines.append("mauve dot = an unstruck pillar, dim grey = already struck")
     if any(lk.get("kind") == "hint_statue" for r in rooms.values() for lk in r.get("lockables", [])):
         legend_lines.append("grey-stone dot = a real hint statue, worth examining")
+    if any(r.get("is_boss_room") for r in rooms.values()):
+        legend_lines.append("thick red double border = a real boss room")
+    if any(r.get("is_miniboss_room") for r in rooms.values()):
+        legend_lines.append("thick purple border = a real mini-boss room")
     legend_row_count = len(legend_lines) + 1
     strip_height = _SEGMENT_STRIP_HEIGHT if segment_floors else 0
     width = min(max(_MARGIN * 2 + cols * CELL_SIZE, _MIN_CANVAS_WIDTH), _MAX_CANVAS_WIDTH)
@@ -1099,10 +1194,35 @@ def render_labyrinth_map(
             if is_locked:
                 _draw_dashed_rect(draw, [px, py, px + CELL_SIZE, py + CELL_SIZE], _OTHER_FLOOR_OUTLINE)
             else:
-                outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
+                # Room visual hierarchy (2026-09-05): "you are here"
+                # always wins the border when it applies (the single
+                # most important real-time signal); otherwise a real
+                # boss/miniboss room gets its own distinct, thicker
+                # accent instead of the plain generic outline, visible
+                # even over a pasted room-art tile.
+                is_boss_room = bool(room.get("is_boss_room"))
+                is_miniboss_room = bool(room.get("is_miniboss_room"))
+                if is_current:
+                    outline, outline_width = _CELL_OUTLINE_CURRENT, 4
+                elif is_boss_room:
+                    outline, outline_width = _BOSS_ROOM_OUTLINE, 5
+                elif is_miniboss_room:
+                    outline, outline_width = _MINIBOSS_ROOM_OUTLINE, 3
+                else:
+                    outline, outline_width = _CELL_OUTLINE, 2
                 _draw_labyrinth_room_walls(
-                    draw, px, py, CELL_SIZE, room_id, rooms, (x, y), by_cell, outline, 4 if is_current else 2,
+                    draw, px, py, CELL_SIZE, room_id, rooms, (x, y), by_cell, outline, outline_width,
                 )
+                if is_boss_room and not is_current:
+                    # A real boss room gets a genuine double border --
+                    # a second, inset gold line -- so it visually reads
+                    # as "significantly more important" from across the
+                    # whole map, not just a slightly thicker single line.
+                    inset = outline_width + 3
+                    draw.rectangle(
+                        [px + inset, py + inset, px + CELL_SIZE - inset, py + CELL_SIZE - inset],
+                        outline=_BOSS_ROOM_ACCENT, width=2,
+                    )
 
             # No emoji prefix here -- this server has no color-emoji
             # font (see this module's own established note above), so
@@ -1151,6 +1271,8 @@ def render_labyrinth_map(
         fitted = _fit_label_to_width(draw, line, legend_font, width - 2 * _MARGIN)
         draw.text((_MARGIN, legend_y), fitted, font=legend_font, fill=_LEGEND_COLOR)
         legend_y += _LEGEND_LINE_HEIGHT
+
+    _draw_ornate_labyrinth_frame(draw, width, height)
 
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")

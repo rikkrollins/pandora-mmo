@@ -36161,6 +36161,75 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             break
         self.assertTrue(miniboss_seen, "expected at least one miniboss room across 80 real seeds")
 
+    def test_render_labyrinth_map_gives_miniboss_and_boss_rooms_a_distinct_border(self):
+        """
+        Real live request (2026-09-05, per Coffee's own "Advanced
+        Dungeon Map System" research: "Boss Room: make it significantly
+        larger and visually important... This creates visual
+        hierarchy"). A real, generated miniboss room must draw with its
+        own distinct border color, not the plain generic outline --
+        checked directly against real generate_floor output, not a
+        synthetic fixture. `is_boss_room` isn't set by any real
+        generator yet, so that half is checked via a synthetic room,
+        confirming the code path is ready for when it ships.
+        """
+        import map_render
+        from unittest.mock import patch
+        from PIL import Image
+        import io
+
+        miniboss_floor = miniboss_hub = None
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 15, random.Random(seed))
+            if any(r.get("is_miniboss_room") for r in floor_data["rooms"].values()):
+                miniboss_floor = floor_data
+                break
+        self.assertIsNotNone(miniboss_floor, "expected at least one miniboss room across 80 real seeds")
+        rooms = miniboss_floor["rooms"]
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_bytes = map_render.render_labyrinth_map(15, rooms, miniboss_floor["hub_room_id"], set(), set(rooms.keys()), {}, None)
+        image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        used_colors = {color for _count, color in image.getcolors(maxcolors=1_000_000)}
+        self.assertIn(map_render._MINIBOSS_ROOM_OUTLINE, used_colors, "expected the real miniboss room's own distinct border color")
+
+        # Synthetic is_boss_room room -- real code path, no real generator sets this flag yet.
+        boss_rooms = {
+            "hub": {"id": "hub", "name": "Hub", "connections": ["boss_room"], "grid_position": {"x": 0, "y": 0}},
+            "boss_room": {
+                "id": "boss_room", "name": "The Boss Chamber", "connections": ["hub"], "is_boss_room": True,
+                "grid_position": {"x": 1, "y": 0},
+            },
+        }
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            boss_png = map_render.render_labyrinth_map(1, boss_rooms, "hub", set(), set(boss_rooms.keys()), {}, None)
+        boss_image = Image.open(io.BytesIO(boss_png)).convert("RGB")
+        boss_colors = {color for _count, color in boss_image.getcolors(maxcolors=1_000_000)}
+        self.assertIn(map_render._BOSS_ROOM_OUTLINE, boss_colors, "expected the boss room's own distinct border color")
+        self.assertIn(map_render._BOSS_ROOM_ACCENT, boss_colors, "expected the boss room's real double-border accent")
+
+    def test_render_labyrinth_map_draws_a_real_ornate_frame(self):
+        """
+        Real live request (2026-09-05, per Coffee's own "Advanced
+        Dungeon Map System" research: "Do NOT render it like a basic
+        developer flowchart... ornate borders, decorative corners...
+        The map should look like something the player would actually
+        enjoy opening"). A real double-line bronze border must actually
+        appear in the rendered image, not just be present as unused
+        drawing code.
+        """
+        import map_render
+        from unittest.mock import patch
+        from PIL import Image
+        import io
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 1, random.Random(5))
+        rooms = floor_data["rooms"]
+        with patch("map_render._fetch_labyrinth_room_tile", return_value=None):
+            png_bytes = map_render.render_labyrinth_map(1, rooms, floor_data["hub_room_id"])
+        image = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        used_colors = {color for _count, color in image.getcolors(maxcolors=1_000_000)}
+        self.assertIn(map_render._ORNATE_FRAME_COLOR, used_colors, "expected the real ornate frame border color")
+        self.assertIn(map_render._ORNATE_FRAME_ACCENT, used_colors, "expected the real ornate frame inner accent line")
+
     def test_generate_floor_branch_gate_is_solvable_by_construction(self):
         """
         Real Metazelda-style guarantee (see rules/labyrinth.py's own
@@ -37373,9 +37442,13 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         that crystal switch or lever"). A door gated by an elemental
         switch (branch gate, collapse trigger) must draw in that
         element's own color, matching the switch dot's already-shipped
-        color-coding; a door with no real element to match (pressure
-        plate, breakable, carry-puzzle pillars) falls back to the flat
-        generic gold, same as before this fix.
+        color-coding.
+
+        Extended 2026-09-05 (per Coffee's own "Advanced Dungeon Map
+        System" research): key/rune/pressure-plate gates now each get
+        their own real, distinct color too -- only a plain DC13 door
+        with genuinely nothing to color-code to (no element, no key,
+        no rune, not a plate) falls back to the flat generic gold.
         """
         import map_render
         rooms = {
@@ -37386,7 +37459,19 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             "gated_room": {"id": "gated_room"},
             "plate_room": {"id": "plate_room", "lockables": [
                 {"id": "plate1", "kind": "pressure_plate"},
-            ], "locked_connections": {"no_element_room": "plate1"}},
+            ], "locked_connections": {"plate_gated_room": "plate1"}},
+            "plate_gated_room": {"id": "plate_gated_room"},
+            "key_room": {"id": "key_room", "lockables": [
+                {"id": "key1", "kind": "door", "requires_key_item": "the_test_key"},
+            ], "locked_connections": {"key_gated_room": "key1"}},
+            "key_gated_room": {"id": "key_gated_room"},
+            "rune_room": {"id": "rune_room", "lockables": [
+                {"id": "rune1", "kind": "door", "requires_rune_item": "labyrinth_rune", "rune_count": 3},
+            ], "locked_connections": {"rune_gated_room": "rune1"}},
+            "rune_gated_room": {"id": "rune_gated_room"},
+            "plain_room": {"id": "plain_room", "lockables": [
+                {"id": "plain1", "kind": "door"},
+            ], "locked_connections": {"no_element_room": "plain1"}},
             "no_element_room": {"id": "no_element_room"},
         }
         self.assertEqual(
@@ -37394,7 +37479,19 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             map_render._SWITCH_ELEMENT_COLORS["fire"],
         )
         self.assertEqual(
-            map_render._labyrinth_locked_door_color("plate_room", "no_element_room", rooms),
+            map_render._labyrinth_locked_door_color("plate_room", "plate_gated_room", rooms),
+            map_render._LABYRINTH_ICON_COLORS["pressure_plate"],
+        )
+        self.assertEqual(
+            map_render._labyrinth_locked_door_color("key_room", "key_gated_room", rooms),
+            map_render._KEY_GATE_COLOR,
+        )
+        self.assertEqual(
+            map_render._labyrinth_locked_door_color("rune_room", "rune_gated_room", rooms),
+            map_render._RUNE_GATE_COLOR,
+        )
+        self.assertEqual(
+            map_render._labyrinth_locked_door_color("plain_room", "no_element_room", rooms),
             map_render._LOCKED_DOOR_COLOR,
         )
 
