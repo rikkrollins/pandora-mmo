@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.522] — fix: Goblin Warrens had no real arc_1 entrance at all
+
+Follow-up to the v1.27.519 soft-lock fix, per the deferred note left
+in that changelog entry. arc_1_discovery's own 3rd quest,
+`clear_the_warrens` (right after `the_hollow_stump`), requires
+defeating `goblin_boss` inside Goblin Warrens -- but Goblin Warrens had
+NO entrance anywhere in the whole campaign except through Sunken Root
+Caverns, itself arc_6/7 content nowhere near a fresh arc_1 character.
+The quest's own clue text even pointed at "descending into the Weeping
+Well past Stonearch Bridge," which doesn't lead there at all -- stale
+flavor text from before the map was reorganized.
+
+Fixed with a real, ungated connection from the Hollow Stump Shrine
+(arc_1's own 2nd quest location) straight down into Goblin Warrens,
+matching the documented "arc_1/arc_2 already have real, intentional,
+early access to just the outer hub room" design -- the deeper vault
+inside Goblin Warrens (behind arc_4's own climax quest) is completely
+untouched. Quest clue/description text corrected to match. New
+end-to-end test confirms a fresh arc_1 character can actually walk
+there now.
+
 ## [1.27.521] — fix: "You've entered a dungeon" banner was firing on ordinary overworld zones
 
 Live question, Coffee, right after the v1.27.519 soft-lock fix: "why

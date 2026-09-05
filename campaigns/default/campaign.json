@@ -335,8 +335,13 @@
         "description": "A shrine built into the base of a tree wider than a house, long since dead. Offerings left here are never touched by animals.",
         "connections": [
           "whispering_wood",
-          "wrathflame_vault_threshold"
+          "wrathflame_vault_threshold",
+          "goblin_warrens"
         ],
+        "sensory_connections": {
+          "goblin_warrens": "Somewhere behind the shrine, the ground itself sounds hollow -- goblin chatter, faint but unmistakable, carries up through a gap in the roots."
+        },
+        "descends_to": "goblin_warrens",
         "npcs": [
           "wren_hollowbrook"
         ],
@@ -1907,13 +1912,15 @@
         "connections": [
           "sunken_root_caverns",
           "goblin_warrens_supply_tunnel",
-          "goblin_warrens_collapsed_tunnel"
+          "goblin_warrens_collapsed_tunnel",
+          "hollow_stump_shrine"
         ],
         "directions": {
           "east": "sunken_root_caverns",
           "north": "goblin_warrens_supply_tunnel",
           "west": "goblin_warrens_collapsed_tunnel"
         },
+        "ascends_to": "hollow_stump_shrine",
         "npcs": [
           "grask_emberscale"
         ],
@@ -8984,7 +8991,7 @@
     },
     "clear_the_warrens": {
       "title": "Clear the Goblin Warrens",
-      "description": "The goblins under Stonearch Bridge have grown bold. Someone should find out why.",
+      "description": "The goblins beneath the Hollow Stump Shrine have grown bold. Someone should find out why.",
       "location": "goblin_warrens",
       "reward_xp": 300,
       "reward_gold": 200,
@@ -8993,7 +9000,7 @@
         "type": "defeat_monster",
         "monster": "goblin_boss"
       },
-      "clue": "Whatever's emboldened the goblins seems to answer to something bigger among them -- their warrens lie underground, reached by descending into the Weeping Well past Stonearch Bridge.",
+      "clue": "Whatever's emboldened the goblins seems to answer to something bigger among them -- their warrens lie underground, reached by descending past the Hollow Stump Shrine.",
       "weight": "climactic"
     },
     "the_wrong_color": {

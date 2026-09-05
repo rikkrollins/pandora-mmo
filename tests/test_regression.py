@@ -7778,6 +7778,32 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "glimmerdeep_grotto -> glimmering_pool should open once the_deep_root_chambers_warden is completed",
         )
 
+    async def test_goblin_warrens_has_a_real_arc_1_entrance_from_the_hollow_stump_shrine(self):
+        """
+        Real, separate gap noted alongside the v1.27.519 soft-lock fix:
+        arc_1's own "Clear the Warrens" quest (clear_the_warrens,
+        3rd quest of arc_1_discovery, right after the_hollow_stump)
+        requires defeating goblin_boss inside Goblin Warrens, but Goblin
+        Warrens had NO entrance anywhere in the campaign except through
+        Sunken Root Caverns (itself arc_6/7 content) -- the quest's own
+        clue text even pointed at "descending into the Weeping Well past
+        Stonearch Bridge," which is nowhere near arc_1's own zone. A
+        fresh arc_1 character genuinely could not reach Goblin Warrens
+        at all. Fixed with a real, ungated connection from the Hollow
+        Stump Shrine (arc_1's own 2nd quest location) straight down into
+        Goblin Warrens, matching test_shared_zone_dungeons_gate_only_
+        their_own_deeper_subarea's own documented design ("arc_1/arc_2
+        already have real, intentional, early access to just the outer
+        hub room") -- the deeper vault inside Goblin Warrens stays
+        exactly as gated as before.
+        """
+        user_id = 960287
+        make_basic_character(user_id, "WarrensEntranceTester", current_location="hollow_stump_shrine")
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the goblin warrens")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "goblin_warrens")
+
     def test_the_keeps_warden_uses_the_real_new_systems_not_a_generic_statstick(self):
         boss = bot.CAMPAIGN["monsters"]["the_keeps_warden"]
         self.assertTrue(boss["is_boss"])
