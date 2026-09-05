@@ -477,6 +477,19 @@ def _labyrinth_monster_pool(campaign: dict) -> list[str]:
     return _candidate_monsters(campaign, (0, 10_000), boss=False)
 
 
+def _labyrinth_boss_pool(campaign: dict) -> list[str]:
+    """
+    Real, reusable, leveled bosses only (same _candidate_monsters(boss=
+    True) exclusion dungeon_evolve.py's own boss branches already rely
+    on -- the level-less headline story climaxes never show up here,
+    same as they never show up as evolved-dungeon bosses). Level itself
+    doesn't gate eligibility, same reasoning as _labyrinth_monster_pool
+    above: bot._build_labyrinth_enemy's own depth multiplier is what
+    actually scales the fight, not the template's level field.
+    """
+    return _candidate_monsters(campaign, (0, 10_000), boss=True)
+
+
 def segment_number_for_floor(floor: int) -> int:
     return (floor - 1) // SEGMENT_SIZE + 1
 
@@ -843,20 +856,45 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     rooms[main_path_end]["connections"].append(connector["id"])
     rooms[connector["id"]] = connector
 
-    # A real mini-boss guarding the way to the stairs -- always on the
-    # MAIN path, never a side branch, so reaching the exit means facing
-    # it (every reference map studied placed at least one mini-boss
-    # partway along the real critical path, not tucked in an optional
-    # room). Still a real catalog monster from this floor's own pool,
-    # just alone in its room and flagged for narration/map-icon use --
-    # never an invented enemy.
-    miniboss_candidates = [rid for rid in main_chain if pool]
-    if miniboss_candidates and rng.random() < _scaled_chance(_MINIBOSS_CHANCE, floor, 0.002, 0.6):
-        miniboss_room_id = rng.choice(miniboss_candidates)
-        strongest = max(pool, key=lambda mk: (campaign["monsters"].get(mk) or {}).get("hp_max", 0))
-        rooms[miniboss_room_id]["monsters"] = [strongest]
-        rooms[miniboss_room_id]["is_miniboss_room"] = True
-        rooms[miniboss_room_id]["description"] += " Something far stronger than the rest of this floor is waiting here."
+    # A real end-of-segment BOSS (2026-09-05, per Coffee: "we should
+    # have...something that we would deem a boss, something
+    # significantly larger, this is the goal" -- the miniboss below was
+    # never that; it's just the toughest ordinary trash monster on the
+    # floor, with real bosses explicitly excluded from `pool` entirely.
+    # Guaranteed (not chance-rolled) on every checkpoint floor -- the
+    # segment's own natural "this is what you were working toward"
+    # beat -- placed on `main_path_end`, the room right before the
+    # checkpoint/stairs connector, so reaching the checkpoint genuinely
+    # means beating it first (same is_boss_room movement-gate bot.py's
+    # map-render/_is_gated_combat_room already honor for the miniboss
+    # case, now finally set by a real generator for once). Draws from
+    # _labyrinth_boss_pool -- real, reusable, non-headline bosses only,
+    # same exclusion dungeon_evolve.py's own evolved-dungeon bosses
+    # rely on -- and needs bot._build_labyrinth_enemy's own is_boss/
+    # signature-flag copying fix (same date) to actually fight like one.
+    boss_pool = _labyrinth_boss_pool(campaign) if checkpoint else []
+    if boss_pool:
+        boss_key = rng.choice(boss_pool)
+        rooms[main_path_end]["monsters"] = [boss_key]
+        rooms[main_path_end]["is_boss_room"] = True
+        rooms[main_path_end]["description"] += " Something with real weight is waiting here -- the true end of this stretch of the Labyrinth."
+    else:
+        # A real mini-boss guarding the way to the stairs -- always on
+        # the MAIN path, never a side branch, so reaching the exit
+        # means facing it (every reference map studied placed at least
+        # one mini-boss partway along the real critical path, not
+        # tucked in an optional room). Still a real catalog monster
+        # from this floor's own pool, just alone in its room and
+        # flagged for narration/map-icon use -- never an invented
+        # enemy. Only rolled on non-checkpoint floors now that
+        # checkpoint floors always get the real boss above instead.
+        miniboss_candidates = [rid for rid in main_chain if pool]
+        if miniboss_candidates and rng.random() < _scaled_chance(_MINIBOSS_CHANCE, floor, 0.002, 0.6):
+            miniboss_room_id = rng.choice(miniboss_candidates)
+            strongest = max(pool, key=lambda mk: (campaign["monsters"].get(mk) or {}).get("hp_max", 0))
+            rooms[miniboss_room_id]["monsters"] = [strongest]
+            rooms[miniboss_room_id]["is_miniboss_room"] = True
+            rooms[miniboss_room_id]["description"] += " Something far stronger than the rest of this floor is waiting here."
 
     # Real branch-gating, guaranteed solvable BY CONSTRUCTION (Metazelda's
     # own real technique, see the module-level research note above): a

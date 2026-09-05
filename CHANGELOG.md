@@ -2,6 +2,53 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.520] — feature: real end-of-segment BOSS rooms in the Labyrinth (not just the old miniboss)
+
+Coffee, after the Labyrinth map/gating pass this week: "we should
+have...something that we would deem a boss, something significantly
+larger, this is the goal" -- confirmed by direct code read that the
+Labyrinth's own "miniboss" was never an actual `is_boss` monster at
+all. `_labyrinth_monster_pool` explicitly excludes every real catalog
+boss, so the miniboss room was always just the toughest ordinary trash
+monster on the floor -- no Godshard/spell-tonic drop chance, no
+signature mechanic, no boss-tier narration, nothing that distinguishes
+it from a regular fight once you're actually swinging at it.
+
+Two real gaps fixed together:
+
+1. **Prerequisite bug**: `_build_labyrinth_enemy` hardcoded
+   `is_boss: False` on every Labyrinth combat participant and copied
+   NONE of the ~20 real boss signature-mechanic flags (`adapts_to_
+   damage`, `counters_sneak_attack`, `resists_forge_guild`, etc.)
+   `_build_echo_enemy` already proves safe to copy. Harmless while only
+   trash ever reached this function -- a real blocker for placing an
+   actual boss. Now copies the full set from the real catalog template,
+   same as Echo Trials already do.
+2. **Real boss placement**: every checkpoint floor (every 5th floor,
+   the segment's own natural "this is what you were working toward"
+   beat) now GUARANTEES a real, reusable, non-headline catalog boss
+   (drawn from `_labyrinth_boss_pool`, the same `_candidate_monsters
+   (boss=True)` exclusion evolved dungeons already rely on) on the main
+   path, right before the checkpoint -- not a chance roll. Reaching the
+   checkpoint now genuinely means beating it first, via the same
+   `is_boss_room` movement-gate mechanism the old miniboss already
+   proved live. Non-checkpoint floors keep the old chance-based
+   miniboss unchanged.
+
+Because `is_boss` now correctly propagates, a Labyrinth boss kill is
+automatically recognized by every existing boss-only system with zero
+new code: `BOSS_SPELL_TONIC_DROP_CHANCE` (35%), `GODSHARD_DROP_CHANCE`
+(8%), and the boss's own real signature mechanic, all via the same
+`_award_victory_xp` path every other boss fight in the game already
+uses.
+
+Verified end-to-end with a real generator-placed boss: combat
+participants carry `is_boss=True`, the live room genuinely blocks
+leaving until it's cleared, and a forced-low roll granted a real
+Supreme Spell Tonic and Godshard on defeat -- all impossible before
+this fix. Full LabyrinthTests/DungeonEvolveTests/DungeonAuditTests
+suite (199 tests) re-run clean.
+
 ## [1.27.519] — fix: real, total, live-reported soft-lock -- Whispering Wood and Stonearch Bridge were unreachable by anyone
 
 Live dev-bridge report, Coffee: "It's not letting me travel to the

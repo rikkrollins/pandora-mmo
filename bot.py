@@ -9469,7 +9469,32 @@ def _build_labyrinth_enemy(monster_key: str, floor: int, index: int, total: int,
         "proficiency_bonus": template["proficiency_bonus"],
         "is_ai": 1, "xp_reward": int(template.get("xp_reward", 0) * stat_mult),
         "on_hit_condition": template.get("on_hit_condition"),
-        "monster_key": monster_key, "is_boss": False,
+        "monster_key": monster_key, "is_boss": template.get("is_boss", False),
+        "life_drain": template.get("life_drain", False),
+        "adapts_to_damage": template.get("adapts_to_damage", False),
+        "extra_attack_when_enraged": template.get("extra_attack_when_enraged", False),
+        "counters_sneak_attack": template.get("counters_sneak_attack", False),
+        "summons": template.get("summons"),
+        # Same real boss signature-mechanic flags _build_echo_enemy already
+        # copies -- Labyrinth encounters could never place a real boss
+        # before v1.27.519, so this dict never needed them; a real boss room
+        # needs the fight to actually play like one, not a stripped copy.
+        "echoes_damage_type": template.get("echoes_damage_type", False),
+        "counters_extra_attack": template.get("counters_extra_attack", False),
+        "resists_dot_stacking": template.get("resists_dot_stacking", False),
+        "counters_rage": template.get("counters_rage", False),
+        "counters_backstab": template.get("counters_backstab", False),
+        "resists_forge_guild": template.get("resists_forge_guild", False),
+        "counters_wild_shape": template.get("counters_wild_shape", False),
+        "punishes_own_condition": template.get("punishes_own_condition", False),
+        "reduces_first_hit_damage": template.get("reduces_first_hit_damage", False),
+        "punishes_repeat_attacker": template.get("punishes_repeat_attacker", False),
+        "resists_arcane_circle": template.get("resists_arcane_circle", False),
+        "counters_divine_smite": template.get("counters_divine_smite", False),
+        "ignited_after_first_hit": template.get("ignited_after_first_hit", False),
+        "empowered_by_crits": template.get("empowered_by_crits", False),
+        "counters_empowered_spell": template.get("counters_empowered_spell", False),
+        "resistances": template.get("resistances", []),
         "damage_dice": template.get("damage_dice"),
         # Same square-root damage curve as the main encounter-build
         # loop's own undertuned-growth path (UNDERTUNED_DAMAGE_SCALE_
