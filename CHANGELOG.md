@@ -2,6 +2,69 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.514] — fix: real world-map orientation bug across 3 dungeons, found by a requested audit
+
+Coffee asked for a direct audit: "double check the world map for
+collisions with world map and dungeon maps (navigation and
+orientation)." Ran this project's own existing map-consistency test
+suite (`tests.test_regression.test_campaign_grid_positions_agree_with_
+their_own_directions`) against the live campaign data -- it was
+actually FAILING, with 32 real violations across three dungeons
+(Stonearch Bridge on the surface; The First City Spire and Sunken Root
+Caverns underground), previously uncaught because this specific test
+wasn't part of any routine sweep.
+
+Root-caused to `scripts/build_location_grid.py`: when a dungeon's real
+"up" edge needs the map cell directly north of a room, but that cell
+is already occupied by unrelated overworld content sharing the same
+layer (Whispering Wood, Greymoor Downs), the script silently fell back
+to placing it east/south/west instead -- while still labeling the
+connection "up". Real player-facing effect: the exit text says "Up:
+The Lower Battlement," but the map drew that room SOUTH of the bridge,
+a genuine contradiction between the text navigation and the visual
+map. The script's own old comment claimed this was harmless ("a player
+never sees raw x/y") -- it wasn't; this exact invariant is what the
+map's line-drawing and every distance/adjacency computation rely on.
+
+Fixed the placement logic to never relabel a vertical edge to a
+different compass word -- an occupied preferred cell now gets the same
+honest "kept reachable via connections only, no compass label"
+treatment already used for the (separate, pre-existing, unaffected)
+4-neighbor lateral overflow case. This surfaced a second, dormant bug
+in the same script's leftover-island shelf-packing (never triggered
+before, since irreconcilable delve conflicts were rare): a leftover
+island's absolute placement was pure bounding-box arithmetic with no
+real occupied-cell check, and could land pieces of Sunken Root Caverns
+directly on top of already-placed, unrelated content. Added a real
+collision-avoidance slide (checked cell-by-cell against everything
+already placed, not just a bounding box) so this is now provably
+collision-free by construction. Also made the whole regeneration
+self-converging (iterates internally to a fixed point, capped) instead
+of silently needing multiple manual `--apply` runs to fully resolve --
+confirmed live this exact fix needed 3 passes to fully converge from
+the real, previously-broken campaign.json.
+
+Regenerated `campaigns/default/campaign.json` (105 locations end up
+with a real, corrected `grid_position`/`directions` as Stonearch
+Bridge/First City Spire/Sunken Root Caverns claim genuinely free space
+and the underground layer's leftover-island packing reflows around
+them -- no location identity, content, or reachability changed, only
+where each one sits on the map and which compass word labels each real
+edge). Verified: zero raw grid collisions campaign-wide (only the one
+intentional Crossroads Tavern cellar/upstairs exception remains), the
+orientation test and 5 related map-consistency tests all pass, 34
+dungeon-specific tests re-verified with no regressions, and a rendered
+spot-check of the Stonearch Bridge tower now shows a clean, straight
+climb instead of the old zigzag. One separately-found, pre-existing
+stale test (`stonearch_bridge_to_weeping_well`, assumed a "south"
+relationship that was already "west" in the real, self-consistent
+data well before this session) updated to match reality.
+
+Confirmed out of scope for this bug class: the Labyrinth and evolved-
+dungeon maps compute their compass labels LIVE from real grid_position
+every time (never a separately-stored field), so they're structurally
+immune to this exact drift -- audited and clean.
+
 ## [1.27.513] — fix: ambiguous same-kind switches now ask which one + chests grant Greater Healing Potions
 
 Two more real live fixes from the Development topic.

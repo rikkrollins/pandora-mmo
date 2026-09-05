@@ -583,8 +583,8 @@
         "descends_to": "stonearch_bridge_gorge_depths",
         "directions": {
           "north": "crossroads_tavern",
-          "up": "stonearch_bridge_the_lower_battlement",
-          "west": "the_weeping_well"
+          "west": "the_weeping_well",
+          "south": "stonearch_bridge_far_end"
         },
         "npcs": [
           "pip_thistledown"
@@ -654,6 +654,7 @@
           "hollow_verge_threshold"
         ],
         "directions": {
+          "north": "stonearch_bridge",
           "south": "hollow_verge_threshold"
         },
         "interactables": {
@@ -666,8 +667,8 @@
           "the_farthest_span"
         ],
         "grid_position": {
-          "x": -1,
-          "y": -8
+          "x": 0,
+          "y": -2
         },
         "dungeon_id": "stonearch_bridge",
         "dungeon_interior": true,
@@ -834,8 +835,8 @@
           "hollow_verge_bonefield"
         ],
         "directions": {
-          "south": "hollow_verge_bonefield",
-          "north": "stonearch_bridge_far_end"
+          "north": "stonearch_bridge_far_end",
+          "south": "hollow_verge_bonefield"
         },
         "requires_rebirth_count": 1,
         "monsters": [
@@ -848,8 +849,8 @@
           }
         },
         "grid_position": {
-          "x": -1,
-          "y": -9
+          "x": 0,
+          "y": -3
         },
         "story_gates": {
           "stonearch_bridge_far_end": {
@@ -867,8 +868,8 @@
           "hollow_verge_forgotten_nook"
         ],
         "directions": {
-          "east": "hollow_verge_husk_orchard",
           "north": "hollow_verge_threshold",
+          "east": "hollow_verge_husk_orchard",
           "south": "hollow_verge_forgotten_nook"
         },
         "monsters": [
@@ -887,8 +888,8 @@
           }
         },
         "grid_position": {
-          "x": -1,
-          "y": -10
+          "x": 0,
+          "y": -4
         }
       },
       "hollow_verge_sealed_cairn": {
@@ -900,8 +901,8 @@
           "hollow_verge_ashen_reliquary"
         ],
         "directions": {
-          "east": "hollow_verge_ashen_reliquary",
-          "west": "hollow_verge_husk_orchard"
+          "west": "hollow_verge_husk_orchard",
+          "east": "hollow_verge_ashen_reliquary"
         },
         "monsters": [
           "cairn_watcher"
@@ -918,8 +919,8 @@
           }
         },
         "grid_position": {
-          "x": 1,
-          "y": -10
+          "x": 2,
+          "y": -4
         }
       },
       "hollow_verge_inner_sanctum": {
@@ -947,8 +948,8 @@
           "damage_dice": "4d6"
         },
         "grid_position": {
-          "x": 3,
-          "y": -10
+          "x": 4,
+          "y": -4
         }
       },
       "hollow_verge_husk_orchard": {
@@ -960,8 +961,8 @@
           "hollow_verge_sealed_cairn"
         ],
         "directions": {
-          "east": "hollow_verge_sealed_cairn",
-          "west": "hollow_verge_bonefield"
+          "west": "hollow_verge_bonefield",
+          "east": "hollow_verge_sealed_cairn"
         },
         "monsters": [
           "elder_bone_legionnaire"
@@ -978,8 +979,8 @@
           }
         },
         "grid_position": {
-          "x": 0,
-          "y": -10
+          "x": 1,
+          "y": -4
         }
       },
       "hollow_verge_ashen_reliquary": {
@@ -1013,8 +1014,8 @@
           }
         },
         "grid_position": {
-          "x": 2,
-          "y": -10
+          "x": 3,
+          "y": -4
         }
       },
       "hollow_verge_forgotten_nook": {
@@ -1037,8 +1038,8 @@
           }
         },
         "grid_position": {
-          "x": -1,
-          "y": -11
+          "x": 0,
+          "y": -5
         }
       },
       "greymoor_downs_tower_vantage_below": {
@@ -1105,15 +1106,14 @@
           "stonearch_bridge_the_watch_stair"
         ],
         "directions": {
-          "down": "stonearch_bridge",
-          "up": "stonearch_bridge_the_watch_stair"
+          "west": "stonearch_bridge_the_watch_stair"
         },
         "monsters": [
           "battlement_watchman"
         ],
         "grid_position": {
-          "x": 0,
-          "y": -2
+          "x": 1,
+          "y": -18
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1129,14 +1129,14 @@
           "stonearch_bridge_the_watch_stairs_landing"
         ],
         "directions": {
-          "down": "stonearch_bridge_the_lower_battlement",
-          "up": "stonearch_bridge_the_upper_battlement",
           "south": "stonearch_bridge_the_sealed_armory",
+          "up": "stonearch_bridge_the_upper_battlement",
+          "east": "stonearch_bridge_the_lower_battlement",
           "west": "stonearch_bridge_the_watch_stairs_landing"
         },
         "grid_position": {
           "x": 0,
-          "y": -3
+          "y": -18
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1150,8 +1150,8 @@
           "stonearch_bridge_the_armory_annex"
         ],
         "directions": {
-          "north": "stonearch_bridge_the_watch_stair",
-          "east": "stonearch_bridge_the_armory_annex"
+          "east": "stonearch_bridge_the_armory_annex",
+          "north": "stonearch_bridge_the_watch_stair"
         },
         "lockables": [
           {
@@ -1166,7 +1166,7 @@
         ],
         "grid_position": {
           "x": 0,
-          "y": -4
+          "y": -19
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1187,8 +1187,8 @@
           "battlement_sentry"
         ],
         "grid_position": {
-          "x": 1,
-          "y": -3
+          "x": 0,
+          "y": -17
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1206,8 +1206,8 @@
           "up": "stonearch_bridge_the_signal_tower"
         },
         "grid_position": {
-          "x": 2,
-          "y": -3
+          "x": 0,
+          "y": -16
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1234,8 +1234,8 @@
           }
         ],
         "grid_position": {
-          "x": 3,
-          "y": -3
+          "x": 0,
+          "y": -15
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1256,8 +1256,8 @@
           "the_gate_carving"
         ],
         "grid_position": {
-          "x": 3,
-          "y": -2
+          "x": 0,
+          "y": -14
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge",
@@ -1286,8 +1286,8 @@
           }
         },
         "grid_position": {
-          "x": 3,
-          "y": -1
+          "x": 0,
+          "y": -13
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1308,8 +1308,8 @@
           "rampart_guardian"
         ],
         "grid_position": {
-          "x": 4,
-          "y": -1
+          "x": 0,
+          "y": -12
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1330,8 +1330,8 @@
           "keep_watcher"
         ],
         "grid_position": {
-          "x": 4,
-          "y": 0
+          "x": 0,
+          "y": -11
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1356,8 +1356,8 @@
           }
         },
         "grid_position": {
-          "x": 5,
-          "y": 0
+          "x": 0,
+          "y": -10
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1381,8 +1381,8 @@
           "damage_dice": "4d6"
         },
         "grid_position": {
-          "x": 5,
-          "y": -1
+          "x": 0,
+          "y": -9
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge",
@@ -1415,7 +1415,7 @@
         },
         "grid_position": {
           "x": 1,
-          "y": -4
+          "y": -19
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1432,7 +1432,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -3
+          "y": -18
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1823,8 +1823,8 @@
           "the_watch_bound_sentry"
         ],
         "grid_position": {
-          "x": 9,
-          "y": -8
+          "x": 7,
+          "y": -9
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -1855,8 +1855,8 @@
           }
         },
         "grid_position": {
-          "x": 6,
-          "y": -8
+          "x": 4,
+          "y": -9
         },
         "dungeon_interior": true,
         "dungeon_id": "stonearch_bridge"
@@ -2136,7 +2136,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -56
+          "y": -55
         },
         "dungeon_id": "sunken_root_caverns",
         "dungeon_interior": true
@@ -2169,7 +2169,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -55
+          "y": -54
         },
         "dungeon_id": "sunken_root_caverns",
         "dungeon_interior": true
@@ -2429,7 +2429,7 @@
         ],
         "directions": {
           "west": "the_first_city",
-          "up": "the_first_city_spire_stair"
+          "east": "the_first_city_spire_stair"
         },
         "resource_nodes": [
           {
@@ -2490,7 +2490,7 @@
         "monsters": [],
         "grid_position": {
           "x": -6,
-          "y": -61
+          "y": -60
         },
         "dungeon_id": "the_first_city",
         "dungeon_interior": true,
@@ -2534,7 +2534,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -62
+          "y": -61
         },
         "dungeon_id": "the_first_city",
         "dungeon_interior": true
@@ -2559,7 +2559,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -61
+          "y": -60
         },
         "story_gates": {
           "wordless_choir_gate": {
@@ -2598,7 +2598,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -72
+          "y": -71
         }
       },
       "whispering_wood_sunken_den": {
@@ -2629,7 +2629,7 @@
         },
         "grid_position": {
           "x": -5,
-          "y": -72
+          "y": -71
         }
       },
       "whispering_wood_deeper_roots": {
@@ -2660,7 +2660,7 @@
         },
         "grid_position": {
           "x": -5,
-          "y": -74
+          "y": -73
         }
       },
       "greymoor_downs_sunken_barrow": {
@@ -2817,7 +2817,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -62
+          "y": -61
         }
       },
       "wordless_choir_machinery": {
@@ -2850,7 +2850,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -64
+          "y": -63
         }
       },
       "wordless_choir_hall": {
@@ -2881,7 +2881,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -65
+          "y": -64
         }
       },
       "wordless_choir_source": {
@@ -2910,7 +2910,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -67
+          "y": -66
         }
       },
       "wordless_choir_antechamber": {
@@ -2941,7 +2941,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -63
+          "y": -62
         }
       },
       "wordless_choir_resonance_well": {
@@ -2979,7 +2979,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -66
+          "y": -65
         }
       },
       "wordless_choir_forgotten_chord": {
@@ -3003,7 +3003,7 @@
         },
         "grid_position": {
           "x": -2,
-          "y": -64
+          "y": -63
         }
       },
       "goblin_warrens_supply_tunnel": {
@@ -3124,7 +3124,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -57
+          "y": -56
         },
         "dungeon_id": "sunken_root_caverns",
         "dungeon_interior": true
@@ -3152,7 +3152,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -54
+          "y": -53
         },
         "dungeon_id": "sunken_root_caverns",
         "dungeon_interior": true
@@ -3178,7 +3178,7 @@
         },
         "grid_position": {
           "x": -5,
-          "y": -57
+          "y": -56
         },
         "dungeon_id": "sunken_root_caverns",
         "dungeon_interior": true
@@ -3428,7 +3428,7 @@
         },
         "grid_position": {
           "x": -5,
-          "y": -73
+          "y": -72
         }
       },
       "whispering_wood_stray_den": {
@@ -3452,7 +3452,7 @@
         },
         "grid_position": {
           "x": -4,
-          "y": -73
+          "y": -72
         }
       },
       "whispering_wood_deep_root_chamber": {
@@ -3476,7 +3476,7 @@
         },
         "grid_position": {
           "x": -5,
-          "y": -75
+          "y": -74
         }
       },
       "glimmerdeep_grotto_buried_glow": {
@@ -3543,7 +3543,7 @@
         ],
         "grid_position": {
           "x": -1,
-          "y": -87
+          "y": -86
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
@@ -3569,7 +3569,7 @@
         ],
         "grid_position": {
           "x": -1,
-          "y": -88
+          "y": -87
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault",
@@ -3619,7 +3619,7 @@
         ],
         "grid_position": {
           "x": 0,
-          "y": -88
+          "y": -87
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
@@ -3643,7 +3643,7 @@
         ],
         "grid_position": {
           "x": -1,
-          "y": -89
+          "y": -88
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault",
@@ -3680,7 +3680,7 @@
         },
         "grid_position": {
           "x": -1,
-          "y": -90
+          "y": -89
         },
         "healing_water": true,
         "real_shrine": true,
@@ -3704,7 +3704,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -95
+          "y": -94
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault",
@@ -3743,7 +3743,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -96
+          "y": -95
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
@@ -3768,7 +3768,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -97
+          "y": -96
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault",
@@ -3797,7 +3797,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -98
+          "y": -97
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
@@ -3817,7 +3817,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -99
+          "y": -98
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
@@ -4277,7 +4277,7 @@
           "the_first_city_spire_overlook"
         ],
         "directions": {
-          "down": "the_first_city_spire_reaches",
+          "west": "the_first_city_spire_reaches",
           "up": "the_first_city_spire_overlook"
         },
         "resource_nodes": [
@@ -4306,7 +4306,7 @@
         ],
         "directions": {
           "down": "the_first_city_spire_stair",
-          "up": "the_first_city_spire_crown"
+          "east": "the_first_city_spire_crown"
         },
         "interactables": {
           "overlook_true_shape": {
@@ -4329,7 +4329,7 @@
           "the_first_city_spire_overlook"
         ],
         "directions": {
-          "down": "the_first_city_spire_overlook"
+          "west": "the_first_city_spire_overlook"
         },
         "monsters": [
           "buried_sentinel"
@@ -4367,7 +4367,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -63
+          "y": -62
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4386,7 +4386,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -64
+          "y": -63
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city",
@@ -4423,7 +4423,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -65
+          "y": -64
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4446,7 +4446,7 @@
         },
         "grid_position": {
           "x": -5,
-          "y": -65
+          "y": -64
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4471,7 +4471,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -66
+          "y": -65
         },
         "dungeon_interior": true,
         "dungeon_checkpoint": true,
@@ -4501,7 +4501,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -67
+          "y": -66
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4526,7 +4526,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -68
+          "y": -67
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city",
@@ -5429,7 +5429,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -53
+          "y": -52
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -5459,7 +5459,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -52
+          "y": -51
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -5481,7 +5481,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -51
+          "y": -50
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -5510,7 +5510,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -50
+          "y": -49
         },
         "healing_water": true,
         "real_shrine": true,
@@ -5538,7 +5538,7 @@
         },
         "grid_position": {
           "x": -6,
-          "y": -49
+          "y": -48
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -5553,14 +5553,14 @@
         ],
         "directions": {
           "south": "sunken_root_caverns_the_shrines_after",
-          "down": "sunken_root_caverns_the_drowned_hall"
+          "north": "sunken_root_caverns_the_drowned_hall"
         },
         "monsters": [
           "root_cavern_lurker"
         ],
         "grid_position": {
           "x": -6,
-          "y": -48
+          "y": -47
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -5575,9 +5575,9 @@
           "sunken_root_caverns_the_wellsprings_answer"
         ],
         "directions": {
-          "up": "sunken_root_caverns_the_flooded_stair",
-          "down": "sunken_root_caverns_the_wellsprings_answer",
-          "east": "sunken_root_caverns_the_hollow_beneath"
+          "south": "sunken_root_caverns_the_flooded_stair",
+          "north": "sunken_root_caverns_the_hollow_beneath",
+          "east": "sunken_root_caverns_the_wellsprings_answer"
         },
         "resource_nodes": [
           {
@@ -5590,7 +5590,7 @@
         ],
         "grid_position": {
           "x": -6,
-          "y": -47
+          "y": -46
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -5603,7 +5603,7 @@
           "sunken_root_caverns_the_drowned_hall"
         ],
         "directions": {
-          "west": "sunken_root_caverns_the_drowned_hall"
+          "south": "sunken_root_caverns_the_drowned_hall"
         },
         "interactables": {
           "hollow_beneath_note": {
@@ -5612,8 +5612,8 @@
           }
         },
         "grid_position": {
-          "x": -5,
-          "y": -47
+          "x": -6,
+          "y": -45
         },
         "dungeon_interior": true,
         "dungeon_id": "sunken_root_caverns"
@@ -5627,14 +5627,14 @@
           "sunken_root_caverns_the_final_current"
         ],
         "directions": {
-          "up": "sunken_root_caverns_the_drowned_hall",
-          "down": "sunken_root_caverns_the_final_current"
+          "west": "sunken_root_caverns_the_drowned_hall",
+          "north": "sunken_root_caverns_the_final_current"
         },
         "npcs": [
           "the_wellsprings_keeper"
         ],
         "grid_position": {
-          "x": -6,
+          "x": -5,
           "y": -46
         },
         "dungeon_interior": true,
@@ -5649,14 +5649,14 @@
           "sunken_root_caverns_the_last_root"
         ],
         "directions": {
-          "up": "sunken_root_caverns_the_wellsprings_answer",
-          "down": "sunken_root_caverns_the_last_root"
+          "south": "sunken_root_caverns_the_wellsprings_answer",
+          "north": "sunken_root_caverns_the_last_root"
         },
         "monsters": [
           "the_final_current"
         ],
         "grid_position": {
-          "x": -6,
+          "x": -5,
           "y": -45
         },
         "dungeon_interior": true,
@@ -5671,11 +5671,11 @@
           "sunken_root_caverns_the_deepest_approach"
         ],
         "directions": {
-          "up": "sunken_root_caverns_the_final_current",
-          "down": "sunken_root_caverns_the_deepest_approach"
+          "south": "sunken_root_caverns_the_final_current",
+          "north": "sunken_root_caverns_the_deepest_approach"
         },
         "grid_position": {
-          "x": -6,
+          "x": -5,
           "y": -44
         },
         "dungeon_interior": true,
@@ -5690,11 +5690,11 @@
           "sunken_root_caverns_the_source"
         ],
         "directions": {
-          "up": "sunken_root_caverns_the_last_root",
-          "down": "sunken_root_caverns_the_source"
+          "south": "sunken_root_caverns_the_last_root",
+          "north": "sunken_root_caverns_the_source"
         },
         "grid_position": {
-          "x": -6,
+          "x": -5,
           "y": -43
         },
         "dungeon_interior": true,
@@ -5708,7 +5708,7 @@
           "sunken_root_caverns_the_deepest_approach"
         ],
         "directions": {
-          "up": "sunken_root_caverns_the_deepest_approach"
+          "south": "sunken_root_caverns_the_deepest_approach"
         },
         "monsters": [
           "the_keeping_current"
@@ -5719,7 +5719,7 @@
           "damage_dice": "4d6"
         },
         "grid_position": {
-          "x": -6,
+          "x": -5,
           "y": -42
         },
         "dungeon_interior": true,
@@ -6529,7 +6529,7 @@
         },
         "grid_position": {
           "x": 0,
-          "y": -89
+          "y": -88
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
@@ -6556,7 +6556,7 @@
         ],
         "grid_position": {
           "x": -1,
-          "y": -91
+          "y": -90
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault",
@@ -6585,7 +6585,7 @@
         ],
         "grid_position": {
           "x": 0,
-          "y": -95
+          "y": -94
         },
         "dungeon_interior": true,
         "dungeon_id": "wrathflame_vault"
@@ -6912,7 +6912,7 @@
         },
         "grid_position": {
           "x": 2,
-          "y": -61
+          "y": -60
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -6932,7 +6932,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -88
+          "y": -87
         },
         "requires_rebirth_count": 1
       },
@@ -6951,7 +6951,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -87
+          "y": -86
         }
       },
       "wrathflame_vault_evolved_approach_1": {
@@ -6969,7 +6969,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -86
+          "y": -85
         }
       },
       "wrathflame_vault_evolved_approach_2": {
@@ -6987,7 +6987,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -85
+          "y": -84
         }
       },
       "wrathflame_vault_evolved_approach_3": {
@@ -7005,7 +7005,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -84
+          "y": -83
         }
       },
       "wrathflame_vault_evolved_hub": {
@@ -7027,7 +7027,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -83
+          "y": -82
         },
         "dungeon_hub": true,
         "lockables": [
@@ -7056,7 +7056,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -82
+          "y": -81
         },
         "monsters": [
           "root_wrought_sentinel"
@@ -7077,7 +7077,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -81
+          "y": -80
         },
         "monsters": [
           "turning_stair_guardian"
@@ -7098,7 +7098,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -3,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "stray_wood_wolf",
@@ -7120,7 +7120,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -4,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "bound_loom_warden",
@@ -7142,7 +7142,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -5,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "bound_voiceless_warden"
@@ -7163,7 +7163,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -1,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "young_choir_remnant",
@@ -7185,7 +7185,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": 0,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "young_choir_remnant",
@@ -7207,7 +7207,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": 1,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "elder_crystal_spider",
@@ -7228,7 +7228,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -3,
-          "y": -95
+          "y": -94
         },
         "monsters": [
           "the_vein_bound_picker",
@@ -7250,7 +7250,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -3,
-          "y": -96
+          "y": -95
         },
         "monsters": [
           "the_vein_bound_picker",
@@ -7272,7 +7272,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -80
+          "y": -79
         },
         "monsters": [
           "pool_wrought_spider",
@@ -7292,7 +7292,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -3,
-          "y": -97
+          "y": -96
         },
         "monsters": [
           "bone_legionnaire",
@@ -7313,7 +7313,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -2,
-          "y": -79
+          "y": -78
         },
         "monsters": [
           "the_toll_master"
@@ -7332,7 +7332,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": -6,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "bone_legionnaire"
@@ -7361,7 +7361,7 @@
         "dungeon_interior": true,
         "grid_position": {
           "x": 2,
-          "y": -83
+          "y": -82
         },
         "monsters": [
           "warren_paymasters_scout",

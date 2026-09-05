@@ -148,46 +148,52 @@ def _bfs_from_root(
         # one square"). Any up/down edge NOT in SAME_CELL_VERTICAL_PAIRS
         # is a real, separate room -- placed one real cell over, so
         # it's visible on the map as part of a real path instead of
-        # stacked invisibly under a floor badge. The DIRECTION LABEL
-        # stays "down"/"up" regardless of which compass delta the cell
-        # actually lands on -- a player never sees raw (x, y), only a
-        # drawn line between two adjacent squares and the "descend"/
-        # "ascend" action text elsewhere, so this is never a visible
-        # lie the way a real lateral mislabel (calling an actual west
-        # neighbor "east") would be. Prefers the intuitive delta
-        # ("down"->south, "up"->north) but falls back through the same
-        # LATERAL_ORDER search real lateral neighbors use -- real live
-        # bug found in this rework's own first draft (a FIXED single
-        # slot, no fallback): dozens of unrelated delves all descending
-        # from rooms that happened to already share a column cascaded
-        # into the exact same "everything piles onto one cell" problem
-        # this rework exists to fix, just one level deeper each time.
-        # Only reports the same real overflow every lateral neighbor
-        # already can if all 4 compass slots are genuinely taken.
+        # stacked invisibly under a floor badge. Prefers the intuitive
+        # delta ("down"->south, "up"->north).
+        #
+        # Real live bug (2026-09-05, Coffee: "double check the world
+        # map for collisions... navigation and orientation" -- found by
+        # this audit, not yet reported live): this used to fall back
+        # through the same LATERAL_ORDER search real lateral neighbors
+        # use whenever the preferred cell was already occupied by
+        # unrelated content sharing the same layer (confirmed live for
+        # Stonearch Bridge/The First City Spire/Sunken Root Caverns'
+        # own tower/shaft chains, each running into Whispering Wood's
+        # or Greymoor Downs' independently-laid-out rooms). The old
+        # comment here claimed relabeling was harmless since "a player
+        # never sees raw (x, y)" -- WRONG: tests.test_regression's own
+        # test_campaign_grid_positions_agree_with_their_own_directions
+        # already encodes the real invariant every OTHER part of this
+        # codebase relies on (map_render's own line-drawing between
+        # adjacent cells, distance/adjacency logic) -- an "up" edge
+        # that actually lands EAST or SOUTH of its origin is a real,
+        # visible zigzag/backwards line on the map, exactly the kind of
+        # lie a lateral mislabel would also be. Never falls back to a
+        # different compass word now -- an occupied preferred cell gets
+        # the same honest "kept reachable via connections only, no
+        # compass label" treatment the 4-neighbor lateral overflow case
+        # already uses just below, which correctly lets a whole blocked
+        # sub-chain fall through to build_layer's own island/shelf-
+        # packing pass instead (its own separate, conflict-free space).
         vertical_preferred = {"down": "south", "up": "north"}
         for neighbor, direction in delve_here.items():
             if neighbor in coords:
                 continue
             preferred = vertical_preferred[direction]
-            candidates = [preferred] + [w for w in LATERAL_ORDER if w != preferred]
-            placed = False
-            for word in candidates:
-                dx, dy = DELTA[word]
-                target = (cx + dx, cy + dy)
-                if target in occupied and occupied[target] != neighbor:
-                    continue
-                coords[neighbor] = target
-                occupied[target] = neighbor
-                new_directions[current][direction] = neighbor
-                new_directions.setdefault(neighbor, {})[OPPOSITE[direction]] = current
-                queue.append(neighbor)
-                placed = True
-                break
-            if not placed:
+            dx, dy = DELTA[preferred]
+            target = (cx + dx, cy + dy)
+            if target in occupied and occupied[target] != neighbor:
                 notes.append(
-                    f"[{layer_name}] {current} <-> {neighbor}: real \"{direction}\" edge, but all 4 "
-                    f"neighboring cells are already occupied -- kept reachable via connections only."
+                    f"[{layer_name}] {current} <-> {neighbor}: real \"{direction}\" edge, but its own "
+                    f"{preferred} cell is already occupied by unrelated content -- kept reachable via "
+                    f"connections only, no compass label."
                 )
+                continue
+            coords[neighbor] = target
+            occupied[target] = neighbor
+            new_directions[current][direction] = neighbor
+            new_directions.setdefault(neighbor, {})[OPPOSITE[direction]] = current
+            queue.append(neighbor)
 
         # Excludes every up/down edge above (same-cell AND delve,
         # placed or not) -- a delve edge that lost its preferred slot
@@ -279,6 +285,7 @@ def build_layer(layer_name: str, places: dict) -> tuple[dict, list[str]]:
     # column count, a new shelf starts 2 rows below the deepest point
     # anything on the previous shelf actually reached.
     remaining = {lid for lid in places if lid not in coords}
+    occupied_cells: set[tuple[int, int]] = set(coords.values())
     main_min_x = min((x for x, _ in coords.values()), default=0)
     # Real render limit (map_render.py: _MAX_CANVAS_WIDTH=1800,
     # CELL_SIZE=150, _MARGIN=30 -- (1800 - 30*2) / 150 = 11.8) -- using
@@ -326,8 +333,27 @@ def build_layer(layer_name: str, places: dict) -> tuple[dict, list[str]]:
 
         x_shift = (shelf_x - island_min_x)
         y_shift = (shelf_top_y - 2) - island_max_y
+        # Real collision guard (2026-09-05, found by this same session's
+        # audit while fixing the delve mislabeling bug above -- which
+        # made leftover islands genuinely common for the first time,
+        # instead of the rare edge case this shelf-packer was written
+        # for): the shelf bookkeeping above is only a bounding-box
+        # heuristic against OTHER islands already shelved THIS pass --
+        # it has no idea the main component (or an earlier island)
+        # might already occupy cells further down some OTHER column
+        # this island's own columns also pass through (this layer's
+        # real content is full of long, irregular vertical shafts, not
+        # a tidy rectangle). Confirmed live: two real, unrelated
+        # locations landed on the exact same cell before this guard
+        # existed. Slides the whole island straight down, one row at a
+        # time, until every one of its real cells is genuinely free --
+        # provably collision-free by construction, unlike the blind
+        # arithmetic this replaces.
+        while any((x + x_shift, y + y_shift) in occupied_cells for x, y in island_coords.values()):
+            y_shift -= 1
         for lid, (x, y) in island_coords.items():
             coords[lid] = (x + x_shift, y + y_shift)
+            occupied_cells.add((x + x_shift, y + y_shift))
         shelf_bottom_y = min(shelf_bottom_y, island_min_y + y_shift)
         shelf_x += island_cols + 2
 
@@ -347,13 +373,46 @@ def build_layer(layer_name: str, places: dict) -> tuple[dict, list[str]]:
     return results, notes
 
 
+def _converge_layer(layer_name: str, places: dict, max_iterations: int = 5) -> tuple[dict, list[str]]:
+    """
+    Real live gap (2026-09-05, found by this session's own map-collision
+    audit): build_layer's BFS placement uses each location's EXISTING
+    `directions` as a same-strength hint (see its own docstring) --
+    which means a single pass doesn't always reach a fully self-
+    consistent fixed point starting cold from a campaign.json that
+    still carries the OLD, inconsistent hints a past bug wrote.
+    Confirmed live: fixing that bug's own real-world fallout took 3
+    full passes to fully converge to zero real collisions (each pass's
+    freshly-computed directions become the next pass's hints, letting
+    BFS explore differently and resolve edges the previous pass
+    couldn't). Iterates automatically instead of leaving "run --apply
+    several times" as undocumented tribal knowledge -- stops as soon as
+    a pass makes no further changes, capped so a genuinely pathological
+    layer can't loop forever.
+    """
+    working = {lid: dict(info) for lid, info in places.items()}
+    results, notes = {}, []
+    for _ in range(max_iterations):
+        results, notes = build_layer(layer_name, working)
+        changed = False
+        for lid, entry in results.items():
+            if working[lid].get("directions") != entry["directions"]:
+                changed = True
+            working[lid]["directions"] = entry["directions"]
+            if "grid_position" in entry:
+                working[lid]["grid_position"] = entry["grid_position"]
+        if not changed:
+            break
+    return results, notes
+
+
 def main() -> None:
     apply = "--apply" in sys.argv
     campaign = json.loads(CAMPAIGN_PATH.read_text())
     all_notes = []
     diff_count = 0
     for layer_name, places in campaign["locations"].items():
-        results, notes = build_layer(layer_name, places)
+        results, notes = _converge_layer(layer_name, places)
         all_notes.extend(notes)
         for lid, entry in results.items():
             old_dirs = places[lid].get("directions") or {}

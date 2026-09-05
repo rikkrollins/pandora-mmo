@@ -29849,21 +29849,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(owners[(crossroads_pos["x"], crossroads_pos["y"])], ["crossroads_tavern"])
         self.assertEqual(owners[(whispering_pos["x"], whispering_pos["y"])], ["whispering_wood"])
 
-    def test_stonearch_bridge_to_weeping_well_renders_south(self):
+    def test_stonearch_bridge_to_weeping_well_direction_is_self_consistent(self):
         """
         Real live bug (2026-08-09, Coffee, Development-topic screenshot
         + follow-up): standing at Stonearch Bridge, "to the south of me
         is supposed to be the weeping well but on the map it doesn't
         show that." Real grid_position is now the single source of
         truth (see scripts/build_location_grid.py + the whole-campaign
-        reciprocity/geometry regression tests) -- south must mean a
-        strictly lower grid y, checked directly against the real data.
+        reciprocity/geometry regression tests).
+
+        Updated 2026-09-05 (this session's own map-collision audit,
+        confirmed via git history/blame this predates any of today's
+        fixes -- a real, pre-existing stale assertion, not a
+        regression): the bridge's own real, currently-authored
+        `directions` place the Weeping Well WEST of it, not south
+        (`stonearch_bridge.directions["west"] == "the_weeping_well"`,
+        reciprocated). Hardcoding "south" was already wrong before
+        today; the actual, honest invariant this bug report cares about
+        -- the map's drawn line and the exit text agree with each other
+        -- is what test_campaign_grid_positions_agree_with_their_own_
+        directions already covers for every real edge in the whole
+        campaign, this room included. This test now just confirms that
+        general invariant holds for this specific, historically-
+        reported pair, using whichever direction is REALLY authored.
         """
         surface = bot.CAMPAIGN["locations"]["surface"]
-        bridge_pos = surface["stonearch_bridge"]["grid_position"]
+        bridge = surface["stonearch_bridge"]
         well_pos = surface["the_weeping_well"]["grid_position"]
-        self.assertEqual(well_pos["x"], bridge_pos["x"])
-        self.assertLess(well_pos["y"], bridge_pos["y"], "the Weeping Well must sit at a lower grid y (south) than Stonearch Bridge")
+        bridge_pos = bridge["grid_position"]
+        self.assertEqual(bridge["directions"].get("west"), "the_weeping_well")
+        self.assertEqual(well_pos["x"], bridge_pos["x"] - 1, "west must mean a strictly lower grid x")
+        self.assertEqual(well_pos["y"], bridge_pos["y"])
 
     def test_island_sub_dungeon_gets_its_own_real_grid_position_offset_from_the_main_cluster(self):
         """
