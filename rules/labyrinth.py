@@ -68,7 +68,21 @@ _SIDE_ROOM_COUNT_RANGE = (3, 5)
 # matching this module's own hard "must run in well under a second"
 # requirement. See [[project_zelda_dungeon_algorithm_research]] for the
 # full research writeup.
-_BRANCH_DEPTH_WEIGHTS = ([0, 1, 2], [0.45, 0.35, 0.2])  # most branches stay shallow; a few run genuinely deep
+# Real live request (2026-09-05, per Coffee: "make longer
+# interconnectable pathways like the samples i gave the other day" --
+# following up on the same "Zelda Dungeon Path & Gateway System"
+# reference research above). Confirmed by direct code read before this
+# change: a branch topped out at 2 extra rooms (3 total, root
+# included), so main_chain -- the one guaranteed hub-to-stairs path --
+# could never run longer than 3 rooms even at its statistical best.
+# Every real reference map Coffee shared shows genuine multi-room
+# hallways, not a 1-2-room hop. Widened to 0-4 extra rooms with the
+# weight shifted toward real depth (mean ~2.1 extra rooms now, vs.
+# ~0.75 before) -- still probabilistic (a few short branches keep
+# reading as real dead-ends, matching every reference map's own mix of
+# long halls and short side rooms) rather than a fixed length, which
+# would make every floor feel identically shaped.
+_BRANCH_DEPTH_WEIGHTS = ([0, 1, 2, 3, 4], [0.10, 0.20, 0.25, 0.25, 0.20])
 _BRANCH_GATE_CHANCE = 0.35
 _MINIBOSS_CHANCE = 0.3
 
@@ -167,8 +181,17 @@ _GATED_ENCOUNTER_CHANCE = 0.3
 # any room that's only reachable through a still-real lock (a branch
 # gate) or that a collapse-puzzle can later seal off -- a bare loop-back
 # edge into either would silently bypass that gate/trigger forever.
-_LOOP_BACK_CHANCE = 0.4
-_LOOP_BACK_MAX_EDGES = 3
+_LOOP_BACK_CHANCE = 0.5
+# Real live request (2026-09-05, per Coffee: "make longer
+# interconnectable pathways like the samples i gave the other day").
+# A flat cap of 3 real loop-back edges made sense when floors were
+# small (5 or so rooms, per the OLD _BRANCH_DEPTH_WEIGHTS), but the
+# longer branches above roughly triple a floor's real room count --
+# the same fixed 3 would read as proportionally sparser, not denser,
+# interconnection on a bigger floor. Scales the same way side_room_max
+# already does (deeper floors, more headroom), so "interconnectable"
+# keeps meaning something as floors grow.
+_LOOP_BACK_MAX_EDGES = 5
 
 # L3: one segment = this many real, interconnected floors. Reuses the
 # exact number Phase L2c's milestone interval already used, per
@@ -627,8 +650,9 @@ def _add_loop_back_connections(rooms: dict, hub_id: str, connector_id: str, rng:
     rng.shuffle(candidates)
     added = 0
     chance = _scaled_chance(_LOOP_BACK_CHANCE, floor, 0.05, 0.9)
+    max_edges = _LOOP_BACK_MAX_EDGES + min(floor // 10, 5)  # same depth-scaled-headroom shape as side_room_max above
     for a, b in candidates:
-        if added >= _LOOP_BACK_MAX_EDGES:
+        if added >= max_edges:
             break
         if rng.random() < chance:
             rooms[a].setdefault("connections", []).append(b)
@@ -1211,12 +1235,14 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # so warping between two such leaves always saves real distance
     # (>= 4 hops the long way vs. 1 hop through the warp).
     warp_candidates = [c[-1] for c in branch_chains if c is not main_chain and len(c) >= 2]
+    warp_endpoint_ids: set = set()
     if len(warp_candidates) >= 2 and rng.random() < _scaled_chance(_WARP_CHANCE, floor, 0.002, 0.5):
         warp_a, warp_b = rng.sample(warp_candidates, 2)
         rooms[warp_a].setdefault("warps", []).append(warp_b)
         rooms[warp_b].setdefault("warps", []).append(warp_a)
         rooms[warp_a]["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else on this floor."
         rooms[warp_b]["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else on this floor."
+        warp_endpoint_ids = {warp_a, warp_b}
 
     # Real Eagle's Tower-style structural puzzle (2026-09-03): solving
     # it doesn't just open one new door, it ALSO seals a previously-open
@@ -1263,7 +1289,14 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             # The real reward: a genuine new shortcut opens elsewhere on
             # the floor the instant this same trigger fires, so solving
             # it is a real trade, not just a loss.
-            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain]
+            # Excludes real warp endpoints too (2026-09-05, real
+            # regression found and fixed while shipping "longer
+            # interconnectable pathways"): an echo shortcut landing on
+            # the SAME tail a warp already connects to silently
+            # shortens that warp's own real distance-saved guarantee
+            # (already computed and relied on above, before this
+            # puzzle's own placement runs).
+            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain and c[-1] not in warp_endpoint_ids]
             if len(shortcut_pair) >= 2:
                 shortcut_a, shortcut_b = rng.sample(shortcut_pair, 2)
                 rooms[shortcut_a].setdefault("locked_connections", {})[shortcut_b] = trigger_id
@@ -1337,7 +1370,14 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             })
             rooms[seal_parent].setdefault("collapsing_connections", {})[seal_leaf] = trigger_id
             rooms[seal_parent]["description"] += " Something here feels structurally unstable -- like a well-placed blow, twice over, could bring it down."
-            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain]
+            # Excludes real warp endpoints too (2026-09-05, real
+            # regression found and fixed while shipping "longer
+            # interconnectable pathways"): an echo shortcut landing on
+            # the SAME tail a warp already connects to silently
+            # shortens that warp's own real distance-saved guarantee
+            # (already computed and relied on above, before this
+            # puzzle's own placement runs).
+            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain and c[-1] not in warp_endpoint_ids]
             if len(shortcut_pair) >= 2:
                 shortcut_a, shortcut_b = rng.sample(shortcut_pair, 2)
                 rooms[shortcut_a].setdefault("locked_connections", {})[shortcut_b] = trigger_id
@@ -1382,6 +1422,46 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             "id": f"f{floor}_hint_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing",
             "hint_lines": hint_lines,
         })
+
+    # Real shortcut levers (2026-09-05, per Coffee: "make longer
+    # interconnectable pathways like the samples i gave the other day").
+    # _add_loop_back_connections just below only ever connects rooms
+    # that happen to land grid-ADJACENT after placement -- with branches
+    # radiating outward from the hub in mostly-separate directions, that
+    # rarely fires in practice (confirmed empirically: under 1 real loop
+    # edge per floor on average even with today's widened chance/cap).
+    # A deliberate shortcut lever is the same real, proven mechanic
+    # dungeon_evolve.py's own evolved dungeons already use for exactly
+    # this ("the genuine Zelda beat: pull the lever at the FAR end of
+    # the branch and gain a quick way straight back to the hub -- not
+    # the hub reaching into the branch") -- ported here so a branch that
+    # got genuinely LONG under the widened _BRANCH_DEPTH_WEIGHTS above
+    # also gets real interconnection, not just extra length. Kind
+    # "lever" always auto-succeeds with no roll (_do_lockpick), and the
+    # lockable + locked_connections entry live ONLY on the tail room
+    # pointing back at the hub -- same one-way-findable shape
+    # add_lever_shortcut already establishes, so it can never be
+    # triggered from the hub side and never bypasses anything (the
+    # branch was already freely reachable; this only adds a faster way
+    # back out of it).
+    #
+    # Excludes any chain whose tail is a real warp endpoint (2026-09-05,
+    # real regression found and fixed while shipping this): a warp's
+    # own "genuine shortcut" guarantee is that its two ends are
+    # otherwise far apart (see _WARP_CHANCE's own live-bug history
+    # above) -- a lever placed on that SAME tail would shorten the real
+    # distance back to the hub to just 1 hop, silently undermining a
+    # guarantee the warp placement above already computed and relied
+    # on before this lever mechanic existed.
+    long_chains = [c for c in other_chains if len(c) >= 3 and c[-1] not in warp_endpoint_ids]
+    for i, chain in enumerate(long_chains):
+        if rng.random() < _scaled_chance(_LOOP_BACK_CHANCE, floor, 0.05, 0.9):
+            tail_id = chain[-1]
+            lever_id = f"f{floor}_shortcut_lever_{i}"
+            rooms[tail_id].setdefault("lockables", []).append({
+                "id": lever_id, "kind": "lever", "name": "a weathered lever",
+            })
+            rooms[tail_id].setdefault("locked_connections", {})[hub_id] = lever_id
 
     _assign_grid_positions(rooms, hub_id)
     _add_loop_back_connections(rooms, hub_id, connector["id"], rng, floor)

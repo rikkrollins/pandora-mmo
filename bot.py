@@ -10368,11 +10368,32 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
                 destination_id = dest["id"]
                 break
     if destination_id is None:
+        # Real live bug (2026-09-05, found while widening branch depth
+        # for "longer interconnectable pathways"): every theme reuses
+        # the same base room name across many rooms, disambiguated only
+        # by a trailing number ("A Room That Shouldn't Fit 1" / "...
+        # 11" / "...12" ...). A floor deep enough to need two digits
+        # means a SHORTER name is a real substring of a LONGER one
+        # ("...Fit 1" inside "...Fit 11") -- the first-match loop below
+        # used to just take whichever `dest_id` happened to come first
+        # in `reachable_ids`, silently landing on the wrong room instead
+        # of the one actually named. Collects every real match instead
+        # and prefers the LONGEST matched name -- the most specific
+        # real room name always wins over a shorter one it happens to
+        # contain, same "don't guess, resolve to the real specific
+        # thing" discipline _find_lockable's own distinctive-word
+        # matching already uses for lockables.
+        best_dest_id, best_len = None, -1
         for dest_id in reachable_ids:
             dest = run["rooms"].get(dest_id)
-            if dest and (dest_id in lowered or dest["name"].lower() in lowered):
-                destination_id = dest_id
-                break
+            if not dest:
+                continue
+            if dest_id in lowered and len(dest_id) > best_len:
+                best_dest_id, best_len = dest_id, len(dest_id)
+            name_lower = dest["name"].lower()
+            if name_lower in lowered and len(name_lower) > best_len:
+                best_dest_id, best_len = dest_id, len(name_lower)
+        destination_id = best_dest_id
     if destination_id is None:
         await update.effective_chat.send_message(
             "Nothing that way — try one of the paths you can already see.",

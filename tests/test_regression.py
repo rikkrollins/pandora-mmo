@@ -35049,6 +35049,47 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             f"expected the bare compass word to resolve to the real south exit, got: {sink}",
         )
 
+    async def test_labyrinth_move_prefers_the_longer_name_over_a_substring_collision(self):
+        """
+        Real live bug (2026-09-05, found while widening branch depth for
+        "longer interconnectable pathways"): every theme reuses the same
+        base room name across many rooms on one floor, disambiguated
+        only by a trailing number ("A Room That Shouldn't Fit 1" /
+        "...11" / "...12"...). Once a floor has 10+ rooms of one theme,
+        a shorter name is a real substring of a longer one -- naming the
+        room explicitly by its full, correct name must never silently
+        land on a different, shorter-named room it happens to contain.
+        """
+        user_id, chat_id = 962073, -962073
+        make_basic_character(user_id, "SubstringMoveTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub["grid_position"] = {"x": 0, "y": 0}
+        room_1 = {
+            "id": "test_room_1", "floor": hub["floor"], "name": "A Room That Shouldn't Fit 1",
+            "description": "test", "connections": [hub["id"]], "monsters": [],
+            "grid_position": {"x": -1, "y": 0},
+        }
+        room_11 = {
+            "id": "test_room_11", "floor": hub["floor"], "name": "A Room That Shouldn't Fit 11",
+            "description": "test", "connections": [hub["id"]], "monsters": [],
+            "grid_position": {"x": 1, "y": 0},
+        }
+        hub["connections"] = ["test_room_1", "test_room_11"]
+        run["rooms"]["test_room_1"] = room_1
+        run["rooms"]["test_room_11"] = room_11
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), "A Room That Shouldn't Fit 11")
+        self.assertEqual(
+            db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "test_room_11",
+            f"expected the full, longer name to win over its own shorter substring, got: {sink}",
+        )
+
     def test_labyrinth_room_image_prompt_leans_dungeon_crawl_but_stays_grounded(self):
         """
         Real style enrichment (2026-09-03, Phase L4, item 2, per
@@ -36021,6 +36062,74 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 break
         self.assertTrue(deep_branch_seen, "expected at least one branch deeper than one room across 60 real seeds")
 
+    def test_generate_floor_places_a_real_shortcut_lever_solvable_by_construction(self):
+        """
+        Real live request (2026-09-05, per Coffee: "make longer
+        interconnectable pathways like the samples i gave the other
+        day"). A branch that's genuinely long (>= 3 rooms) should
+        sometimes get a real shortcut lever at its tail back to the
+        hub, same proven mechanic dungeon_evolve.py's own evolved
+        dungeons already use. Solvable by construction: the lockable +
+        locked_connections entry must live ONLY on the tail room, never
+        on the hub (so it can only ever be found/pulled from the far
+        end, never triggered from the hub's own side).
+        """
+        lever_seen = False
+        for seed in range(60):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 15, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub_id = floor_data["hub_room_id"]
+            lever_rooms = [
+                (rid, lk) for rid, r in rooms.items() for lk in r.get("lockables", [])
+                if lk.get("kind") == "lever" and "shortcut_lever" in lk["id"]
+            ]
+            if not lever_rooms:
+                continue
+            lever_seen = True
+            for tail_id, lever in lever_rooms:
+                self.assertEqual(rooms[tail_id]["locked_connections"].get(hub_id), lever["id"])
+                self.assertNotIn(tail_id, rooms[hub_id].get("locked_connections", {}), "must never be triggerable from the hub's own side")
+        self.assertTrue(lever_seen, "expected at least one real shortcut lever across 60 real seeds")
+
+    async def test_labyrinth_shortcut_lever_opens_a_quick_way_back_to_the_hub_end_to_end(self):
+        """Real end-to-end, same "genuine Zelda beat" shape as the evolved-dungeon version: pull the lever at the FAR end of a long branch and gain a quick way straight back to the hub."""
+        lever_tail_id = lever_id = hub_id = None
+        floor_data = None
+        for seed in range(60):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 15, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub_id = floor_data["hub_room_id"]
+            found = next(
+                ((rid, lk) for rid, r in rooms.items() for lk in r.get("lockables", [])
+                 if lk.get("kind") == "lever" and "shortcut_lever" in lk["id"]),
+                None,
+            )
+            if found:
+                lever_tail_id, lever = found
+                lever_id = lever["id"]
+                break
+        self.assertIsNotNone(lever_tail_id, "expected at least one real shortcut lever across 60 real seeds")
+
+        user_id, chat_id = 962074, -962074
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "LeverShortcutTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL, hp_max=999999)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=999999)
+        db.add_item(user_id, chat_id, "torch", 1)
+        db.create_labyrinth_run(chat_id, party_key, floor=15, seed=0, current_room_id=lever_tail_id, rooms=floor_data["rooms"])
+        character = db.get_character(user_id, chat_id)
+
+        lever = next(lk for lk in floor_data["rooms"][lever_tail_id]["lockables"] if lk["id"] == lever_id)
+        sink = []
+        await bot._do_lockpick(FakeUpdate(user_id, "pull the lever", sink, chat_id=chat_id), character, dict(lever), "pull the lever")
+        self.assertIn(lever_id, bot._UNLOCKED.get(chat_id, set()), f"expected the lever to actually unlock, got: {sink}")
+
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), floor_data["rooms"][hub_id]["name"])
+        self.assertEqual(
+            db.get_labyrinth_run(chat_id, party_key)["current_room_id"], hub_id,
+            f"expected the quick way back to the hub to actually work, got: {sink2}",
+        )
+
     def test_generate_floor_places_a_real_miniboss_guarding_the_main_path(self):
         """Statistical: a mini-boss room, when it fires, must sit on the real main path (reachable en route to the connector), never a side branch."""
         miniboss_seen = False
@@ -36174,6 +36283,22 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                     # comment). Real branch gates never carry "_echo_"
                     # in their lockable id.
                     if "_echo_" in lockable_id:
+                        continue
+                    # Real shortcut levers (2026-09-05, per Coffee:
+                    # "make longer interconnectable pathways") are the
+                    # SAME deliberate-exception shape, not a forward
+                    # gate: a lever's own locked_connections entry
+                    # points BACK at the hub from a branch's own tail,
+                    # same one-way-findable convention add_lever_
+                    # shortcut already establishes elsewhere in this
+                    # codebase. Checking by real kind (not an id-string
+                    # convention) is what actually makes this correct --
+                    # the hub is trivially always in `visited` (BFS
+                    # seeds it there), so treating this as an ordinary
+                    # gate would make this assertion fail on every
+                    # single real lever, always, by construction.
+                    lockable = next((lk for lk in room.get("lockables", []) if lk["id"] == lockable_id), None)
+                    if lockable is not None and lockable.get("kind") == "lever":
                         continue
                     gate_checked = True
                     # BFS from the hub via PLAIN connections only (no
@@ -36492,6 +36617,36 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_labyrinth_key_gate_end_to_end_chest_and_drop_and_consumption(self):
         """Real end-to-end: find/obtain the key (via the real chest-loot path or a real combat victory), open the real gated door with it, and confirm the key is gone afterward -- not just comparing generator output in isolation."""
+        async def _walk_to_room(rooms, start_id, target_id, user_id, chat_id):
+            # Real fix (2026-09-05, alongside "longer interconnectable
+            # pathways"): a single _do_labyrinth_move call only ever
+            # covers ONE hop -- fine when every branch topped out at 2
+            # extra rooms, but the widened _BRANCH_DEPTH_WEIGHTS above
+            # can now genuinely put the key chest/drop room several real
+            # hops deep, so a direct move silently failed to reach it.
+            # Real BFS walk over the floor's own `connections`, one real
+            # _do_labyrinth_move per hop, same discipline this file's
+            # own _walk_to_checkpoint helper already uses elsewhere.
+            from collections import deque
+            parent = {start_id: None}
+            queue = deque([start_id])
+            while queue:
+                cur = queue.popleft()
+                if cur == target_id:
+                    break
+                for nb in rooms[cur].get("connections", []):
+                    if nb in rooms and nb not in parent:
+                        parent[nb] = cur
+                        queue.append(nb)
+            path = []
+            node = target_id
+            while node is not None:
+                path.append(node)
+                node = parent.get(node)
+            path.reverse()
+            for room_id in path[1:]:
+                await bot._do_labyrinth_move(FakeUpdate(user_id, "", [], chat_id=chat_id), rooms[room_id]["name"])
+
         user_id, chat_id = 962060, -962060
         party_key = f"solo:{user_id}"
         make_basic_character(user_id, "KeyGateTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL, hp_max=999999)
@@ -36509,12 +36664,34 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             if door is None:
                 continue
             gated_room_id = next(d for d, lid in hub["locked_connections"].items() if lid == door["id"])
+            # Real fix (2026-09-05, alongside "longer interconnectable
+            # pathways"): more mechanics can now genuinely compete for
+            # the same floor's `other_chains` (mandatory gate, optional
+            # branch gate, rune/switch gates, shortcut levers, carry
+            # puzzles), so the key chest/drop room this test cares about
+            # can itself land behind a DIFFERENT, unrelated gate this
+            # test was never meant to also solve. Only real plain-
+            # connections-reachable candidates count -- this test is
+            # about the key gate mechanic specifically, not chained
+            # multi-gate solving.
+            from collections import deque
+            plain_reachable = {hub_id}
+            _frontier = deque([hub_id])
+            while _frontier:
+                _cur = _frontier.popleft()
+                for _nb in rooms[_cur].get("connections", []):
+                    if _nb in rooms and _nb not in plain_reachable:
+                        plain_reachable.add(_nb)
+                        _frontier.append(_nb)
             key_chest_room = next(
                 (rid for rid, r in rooms.items()
-                 if any(lk.get("kind") == "chest" and "labyrinth_floor_key" in lk.get("loot", {}) for lk in r.get("lockables", []))),
+                 if rid in plain_reachable
+                 and any(lk.get("kind") == "chest" and "labyrinth_floor_key" in lk.get("loot", {}) for lk in r.get("lockables", []))),
                 None,
             )
-            key_drop_room = next((rid for rid, r in rooms.items() if r.get("guaranteed_key_drop")), None)
+            key_drop_room = next(
+                (rid for rid, r in rooms.items() if rid in plain_reachable and r.get("guaranteed_key_drop")), None,
+            )
             is_chest_case = key_chest_room is not None and not found_chest_case
             is_drop_case = key_drop_room is not None and not found_drop_case and not is_chest_case
             if not is_chest_case and not is_drop_case:
@@ -36532,14 +36709,12 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             db.create_labyrinth_run(chat_id, party_key, floor=1, seed=seed, current_room_id=hub_id, rooms=rooms)
             if is_chest_case:
                 found_chest_case = True
-                key_room_name = rooms[key_chest_room]["name"]
                 lockable_id = next(lk["id"] for lk in rooms[key_chest_room]["lockables"] if lk.get("kind") == "chest" and "labyrinth_floor_key" in lk.get("loot", {}))
-                await bot._do_labyrinth_move(FakeUpdate(user_id, "", [], chat_id=chat_id), key_room_name)
+                await _walk_to_room(rooms, hub_id, key_chest_room, user_id, chat_id)
                 await bot._do_skill_check(FakeUpdate(user_id, "open the lockbox", [], chat_id=chat_id), "dexterity", "open the lockbox", forced_roll=20)
             else:
                 found_drop_case = True
-                key_room_name = rooms[key_drop_room]["name"]
-                await bot._do_labyrinth_move(FakeUpdate(user_id, "", [], chat_id=chat_id), key_room_name)
+                await _walk_to_room(rooms, hub_id, key_drop_room, user_id, chat_id)
                 await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
                 fight_session = sessions.get_session_for_user(chat_id, user_id)
                 if fight_session is not None:
@@ -36550,7 +36725,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             character = db.get_character(user_id, chat_id)
             self.assertIn("labyrinth_floor_key", character["inventory"], "expected the key to actually be obtained")
 
-            await bot._do_labyrinth_move(FakeUpdate(user_id, "", [], chat_id=chat_id), hub["name"])
+            current_room_id = db.get_labyrinth_run(chat_id, party_key)["current_room_id"]
+            await _walk_to_room(rooms, current_room_id, hub_id, user_id, chat_id)
             sink = []
             await bot._do_skill_check(FakeUpdate(user_id, "open the barred door", sink, chat_id=chat_id), "dexterity", "open the barred door")
             self.assertTrue(any("opens" in s for s in sink), sink)

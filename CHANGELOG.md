@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.515] — feature: longer, more interconnectable Labyrinth pathways (start of the generator improvement pass)
+
+First piece of the requested "make the dungeon better and more
+advanced" improvement pass (Coffee: "make longer interconnectable
+pathways like the samples i gave the other day" -- the same Zelda
+Dungeon Path & Gateway reference research). Two real generator
+changes, both in `rules/labyrinth.py`:
+
+- **Longer branches.** `_BRANCH_DEPTH_WEIGHTS` topped out at 2 extra
+  rooms (3 total, root included) -- meaning `main_chain`, the one
+  guaranteed hub-to-stairs path, could never run longer than 3 rooms
+  even at its statistical best. Widened to 0-4 extra rooms with the
+  weight shifted toward real depth (mean ~2.1 extra rooms now, vs.
+  ~0.75 before) -- still probabilistic, so a mix of long halls and
+  short dead-ends keeps every floor from feeling identically shaped.
+
+- **Real shortcut levers.** Passive loop-back edges (grid-adjacent
+  rooms happening to connect) turned out to fire under 1 time per
+  floor on average even with today's widened chance/cap -- branches
+  radiate outward from the hub in mostly separate directions, so they
+  rarely land next to each other by chance. Ported the same real,
+  already-proven mechanic dungeon_evolve.py's own evolved dungeons use
+  for exactly this: a genuinely long branch (>= 3 rooms) can now get a
+  real lever at its tail, opening a one-way quick path straight back to
+  the hub -- solvable by construction (findable only from the far end,
+  auto-succeeds with no roll), averaging ~1-2 real levers per floor and
+  scaling with depth.
+
+Both interact with several already-existing mechanics in ways that
+needed real fixes, not just tuning: a lever or a carry-puzzle's own
+"echo" shortcut landing on the same tail as a real warp silently
+undermined the warp's own "always a genuine shortcut" guarantee (now
+excluded); a floor with 10+ rooms sharing one theme's name template
+exposed a real, more broadly-impacting bug in `bot._do_labyrinth_move`
+itself -- "A Room That Shouldn't Fit 1" is a literal substring of "...
+11", and the matcher took whichever name matched first rather than the
+most specific one, silently landing a named move on the wrong room
+(fixed to always prefer the longest real match); and a key-gate/
+mandatory-gate end-to-end test's own single-hop move assumptions
+needed a real multi-hop BFS walk once branches could genuinely run
+several rooms deep. All fixed, not just the tests loosened. Verified:
+new lever/depth-specific tests, the full generate_floor-touching test
+family (37 tests), and the complete Labyrinth/DungeonEvolve/
+SwitchAndBreakableAndPitTests suite (179 tests) all clean.
+
+Deeper cuts of this pass (real end-of-segment bosses, multi-step
+combination puzzles, unique Labyrinth-exclusive gear) still to come.
+
 ## [1.27.514] — fix: real world-map orientation bug across 3 dungeons, found by a requested audit
 
 Coffee asked for a direct audit: "double check the world map for
