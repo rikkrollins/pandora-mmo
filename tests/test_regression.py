@@ -9977,6 +9977,47 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(expiry, round_before + 4)
         sessions.end_session(-999)
 
+    async def test_shield_now_rolls_a_random_3_to_5_round_duration_instead_of_a_flat_1(self):
+        """
+        Real live request (2026-09-05, per Coffee, dev-bridge: "I want
+        shield and other spells [with] that similar mechanic to have 3
+        to 5 turns and then the option for RNG for how long they last.
+        One turn is way too short"). Shield used to be force-pinned to
+        exactly 1 round regardless of duration_rounds -- now joins the
+        same real 3-5 round RNG every other buff using the "10"
+        sentinel already rolls (Bless, Charm Person, etc., 2026-08-26).
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 900489
+        make_basic_character(
+            uid, "ShieldDurationRoller", char_class="Wizard", known_spells=["shield"], spell_slots_max=3,
+            current_location="crossroads_tavern",
+        )
+        db.update_character(uid, -999, spell_slots_current=3)
+        enemy = {"telegram_user_id": -5200924, "name": "ShieldDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 5, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5200924: "enemy"})
+        session.turn_order = [uid, -5200924]
+        session.current_turn_index = 0
+
+        round_before = session.round_number
+        sink = []
+        with patch("bot.random.randint", return_value=4) as mock_randint, \
+                patch("bot.narrate_action", return_value="A shimmer of force surrounds you."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_cast_spell(FakeUpdate(uid, "cast shield", sink), "cast shield")
+        mock_randint.assert_any_call(3, 5)
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertIn("shield_active", caster_p.get("conditions", []))
+        expiry = caster_p.get("condition_expires_round", {}).get("shield_active")
+        self.assertIsNotNone(expiry)
+        self.assertEqual(expiry, round_before + 4, f"expected a real rolled duration, not the old flat 1 round, got: {sink}")
+        sessions.end_session(-999)
+
     async def test_charmed_condition_ends_early_on_a_successful_wisdom_save(self):
         import sessions
         from unittest.mock import patch
@@ -38169,6 +38210,44 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             "talk to the elder bone legionnaire",
         )
         self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+
+    async def test_check_formation_works_inside_the_labyrinth(self):
+        """
+        Real live report (2026-09-05, dev-bridge screenshot, Sugar:
+        "Show formation" mid-fight deep in the Labyrinth got the same
+        generic "That doesn't work this deep in the Labyrinth" refusal).
+        _do_check_formation is entirely combat-session based
+        (sessions.get_session_for_user + _maybe_send_battle_formation_
+        image) -- it never touches cl.get_location/CAMPAIGN at all, so
+        it only needed to be let through the allowlist gate, same as
+        every other addition here.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        user_id, chat_id = 962075, -962075
+        make_basic_character(user_id, "LabyrinthFormationTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        rooms[run["current_room_id"]]["monsters"] = ["goblin"]
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session, "expected a real fight to have started")
+
+        sink = []
+        with patch.object(bot, "_maybe_send_battle_formation_image", new=AsyncMock()) as mock_formation:
+            await bot._dispatch_intent(
+                FakeUpdate(user_id, "show formation", sink, chat_id=chat_id), DummyContext(),
+                {"action": "check_formation", "raw_text": "show formation"}, "show formation",
+            )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+        mock_formation.assert_awaited_once()
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        sessions.end_session(chat_id, session)
 
     async def test_ambient_ai_chat_inside_the_labyrinth_stays_silent_not_a_visible_refusal(self):
         """

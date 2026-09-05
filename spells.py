@@ -34,7 +34,18 @@ SPELLS = {
     },
     "shield": {
         "name": "Shield", "level": 1, "school": "abjuration",
-        "effect": "ac_bonus", "amount": 5, "duration_rounds": 1,
+        # Real live request (2026-09-05, per Coffee, dev-bridge: "I want
+        # shield and other spells [with] that similar mechanic to have 3
+        # to 5 turns and then the option for RNG for how long they
+        # last. One turn is way too short"). Reuses the SAME "10" cast-
+        # time-RNG sentinel bot.py's own _do_cast_spell already rolls
+        # 3-5 rounds from for Bless/Charm Person/etc. (2026-08-26) --
+        # this only ever applies to a real, manually-cast Shield used as
+        # a standing buff; the separate auto-triggered reaction version
+        # (an instant, retroactive "was that hit going to land?" check
+        # against ONE specific attack) doesn't read this field at all
+        # and is unaffected.
+        "effect": "ac_bonus", "amount": 5, "duration_rounds": 10,
     },
     "cure_wounds": {
         "name": "Cure Wounds", "level": 1, "school": "evocation",

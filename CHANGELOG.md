@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.517] — fix: "Show formation" refused inside the Labyrinth + Shield's duration was pinned to 1 round
+
+Two real live fixes from the Development topic.
+
+**"Show formation" refused inside the Labyrinth** (Sugar, dev-bridge
+screenshot, mid-fight: "That doesn't work this deep in the Labyrinth.
+Try moving, looking around, fighting, or leaving."). Same real bug
+class as the earlier rest/chat/summon_remnant/find_merchant Labyrinth-
+allowlist gaps this session already closed: `check_formation` was
+simply never added to the allowlist, even though `_do_check_formation`
+is entirely combat-session based (`sessions.get_session_for_user` +
+`_maybe_send_battle_formation_image`) and never touches
+`cl.get_location`/CAMPAIGN at all -- Labyrinth-safe by construction,
+same as everything else already on that list. Added.
+
+**Shield's duration was pinned to exactly 1 round** (Coffee, dev-
+bridge: "I want shield and other spells [with] that similar mechanic
+to have 3 to 5 turns and then the option for RNG for how long they
+last. One turn is way too short"). This is the exact same request
+already granted once before (2026-08-26) for Bless/Charm Person/Animal
+Friendship/Hex/Faerie Fire/Invisibility/Protection from Evil and
+Good/Hold Person/Hold Monster -- all of them now roll a real random
+3-5 round duration at cast time instead of a flat 10 -- but Shield was
+explicitly excluded back then as "a genuinely different duration"
+(its own real 5E rule only needs it to last until your next turn).
+Coffee's follow-up asks for that exclusion to be lifted. Shield's
+`duration_rounds` now uses the same "10" sentinel every other spell in
+that group already does, so it rolls the identical 3-5 round RNG --
+zero new code needed beyond removing the one special-case override
+that force-pinned it to 1 regardless. The separate auto-triggered
+Shield REACTION (an instant, retroactive check against one specific
+incoming attack) doesn't read this field at all and is completely
+unaffected -- only a real, manually-cast Shield used as a standing
+buff changes.
+
+2 new tests (Labyrinth formation-check end-to-end, Shield's real 3-5
+round roll); full Labyrinth/DungeonEvolve/SwitchAndBreakableAndPitTests
+suite plus the full existing Shield test family (16 tests) re-verified
+clean -- one apparent affinity-boost mismatch traced to real Ollama
+narration latency under load (a pre-existing, already-documented
+flakiness source), confirmed unrelated by a clean isolated re-run.
+
 ## [1.27.516] — feature: Advanced Dungeon Map System, phase 1 (gateway colors, room hierarchy, ornate frame)
 
 Second piece of the requested dungeon-improvement pass, per Coffee's

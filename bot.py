@@ -20875,7 +20875,7 @@ _SPELL_MENU_MECHANIC_NOTES = {
     # ai/support_agent.py's own _SPELL_REAL_MECHANIC_OVERRIDES already
     # follows for these same four cantrips (2026-08-11 grounding fix).
     "counterspell": "Reaction-only -- automatically negates a monster's spell cast, can't be cast on your own turn.",
-    "shield": f"+{spells_module.SPELLS['shield']['amount']} AC for 1 round -- also auto-triggers as a real reaction against an attack that would've hit.",
+    "shield": f"+{spells_module.SPELLS['shield']['amount']} AC for a real 3-5 round window -- also auto-triggers instantly as a reaction against an attack that would've hit.",
     "guidance": "Gives a real +2 bonus to your own next skill/ability check.",
     "thaumaturgy": "Gives a real +2 bonus to your own next skill/ability check.",
     "mage_hand": "Gives a real +2 bonus to your own next skill/ability check.",
@@ -31778,9 +31778,22 @@ async def _cast_utility_spell(
     # OTHER half of his request -- a real saving throw each round for
     # the affected creature to end it early -- reuses Paralyzed's own
     # exact fixed-DC save mechanic, see Session._expire_timed_
-    # conditions. Spells with a genuinely different duration (1-round
-    # effects like Shield/Guidance, or 0 for instant effects) are
-    # completely unaffected -- this only ever touches the "10" marker.
+    # conditions. Spells with a genuinely different duration (0 for
+    # instant effects, or a real one-time-use token like Guidance --
+    # see the guidance/thaumaturgy/mage_hand/prestidigitation block
+    # below, a completely different "spent on next use" mechanic, not
+    # a per-round timer at all) are completely unaffected -- this only
+    # ever touches the "10" marker.
+    #
+    # Shield joined this same "10" marker 2026-09-05 (per Coffee, same
+    # dev-bridge thread: "shield and other spells [with] that similar
+    # mechanic [should] have 3 to 5 turns... one turn is way too
+    # short") -- it used to be the one real ac_bonus/buff spell
+    # deliberately excluded here (its own real 5E rule only needs it to
+    # last until your next turn), forced to exactly 1 round by a
+    # special case just below regardless of what this computed. That
+    # override is gone; spells.py's own duration_rounds=10 for shield
+    # now feeds this exact same computation like everything else here.
     raw_duration = spell.get("duration_rounds", 10) or 10
     duration = random.randint(3, 5) if raw_duration == 10 else raw_duration
 
@@ -31994,7 +32007,15 @@ async def _cast_utility_spell(
                 await _safe_send(update, f"🏃 **{character['name']}** casts {spell['name']} — fast enough to slip away clean.")
                 await _resolve_flee_attempt(update, session, text, forced_roll=20)
                 return
-            actual_duration = 1 if spell_id == "shield" else duration
+            # Real live request (2026-09-05, per Coffee, dev-bridge:
+            # "shield and other spells [with] that similar mechanic
+            # [should] have 3 to 5 turns... one turn is way too short").
+            # Shield used to be force-pinned to exactly 1 round here
+            # regardless of `duration` -- now it rolls the same real
+            # 3-5 round RNG every other spell using the "10" sentinel
+            # already gets (spells.py's own duration_rounds=10 for
+            # shield feeds the same computation above).
+            actual_duration = duration
             _apply_timed_condition(target_p, condition_for_spell, actual_duration, session)
             _maybe_boost_companion_affinity_for_support(update, character, target_p, 2, f"cast {spell['name']} on")
             note = f" on **{target_p['name']}**" if target_p["telegram_user_id"] != user_id else ""
@@ -33747,12 +33768,19 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # an unrecognized location id (the sentinel), so its BFS just finds
     # nothing and answers "no known merchant reachable from here" --
     # never crashes, never invents a location.
+    # Real live report (2026-09-05, dev-bridge, Sugar: "Show formation"
+    # deep in the Labyrinth mid-fight -> the same generic refusal.
+    # _do_check_formation is entirely combat-session based
+    # (sessions.get_session_for_user + _maybe_send_battle_formation_
+    # image) -- it never touches cl.get_location/CAMPAIGN at all, so
+    # it's Labyrinth-safe by construction, same as every other action
+    # added to this list above.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
         "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant", "find_merchant",
-        "rest", "go_inactive", "check_labyrinth_seed", "load_labyrinth_seed",
+        "rest", "go_inactive", "check_labyrinth_seed", "load_labyrinth_seed", "check_formation",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
