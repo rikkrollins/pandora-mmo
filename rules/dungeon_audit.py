@@ -31,6 +31,7 @@ traceable, not a generic paraphrase:
     path to the boss key must (check_no_self_referential_lock,
     check_boss_gated).
 """
+import random
 from collections import deque
 
 import remnants
@@ -663,6 +664,41 @@ def add_rune_gate(campaign: dict, room_id: str, dest_id: str, lockable_id: str, 
     _, room = found
     room.setdefault("lockables", []).append({"id": lockable_id, "kind": "door", "name": name, "requires_rune_item": rune_item, "rune_count": count})
     room.setdefault("locked_connections", {})[dest_id] = lockable_id
+
+
+# Real live gap found (2026-09-05, per Coffee, dev-bridge: "we need
+# you to add ethers to the item list of things that can be won from a
+# chest, or a battle, or finding in a room. ethers are very rare to
+# come by and in the labyrinth it is needed"). Investigation confirmed
+# the gap: every real dungeon chest (Labyrinth AND evolved-dungeon)
+# only ever grants greater_healing_potion + gold, and bot.py's own
+# BOSS_SPELL_TONIC_DROP_CHANCE/BOSS_SPELL_TONIC_DROP_WEIGHTS overworld
+# boss-kill roll never fires for a Labyrinth miniboss (real bosses are
+# explicitly excluded from _labyrinth_monster_pool, so no Labyrinth
+# combat participant is ever flagged is_boss). A caster could run
+# completely dry deep in the Labyrinth with no real path back to spell
+# slots from anything the dungeon itself gives you. Per Coffee's own
+# choice: reuse the EXISTING Spell Tonic line (spell_tonic/greater_
+# spell_tonic/supreme_spell_tonic) rather than invent a new item --
+# same real weighting bot.py's overworld boss-drop table already uses,
+# so a dungeon chest and an overworld boss kill feel like the same
+# real economy, not two different systems.
+SPELL_TONIC_DROP_CHANCE = 0.10
+SPELL_TONIC_DROP_WEIGHTS = {"spell_tonic": 50, "greater_spell_tonic": 35, "supreme_spell_tonic": 15}
+
+
+def maybe_add_spell_tonic_to_loot(loot: dict, rng: random.Random) -> None:
+    """
+    Real, independent rare roll -- mutates `loot` in place, adding one
+    real spell-tonic tier on top of whatever a chest already grants
+    (never REPLACING its existing gold/potion loot). Shared by both
+    real dungeon generators (rules/labyrinth.py, rules/dungeon_evolve.py)
+    so the same rare-drop economy applies everywhere a real chest gets
+    built, not just one.
+    """
+    if rng.random() < SPELL_TONIC_DROP_CHANCE:
+        tonic_id = rng.choices(list(SPELL_TONIC_DROP_WEIGHTS.keys()), weights=list(SPELL_TONIC_DROP_WEIGHTS.values()))[0]
+        loot[tonic_id] = loot.get(tonic_id, 0) + 1
 
 
 def dump_dungeon_graph(campaign: dict, dungeon_id: str) -> str:

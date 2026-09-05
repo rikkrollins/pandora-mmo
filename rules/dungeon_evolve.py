@@ -570,12 +570,18 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     chest_leaves = rng.sample(chest_pool, k=min(chests_needed, len(chest_pool)))
     for i, leaf_id in enumerate(chest_leaves):
         _, leaf_room = _find_room(campaign, leaf_id)
+        # Greater, not plain (2026-09-05, per Coffee, dev-bridge:
+        # "Instead of healing potions, can you give greater healing
+        # potions?" -- same fix as rules/labyrinth.py's own chests).
+        # Real independent rare spell-tonic roll (2026-09-05, per
+        # Coffee: "add ethers to the item list of things that can be
+        # won from a chest" -- see dungeon_audit.maybe_add_spell_
+        # tonic_to_loot's own docstring for the full reasoning).
+        cache_loot = {"greater_healing_potion": rng.randint(1, 2)}
+        dungeon_audit.maybe_add_spell_tonic_to_loot(cache_loot, rng)
         leaf_room.setdefault("lockables", []).append({
             "id": f"{new_dungeon_id}_cache_{i}", "kind": "chest", "name": "a real, half-buried cache",
-            # Greater, not plain (2026-09-05, per Coffee, dev-bridge:
-            # "Instead of healing potions, can you give greater healing
-            # potions?" -- same fix as rules/labyrinth.py's own chests).
-            "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(40, 220),
+            "loot": cache_loot, "gold": rng.randint(40, 220),
         })
 
     # Lever shortcut: from a non-boss branch leaf back to the new hub.
@@ -763,9 +769,11 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     bonus_room["name"] = f"{display_name} -- A Quiet Alcove"
     bonus_room["description"] = "Off the main path, easy to miss -- exactly the kind of place worth a second look."
     bonus_room["monsters"] = []
+    bonus_loot = {"greater_healing_potion": 1}
+    dungeon_audit.maybe_add_spell_tonic_to_loot(bonus_loot, rng)
     bonus_room.setdefault("lockables", []).append({
         "id": f"{new_dungeon_id}_bonus_cache", "kind": "chest", "name": "an unguarded stash",
-        "loot": {"greater_healing_potion": 1}, "gold": rng.randint(60, 180),
+        "loot": bonus_loot, "gold": rng.randint(60, 180),
     })
 
     # Dungeon shop for larger dungeons only (2026-09-01) -- the shop

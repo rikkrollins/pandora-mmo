@@ -1326,6 +1326,23 @@ MAP_LOOT_DROP_CHANCE = 0.08  # task #141 (discoverable half): rare map find on a
 BOSS_SPELL_TONIC_DROP_CHANCE = 0.35
 BOSS_SPELL_TONIC_DROP_WEIGHTS = {"spell_tonic": 50, "greater_spell_tonic": 35, "supreme_spell_tonic": 15}
 
+# Real live gap found (2026-09-05, per Coffee, dev-bridge: "we need you
+# to add ethers to the item list of things that can be won from a
+# chest, or a battle, or finding in a room. ethers are very rare to
+# come by and in the labyrinth it is needed" -- the SAME "ethers" this
+# whole tonic line already exists for, per the 2026-08-10 comment just
+# above). Confirmed by direct code read: the boss-only roll above never
+# fires for a Labyrinth miniboss -- real bosses are explicitly excluded
+# from rules.labyrinth._labyrinth_monster_pool, so no Labyrinth combat
+# participant is ever flagged is_boss. A caster could run completely
+# dry deep in the Labyrinth with no real path back to spell slots from
+# anything the dungeon itself gives you. Lower chance than the overworld
+# boss roll (miniboss rooms are themselves already a real, non-
+# guaranteed roll per floor -- stacking two full-strength rare rolls
+# would make this less rare overall, not more) -- reuses the SAME real
+# weights above rather than a second, divergent tier split.
+LABYRINTH_MINIBOSS_SPELL_TONIC_DROP_CHANCE = 0.12
+
 # Guild tier-5 capstone material (2026-08-11, per Coffee: cover every
 # guild tier from level 1 to end game). Deliberately far rarer than the
 # spell tonics above -- this feeds the true END of both the Enchanters'
@@ -10789,6 +10806,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     # flag, same convention as the checkpoint/hazard triggers.
     reward_line = None
     miniboss_rune_line = None
+    miniboss_tonic_line = None
     if room.get("is_miniboss_room") and not room.get("miniboss_reward_claimed"):
         room["miniboss_reward_claimed"] = True
         item_id = labyrinth_module._milestone_item_for_floor(room.get("floor", run["floor"]))
@@ -10809,6 +10827,17 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             if not m.get("is_ai"):
                 db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_rune", 1)
         miniboss_rune_line = f"🔹 It also drops **{rune_item['name'] if rune_item else 'a Labyrinth Rune'}** — added to the party's stash."
+        if random.random() < LABYRINTH_MINIBOSS_SPELL_TONIC_DROP_CHANCE:
+            tonic_id = random.choices(
+                list(BOSS_SPELL_TONIC_DROP_WEIGHTS.keys()), weights=list(BOSS_SPELL_TONIC_DROP_WEIGHTS.values()),
+            )[0]
+            tonic_item = items_module.get_item(tonic_id)
+            for m in members:
+                if not m.get("is_ai"):
+                    db.add_item(m["telegram_user_id"], update.effective_chat.id, tonic_id, 1)
+            miniboss_tonic_line = f"✨ Something about it hums with real magic -- **{tonic_item['name']}** — added to the party's stash."
+        else:
+            miniboss_tonic_line = None
     # Real live feature (2026-09-04, Phase B of the combat-gating work,
     # per Coffee: "keys can be dropped by enemies or found in another
     # room"). Same real one-time-flag shape as the miniboss reward just
@@ -10843,6 +10872,8 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
         await _safe_send(update, reward_line)
     if miniboss_rune_line:
         await _safe_send(update, miniboss_rune_line)
+    if miniboss_tonic_line:
+        await _safe_send(update, miniboss_tonic_line)
     if key_drop_line:
         await _safe_send(update, key_drop_line)
     if rune_drop_line:

@@ -2,6 +2,56 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.518] — feature: spell tonics ("Ethers") now obtainable via real chest/miniboss RNG, including the Labyrinth
+
+Coffee, dev-bridge: "we need you to add ethers to the item list of
+things that can be won from a chest, or a battle, or finding in a
+room. ethers are very rare to come by and in the labyrinth it is
+needed." Investigated before implementing: "Ethers" was already the
+real name Coffee gave this exact mechanic back on 2026-08-10 ("make it
+so the ethers are hard to find, they can be dropped after boss battles
+or found as hidden treasure") -- items.py's own Spell Tonic line
+(spell_tonic/greater_spell_tonic/supreme_spell_tonic/Elixir of the
+Arcane Circle) already exists to answer it, and the overworld already
+grants it on real boss kills (`BOSS_SPELL_TONIC_DROP_CHANCE`, 35%,
+weighted). Per Coffee's own choice today: reuse that same line rather
+than invent a new item.
+
+The real gap, confirmed by direct code read: every Labyrinth/evolved-
+dungeon chest only ever granted `greater_healing_potion` + gold, and
+the overworld's own boss-drop roll never fires for a Labyrinth
+miniboss at all -- real bosses are explicitly excluded from
+`_labyrinth_monster_pool`, so no Labyrinth combat participant is ever
+flagged `is_boss`. A caster could run completely dry deep in the
+Labyrinth with zero real path back to spell slots from anything the
+dungeon itself gave them.
+
+Fixed with two independent, genuinely rare rolls (never replacing a
+chest's existing loot, always added on top):
+- A new shared `rules/dungeon_audit.py` helper
+  (`maybe_add_spell_tonic_to_loot`, 10% chance, same 50/35/15 tier
+  weighting the overworld boss table already uses) wired into all 6
+  real chest-generation sites across `rules/labyrinth.py` (4) and
+  `rules/dungeon_evolve.py` (2).
+- A new, real, independent 12% roll on a Labyrinth miniboss kill
+  specifically (deliberately lower than the overworld's 35% -- a
+  miniboss room is itself already a real, non-guaranteed per-floor
+  roll, so stacking two full-strength rare rolls would make the
+  combined result LESS rare overall, not more).
+
+Also found and fixed while re-verifying: the mandatory main-path key
+gate and the separate optional key gate shared the exact literal name
+"a real, heavily-barred door" -- harmless while they could never
+coexist, but a real `_find_lockable` ambiguity ("which one?") the
+moment both independent rolls fired on the same floor, which an RNG-
+stream shift from the loot change above happened to expose. Each now
+has its own distinct, real name ("...main door" vs "...side door").
+
+4 new tests (statistical chest-loot rolls for both generators, a real
+end-to-end miniboss-kill drop, the two-key-gate disambiguation); full
+Labyrinth/DungeonEvolve/SwitchAndBreakableAndPitTests suite
+re-verified clean.
+
 ## [1.27.517] — fix: "Show formation" refused inside the Labyrinth + Shield's duration was pinned to 1 round
 
 Two real live fixes from the Development topic.

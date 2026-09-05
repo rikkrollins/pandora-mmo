@@ -33126,6 +33126,34 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(hits, 0, "expected at least one pressure-plate-gated evolve across 20 real seeds")
         self.assertLess(hits, 20, "expected at least one evolve WITHOUT a pressure plate across 20 real seeds -- it should be a real fraction, not every time")
 
+    def test_evolve_dungeon_chests_can_rarely_grant_a_real_spell_tonic(self):
+        """
+        Real live gap found and fixed (2026-09-05, per Coffee, dev-
+        bridge: "we need you to add ethers to the item list of things
+        that can be won from a chest" -- same fix as rules/labyrinth.py's
+        own chests, see dungeon_audit.maybe_add_spell_tonic_to_loot's
+        own docstring). Statistical: across enough seeds, at least one
+        real evolved-dungeon chest must grant one of the three real
+        spell-tonic tiers, always on top of its existing potion/gold,
+        never replacing it.
+        """
+        import copy
+        tonic_seen = False
+        for seed in range(60):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_tonic_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            for room in rooms.values():
+                for lockable in room.get("lockables", []):
+                    if lockable.get("kind") != "chest" or "greater_healing_potion" not in lockable.get("loot", {}):
+                        continue
+                    loot = lockable["loot"]
+                    if any(tid in loot for tid in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic")):
+                        tonic_seen = True
+        self.assertTrue(tonic_seen, "expected at least one real spell-tonic chest drop across 60 real seeds")
+
     def test_evolve_dungeon_sometimes_places_a_real_key_gate_solvable_by_construction(self):
         """
         Phase B port of rules/labyrinth.py's identical key-gate
@@ -35424,6 +35452,30 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # "Pick the lock" here unambiguously means the real cache.
         self.assertEqual(bot._find_lockable(room, "Pick the lock")["id"], "f1_gate_cache")
 
+    async def test_find_lockable_disambiguates_the_mandatory_and_optional_key_gate_doors(self):
+        """
+        Real live bug found and fixed (2026-09-05, exposed by an RNG-
+        stream shift from an unrelated loot change elsewhere in
+        generate_floor): the mandatory main-path key gate and the
+        separate optional key gate used to share the EXACT literal
+        name "a real, heavily-barred door" -- harmless while they could
+        never coexist, but a real _find_lockable ambiguity the moment
+        both fired on the same floor (an always-possible, independent-
+        rolls scenario, not actually rare by construction). Each now
+        has its own distinct name; a specific "main"/"side" phrasing
+        must resolve unambiguously, and a genuinely generic "the barred
+        door" must still honestly refuse rather than guess wrong.
+        """
+        room = {
+            "lockables": [
+                {"id": "f1_maingate", "kind": "door", "name": "a real, heavily-barred main door", "requires_key_item": "labyrinth_floor_key"},
+                {"id": "f1_key_gate", "kind": "door", "name": "a real, heavily-barred side door", "requires_key_item": "labyrinth_floor_key"},
+            ]
+        }
+        self.assertEqual(bot._find_lockable(room, "open the main door")["id"], "f1_maingate")
+        self.assertEqual(bot._find_lockable(room, "open the side door")["id"], "f1_key_gate")
+        self.assertIsNone(bot._find_lockable(room, "open the barred door"), "a genuinely ambiguous phrase must still refuse to guess, never pick one silently")
+
     async def test_cast_fire_spell_onto_a_labyrinth_switch_actually_activates_it(self):
         """
         Real live bug (2026-09-02, Coffee, dev-bridge: "Cast fireball
@@ -36103,6 +36155,71 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 break
         self.assertTrue(deep_branch_seen, "expected at least one branch deeper than one room across 60 real seeds")
 
+    def test_generate_floor_chests_can_rarely_grant_a_real_spell_tonic(self):
+        """
+        Real live gap found and fixed (2026-09-05, per Coffee, dev-
+        bridge: "we need you to add ethers to the item list of things
+        that can be won from a chest, or a battle, or finding in a
+        room. ethers are very rare to come by and in the labyrinth it
+        is needed"). Investigation confirmed every real Labyrinth chest
+        only ever granted greater_healing_potion + gold -- no path back
+        to spell slots anywhere in the Labyrinth's own loot. Per
+        Coffee's own choice: reuse the EXISTING spell_tonic/greater_
+        spell_tonic/supreme_spell_tonic line (the same "ethers" from
+        the original 2026-08-10 request) rather than invent a new item.
+        Statistical: across enough seeds, at least one real chest must
+        grant one of these three, always ON TOP of its existing potion/
+        gold, never replacing it.
+        """
+        tonic_seen = False
+        for seed in range(300):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            for room in floor_data["rooms"].values():
+                for lockable in room.get("lockables", []):
+                    # Real chest kinds only -- excludes the SEPARATE
+                    # rune/key gate-reward chests, which are single-
+                    # purpose (labyrinth_rune/labyrinth_floor_key only)
+                    # by design and never eligible for this roll.
+                    if lockable.get("kind") != "chest" or "greater_healing_potion" not in lockable.get("loot", {}):
+                        continue
+                    loot = lockable["loot"]
+                    if any(tid in loot for tid in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic")):
+                        tonic_seen = True
+        self.assertTrue(tonic_seen, "expected at least one real spell-tonic chest drop across 300 real seeds")
+
+    async def test_labyrinth_miniboss_can_rarely_drop_a_real_spell_tonic(self):
+        """
+        Real end-to-end: the SAME real gap fixed on the combat-drop
+        side. A Labyrinth miniboss kill never triggered bot.py's own
+        overworld BOSS_SPELL_TONIC_DROP_CHANCE roll at all (real bosses
+        are explicitly excluded from _labyrinth_monster_pool, so no
+        Labyrinth participant is ever flagged is_boss) -- a real,
+        independent, rarer roll now runs on the SAME miniboss-kill
+        trigger the rune/milestone-item rewards already use.
+        """
+        from unittest.mock import patch
+        import sessions
+        user_id, chat_id = 962076, -962076
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "MinibossTonicTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL, hp_max=999999)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=999999)
+        room = {
+            "id": "f1_miniboss_room", "floor": 1, "name": "A Test Miniboss Chamber",
+            "connections": [], "monsters": ["goblin"], "is_miniboss_room": True,
+        }
+        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=0, current_room_id=room["id"], rooms={room["id"]: room})
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session, "expected a real fight to have started")
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        with patch("bot.random.random", return_value=0.0), patch("bot.random.choices", return_value=["greater_spell_tonic"]):
+            await bot._check_labyrinth_progress(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+        character_after = db.get_character(user_id, chat_id)
+        self.assertIn("greater_spell_tonic", character_after["inventory"], "expected a real spell tonic to actually be granted on the forced-low roll")
+        sessions.end_session(chat_id, session)
+        db.delete_labyrinth_run(chat_id, party_key)
+
     def test_generate_floor_places_a_real_shortcut_lever_solvable_by_construction(self):
         """
         Real live request (2026-09-05, per Coffee: "make longer
@@ -36770,9 +36887,19 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             rooms = floor_data["rooms"]
             hub_id = floor_data["hub_room_id"]
             hub = rooms[hub_id]
-            door = next((lk for lk in hub.get("lockables", []) if lk.get("requires_key_item") == "labyrinth_floor_key"), None)
-            if door is None:
+            key_doors = [lk for lk in hub.get("lockables", []) if lk.get("requires_key_item") == "labyrinth_floor_key"]
+            # Real, rare edge case (2026-09-05): the mandatory main-path
+            # gate and the separate optional key gate are independent
+            # rolls -- both CAN choose "key" on the same floor. Each now
+            # gets its own real, distinct name ("...main door" vs
+            # "...side door", a genuine, separate fix), but "open the
+            # barred door" below is deliberately generic text this test
+            # uses to exercise ONE specific gate end-to-end -- skip a
+            # seed where both fired, that dual-gate scenario deserves
+            # its own dedicated test, not a silent `next()` pick here.
+            if len(key_doors) != 1:
                 continue
+            door = key_doors[0]
             gated_room_id = next(d for d, lid in hub["locked_connections"].items() if lid == door["id"])
             # Real fix (2026-09-05, alongside "longer interconnectable
             # pathways"): more mechanics can now genuinely compete for

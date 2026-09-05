@@ -46,6 +46,7 @@ at once, unlike the old single-floor model.
 import math
 import random
 
+from rules import dungeon_audit
 from rules.dungeon_evolve import _candidate_monsters
 
 _SIDE_ROOM_COUNT_RANGE = (3, 5)
@@ -719,9 +720,11 @@ def _new_side_room(floor: int, hub_id: str, index: int, pool: list[str], modifie
     # a real party has already fought to reach it.
     if rng.random() < 0.3:
         bountiful = modifier == "bountiful"
+        loot = {"greater_healing_potion": rng.randint(2, 4) if bountiful else rng.randint(1, 2)}
+        dungeon_audit.maybe_add_spell_tonic_to_loot(loot, rng)
         room.setdefault("lockables", []).append({
             "id": f"f{floor}_cache_{index}", "kind": "chest", "name": "a real, hastily-buried cache",
-            "loot": {"greater_healing_potion": rng.randint(2, 4) if bountiful else rng.randint(1, 2)},
+            "loot": loot,
             "gold": (rng.randint(20, 80) * floor) * (2 if bountiful else 1),
         })
     return room, room_id
@@ -923,11 +926,21 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         door_id = f"f{floor}_maingate"
         hub["connections"].remove(mandatory_gate_room_id)
         hub.setdefault("locked_connections", {})[mandatory_gate_room_id] = door_id
+        # Real live bug found and fixed (2026-09-05, exposed by an RNG-
+        # stream shift from an unrelated change elsewhere in this same
+        # function): this mandatory gate and the SEPARATE optional key
+        # gate below used to share the exact literal name "a real,
+        # heavily-barred door" -- harmless while they could never both
+        # exist on the same floor, but a genuine, real _find_lockable
+        # ambiguity ("which one?") the moment both actually fire
+        # together, which they always could in principle (independent
+        # rolls, no mutual exclusion). Named distinctly now -- this one
+        # is always the single guaranteed main-path gate.
         hub.setdefault("lockables", []).append({
-            "id": door_id, "kind": "door", "name": "a real, heavily-barred door",
+            "id": door_id, "kind": "door", "name": "a real, heavily-barred main door",
             "requires_key_item": "labyrinth_floor_key", "consume_key": True,
         })
-        rooms[mandatory_gate_room_id]["description"] += " A real, heavily-barred door seals the only way onward -- it looks like it needs an actual key, not brute force or a steady hand."
+        rooms[mandatory_gate_room_id]["description"] += " A real, heavily-barred main door seals the only way onward -- it looks like it needs an actual key, not brute force or a steady hand."
         if rng.random() < 0.5 and rooms[key_room_id].get("monsters"):
             rooms[key_room_id]["guaranteed_key_drop"] = True
             rooms[key_room_id]["description"] += " Something here looks like it might be carrying something worth taking."
@@ -1051,11 +1064,14 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             door_id = f"f{floor}_key_gate"
             hub["connections"].remove(key_gate_room_id)
             hub.setdefault("locked_connections", {})[key_gate_room_id] = door_id
+            # Named distinctly from the mandatory main-path gate above
+            # (2026-09-05 fix) -- this is always the optional, side-
+            # branch key gate, never the guaranteed one.
             hub.setdefault("lockables", []).append({
-                "id": door_id, "kind": "door", "name": "a real, heavily-barred door",
+                "id": door_id, "kind": "door", "name": "a real, heavily-barred side door",
                 "requires_key_item": "labyrinth_floor_key", "consume_key": True,
             })
-            rooms[key_gate_room_id]["description"] += " A real, heavily-barred door seals this path -- it looks like it needs an actual key, not brute force or a steady hand."
+            rooms[key_gate_room_id]["description"] += " A real, heavily-barred side door seals this path -- it looks like it needs an actual key, not brute force or a steady hand."
             # Coffee's own "dropped by enemies OR found in another
             # room" -- chosen randomly each time real content allows
             # it, always a guaranteed real find either way (never a
@@ -1141,13 +1157,15 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         noun = "wall" if kind == "breakable_wall" else "floor"
         bonus_id = f"f{floor}_secret"
         lockable_id = f"f{floor}_breakable"
+        secret_loot = {"greater_healing_potion": rng.randint(1, 2)}
+        dungeon_audit.maybe_add_spell_tonic_to_loot(secret_loot, rng)
         rooms[bonus_id] = {
             "id": bonus_id, "floor": floor, "name": "Labyrinth -- A Hidden Cache", "monsters": [],
             "description": f"A room that shouldn't be here, sealed off until the {noun} that hid it finally gave way.",
             "connections": [leaf_id], "modifier": modifier,
             "lockables": [{
                 "id": f"f{floor}_secret_cache", "kind": "chest", "name": "a real cache no one else has found",
-                "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(80, 200) * floor,
+                "loot": secret_loot, "gold": rng.randint(80, 200) * floor,
             }],
         }
         rooms[leaf_id].setdefault("locked_connections", {})[bonus_id] = lockable_id
@@ -1171,13 +1189,15 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             })
             switch_lockable_ids.append(switch_id)
         gate_room_id = f"f{floor}_gate_reward"
+        gate_loot = {"greater_healing_potion": rng.randint(1, 2)}
+        dungeon_audit.maybe_add_spell_tonic_to_loot(gate_loot, rng)
         gate_room = {
             "id": gate_room_id, "floor": floor, "name": "Labyrinth -- A Sealed Archway",
             "description": "The archway won't budge -- whatever opens it isn't here in this room.",
             "connections": [hub_id], "monsters": [], "modifier": modifier,
             "lockables": [{
                 "id": f"f{floor}_gate_cache", "kind": "chest", "name": "a real cache behind the archway",
-                "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
+                "loot": gate_loot, "gold": rng.randint(60, 150) * floor,
             }],
         }
         rooms[gate_room_id] = gate_room
@@ -1206,9 +1226,11 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         chest_room["mirror_twin"] = monster_room_id
         chest_room["name"] = "Labyrinth -- A Mirrored Chamber (II)"
         chest_room["description"] = "This room feels like it's happening twice, somewhere else on this same floor."
+        mirror_loot = {"greater_healing_potion": rng.randint(1, 2)}
+        dungeon_audit.maybe_add_spell_tonic_to_loot(mirror_loot, rng)
         chest_room["lockables"] = [{
             "id": f"f{floor}_mirror_cache", "kind": "chest", "name": "an unguarded, matching cache",
-            "loot": {"greater_healing_potion": rng.randint(1, 2)}, "gold": rng.randint(60, 150) * floor,
+            "loot": mirror_loot, "gold": rng.randint(60, 150) * floor,
         }]
 
     # Real warp shortcut (2026-09-03, per Coffee: "do all of them" --
