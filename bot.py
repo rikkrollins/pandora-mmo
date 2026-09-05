@@ -27776,7 +27776,18 @@ async def _do_move(update: Update, text: str) -> None:
     # Reuses the exact same dungeon_id/display-name convention the real
     # dungeon minimap already established (_DUNGEON_DISPLAY_NAMES).
     dungeon_entry_note = ""
-    if destination.get("dungeon_id") and destination.get("dungeon_id") != current.get("dungeon_id"):
+    # Real live confusion (2026-09-05, Coffee: "why is the stonearch
+    # bridge considered a dungeon? i thought we werent supposed to be
+    # able to enter dungeons until it is time"). Root cause: this used
+    # to key off `dungeon_id` alone, which is really just a map/asset
+    # GROUPING label shared by every room in a complex, including the
+    # freely-open surface entrance (Stonearch Bridge, Greymoor Downs,
+    # The First City all have one but are ordinary overworld zones, not
+    # gated dungeons) -- `dungeon_interior` is the real "you are
+    # actually inside a dungeon now" flag, only ever set on the deeper
+    # rooms (e.g. Stonearch Bridge's own Weeping Well), so only THAT
+    # should ever trigger this banner.
+    if destination.get("dungeon_interior") and destination.get("dungeon_id") != current.get("dungeon_id"):
         dungeon_display_name = _DUNGEON_DISPLAY_NAMES.get(
             destination["dungeon_id"], destination["dungeon_id"].replace("_", " ").title()
         )
@@ -28338,7 +28349,18 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     # generic "You" instead, inconsistent with every other arrival/
     # action message in this game.
     dungeon_entry_note = ""
-    if destination.get("dungeon_id") and destination.get("dungeon_id") != current.get("dungeon_id"):
+    # Real live confusion (2026-09-05, Coffee: "why is the stonearch
+    # bridge considered a dungeon? i thought we werent supposed to be
+    # able to enter dungeons until it is time"). Root cause: this used
+    # to key off `dungeon_id` alone, which is really just a map/asset
+    # GROUPING label shared by every room in a complex, including the
+    # freely-open surface entrance (Stonearch Bridge, Greymoor Downs,
+    # The First City all have one but are ordinary overworld zones, not
+    # gated dungeons) -- `dungeon_interior` is the real "you are
+    # actually inside a dungeon now" flag, only ever set on the deeper
+    # rooms (e.g. Stonearch Bridge's own Weeping Well), so only THAT
+    # should ever trigger this banner.
+    if destination.get("dungeon_interior") and destination.get("dungeon_id") != current.get("dungeon_id"):
         dungeon_display_name = _DUNGEON_DISPLAY_NAMES.get(
             destination["dungeon_id"], destination["dungeon_id"].replace("_", " ").title()
         )

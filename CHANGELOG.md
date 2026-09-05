@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.521] — fix: "You've entered a dungeon" banner was firing on ordinary overworld zones
+
+Live question, Coffee, right after the v1.27.519 soft-lock fix: "why
+is the stonearch bridge considered a dungeon? i thought we werent
+supposed to be able to enter dungeons until it is time." Root cause,
+confirmed by direct code read: the "🏰 You've entered a dungeon: X.
+Tread carefully." banner (`_do_move`/`_do_fast_travel`) fired off
+`dungeon_id` alone -- but `dungeon_id` is really just a map/asset
+GROUPING label shared by every room in a complex, including the
+freely-open surface entrance. Stonearch Bridge, Greymoor Downs, and
+The First City all carry a `dungeon_id` but are ordinary overworld
+zones, not gated dungeons -- a level-5 area (giant_spider, fishing
+spots) telling a brand-new player "tread carefully, you've entered a
+dungeon" was exactly backwards.
+
+Fixed by keying the banner off `dungeon_interior` instead (the real
+"you are now physically inside a dungeon" flag, only ever set on the
+deeper rooms) -- confirmed by tracing the full connection graph that
+these 3 zones' own sub-rooms all share the SAME dungeon_id as their
+hub, so the banner never had a legitimate trigger point for them
+anywhere; genuine dungeon thresholds elsewhere (Wrathflame Vault, the
+bonus vaults, Unmoored Isle) are unaffected and still fire correctly.
+Two new tests: the banner no longer fires entering Stonearch Bridge,
+and still does entering a real dungeon_interior room.
+
 ## [1.27.520] — feature: real end-of-segment BOSS rooms in the Labyrinth (not just the old miniboss)
 
 Coffee, after the Labyrinth map/gating pass this week: "we should

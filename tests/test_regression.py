@@ -7629,6 +7629,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "stonearch_bridge")
         self.assertEqual(set(character["map_revealed_locations"]), {"stonearch_bridge_the_old_keep", "stonearch_bridge_the_old_vault"})
+        # Real live confusion (2026-09-05, Coffee: "why is the stonearch
+        # bridge considered a dungeon?"): Stonearch Bridge carries a
+        # dungeon_id (a map/asset grouping label shared with its deeper
+        # rooms) but is NOT itself dungeon_interior -- the real level-5
+        # surface area must never show the "You've entered a dungeon"
+        # banner, which used to fire off dungeon_id alone.
+        self.assertFalse(any("entered a dungeon" in s for s in sink), sink)
+
+    async def test_entering_a_real_dungeon_interior_still_fires_the_entry_banner(self):
+        """
+        Companion to the fix above -- a GENUINE dungeon_interior room
+        (as opposed to a freely-open surface hub that merely shares a
+        dungeon_id label) must still show the real "You've entered a
+        dungeon" banner, so the fix narrowed the trigger correctly
+        rather than just breaking it.
+        """
+        user_id = 960286
+        make_basic_character(user_id, "RealDungeonEntryTester", current_location="hollow_stump_shrine")
+        db.update_character(user_id, -999, completed_quests=["wrens_trial_by_fire"], visited_locations=["hollow_stump_shrine"], map_revealed_locations=[])
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to wrathflame vault threshold")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "wrathflame_vault_threshold")
+        self.assertTrue(any("entered a dungeon" in s for s in sink), sink)
 
     def test_later_chapter_dungeons_are_blocked_until_the_prior_chapters_climax_is_done(self):
         """
