@@ -1020,6 +1020,41 @@ def init_db() -> None:
         if "carrying" not in labyrinth_runs_columns:
             conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN carrying TEXT")
 
+        # Real live gap (2026-09-05, Coffee, dev-bridge: "i had already
+        # cleared that room to get to the first city right? ...next is
+        # glimmer deep then the hush then the city" -- and he was
+        # right). Glimmerdeep Grotto and Sunken Root Caverns' Deep
+        # Tunnels are ONLY ever reachable by first passing through
+        # Sunken Root Caverns itself (confirmed by a direct scan of
+        # every real connection in the campaign), so any character who
+        # already has either of those -- or anything further downstream
+        # or that path (The Hush Below, The First City) -- in their own
+        # cleared_locations has unambiguous, genuine proof they already
+        # got past Sunken Root Caverns too. But v1.27.456 (2026-09-02)
+        # added the real requires_cleared_location gate onto Sunken Root
+        # Caverns' own exits long after many characters had already
+        # walked straight through it -- back then, simply passing
+        # through required no real fight at all, so it was never added
+        # to their own list, and they're now wrongly re-blocked by a
+        # rule that didn't exist when they first got past it. One-time,
+        # idempotent backfill (naturally a no-op once applied, same as
+        # every other migration in this function): never fabricates a
+        # fight that didn't happen, only credits characters who already
+        # have real, downstream proof.
+        downstream_of_sunken_root_caverns = {
+            "glimmerdeep_grotto", "sunken_root_caverns_deep_tunnels",
+            "the_hush_below", "the_first_city",
+        }
+        for row in conn.execute("SELECT character_id, cleared_locations FROM characters").fetchall():
+            cleared = json.loads(row["cleared_locations"])
+            if "sunken_root_caverns" in cleared or downstream_of_sunken_root_caverns.isdisjoint(cleared):
+                continue
+            cleared.append("sunken_root_caverns")
+            conn.execute(
+                "UPDATE characters SET cleared_locations = ? WHERE character_id = ?",
+                (json.dumps(cleared), row["character_id"]),
+            )
+
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)

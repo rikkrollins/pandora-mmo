@@ -23511,6 +23511,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()[0]
         self.assertEqual(healed_chat_id, config.TELEGRAM_CHAT_ID)
 
+    def test_sunken_root_caverns_cleared_backfill_credits_real_downstream_proof(self):
+        """
+        Real live gap (2026-09-05, Coffee, dev-bridge: "i had already
+        cleared that room to get to the first city right? ...next is
+        glimmer deep then the hush then the city" -- correctly so).
+        Glimmerdeep Grotto/the Deep Tunnels are ONLY ever reachable
+        through Sunken Root Caverns, so a character who already cleared
+        Glimmerdeep Grotto (or anything further downstream) has real
+        proof they got past Sunken Root Caverns -- but v1.27.456 added
+        the requires_cleared_location gate on it long after such
+        characters had already walked straight through with no fight
+        required. One-time, idempotent init_db() backfill credits them.
+        A character with NO downstream proof must be left untouched.
+        """
+        credited_id = make_basic_character(900700, "DownstreamProofTester")["telegram_user_id"]
+        db.update_character(credited_id, -999, cleared_locations=["glimmerdeep_grotto", "the_first_city"])
+        untouched_id = make_basic_character(900701, "NoProofTester")["telegram_user_id"]
+        db.update_character(untouched_id, -999, cleared_locations=["whispering_wood"])
+
+        db.init_db()
+
+        self.assertIn("sunken_root_caverns", db.get_character(credited_id, -999)["cleared_locations"])
+        self.assertNotIn("sunken_root_caverns", db.get_character(untouched_id, -999)["cleared_locations"])
+
     # -- Real player-driven ASI level-up (2026-07-16, per Coffee) -------
     def test_level_up_phrasing_classified_correctly(self):
         for text in ("level up", "I want to level up", "Level up!"):

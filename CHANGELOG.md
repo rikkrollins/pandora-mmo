@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.523] — fix: characters wrongly re-blocked at Sunken Root Caverns by a rule added after they'd already passed it
+
+Live exchange, Coffee: "It's not letting me leave the sunken root
+cavern" -> "i had already cleared that room to get to the first city
+right?" -> "next is glimmer deep then the hush then the city" -- and
+he was right on all counts. Confirmed by tracing every real connection
+in the campaign: Glimmerdeep Grotto and Sunken Root Caverns' own Deep
+Tunnels are ONLY ever reachable by first passing through Sunken Root
+Caverns, and The Hush Below/The First City sit further downstream past
+Glimmerdeep Grotto -- so a character who already cleared any of those
+has unambiguous, genuine proof they got past Sunken Root Caverns too.
+
+Root cause: v1.27.456 (2026-09-02) added a real
+`requires_cleared_location` gate onto Sunken Root Caverns' own exits,
+but plenty of characters -- including this one -- had already walked
+straight through it long before that gate existed, back when passing
+through required no real fight at all. The gate was never retroactively
+satisfied for them, so they got wrongly re-blocked by a rule that
+didn't exist when they first got past it.
+
+Fixed with a one-time, idempotent `init_db()` backfill (same shape as
+the existing chat_id backfills): any character with real downstream
+proof (Glimmerdeep Grotto, the Deep Tunnels, The Hush Below, or The
+First City already in their own `cleared_locations`) gets Sunken Root
+Caverns credited too. Never fabricates a fight that didn't happen --
+only characters with genuine proof are touched.
+
 ## [1.27.522] — fix: Goblin Warrens had no real arc_1 entrance at all
 
 Follow-up to the v1.27.519 soft-lock fix, per the deferred note left
