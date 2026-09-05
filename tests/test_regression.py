@@ -23515,15 +23515,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         Real live gap (2026-09-05, Coffee, dev-bridge: "i had already
         cleared that room to get to the first city right? ...next is
-        glimmer deep then the hush then the city" -- correctly so).
-        Glimmerdeep Grotto/the Deep Tunnels are ONLY ever reachable
-        through Sunken Root Caverns, so a character who already cleared
-        Glimmerdeep Grotto (or anything further downstream) has real
-        proof they got past Sunken Root Caverns -- but v1.27.456 added
-        the requires_cleared_location gate on it long after such
-        characters had already walked straight through with no fight
-        required. One-time, idempotent init_db() backfill credits them.
-        A character with NO downstream proof must be left untouched.
+        glimmer deep then the hush then the city" -- correctly so;
+        follow-up: "make sure all characters that have previous cleared
+        areas can travel"). Glimmerdeep Grotto/the Deep Tunnels are ONLY
+        ever reachable through Sunken Root Caverns, so a character who
+        already cleared Glimmerdeep Grotto (or anything further
+        downstream) has real proof they got past Sunken Root Caverns --
+        generalized into db._backfill_cleared_location_gates, a real
+        graph-driven audit of EVERY requires_cleared_location gate in
+        the whole campaign (not hardcoded to this one case), called
+        once, idempotently, from init_db(). A character with NO
+        downstream proof must be left untouched -- in particular,
+        "whispering_wood" alone is a real regression case: an earlier,
+        broken version of this backfill's own downstream search walked
+        BACK OUT through real bidirectional connections deep in the
+        graph and wrongly treated nearly the whole map as "proof" of
+        this one gate.
         """
         credited_id = make_basic_character(900700, "DownstreamProofTester")["telegram_user_id"]
         db.update_character(credited_id, -999, cleared_locations=["glimmerdeep_grotto", "the_first_city"])
@@ -23534,6 +23541,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("sunken_root_caverns", db.get_character(credited_id, -999)["cleared_locations"])
         self.assertNotIn("sunken_root_caverns", db.get_character(untouched_id, -999)["cleared_locations"])
+
+    def test_cleared_location_backfill_generalizes_to_other_real_gates_too(self):
+        """
+        Companion to the test above, proving this is a real, general
+        audit and not secretly special-cased to Sunken Root Caverns.
+        Hollow Verge's own real chain (Bonefield -> Husk Orchard ->
+        Sealed Cairn -> Ashen Reliquary -> Inner Sanctum) is a single-
+        file dungeon with no alternate route around any of its own
+        internal gates -- a character who already cleared the Ashen
+        Reliquary has unambiguous proof they cleared every room before
+        it, all the way back to the Bonefield.
+        """
+        credited_id = make_basic_character(900702, "HollowVergeProofTester")["telegram_user_id"]
+        db.update_character(credited_id, -999, cleared_locations=["hollow_verge_ashen_reliquary"])
+
+        db.init_db()
+
+        cleared = set(db.get_character(credited_id, -999)["cleared_locations"])
+        for expected in ("hollow_verge_bonefield", "hollow_verge_husk_orchard", "hollow_verge_sealed_cairn"):
+            self.assertIn(expected, cleared, f"expected {expected} to be credited from real downstream proof")
+
+    def test_cleared_location_backfill_skips_a_gate_once_a_real_alternate_route_exists(self):
+        """
+        Goblin Warrens used to be reachable ONLY through Sunken Root
+        Caverns' own requires_cleared_location gate -- until v1.27.522
+        added a real, always-open second entrance from the Hollow Stump
+        Shrine. Being inside Goblin Warrens no longer proves a character
+        crossed Sunken Root Caverns' own gate at all (they could have
+        used the new door instead), so this backfill must no longer
+        treat it as proof -- confirms the exclusivity check reacts to
+        the real, current graph rather than a stale assumption.
+        """
+        no_proof_id = make_basic_character(900703, "AltRouteTester")["telegram_user_id"]
+        db.update_character(no_proof_id, -999, cleared_locations=["goblin_warrens"])
+
+        db.init_db()
+
+        self.assertNotIn("sunken_root_caverns", db.get_character(no_proof_id, -999)["cleared_locations"])
 
     # -- Real player-driven ASI level-up (2026-07-16, per Coffee) -------
     def test_level_up_phrasing_classified_correctly(self):

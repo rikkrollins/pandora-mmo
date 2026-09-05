@@ -11,12 +11,14 @@ resolves to. This keeps every existing call site (which all pass a
 telegram_user_id, never a character_id) working unchanged: they always
 mean "my currently active character."
 """
+import collections
 import json
 import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
+import campaign_loader
 import config
 import items as items_module
 import class_features as class_features_module
@@ -335,6 +337,104 @@ def get_connection():
 
 def _existing_columns(conn, table: str) -> set[str]:
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _backfill_cleared_location_gates(conn) -> None:
+    """
+    General "downstream proof implies upstream credit" backfill (2026-
+    09-05, see init_db's own call site for the full real-live-report
+    context). Loads the live campaign fresh each call -- cheap (one
+    JSON file, ~290 locations) and keeps this correct if the map itself
+    changes, rather than baking today's specific gate list in as a
+    hardcoded constant that would silently go stale.
+
+    For every real requires_cleared_location gate (A -> B), first
+    checks whether B is a genuine SOLE-ENTRANCE chokepoint: is B still
+    reachable from the starting location with every OTHER real gate
+    treated as freely passable, but only this one specific edge cut?
+    If B is still reachable some other way, this gate provides no real
+    proof of anything and is skipped entirely (matches this campaign's
+    own real branching in a few places, e.g. Greymoor Downs' hub itself
+    has more than one way in). If B is NOT otherwise reachable, then
+    everything physically reachable FROM B (ignoring gates entirely --
+    a real player who got there could walk anywhere within it) is real,
+    unambiguous proof that A was cleared.
+
+    Never fabricates a fight that didn't happen: a character is only
+    ever credited with A if they already have some location from that
+    exact proof set in their own cleared_locations.
+    """
+    campaign = campaign_loader.load_campaign(config.ACTIVE_CAMPAIGN)
+    locs: dict[str, dict] = {}
+    for layer_locations in campaign.get("locations", {}).values():
+        locs.update(layer_locations)
+
+    def neighbors_of(loc: dict) -> set[str]:
+        out = set(loc.get("connections", []))
+        if loc.get("ascends_to"):
+            out.add(loc["ascends_to"])
+        if loc.get("descends_to"):
+            out.add(loc["descends_to"])
+        return out
+
+    def reachable_from_start_cutting_one_edge(cut_from: str, cut_to: str) -> set[str]:
+        start = campaign.get("starting_location")
+        visited = {start}
+        frontier = collections.deque([start])
+        while frontier:
+            cur = frontier.popleft()
+            for nb in neighbors_of(locs.get(cur, {})):
+                if cur == cut_from and nb == cut_to:
+                    continue
+                if nb not in visited:
+                    visited.add(nb)
+                    frontier.append(nb)
+        return visited
+
+    def reachable_from(node: str) -> set[str]:
+        visited = {node}
+        frontier = collections.deque([node])
+        while frontier:
+            cur = frontier.popleft()
+            for nb in neighbors_of(locs.get(cur, {})):
+                if nb not in visited:
+                    visited.add(nb)
+                    frontier.append(nb)
+        return visited
+
+    proof_sets: dict[str, set[str]] = {}
+    for src, loc in locs.items():
+        for target, gate in loc.get("story_gates", {}).items():
+            required = gate.get("requires_cleared_location")
+            if not required:
+                continue
+            reachable_without_this_gate = reachable_from_start_cutting_one_edge(src, target)
+            if target in reachable_without_this_gate:
+                continue  # a real alternate path exists -- no proof from this gate
+            # reachable_from(target) walks in every direction, including
+            # back out through real bidirectional connections (e.g. a
+            # hub several hops downstream that also has its own
+            # completely unrelated, always-open route back to the
+            # start) -- anything ALSO reachable without ever crossing
+            # this gate is not real proof of it and must be excluded,
+            # or a single deep gate could wrongly "prove" nearly the
+            # whole map.
+            exclusive_downstream = reachable_from(target) - reachable_without_this_gate
+            proof_sets.setdefault(required, set()).update(exclusive_downstream)
+
+    if not proof_sets:
+        return
+    for row in conn.execute("SELECT character_id, cleared_locations FROM characters").fetchall():
+        cleared = json.loads(row["cleared_locations"])
+        cleared_set = set(cleared)
+        to_credit = [required for required, proof in proof_sets.items() if required not in cleared_set and not cleared_set.isdisjoint(proof)]
+        if not to_credit:
+            continue
+        cleared.extend(to_credit)
+        conn.execute(
+            "UPDATE characters SET cleared_locations = ? WHERE character_id = ?",
+            (json.dumps(cleared), row["character_id"]),
+        )
 
 
 def init_db() -> None:
@@ -1022,38 +1122,30 @@ def init_db() -> None:
 
         # Real live gap (2026-09-05, Coffee, dev-bridge: "i had already
         # cleared that room to get to the first city right? ...next is
-        # glimmer deep then the hush then the city" -- and he was
-        # right). Glimmerdeep Grotto and Sunken Root Caverns' Deep
-        # Tunnels are ONLY ever reachable by first passing through
-        # Sunken Root Caverns itself (confirmed by a direct scan of
-        # every real connection in the campaign), so any character who
-        # already has either of those -- or anything further downstream
-        # or that path (The Hush Below, The First City) -- in their own
-        # cleared_locations has unambiguous, genuine proof they already
-        # got past Sunken Root Caverns too. But v1.27.456 (2026-09-02)
-        # added the real requires_cleared_location gate onto Sunken Root
-        # Caverns' own exits long after many characters had already
-        # walked straight through it -- back then, simply passing
-        # through required no real fight at all, so it was never added
-        # to their own list, and they're now wrongly re-blocked by a
-        # rule that didn't exist when they first got past it. One-time,
-        # idempotent backfill (naturally a no-op once applied, same as
+        # glimmer deep then the hush then the city" -- and he was right;
+        # follow-up: "make sure all characters that have previous
+        # cleared areas can travel"). Sunken Root Caverns' own
+        # requires_cleared_location gate is genuinely OLD content (not
+        # something a recent pass introduced), but its downstream proof
+        # was never credited for characters who'd already gotten past
+        # it some other way (admin/testing shortcuts, older builds,
+        # etc.) -- and a direct scan of the whole campaign graph showed
+        # this exact shape (a "clear this room to advance" gate whose
+        # true DOWNSTREAM presence was never retroactively credited)
+        # repeats at 39 other real chokepoints across the whole map, not
+        # just this one. Generalized: for every real requires_cleared_
+        # location gate in the campaign, `_backfill_cleared_location_
+        # gates` below figures out (once, at import time, from the real
+        # graph -- not hardcoded) which ones are genuine sole-entrance
+        # chokepoints (no other real path around them) and what the
+        # full reachable set beyond each one is, then credits any
+        # character who already has real proof of being past a
+        # chokepoint but is missing that specific gate's own location.
+        # One-time, idempotent (naturally a no-op once applied, same as
         # every other migration in this function): never fabricates a
         # fight that didn't happen, only credits characters who already
         # have real, downstream proof.
-        downstream_of_sunken_root_caverns = {
-            "glimmerdeep_grotto", "sunken_root_caverns_deep_tunnels",
-            "the_hush_below", "the_first_city",
-        }
-        for row in conn.execute("SELECT character_id, cleared_locations FROM characters").fetchall():
-            cleared = json.loads(row["cleared_locations"])
-            if "sunken_root_caverns" in cleared or downstream_of_sunken_root_caverns.isdisjoint(cleared):
-                continue
-            cleared.append("sunken_root_caverns")
-            conn.execute(
-                "UPDATE characters SET cleared_locations = ? WHERE character_id = ?",
-                (json.dumps(cleared), row["character_id"]),
-            )
+        _backfill_cleared_location_gates(conn)
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

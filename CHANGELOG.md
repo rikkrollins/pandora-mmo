@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.524] — generalized the v1.27.523 backfill to every real "clear this room" gate in the campaign, not just Sunken Root Caverns
+
+Follow-up, Coffee: "make sure all characters that have previous
+cleared areas can travel." v1.27.523's fix was hardcoded to one
+specific location. A full scan of the campaign found 42 real
+`requires_cleared_location` gates total; 39 of them are genuine
+sole-entrance chokepoints (no other real path around them) exactly
+like Sunken Root Caverns was.
+
+`db._backfill_cleared_location_gates` replaces the hardcoded version:
+it loads the live campaign fresh, and for every real gate figures out
+(from the actual connection graph, not a hand-maintained list) whether
+it's a genuine chokepoint, and if so, the full set of locations that
+count as real proof of having passed it. Any character with proof for
+a gate they're missing gets it credited -- still one-time, idempotent,
+and additive only.
+
+Caught and fixed a real bug in this pass before it shipped: the first
+version's own "what's downstream of this gate" search walked in every
+direction with no constraint, including back out through ordinary
+bidirectional connections deep in the graph -- for a well-connected
+chokepoint this made nearly the WHOLE map look like "proof," which
+would have wrongly credited totally unrelated locations. Fixed by
+excluding anything also reachable from the start without ever crossing
+that specific gate. Confirmed correct: also verified the audit
+correctly stops treating Goblin Warrens as proof of Sunken Root
+Caverns now that v1.27.522's own new entrance means it's no longer the
+only way in.
+
 ## [1.27.523] — fix: characters wrongly re-blocked at Sunken Root Caverns by a rule added after they'd already passed it
 
 Live exchange, Coffee: "It's not letting me leave the sunken root
