@@ -36729,13 +36729,28 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                         for lk in r.get("lockables", []) if lk["id"] == switch_id
                     )
                     # The switch's own room must be reachable WITHOUT
-                    # ever crossing the gate this switch itself opens.
+                    # ever crossing the gate this switch itself opens --
+                    # every OTHER real gate is treated as freely passable
+                    # (the player may need to solve it first, in some
+                    # valid order; that's still solvable-by-construction,
+                    # not a failure) by traversing BOTH `connections` and
+                    # `locked_connections` (2026-09-05, real fix: a gated
+                    # Labyrinth destination is REMOVED from `connections`
+                    # entirely, unlike the overworld's own story_gates
+                    # layered on an intact list -- this BFS previously
+                    # only followed `connections`, so it could never see
+                    # PAST any other real gate at all; harmless while
+                    # every gate lived at the hub, but real Phase L5
+                    # convergence/plate/branch gates can now legitimately
+                    # layer on the same branch, which an RNG-stream shift
+                    # from that same feature exposed here).
                     self.assertNotEqual(switch_room, gate_room_id)
                     visited = {floor_data["hub_room_id"]}
                     frontier = [floor_data["hub_room_id"]]
                     while frontier:
                         cur = frontier.pop()
-                        for nb in rooms[cur].get("connections", []):
+                        neighbors = set(rooms[cur].get("connections", [])) | set(rooms[cur].get("locked_connections", {}).keys())
+                        for nb in neighbors:
                             if nb not in visited and nb != gate_room_id:
                                 visited.add(nb)
                                 frontier.append(nb)
@@ -39210,6 +39225,138 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["rooms"][boss_room_id]["monsters"], [])
 
         sessions.end_session(chat_id, session)
+        db.delete_labyrinth_run(chat_id, party_key)
+
+    def test_generate_floor_gates_the_checkpoint_boss_behind_a_real_multi_branch_convergence(self):
+        """
+        Real Phase L5 "Advanced Dungeons" v1 (2026-09-05, per Coffee,
+        citing Bottle Grotto/Eagle's Tower/Turtle Rock: "the player
+        must go from path one, and work thier way through the other
+        paths until unlocking the final rooms" -- see
+        [[project_advanced_interconnected_dungeons_research]]).
+        Statistical: on checkpoint floors where the gate fires, its
+        real switches must sit in genuinely different branches (never
+        inside the boss room's own branch), and each switch's own room
+        must be reachable from the hub without needing this exact gate
+        -- solvable by construction, same discipline every other real
+        gate in this generator already follows.
+        """
+        import collections
+        gate_seen = False
+        for seed in range(60):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = floor_data["rooms"]
+            boss_rooms = [rid for rid, r in rooms.items() if r.get("is_boss_room")]
+            if not boss_rooms:
+                continue
+            boss_id = boss_rooms[0]
+            gate_room_id = next((rid for rid, r in rooms.items() if boss_id in r.get("locked_connections", {})), None)
+            if gate_room_id is None:
+                continue
+            lockable_id = rooms[gate_room_id]["locked_connections"][boss_id]
+            lockable = next(lk for lk in rooms[gate_room_id]["lockables"] if lk["id"] == lockable_id)
+            if lockable["kind"] != "multi_switch_gate":
+                continue
+            gate_seen = True
+            switch_ids = lockable["requires"]
+            self.assertGreaterEqual(len(switch_ids), 1)
+            switch_rooms = [rid for rid, r in rooms.items() if any(lk["id"] in switch_ids for lk in r.get("lockables", []))]
+            self.assertEqual(len(switch_rooms), len(switch_ids), "each convergence switch must live in its own distinct room")
+            self.assertNotIn(boss_id, switch_rooms, "a convergence switch must never sit inside the boss room itself")
+            # Solvable by construction: reachable from the hub with EVERY
+            # OTHER real gate treated as freely passable (standing in for
+            # "the player has, through some legitimate ordering, already
+            # satisfied every other real prerequisite") and ONLY this one
+            # specific edge cut -- isolates whether THIS gate specifically
+            # is the sole blocker, same methodology this project's own
+            # general story-gate audit (db._backfill_cleared_location_
+            # gates) already uses. Unlike the overworld's own story_gates
+            # (an ADDITIONAL check layered on an intact `connections`
+            # list), a gated Labyrinth destination is REMOVED from
+            # `connections` entirely and moved into `locked_connections`
+            # -- "every other gate passable" here means traversing BOTH
+            # dicts, not just `connections`.
+            hub_id = floor_data["hub_room_id"]
+            visited, frontier = {hub_id}, collections.deque([hub_id])
+            while frontier:
+                cur = frontier.popleft()
+                room = rooms[cur]
+                neighbors = set(room.get("connections", [])) | set(room.get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if cur == gate_room_id and nb == boss_id:
+                        continue
+                    if nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            for switch_room_id in switch_rooms:
+                self.assertIn(switch_room_id, visited, f"seed {seed}: convergence switch room {switch_room_id} must be reachable without the gate it feeds")
+        self.assertTrue(gate_seen, "expected at least one real multi-branch convergence gate across 60 checkpoint-floor seeds")
+
+    async def test_labyrinth_convergence_gate_blocks_the_boss_until_every_switch_is_hit(self):
+        """
+        Real end-to-end companion to the statistical test above: using
+        a REAL generated checkpoint floor (not a synthetic fixture),
+        confirm the boss room is genuinely unreachable until every real
+        convergence switch has actually been hit via the real
+        `_do_lockpick`/`_do_activate_switch` handler flow -- flipping
+        only one of two required switches must still leave it blocked.
+        """
+        user_id, chat_id = 962090, -962090
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "ConvergenceGateTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        floor_data = gate_room_id = lockable = None
+        for seed in range(60):
+            fd = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = fd["rooms"]
+            boss_rooms = [rid for rid, r in rooms.items() if r.get("is_boss_room")]
+            if not boss_rooms:
+                continue
+            boss_id = boss_rooms[0]
+            gid = next((rid for rid, r in rooms.items() if boss_id in r.get("locked_connections", {})), None)
+            if gid is None:
+                continue
+            lk_id = rooms[gid]["locked_connections"][boss_id]
+            lk = next(x for x in rooms[gid]["lockables"] if x["id"] == lk_id)
+            if lk["kind"] == "multi_switch_gate" and len(lk["requires"]) == 2:
+                floor_data, gate_room_id, lockable = fd, gid, lk
+                break
+        self.assertIsNotNone(floor_data, "expected a real 2-switch convergence gate within 60 seeds")
+
+        rooms = floor_data["rooms"]
+        boss_id = next(rid for rid, r in rooms.items() if r.get("is_boss_room"))
+        switch_ids = lockable["requires"]
+        switch_rooms = {rid: r for rid, r in rooms.items() if any(lk["id"] in switch_ids for lk in r.get("lockables", []))}
+        rooms[gate_room_id]["visited"] = True
+        for rid in switch_rooms:
+            rooms[rid]["visited"] = True
+        db.create_labyrinth_run(chat_id, party_key, floor=5, seed=0, current_room_id=gate_room_id, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {rooms[boss_id]['name']}")
+        self.assertNotEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], boss_id, "must stay blocked with zero switches hit")
+
+        first_switch_room_id, first_room = next(iter(switch_rooms.items()))
+        first_switch = next(lk for lk in first_room["lockables"] if lk["id"] in switch_ids)
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=first_switch_room_id)
+        await bot._do_lockpick(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), db.get_character(user_id, chat_id), dict(first_switch), "hit the crystal")
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=gate_room_id)
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), f"go to {rooms[boss_id]['name']}")
+        self.assertNotEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], boss_id, "must still be blocked with only ONE of two switches hit")
+
+        for other_room_id, other_room in switch_rooms.items():
+            if other_room_id == first_switch_room_id:
+                continue
+            other_switch = next(lk for lk in other_room["lockables"] if lk["id"] in switch_ids)
+            db.update_labyrinth_run(chat_id, party_key, current_room_id=other_room_id)
+            await bot._do_lockpick(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), db.get_character(user_id, chat_id), dict(other_switch), "hit the crystal")
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=gate_room_id)
+        sink3 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink3, chat_id=chat_id), f"go to {rooms[boss_id]['name']}")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], boss_id, "must open once every real convergence switch is hit")
+
         db.delete_labyrinth_run(chat_id, party_key)
 
 

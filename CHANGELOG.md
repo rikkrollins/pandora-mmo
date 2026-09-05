@@ -2,6 +2,65 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.526] — feature: real multi-branch convergence gates ("Advanced Dungeons" Phase L5, v1)
+
+Coffee, right after v1.27.525's room-count reduction: "i dont want the
+dungeons smaller, i want the dungeons to be getting larger, but i want
+the puzzles to be interconnected so each branch or path connected to
+the main hub, to unlock the miniboss, boss, or staircase... keep in
+mind the original samples of bottle grotto and eagles nest... the
+player must go from path one, and work thier way through the other
+paths until unlocking the final rooms." Real, sourced research into
+all 8 Link's Awakening dungeons (not just the 3 studied for the
+original Phase L4 pass) confirmed the actual gap: every gate in this
+generator always sat at the hub boundary, so branches never depended
+on each other -- a player could clear any branch independently, in any
+order. See [[project_advanced_interconnected_dungeons_research]] for
+the full write-up (Bottle Grotto's convergent wings/ability-gated
+backtrack/event-gated portal, Eagle's Tower's cross-floor pillar
+collapse, Turtle Rock's 4 sequential minibosses, Key Cavern's
+redundant order-independent keys, and more).
+
+First real slice shipped: on checkpoint floors (which already get a
+real boss at the end of the main path, v1.27.520), the approach to
+that boss room now requires a real elemental switch from each of up to
+2 *different* other branches -- reaching the boss genuinely means
+having explored more than one real path, not just the floor's existing
+single mandatory gate. Reuses 100% existing plumbing
+(`multi_switch_gate`/`_SWITCH_STATE`, already chat-scoped and proven
+safe by every other gate in this generator) with zero new lockable
+kind, movement check, or render code -- purely a new placement pattern
+(a switch's own branch tail, and the gate itself on the edge into the
+boss room instead of at the hub). Solvable by construction, same
+discipline as every other gate here.
+
+Caught and fixed two real pre-existing test gaps while verifying this
+(both were previously invisible because no gate had ever needed to sit
+anywhere but the hub before): two statistical solvability tests
+(including this feature's own new one) only ever traversed a room's
+plain `connections` list, never `locked_connections` -- meaning they
+couldn't see PAST any other real gate at all. Harmless while every
+real gate lived at the hub with nothing else in the way; a real
+regression risk now that gates can legitimately layer on the same
+branch (confirmed live: a pre-existing pressure-plate gate and an
+unrelated branch-gate's own switch happened to share a branch on one
+real seed, exposed by this feature's own RNG-stream shift). Both fixed
+to traverse `locked_connections` too when checking "reachable without
+needing THIS specific gate."
+
+Full LabyrinthTests/DungeonEvolveTests/DungeonAuditTests suite (202
+tests) re-run clean across 3 separate passes, with only the project's
+own known pre-existing batch-order flakes appearing (each confirmed
+passing in isolation, a different one each run -- an established,
+documented characteristic of this suite, not a regression).
+
+Explicitly not yet built (see the research memory's own "explicitly
+not yet decided" section): mid-branch gates (a locked edge partway
+through a single branch, not just at its root or the final approach),
+event-gated new edges (an enemy kill or puzzle solve revealing a
+brand-new connection, Bottle Grotto's post-mini-boss-portal style), and
+any port to `dungeon_evolve.py`'s own overworld generator.
+
 ## [1.27.525] — fewer, more varied Labyrinth rooms (less "The Ticking Vault 2/7/12/17")
 
 Coffee: "reducing repetitive filler rooms in favor of fewer, more

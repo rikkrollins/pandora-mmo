@@ -1065,6 +1065,62 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         if rid != mandatory_gate_room_id and rid not in {c[0] for c in mandatory_source_chains}
     ]
 
+    # Real Phase L5 "Advanced Dungeons" v1 (2026-09-05, per Coffee,
+    # citing Bottle Grotto/Eagle's Tower/Turtle Rock: "the player must
+    # go from path one, and work thier way through the other paths
+    # until unlocking the final rooms" -- see [[project_advanced_
+    # interconnected_dungeons_research]] for the full sourced research
+    # this implements). On checkpoint floors specifically (which
+    # already get a real boss at main_path_end, v1.27.520), the
+    # approach to that boss room now requires a real switch from EACH
+    # of 2 different other branches -- reaching the boss genuinely
+    # means having explored more than one real path, not just the
+    # single mandatory gate above. Reuses 100% existing plumbing
+    # (multi_switch_gate/_SWITCH_STATE already support an arbitrary-
+    # length `requires` list, chat-scoped regardless of which room a
+    # switch physically lives in, same mechanism the mandatory/branch/
+    # collapse-puzzle gates above already prove safe) -- no new
+    # lockable kind, no new movement/render code, purely a new
+    # PLACEMENT pattern. Solvable by construction: every switch's own
+    # branch is already fully generated and reachable (via the hub,
+    # still open at this point) before this gate is added. Same
+    # asymmetric shape every other branch gate here already uses --
+    # only the forward edge INTO the boss room is locked; the boss
+    # room's own reverse edge back out is untouched, so retreating
+    # (to an already-visited room) is never blocked by this.
+    if checkpoint and boss_pool and len(main_chain) >= 2:
+        convergence_sources = [c for c in other_chains if c not in mandatory_source_chains]
+        if len(convergence_sources) < 2:
+            convergence_sources = other_chains
+        convergence_k = min(2, len(convergence_sources))
+        if convergence_k >= 1:
+            convergence_chains = rng.sample(convergence_sources, convergence_k)
+            convergence_switch_ids = []
+            for i, src_chain in enumerate(convergence_chains):
+                # The branch's own TAIL, not its root -- the player
+                # must walk the whole path to reach it, matching "work
+                # their way through the other paths," not just glimpse
+                # the branch's entrance.
+                switch_room_id = src_chain[-1]
+                element = rng.choice(_SWITCH_ELEMENTS)
+                switch_id = f"f{floor}_convergence_{i}"
+                rooms[switch_room_id].setdefault("lockables", []).append({
+                    "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+                })
+                convergence_switch_ids.append(switch_id)
+            approach_room_id = main_chain[-2]
+            convergence_door_id = f"f{floor}_convergence_gate"
+            rooms[approach_room_id]["connections"].remove(main_path_end)
+            rooms[approach_room_id].setdefault("locked_connections", {})[main_path_end] = convergence_door_id
+            rooms[approach_room_id].setdefault("lockables", []).append({
+                "id": convergence_door_id, "kind": "multi_switch_gate", "name": "a real converging seal",
+                "requires": convergence_switch_ids,
+            })
+            rooms[approach_room_id]["description"] += (
+                f" A real converging seal blocks the way in -- it looks like it needs "
+                f"{len(convergence_switch_ids)} different things elsewhere on this floor to open."
+            )
+
     gated_chain = None
     if len(other_chains) >= 2 and rng.random() < _scaled_chance(_BRANCH_GATE_CHANCE, floor, 0.002, 0.55):
         _branch_gate_eligible = [c for c in other_chains if c not in mandatory_source_chains]
