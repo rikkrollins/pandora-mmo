@@ -49,7 +49,22 @@ import random
 from rules import dungeon_audit
 from rules.dungeon_evolve import _candidate_monsters
 
-_SIDE_ROOM_COUNT_RANGE = (3, 5)
+# Real live follow-up (2026-09-05, per Coffee: "reducing repetitive
+# filler rooms in favor of fewer, more purposeful rooms"). Direct
+# measurement before this change: with the old (3, 5) range plus
+# _BRANCH_DEPTH_WEIGHTS' own real ~2.1-extra-room mean per branch, a
+# typical floor generated ~12-13 side rooms total -- but each of the 5
+# themes above only has 5 real room_names/room_descriptions pairs,
+# cycled by plain index (see _new_side_room's own name_index), so a
+# single floor routinely repeated every one of those 5 names 2-3 times
+# each (Coffee's own literal example: "The Ticking Vault 2/7/12/17").
+# Narrowed to fewer BRANCHES specifically, not shorter ones -- v1.27.515
+# just widened _BRANCH_DEPTH_WEIGHTS for real "longer interconnectable
+# pathways," and shortening branches back down would undo that. Fewer,
+# longer branches instead of many short ones: same real corridor feel,
+# roughly a third less total rooms (and therefore a third less name
+# repetition) per floor.
+_SIDE_ROOM_COUNT_RANGE = (2, 4)
 
 # Real Zelda-style branching topology (2026-09-03, per Coffee, dev-
 # bridge: 3 real Link's Awakening dungeon maps -- "I want the levels to
@@ -226,13 +241,19 @@ LABYRINTH_THEMES = [
         "intro": "The way ahead cracks like glass and reassembles wrong -- everything here is a reflection of somewhere real, just slightly, deliberately, off.",
         "hub_description": "Fractured light bends through the air here, throwing a dozen almost-right versions of the room across every wall.",
         "checkpoint_description": "The cracks stop spreading here -- a single unbroken pane, calm at the center of all this wrongness.",
-        "room_names": ["A Cracked Reflection", "The Wrong Angle", "A Doubled Hallway", "The Silvered Room", "A Recursive Corner"],
+        "room_names": [
+            "A Cracked Reflection", "The Wrong Angle", "A Doubled Hallway", "The Silvered Room", "A Recursive Corner",
+            "The Unlit Glass", "A Second Vantage", "The Fracture Line",
+        ],
         "room_descriptions": [
             "A tall pane of broken glass stands freestanding in the middle of the floor, showing you a version of this room that isn't quite the one you're standing in.",
             "The corners here don't meet the way corners should -- every angle is a few degrees off from what your eyes expect.",
             "The same stretch of hallway repeats twice, mirrored, with no visible seam where one copy ends and the other begins.",
             "Every wall is silvered like an old mirror's backing, and your own reflection lags a half-second behind your real movements.",
             "The room curls back on itself at the far end, so that walking straight eventually brings you back to where you started.",
+            "A sheet of glass leans against the far wall here, dark and unreflective no matter how the light shifts -- it shows nothing back at all.",
+            "Two identical vantage points look out over the same stretch of nowhere, a few feet apart, each one certain it's the original.",
+            "A jagged crack runs floor to ceiling here, and whatever's on the other side of it doesn't quite line up with this room anymore.",
         ],
         "signature_hazard": "drowning",
         # Real polish found via the hourly self-improvement monitoring
@@ -250,13 +271,19 @@ LABYRINTH_THEMES = [
         "intro": "Sound dies a step behind you as you cross over -- this place sits in the gap between where you were and where you're going, and it doesn't want visitors noticed.",
         "hub_description": "A wide, grey nowhere, lit by no source anyone can point to.",
         "checkpoint_description": "The grey finally holds still here, just long enough to feel like an actual room again.",
-        "room_names": ["A Room That Shouldn't Fit", "The Quiet Gap", "An Unfinished Space", "The In-Between Landing", "A Forgotten Threshold"],
+        "room_names": [
+            "A Room That Shouldn't Fit", "The Quiet Gap", "An Unfinished Space", "The In-Between Landing", "A Forgotten Threshold",
+            "The Held Breath", "An Unmapped Pocket", "The Second Silence",
+        ],
         "room_descriptions": [
             "The proportions here are wrong in a way you can't quite name -- this room is bigger on the inside than the space it sits in from outside.",
             "A narrow gap of nothing splits the room in two; crossing it takes a step too long, like the distance quietly grows as you walk it.",
             "Half the walls here trail off into flat grey nothing before they ever reach a real corner.",
             "This landing exists between two places that no longer connect to it -- neither one remembers building it.",
             "A threshold stands with no door in it and nothing obvious on either side, like something meant to be walked through was forgotten.",
+            "The air here holds still the way a held breath does, like the room itself is waiting to see if you'll notice before it lets go.",
+            "This space doesn't appear to connect to anything on either side of it -- just a pocket of somewhere, sealed off from whatever it used to belong to.",
+            "Even your own footsteps land without a sound here, twice over -- once for real, once a beat later, from somewhere just behind you.",
         ],
         "signature_hazard": "freezing",
         "secondary_hazard": "acid",
@@ -267,13 +294,19 @@ LABYRINTH_THEMES = [
         "intro": "Gears the size of houses turn somewhere out of sight, and the whole place ticks forward around you like it's keeping its own private time.",
         "hub_description": "Brass housing and slow-turning gearwork line every surface, all of it moving to a rhythm no one asked for.",
         "checkpoint_description": "The gears here have wound down to a stop -- whatever this place used to measure, it isn't measuring it anymore.",
-        "room_names": ["A Gear-Locked Chamber", "The Ticking Vault", "A Stalled Mechanism", "The Brass Landing", "A Wound Spring Room"],
+        "room_names": [
+            "A Gear-Locked Chamber", "The Ticking Vault", "A Stalled Mechanism", "The Brass Landing", "A Wound Spring Room",
+            "The Counted Hour", "A Sealed Escapement", "The Overwound Room",
+        ],
         "room_descriptions": [
             "A massive interlocking gear fills most of the far wall, its teeth taller than a person, turning so slowly you can't quite tell it's moving until you look away and back.",
             "Rows of brass-plated lockers line this vault, each one ticking faintly, like something inside is still being wound.",
             "A huge mechanism sits frozen mid-motion here, one gear jammed against another -- whatever it was building toward, it never finished.",
             "Pipework and pressure gauges cover every surface of this landing, needles twitching toward numbers that mean nothing to you.",
             "A tightly coiled spring, thick as a tree trunk, strains visibly against its housing in the corner, tensioned and never released.",
+            "A single brass clock face dominates the far wall here, hands frozen at an hour that doesn't match anything, still audibly counting underneath.",
+            "A small glass-fronted mechanism ticks away behind sealed brass, its gears visible but its purpose long since lost to whoever built it.",
+            "Every spring and coil in this room looks tensioned past what it was ever meant to hold, straining toward a release that keeps not coming.",
         ],
         "signature_hazard": "arcing_current",
         "secondary_hazard": "overheating",
@@ -284,13 +317,19 @@ LABYRINTH_THEMES = [
         "intro": "The air goes warm and grey the moment you cross in -- everything here looks like it's already burned, and burns a little more every time you look away.",
         "hub_description": "Ash drifts in from nowhere, settling over floors that were never actually on fire.",
         "checkpoint_description": "The ash doesn't fall here -- the only still, clean air anywhere in this stretch.",
-        "room_names": ["An Ember-Lit Hollow", "The Smoldering Passage", "A Grey Ash Room", "The Cinder Landing", "An Ashen Threshold"],
+        "room_names": [
+            "An Ember-Lit Hollow", "The Smoldering Passage", "A Grey Ash Room", "The Cinder Landing", "An Ashen Threshold",
+            "The Banked Hearth", "A Blackened Vault", "The Long Exhale",
+        ],
         "room_descriptions": [
             "Embers glow faintly in the cracks of the floor here, throwing just enough orange light to see the shape of the room by.",
             "A narrow passage stretches ahead, smoke curling along the ceiling with nowhere obvious to vent to.",
             "Fine grey ash coats every surface in here, undisturbed until your own footprints cut through it.",
             "Charred beams cross overhead on this landing, blackened but still somehow holding the weight above them.",
             "The threshold here is scorched black on both sides, as if something passed through it burning, more than once.",
+            "A wide hearth of blackened stone dominates one wall, banked low but unmistakably still warm to stand near.",
+            "Every surface in this vault has been scorched to the same flat black, like whatever burned here did it all at once, then stopped.",
+            "A slow breath of hot air moves through this room and never seems to run out, drifting from somewhere deeper in that never shows itself.",
         ],
         "signature_hazard": "lava",
         "secondary_hazard": "overheating",
@@ -301,13 +340,19 @@ LABYRINTH_THEMES = [
         "intro": "Roots have already grown through walls that, by every sign, were built after them -- whatever this place is, growth here runs backward.",
         "hub_description": "Vines thick as rope hold up stonework that looks like it should have collapsed centuries ago.",
         "checkpoint_description": "The green here has gone still and orderly, almost tended, almost deliberate.",
-        "room_names": ["A Root-Bound Chamber", "The Overgrown Landing", "A Reclaimed Hall", "The Living Threshold", "An Unpruned Room"],
+        "room_names": [
+            "A Root-Bound Chamber", "The Overgrown Landing", "A Reclaimed Hall", "The Living Threshold", "An Unpruned Room",
+            "The Backward Grove", "A Split Foundation", "The Quiet Reclaiming",
+        ],
         "room_descriptions": [
             "Thick roots have pushed up through the floor here, bracing the ceiling like they grew that way on purpose.",
             "Moss and creeping vine cover this landing so completely that the original stonework barely shows through anymore.",
             "Whatever this hall was built for, the green growing through every seam has clearly made other plans for it.",
             "Living vines form the actual doorframe of this threshold now, thick enough that stone underneath is only a guess.",
             "Nothing in this room has been pruned or tended in what feels like a very long time -- growth here answers to no one.",
+            "A cluster of trees grows straight through the middle of this room, roots and all, in a pattern too deliberate to be an accident of nature.",
+            "The floor has split clean in two where a root pushed up from beneath, and neither half looks in any hurry to settle back down.",
+            "Green has crept over nearly everything in here, slow and patient, like it's simply waiting for the room to finish being a room.",
         ],
         "signature_hazard": "acid",
         "secondary_hazard": "drowning",
@@ -811,7 +856,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # both key off `room_ids`, the flat hub-adjacent set -- keep working
     # exactly as before), but a branch can now run 0-2 rooms DEEPER, a
     # real path rather than a single dead-end hop.
-    side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 15, 3)  # depth-scaled RNG: more chambers per floor, deeper in
+    side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 20, 2)  # depth-scaled RNG: more chambers per floor, deeper in -- gentler growth now that the base range itself is smaller (2026-09-05 room-count reduction)
     num_branch_roots = rng.randint(_SIDE_ROOM_COUNT_RANGE[0], side_room_max)
     room_ids = []
     branch_chains = []
@@ -928,11 +973,18 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # real mechanics every optional gate below already uses (per
     # Coffee: "random from the full existing set" -- no new mechanic,
     # just a guaranteed application of what's already built).
-    # _SIDE_ROOM_COUNT_RANGE's own floor of 3 branch roots guarantees
-    # `other_chains` always has >= 2 entries in practice; the `if
-    # other_chains else "plate"` fallback only matters for the
-    # theoretical zero-side-branch case, since pressure_plate is the
-    # one mechanic that's entirely self-contained in the hub.
+    # _SIDE_ROOM_COUNT_RANGE's own floor of 2 branch roots (2026-09-05,
+    # reduced for "fewer, more purposeful rooms") guarantees `other_
+    # chains` has >= 1 entry in practice, not always >= 2 anymore --
+    # every mechanic below that draws from `other_chains` already
+    # degrades gracefully with just one (a single switch/key source, or
+    # rune's own `min(..., len(other_chains))` clamp), and the handful
+    # that explicitly require `len(other_chains) >= 2` (branch-gating,
+    # for one) simply roll less often now, which is the intended
+    # tradeoff of fewer branches per floor. The `if other_chains else
+    # "plate"` fallback still covers the theoretical zero-side-branch
+    # case, since pressure_plate is the one mechanic that's entirely
+    # self-contained in the hub.
     mandatory_kind = rng.choice(("switch", "plate", "key", "rune")) if other_chains else "plate"
     mandatory_gate_room_id = main_chain[0]
     mandatory_source_chains: list = []

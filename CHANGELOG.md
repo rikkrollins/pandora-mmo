@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.525] — fewer, more varied Labyrinth rooms (less "The Ticking Vault 2/7/12/17")
+
+Coffee: "reducing repetitive filler rooms in favor of fewer, more
+purposeful rooms." Measured before this fix: with the old (3, 5)
+_SIDE_ROOM_COUNT_RANGE plus v1.27.515's own real "longer
+interconnectable pathways" branch-depth widening, a typical floor
+generated ~12-13 side rooms -- but each of the 5 themes only has 5 real
+room_names/room_descriptions pairs, cycled by plain index, so a single
+floor routinely repeated every one of those 5 names 2-3 times each
+(Coffee's own literal example: "The Ticking Vault 2/7/12/17").
+
+Fixed two ways, together:
+- `_SIDE_ROOM_COUNT_RANGE` narrowed from (3, 5) to (2, 4) branches --
+  fewer BRANCHES specifically, not shorter ones (v1.27.515's own real
+  depth widening is untouched, so each branch still runs as long as it
+  did before). Fewer, longer branches instead of many short ones: same
+  real corridor feel, ~30% fewer total rooms per floor.
+- Each of the 5 Labyrinth themes widened from 5 to 8 real, distinct
+  room_names/room_descriptions pairs (15 new pairs written, matching
+  each theme's existing tone).
+
+Together: average rooms per floor drops from ~12.6 to ~9.1, and no
+room name needs to repeat more than twice on any one floor anymore
+(down from routine 2-3x repeats of every single name). New statistical
+test locks in both the room-count reduction and the widened pool size.
+Full LabyrinthTests/DungeonEvolveTests/DungeonAuditTests suite (200
+tests) re-run clean.
+
+Separately noted, not fixed here: `rules/dungeon_evolve.py`'s own
+"Approach" buffer corridors (4-8 generated per evolved dungeon, purely
+for real map-collision spacing) all reuse the exact same single
+description verbatim -- a related but separate repetition source,
+worth its own follow-up.
+
 ## [1.27.524] — generalized the v1.27.523 backfill to every real "clear this room" gate in the campaign, not just Sunken Root Caverns
 
 Follow-up, Coffee: "make sure all characters that have previous

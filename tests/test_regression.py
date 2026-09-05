@@ -34545,6 +34545,48 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(floor_data["connector_room_id"], rooms)
         self.assertFalse(floor_data["is_checkpoint"])
 
+    def test_generate_floor_produces_fewer_more_varied_rooms_than_before(self):
+        """
+        Real live follow-up (2026-09-05, per Coffee: "reducing
+        repetitive filler rooms in favor of fewer, more purposeful
+        rooms"). Direct measurement before this fix: the old (3, 5)
+        _SIDE_ROOM_COUNT_RANGE plus each theme's own 5-name pool meant a
+        typical floor generated ~12-13 side rooms, repeating every one
+        of those 5 names 2-3 times each (Coffee's own literal example:
+        "The Ticking Vault 2/7/12/17"). Fewer BRANCHES (not shorter
+        ones -- v1.27.515's own real "longer interconnectable pathways"
+        widening of _BRANCH_DEPTH_WEIGHTS is untouched) plus each
+        theme's pool widened from 5 to 8 real names/descriptions
+        together bring this down to a real, measurable improvement:
+        average side-room count per floor drops meaningfully, and no
+        single room name should need to repeat 3+ times on one floor
+        anymore.
+        """
+        total_rooms = 0
+        max_repeat_on_any_floor = 0
+        seeds = 40
+        for seed in range(seeds):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 10, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub, connector = floor_data["hub_room_id"], floor_data["connector_room_id"]
+            name_counts: dict[str, int] = {}
+            for rid, r in rooms.items():
+                if rid in (hub, connector):
+                    continue
+                total_rooms += 1
+                base_name = r["name"].rsplit(" ", 1)[0]
+                name_counts[base_name] = name_counts.get(base_name, 0) + 1
+            if name_counts:
+                max_repeat_on_any_floor = max(max_repeat_on_any_floor, max(name_counts.values()))
+        average_rooms = total_rooms / seeds
+        self.assertLess(average_rooms, 11, f"expected a real reduction from the old ~12-13 average, got {average_rooms:.1f}")
+        self.assertLessEqual(max_repeat_on_any_floor, 2, "no room name should need to repeat 3+ times on one floor with the widened 8-name pool")
+
+        for theme in labyrinth_module.LABYRINTH_THEMES:
+            self.assertGreaterEqual(len(theme["room_names"]), 8, f"{theme['id']} should have real widened variety, not just the original 5")
+            self.assertEqual(len(theme["room_names"]), len(theme["room_descriptions"]), theme["id"])
+            self.assertEqual(len(theme["room_names"]), len(set(theme["room_names"])), f"{theme['id']} must not have duplicate room names")
+
         visited = {floor_data["hub_room_id"]}
         frontier = [floor_data["hub_room_id"]]
         while frontier:
