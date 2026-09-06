@@ -2,6 +2,69 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.528] — feature: real branch-tail merging ("Advanced Dungeons" Phase L5, v3) + a serious pre-existing generator bug found and fixed
+
+Coffee: "keep going... your goal is to be able to generate dungeons
+like the samples and references on the fly." Continuing Phase L5 (see
+[[project_advanced_interconnected_dungeons_research]]): Bottle Grotto's
+own literal "two wings rejoin before the mini-boss" shape. On
+checkpoint floors, two genuinely independent branches can now be
+physically joined at their own tail rooms by a real, bidirectional
+connection -- a player who fully explores either one arrives at the
+same shared room the other also leads to. Checkpoint floors also gain
+2 extra branch roots specifically, so the growing set of Phase L5
+mechanics (convergence gate, mid-branch gate, now tail-merging) has
+real room to draw from without starving each other -- checkpoint
+floors now average ~19 rooms vs. ~9 for ordinary ones, real,
+deliberate size differentiation matching "this is our goal is larger
+dungeons" for the floors that are actually meant to feel like an event.
+
+**A serious, real, pre-existing bug found and fixed while building
+this**: `_add_loop_back_connections`'s own safety check (which decides
+which rooms a bare shortcut edge may never touch, so it can never
+bypass a real gate) had a backward-leakage bug -- it BFS'd outward from
+each gated room's own `connections` list to find what it shadows, but
+a gated room's own REVERSE edge back to the hub is deliberately left
+open (every real gate here only removes the forward direction, so
+retreating never traps a player), so that same BFS walked straight
+back OUT through the gate, into the hub, and from there into every
+OTHER branch on the floor -- silently marking the ENTIRE floor as
+"shadowed" on every single seed tested. This meant the Labyrinth's own
+real "grid loops" feature (shipped 2026-09-03) has been effectively
+dead code, or very close to it, for most of its life, only ever firing
+in whatever rare cases this over-exclusion still left room for. Fixed
+by computing plain hub reachability directly instead (ignoring
+`locked_connections` entirely) and treating anything not reachable
+that way as shadowed -- the same real invariant, computed in a way
+that can't leak backward through a gate's own return trip. Confirmed
+this was the real, sole reason branch-tail merging (which reuses the
+identical exclusion logic) found zero real candidates across 200
+seeds during testing, before this fix.
+
+Fixing this real bug immediately surfaced two more, smaller real
+follow-ups (loop-back now actually fires far more often than it ever
+safely could before, so long-dormant edge cases got real exposure for
+the first time): loop-back and tail-merging both needed to additionally
+exclude real warp endpoints (a warp's own "genuinely saves real
+distance" guarantee, computed once at placement time, never accounted
+for a LATER shortcut edge landing on either end and shrinking that
+distance retroactively) -- and one test (`test_generate_floor_
+produces_fewer_more_varied_rooms_than_before`, v1.27.525's own
+room-count check) had unknowingly measured floor 10, which is itself a
+checkpoint floor now deliberately exempt from that reduction; corrected
+to floor 11.
+
+Full LabyrinthTests/DungeonEvolveTests/DungeonAuditTests suite (206
+tests) re-run clean across 2 separate passes, only the project's own 2
+known pre-existing batch-order flakes appearing (both confirmed
+passing in isolation, as always).
+
+Still queued: event-gated live edges (a miniboss kill or puzzle solve
+revealing a brand-new connection at runtime, Bottle Grotto's own
+post-mini-boss portal), true sequential chains (solving A unlocks B's
+own gate specifically), and any port of Phase L5 to `dungeon_evolve.
+py`'s own overworld generator.
+
 ## [1.27.527] — feature: real mid-branch gates ("Advanced Dungeons" Phase L5, v2) + two real pre-existing bugs found and fixed along the way
 
 Coffee: "keep going... your goal is to be able to generate dungeons

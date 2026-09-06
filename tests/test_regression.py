@@ -34561,12 +34561,20 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         average side-room count per floor drops meaningfully, and no
         single room name should need to repeat 3+ times on one floor
         anymore.
+
+        Floor 11, not 10 (2026-09-05 follow-up correction): floor 10 is
+        itself a checkpoint floor, which Phase L5's own later "Advanced
+        Dungeons" work deliberately, explicitly exempts from this
+        reduction (checkpoint floors get 2 EXTRA branch roots on top,
+        specifically so they read as bigger, richer floors -- the real
+        end-of-segment "this is what you were working toward" beat).
+        This test's own claim was always about an ORDINARY floor.
         """
         total_rooms = 0
         max_repeat_on_any_floor = 0
         seeds = 40
         for seed in range(seeds):
-            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 10, random.Random(seed))
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 11, random.Random(seed))
             rooms = floor_data["rooms"]
             hub, connector = floor_data["hub_room_id"], floor_data["connector_room_id"]
             name_counts: dict[str, int] = {}
@@ -39493,6 +39501,57 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], to_room_id, "must open once the real switch is hit")
 
         db.delete_labyrinth_run(chat_id, party_key)
+
+    def test_generate_floor_can_merge_two_branch_tails_bottle_grotto_style(self):
+        """
+        Real Phase L5 "Advanced Dungeons" v3 (2026-09-05, per Coffee:
+        "keep going... generate dungeons like the samples" -- Bottle
+        Grotto's own literal "two wings rejoin before the mini-boss"
+        shape, see [[project_advanced_interconnected_dungeons_
+        research]]). Statistical: when two branch tails get merged,
+        the new edge must be real and bidirectional, must never touch
+        main_chain (that would hand out a free, ungated back door
+        around the real convergence gate protecting the boss room),
+        and must never touch a room `_rooms_shadowed_by_a_real_gate`
+        says is genuinely unreachable without solving some other real
+        gate first (a bare merge edge would silently bypass it, same
+        discipline `_add_loop_back_connections` already established
+        for its own shortcuts) -- NOT merely "is a locked_connections
+        target somewhere," since a room can legitimately have both its
+        own normal, always-open path AND a separate, optional gated
+        shortcut into it (a real, pre-existing pattern this generator
+        already uses, e.g. the collapse-puzzle's own echo shortcuts).
+        """
+        merge_seen = False
+        for seed in range(200):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = floor_data["rooms"]
+            merged_pairs = [
+                (rid, other) for rid, r in rooms.items() for other in r.get("connections", [])
+                if "A real passage leads on from here" in r.get("description", "")
+                and "A real passage leads on from here" in rooms.get(other, {}).get("description", "")
+                and other in r.get("connections", []) and rid in rooms.get(other, {}).get("connections", [])
+            ]
+            if not merged_pairs:
+                continue
+            merge_seen = True
+            boss_id = next((rid for rid, r in rooms.items() if r.get("is_boss_room")), None)
+            for tail_a, tail_b in merged_pairs:
+                if boss_id is not None:
+                    self.assertNotEqual(tail_a, boss_id, f"seed {seed}: a tail-merge must never touch the boss room")
+                    self.assertNotEqual(tail_b, boss_id, f"seed {seed}: a tail-merge must never touch the boss room")
+                # Compute against the rooms as they stood BEFORE this
+                # exact tail-merge edge was added (removing just this one
+                # known pair from a shallow copy), so the check can't
+                # trivially "pass" just because the very edge being
+                # tested made its own destination look reachable.
+                rooms_before = {rid: dict(r) for rid, r in rooms.items()}
+                rooms_before[tail_a]["connections"] = [c for c in rooms_before[tail_a]["connections"] if c != tail_b]
+                rooms_before[tail_b]["connections"] = [c for c in rooms_before[tail_b]["connections"] if c != tail_a]
+                shadowed = labyrinth_module._rooms_shadowed_by_a_real_gate(rooms_before, floor_data["hub_room_id"], floor_data["connector_room_id"])
+                self.assertNotIn(tail_a, shadowed, f"seed {seed}: {tail_a} is genuinely unreachable without this exact tail-merge edge -- it would be bypassing a real gate")
+                self.assertNotIn(tail_b, shadowed, f"seed {seed}: {tail_b} is genuinely unreachable without this exact tail-merge edge -- it would be bypassing a real gate")
+        self.assertTrue(merge_seen, "expected at least one real branch-tail merge across 200 checkpoint-floor seeds")
 
 
 if __name__ == "__main__":

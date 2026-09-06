@@ -653,7 +653,55 @@ def _assign_grid_positions(rooms: dict, hub_room_id: str) -> None:
                 occupied[(x, y)] = rid
 
 
-def _add_loop_back_connections(rooms: dict, hub_id: str, connector_id: str, rng: random.Random, floor: int) -> None:
+def _rooms_shadowed_by_a_real_gate(rooms: dict, hub_id: str, connector_id: str) -> set[str]:
+    """
+    Real, shared safety check (2026-09-05, extracted from `_add_loop_
+    back_connections`'s own original logic so a second real feature --
+    Phase L5's branch-tail merge -- can reuse the identical exclusion
+    set, plus a real bug fix found doing that extraction). Returns
+    every room a bare, unconditional new connection must never touch:
+    the hub and connector (never trivialize the main path, same
+    discipline warps already follow), any room a collapse-puzzle
+    trigger can later seal off, and every room that isn't reachable
+    from the hub using ONLY plain, ungated `connections` -- a bare edge
+    into any of those would silently let a player bypass whatever real
+    gate actually protects them, forever.
+
+    Real bug fixed here (found via Phase L5's own branch-tail-merge
+    testing turning up ZERO real candidates on every single seed, which
+    should be statistically near-impossible): the ORIGINAL version of
+    this check BFS'd outward from each gated room's own `connections`
+    list to find what it shadows -- but a gated room's own REVERSE edge
+    back to the hub is deliberately left intact (every real gate in
+    this generator only ever removes the FORWARD direction, so
+    retreating never traps a player), so that same BFS walked straight
+    back OUT through the gate, into the hub, and from there into every
+    OTHER real branch on the floor -- marking the ENTIRE floor as
+    "shadowed," even the parts with no gate anywhere near them. Fixed
+    by computing plain hub reachability directly (ignoring
+    `locked_connections` entirely) and treating anything NOT in that
+    set as shadowed -- the same real invariant, computed the way that
+    can't leak backward through a gate's own return trip.
+    """
+    reachable = {hub_id}
+    frontier = [hub_id]
+    while frontier:
+        cur = frontier.pop()
+        for nb in rooms[cur].get("connections", []):
+            if nb not in reachable:
+                reachable.add(nb)
+                frontier.append(nb)
+
+    excluded = {hub_id, connector_id}
+    excluded.update(rid for rid in rooms if rid not in reachable)
+    for room in rooms.values():
+        excluded.update(room.get("collapsing_connections", {}).keys())
+    return excluded
+
+
+def _add_loop_back_connections(
+    rooms: dict, hub_id: str, connector_id: str, rng: random.Random, floor: int, warp_endpoint_ids: set | None = None,
+) -> None:
     """
     Real, more foundational research follow-up (2026-09-03) -- see
     `_LOOP_BACK_CHANCE`'s own module-level docstring for the full
@@ -668,24 +716,22 @@ def _add_loop_back_connections(rooms: dict, hub_id: str, connector_id: str, rng:
     one), so this never needs its own solvability check.
 
     Excludes the hub and connector (never trivialize the main path,
-    same discipline warps already follow) and any room that's only
+    same discipline warps already follow), any room that's only
     reachable through a real branch gate, or that a collapse-puzzle
-    trigger can later seal off -- a bare loop-back edge into either
-    would silently let a player bypass that gate/trigger forever.
+    trigger can later seal off (a bare loop-back edge into either would
+    silently let a player bypass that gate/trigger forever), and real
+    warp endpoints (2026-09-05 follow-up fix, real regression found
+    testing Phase L5's own branch-tail merge: fixing this function's
+    own exclusion-set bug, which previously shadowed almost the ENTIRE
+    floor and so barely ever actually fired, meant loop-back could
+    newly land a real shortcut edge on a warp's own endpoint -- a
+    warp's "genuinely saves real distance" guarantee, computed once at
+    placement time, assumed no LATER edge would ever shrink that
+    distance).
     """
-    excluded = {hub_id, connector_id}
-    for room in rooms.values():
-        excluded.update(room.get("collapsing_connections", {}).keys())
-
-    gated_all = {dest for room in rooms.values() for dest in room.get("locked_connections", {})}
-    frontier = list(gated_all)
-    while frontier:
-        cur = frontier.pop()
-        for nb in rooms[cur].get("connections", []):
-            if nb not in gated_all:
-                gated_all.add(nb)
-                frontier.append(nb)
-    excluded |= gated_all
+    excluded = _rooms_shadowed_by_a_real_gate(rooms, hub_id, connector_id)
+    if warp_endpoint_ids:
+        excluded |= warp_endpoint_ids
 
     by_cell = {(r["grid_position"]["x"], r["grid_position"]["y"]): rid for rid, r in rooms.items()}
     candidates = []
@@ -857,7 +903,21 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # exactly as before), but a branch can now run 0-2 rooms DEEPER, a
     # real path rather than a single dead-end hop.
     side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 20, 2)  # depth-scaled RNG: more chambers per floor, deeper in -- gentler growth now that the base range itself is smaller (2026-09-05 room-count reduction)
-    num_branch_roots = rng.randint(_SIDE_ROOM_COUNT_RANGE[0], side_room_max)
+    # Real, deliberate exception to that same reduction (2026-09-05,
+    # per Coffee: "i dont want the dungeons smaller, i want the
+    # dungeons to be getting larger... this is our goal is larger
+    # dungeons"): checkpoint floors are this segment's own real "this
+    # is what you were working toward" beat -- they already get the
+    # real boss (v1.27.520) and the Phase L5 mechanics above (a
+    # convergence gate, a mid-branch gate, real branch-tail merging),
+    # all of which need real branches to draw from. A plain (2, 4)
+    # floor routinely has nothing left over once those mechanics claim
+    # their own sources -- checkpoint floors get 2 extra branch roots
+    # specifically, so they read as genuinely bigger, richer floors,
+    # not just structurally different ones.
+    if checkpoint:
+        side_room_max += 2
+    num_branch_roots = rng.randint(_SIDE_ROOM_COUNT_RANGE[0] + (2 if checkpoint else 0), side_room_max)
     room_ids = []
     branch_chains = []
     next_index = 0
@@ -1711,7 +1771,50 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             rooms[tail_id].setdefault("locked_connections", {})[hub_id] = lever_id
 
     _assign_grid_positions(rooms, hub_id)
-    _add_loop_back_connections(rooms, hub_id, connector["id"], rng, floor)
+    _add_loop_back_connections(rooms, hub_id, connector["id"], rng, floor, warp_endpoint_ids)
+
+    # Real Phase L5 "Advanced Dungeons" v3 (2026-09-05, per Coffee:
+    # "keep going... generate dungeons like the samples" -- Bottle
+    # Grotto's own literal "two wings rejoin before the mini-boss"
+    # shape, see [[project_advanced_interconnected_dungeons_
+    # research]]). Two genuinely independent branches, each still
+    # their own real dead-end path from the hub, physically joined at
+    # their own TAIL rooms by a real, unconditional, bidirectional
+    # connection -- a player who fully explores EITHER branch arrives
+    # at the same shared room the other one also leads to. Deliberately
+    # runs LAST, after every real gate/puzzle above has already claimed
+    # whatever rooms it needed, reusing the exact same `_rooms_
+    # shadowed_by_a_real_gate` exclusion `_add_loop_back_connections`
+    # itself already relies on -- a real bug found testing an earlier
+    # version of this feature: running it BEFORE those gates were all
+    # placed meant a later mechanic could still lock a room this
+    # feature had already wired an ungated shortcut into, silently
+    # bypassing it. Same "always adds a redundant path, never removes
+    # one" safety as loop-back, so this never needs its own
+    # solvability check either.
+    if checkpoint and boss_pool:
+        shadowed = _rooms_shadowed_by_a_real_gate(rooms, hub_id, connector["id"])
+        # Also excludes real warp endpoints (2026-09-05 follow-up fix,
+        # real regression found testing this): a warp's own "genuinely
+        # saves real distance" guarantee (see warp_endpoint_ids' own
+        # placement above) assumes its two rooms stay exactly as far
+        # apart as they were when the warp was placed -- a later,
+        # unconditional tail-merge edge landing on either endpoint
+        # would silently shrink that distance, same reasoning the
+        # shortcut-lever and collapse/carry-puzzle echo shortcuts
+        # already exclude warp endpoints for.
+        tail_merge_candidates = [
+            c for c in other_chains
+            if c is not main_chain and len(c) >= 2 and c[-1] not in shadowed and c[-1] not in warp_endpoint_ids
+        ]
+        if len(tail_merge_candidates) >= 2:
+            merge_a, merge_b = rng.sample(tail_merge_candidates, 2)
+            tail_a, tail_b = merge_a[-1], merge_b[-1]
+            rooms[tail_a]["connections"].append(tail_b)
+            rooms[tail_b]["connections"].append(tail_a)
+            rooms[tail_a]["description"] += " A real passage leads on from here, deeper into the floor."
+            rooms[tail_b]["description"] += " A real passage leads on from here, deeper into the floor."
+
     return {
         "rooms": rooms, "hub_room_id": hub_id, "connector_room_id": connector["id"],
         "modifier": modifier, "is_checkpoint": checkpoint,
