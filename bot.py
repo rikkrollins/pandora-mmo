@@ -26461,12 +26461,40 @@ async def _mark_location_cleared_for_party(update: Update, session: sessions.Ses
     blocked until whatever's in the room before it has actually been
     fought, not just walked past.
     """
+    # Real "Advanced Dungeons" repeated gate, ported to evolved
+    # overworld dungeons (2026-09-06, per Coffee: "keep going" --
+    # Catfish's Maw's own real pattern, already shipped for the
+    # Labyrinth in v1.27.534). No monster-respawn logic is needed here
+    # at all: unlike the Labyrinth's own per-run room dict, an evolved
+    # dungeon room's `monsters` list is shared, campaign-wide state
+    # that's NEVER cleared on a real victory -- the exact same
+    # encounter is already still there to fight again. This only ever
+    # gates WHEN `mark_location_cleared` actually fires, via a real
+    # per-character defeat counter (db.bump_location_defeat_count),
+    # narrated once per real win short of the requirement.
+    flee_line = None
     for pid in session.turn_order:
         if session.sides.get(pid) != "party":
             continue
         character = db.get_character(pid, update.effective_chat.id)
-        if character is not None:
-            db.mark_location_cleared(pid, update.effective_chat.id, character["current_location"])
+        if character is None:
+            continue
+        location_id = character["current_location"]
+        if location_id in character["cleared_locations"]:
+            continue
+        location = _real_campaign_location(location_id)
+        repeat_required = location.get("repeat_required") if location else None
+        if repeat_required:
+            count = db.bump_location_defeat_count(pid, update.effective_chat.id, location_id)
+            if count < repeat_required:
+                flee_line = (
+                    f"💨 Wounded, it flees deeper before {character['name']} can finish it off -- "
+                    f"you'll have to catch it again ({count}/{repeat_required})."
+                )
+                continue
+        db.mark_location_cleared(pid, update.effective_chat.id, location_id)
+    if flee_line:
+        await _safe_send(update, flee_line)
 
 
 async def _check_achievements_for_combat_party(update: Update, session: sessions.Session) -> None:

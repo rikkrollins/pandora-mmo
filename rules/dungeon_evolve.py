@@ -103,6 +103,12 @@ _MID_BRANCH_GATE_CHANCE = 0.4
 # mechanic -- same "roll for it" discipline as every sibling gate.
 _KEY_MESH_CHANCE = 0.3
 
+# Real Phase L5 "Advanced Dungeons" repeated mini-boss gate chance
+# (2026-09-06), ported from rules/labyrinth.py's identical mechanic
+# (Catfish's Maw's own real pattern). Independent of the mini-boss's
+# own placement above -- only rolled once a mini-boss already exists.
+_MINIBOSS_REPEAT_CHANCE = 0.25
+
 # Loop-back connections (rules/labyrinth.py's own "densify the tree
 # into a real grid" mechanic) were tried here too (2026-09-03) and
 # deliberately NOT shipped: real testing across 3 source dungeons x 40
@@ -753,6 +759,20 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
             if miniboss not in miniboss_room["monsters"]:
                 miniboss_room["monsters"].append(miniboss)
             miniboss_room["is_miniboss_room"] = True
+            # Real "Advanced Dungeons" repeated gate (2026-09-06, per
+            # Coffee: "keep going" -- Catfish's Maw's own real pattern,
+            # already shipped for the Labyrinth in v1.27.534). A rare,
+            # independent roll on top of an already-placed mini-boss.
+            # No monster-respawn logic is needed here (unlike the
+            # Labyrinth's own port): this room's `monsters` list is
+            # shared, campaign-wide state that's never cleared on a
+            # real victory in the first place, so the exact same
+            # encounter is already still there for a real rematch --
+            # `bot._mark_location_cleared_for_party` is the one real
+            # gate that needs to know to hold off on `cleared_locations`
+            # until the required count is actually met.
+            if rng.random() < _MINIBOSS_REPEAT_CHANCE:
+                miniboss_room["repeat_required"] = rng.randint(2, 3)
 
     # Real gated encounter (2026-09-04) -- see _GATED_ENCOUNTER_CHANCE's
     # own comment for the full reasoning. Never the entrance/hub/buffer

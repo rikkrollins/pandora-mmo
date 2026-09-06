@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.537] — feature: repeated mini-boss gate ported to evolved overworld dungeons
+
+Per Coffee: "keep going" -- the third `dungeon_evolve.py` port, and a
+real design realization along the way: unlike the Labyrinth's own
+per-run room dict, an evolved dungeon room's `monsters` list is
+shared, campaign-wide state that's never actually cleared on a real
+victory -- so porting Catfish's Maw's "beat the same encounter N
+times" pattern needs NO monster-respawn logic at all here, only a real
+per-character defeat counter (`characters.location_defeat_counts`,
+new column) gating exactly when `mark_location_cleared` fires for a
+room flagged `repeat_required`. `bot._mark_location_cleared_for_party`
+-- the one shared checkpoint already called at all 5 real combat-
+resolution sites -- now checks this before ever marking a location
+cleared, narrating "wounded, it flees" short of the requirement.
+Backward-compatible by construction: every existing location has no
+`repeat_required` field, so this is a pure no-op everywhere else.
+
+This closes every reasonably portable pattern from the whole Advanced
+Dungeons research line for both generators. The boss-shortcut / live
+event-gated edge remains deliberately unported -- it would require
+either a real campaign.json runtime mutation (which this module's own
+design explicitly avoids) or a new per-character lock-check
+architecture, a real scope decision rather than a straightforward port.
+
 ## [1.27.536] — feature: Key Cavern redundant key mesh ported to evolved overworld dungeons
 
 Per Coffee: "work on the lower-priority and unscheduled stuff" -- the

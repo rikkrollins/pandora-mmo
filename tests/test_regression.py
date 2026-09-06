@@ -33479,6 +33479,29 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(hits, 0, "expected at least one real Key Cavern mesh across 40 seeds")
         self.assertLess(hits, 40, "expected at least one evolve WITHOUT a mesh across 40 seeds -- it should be a real fraction")
 
+    def test_evolve_dungeon_sometimes_places_a_real_repeated_miniboss_gate(self):
+        """
+        Real "Advanced Dungeons" repeated gate, ported to evolved
+        overworld dungeons (2026-09-06, per Coffee: "keep going" --
+        Catfish's Maw's own real pattern, already shipped for the
+        Labyrinth in v1.27.534). Statistical: fires as a real fraction
+        on top of an already-placed mini-boss, always a real 2-3 count.
+        """
+        import copy
+        hits = 0
+        for seed in range(60):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_repeat_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            miniboss_room = next((r for r in rooms.values() if r.get("is_miniboss_room")), None)
+            if miniboss_room is None or not miniboss_room.get("repeat_required"):
+                continue
+            hits += 1
+            self.assertIn(miniboss_room["repeat_required"], (2, 3))
+        self.assertGreater(hits, 0, "expected at least one real repeated mini-boss gate across 60 seeds")
+
     def test_evolve_dungeon_never_places_two_switch_lockables_in_one_room(self):
         """
         Real regression found and fixed shipping the mid-branch gate/
@@ -33732,6 +33755,42 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             await bot._check_overworld_key_drop(FakeUpdate(user_id, "", sink2, chat_id=chat_id), session)
             after2 = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_floor_key", 0)
             self.assertEqual(after2, before + 1, "expected the guaranteed overworld key drop to be one-time only")
+        finally:
+            del bot.CAMPAIGN["locations"]["underground"][loc_id]
+
+    async def test_mark_location_cleared_respects_a_real_repeated_gate(self):
+        """
+        Real "Advanced Dungeons" repeated gate, ported to evolved
+        overworld dungeons (2026-09-06, per Coffee: "keep going" --
+        Catfish's Maw's own real pattern, already shipped for the
+        Labyrinth in v1.27.534). No monster-respawn logic needed here:
+        an evolved-dungeon room's own `monsters` list is shared,
+        campaign-wide state that's never cleared on a real victory in
+        the first place, so this is purely a per-character defeat-count
+        gate on WHEN cleared_locations actually fires.
+        """
+        import sessions
+        loc_id = "repeat_gate_test_location"
+        bot.CAMPAIGN["locations"]["underground"][loc_id] = {
+            "name": "A Real Repeated Chamber", "connections": [], "is_miniboss_room": True, "repeat_required": 2,
+        }
+        try:
+            user_id, chat_id = 962063, -962063
+            make_basic_character(user_id, "RepeatGateOverworldTester", chat_id=chat_id, current_location=loc_id)
+            session = sessions.Session(chat_id=chat_id, participants=[], turn_order=[user_id], sides={user_id: "party"})
+
+            sink1 = []
+            await bot._mark_location_cleared_for_party(FakeUpdate(user_id, "", sink1, chat_id=chat_id), session)
+            character_after_1 = db.get_character(user_id, chat_id)
+            self.assertNotIn(loc_id, character_after_1["cleared_locations"], "must not clear before the real requirement is met")
+            self.assertEqual(character_after_1["location_defeat_counts"].get(loc_id), 1)
+            self.assertTrue(any("flees deeper" in s for s in sink1), sink1)
+
+            sink2 = []
+            await bot._mark_location_cleared_for_party(FakeUpdate(user_id, "", sink2, chat_id=chat_id), session)
+            character_after_2 = db.get_character(user_id, chat_id)
+            self.assertIn(loc_id, character_after_2["cleared_locations"], "must clear on the real final defeat")
+            self.assertFalse(any("flees deeper" in s for s in sink2), sink2)
         finally:
             del bot.CAMPAIGN["locations"]["underground"][loc_id]
 

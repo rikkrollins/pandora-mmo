@@ -1075,6 +1075,22 @@ def init_db() -> None:
         if "equipped_offhand_weapon" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN equipped_offhand_weapon TEXT")
 
+        # location_defeat_counts (2026-09-06, real "Advanced Dungeons"
+        # repeated gate, ported to evolved overworld dungeons -- per
+        # Coffee: "keep going"). Per-character, {location_id: count},
+        # separate from `cleared_locations` -- an evolved-dungeon room's
+        # own `monsters` list is shared, campaign-wide state that's
+        # NEVER cleared on victory (unlike the Labyrinth's own per-run
+        # room dict), so a real "fight the same encounter N times"
+        # requires no monster-respawn logic at all here: the room's
+        # monsters are already always still there to fight again. This
+        # column just counts how many times THIS character has won,
+        # gating exactly when `mark_location_cleared` (bot.py's
+        # _mark_location_cleared_for_party) actually fires for a room
+        # flagged `repeat_required` (rules/dungeon_evolve.py).
+        if "location_defeat_counts" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN location_defeat_counts TEXT NOT NULL DEFAULT '{}'")
+
         # labyrinth_runs.modifier (2026-09-02, Phase L2 floor modifiers)
         # -- a real DB already running Phase L1's CREATE TABLE IF NOT
         # EXISTS won't pick up a column added to that CREATE statement
@@ -1191,6 +1207,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["dismissed_quest_ids"] = json.loads(d["dismissed_quest_ids"])
     d["spell_mastery_pct"] = json.loads(d["spell_mastery_pct"])
     d["element_mastery_pct"] = json.loads(d["element_mastery_pct"])
+    d["location_defeat_counts"] = json.loads(d["location_defeat_counts"])
     return d
 
 
@@ -1322,7 +1339,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1366,7 +1383,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -2263,6 +2280,27 @@ def mark_location_cleared(telegram_user_id: int, chat_id: int, location_id: str)
         return character
     character["cleared_locations"].append(location_id)
     return update_character(telegram_user_id, chat_id, cleared_locations=character["cleared_locations"])
+
+
+def bump_location_defeat_count(telegram_user_id: int, chat_id: int, location_id: str) -> int:
+    """
+    Real "Advanced Dungeons" repeated gate, ported to evolved overworld
+    dungeons (2026-09-06, per Coffee: "keep going"). Separate from
+    cleared_locations above -- a location flagged `repeat_required`
+    (rules/dungeon_evolve.py) needs this many real per-character wins
+    before bot._mark_location_cleared_for_party actually calls
+    mark_location_cleared for it, so the room keeps genuinely blocking
+    movement across several real fights instead of clearing on the
+    first. Returns the new count so the caller can compare it against
+    the room's own requirement without a second read.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return 0
+    counts = character["location_defeat_counts"]
+    counts[location_id] = counts.get(location_id, 0) + 1
+    update_character(telegram_user_id, chat_id, location_defeat_counts=counts)
+    return counts[location_id]
 
 
 def learn_spell(telegram_user_id: int, chat_id: int, spell_id: str) -> dict | None:
