@@ -39266,6 +39266,55 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(chat_id, session)
         db.delete_labyrinth_run(chat_id, party_key)
 
+    async def test_labyrinth_defeating_the_boss_reveals_a_real_live_shortcut_to_the_hub(self):
+        """
+        Real Phase L5 "Advanced Dungeons" event-gated live edge
+        (2026-09-06, per Coffee: "keep going... generate dungeons like
+        the samples and references on the fly" -- Bottle Grotto's own
+        real signature move, see [[project_advanced_interconnected_
+        dungeons_research]]: "After Hinox defeat, a portal between this
+        room and entrance is now usable, creating a shortcut"). Using a
+        REAL generated checkpoint floor (not an artificially pre-
+        connected fixture): the hub must NOT connect to the boss room
+        before the fight, and MUST connect to it, both directions,
+        immediately after a real victory -- a live topology change, not
+        just an item/XP reward.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        user_id, chat_id = 962092, -962092
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "BossShortcutTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL, hp_max=999999)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=999999)
+
+        floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(0))
+        rooms = floor_data["rooms"]
+        boss_room_id = next(rid for rid, r in rooms.items() if r.get("is_boss_room"))
+        hub_id = floor_data["hub_room_id"]
+        self.assertNotIn(boss_room_id, rooms[hub_id].get("connections", []), "the hub must not already connect to the boss room before it's ever been defeated")
+        self.assertNotIn(hub_id, rooms[boss_room_id].get("connections", []))
+        rooms[boss_room_id]["visited"] = True
+        db.create_labyrinth_run(chat_id, party_key, floor=5, seed=0, current_room_id=boss_room_id, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", sink, chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+
+        progress_sink = []
+        with patch("bot._grant_generated_loot", new=AsyncMock(return_value="")):
+            await bot._award_victory_xp(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+            await bot._check_labyrinth_progress(FakeUpdate(user_id, "", progress_sink, chat_id=chat_id), session)
+
+        self.assertTrue(any("hidden shortcut back to this floor's own hub" in s for s in progress_sink), progress_sink)
+        run_after = db.get_labyrinth_run(chat_id, party_key)
+        self.assertIn(boss_room_id, run_after["rooms"][hub_id]["connections"], "the hub must now connect straight to the boss room")
+        self.assertIn(hub_id, run_after["rooms"][boss_room_id]["connections"], "the boss room must now connect straight back to the hub")
+
+        sessions.end_session(chat_id, session)
+        db.delete_labyrinth_run(chat_id, party_key)
+
     def test_generate_floor_gates_the_checkpoint_boss_behind_a_real_multi_branch_convergence(self):
         """
         Real Phase L5 "Advanced Dungeons" v1 (2026-09-05, per Coffee,

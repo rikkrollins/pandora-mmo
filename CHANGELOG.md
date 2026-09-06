@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.529] — feature: defeating a real boss reveals a live shortcut back to the hub ("Advanced Dungeons" Phase L5, v4)
+
+Coffee: "keep going... generate dungeons like the samples and
+references on the fly." Bottle Grotto's own real signature move (see
+[[project_advanced_interconnected_dungeons_research]]): "After Hinox
+defeat, a portal between this room and entrance is now usable,
+creating a shortcut." Defeating a real checkpoint-floor boss now does
+the same thing here -- the instant the fight ends, a brand-new,
+permanent, bidirectional connection opens straight back to that
+floor's own hub, cutting what could otherwise be a long walk back
+through the whole branch (and every gate along it). The hub's own real
+id is always derivable from the room's own floor number, so no new
+state needs to be stored to find it.
+
+This is the first real EVENT-gated live edge in this generator --
+every other connection so far (branches, loop-back, tail-merging) is
+decided once at generation time and never changes; this one is a real,
+live topology mutation triggered by a genuine combat victory, the same
+class of mechanic Bottle Grotto and Eagle's Tower's own pillar-collapse
+both use.
+
+Full LabyrinthTests/DungeonEvolveTests/DungeonAuditTests suite (207
+tests) re-run clean, only the project's own known pre-existing
+batch-order flakes appearing (confirmed passing in isolation, as
+always) -- one run this pass hit an unusually large flake cluster (7
+tests) that all passed cleanly together in isolation immediately after,
+consistent with ordinary batch-order sensitivity rather than a real
+regression from this change.
+
+Still queued: true sequential chains (solving A unlocks B's own gate
+specifically, not just "any order, all required"), and any port of
+Phase L5 to `dungeon_evolve.py`'s own overworld generator.
+
 ## [1.27.528] — feature: real branch-tail merging ("Advanced Dungeons" Phase L5, v3) + a serious pre-existing generator bug found and fixed
 
 Coffee: "keep going... your goal is to be able to generate dungeons

@@ -10863,6 +10863,28 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             miniboss_tonic_line = f"✨ Something about it hums with real magic -- **{tonic_item['name']}** — added to the party's stash."
         else:
             miniboss_tonic_line = None
+    # Real Phase L5 "Advanced Dungeons" event-gated live edge (2026-09-
+    # 06, per Coffee: "keep going... generate dungeons like the samples
+    # and references on the fly" -- Bottle Grotto's own real signature
+    # move, see [[project_advanced_interconnected_dungeons_research]]:
+    # "After Hinox defeat, a portal between this room and entrance is
+    # now usable, creating a shortcut"). Defeating the real boss doesn't
+    # just clear its room -- it reveals a brand-new, permanent
+    # connection straight back to this floor's own hub, live, the
+    # instant the fight ends, cutting what could otherwise be a long
+    # walk back through the whole branch. The hub's own real id is
+    # always derivable from the room's own floor number (`_hub_id`,
+    # the same deterministic naming every real room on this floor
+    # already uses) -- no extra state needs to be stored to find it.
+    boss_shortcut_line = None
+    if room.get("is_boss_room") and not room.get("boss_shortcut_revealed"):
+        room["boss_shortcut_revealed"] = True
+        hub_id = labyrinth_module._hub_id(room.get("floor", run["floor"]))
+        hub_room = run["rooms"].get(hub_id)
+        if hub_room is not None and room["id"] not in hub_room.get("connections", []):
+            hub_room.setdefault("connections", []).append(room["id"])
+            room.setdefault("connections", []).append(hub_id)
+            boss_shortcut_line = "🗝️ Something shifts in the wall as the boss falls -- a real, hidden shortcut back to this floor's own hub has opened."
     # Real live feature (2026-09-04, Phase B of the combat-gating work,
     # per Coffee: "keys can be dropped by enemies or found in another
     # room"). Same real one-time-flag shape as the miniboss reward just
@@ -10903,6 +10925,8 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
         await _safe_send(update, key_drop_line)
     if rune_drop_line:
         await _safe_send(update, rune_drop_line)
+    if boss_shortcut_line:
+        await _safe_send(update, boss_shortcut_line)
 
 
 def _real_campaign_location(location_id: str) -> dict | None:
