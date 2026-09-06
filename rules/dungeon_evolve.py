@@ -84,6 +84,20 @@ _HUB_NON_BOSS_BRANCHES = 3
 # mechanic here, not as a blanket rule.
 _GATED_ENCOUNTER_CHANCE = 0.3
 
+# Real Phase L5 "Advanced Dungeons" mid-branch gate chance (2026-09-06),
+# ported from rules/labyrinth.py's identical mechanic -- same "roll
+# for it" discipline every other optional gate below already uses
+# (switch 0.5, plate 0.35, key 0.3, rune 0.2), never "always fires
+# whenever a branch happens to be long enough." A real regression this
+# exact omission caused, found running the full test suite: with no
+# chance gate this fired on nearly every real generation, so a
+# statistical test expecting the ORIGINAL switch-gate mechanic to be
+# absent on SOME real seeds saw 20/20 seeds carrying a switch instead
+# (this mechanic's own switch, not that one's) -- both use the same
+# `kind: "switch"` lockable shape, so an unconditional mid-branch gate
+# silently made that other test's own "not every time" assumption false.
+_MID_BRANCH_GATE_CHANCE = 0.4
+
 # Loop-back connections (rules/labyrinth.py's own "densify the tree
 # into a real grid" mechanic) were tried here too (2026-09-03) and
 # deliberately NOT shipped: real testing across 3 source dungeons x 40
@@ -547,6 +561,49 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                         "id": f"{new_dungeon_id}_rune_cache_{i}", "kind": "chest", "name": "a small, rune-etched cache",
                         "loot": {"labyrinth_rune": 1}, "gold": rng.randint(20, 60),
                     })
+
+    # Real Phase L5 "Advanced Dungeons" mid-branch gate, ported from
+    # rules/labyrinth.py's identical mechanic (2026-09-06, per Coffee:
+    # "work on the lower-priority and unscheduled stuff" -- see
+    # [[project_advanced_interconnected_dungeons_research]]'s own real
+    # caution that a Labyrinth-shaped fix does NOT automatically port
+    # cleanly here, e.g. loop-back was tried and abandoned). This one
+    # DOES port safely: unlike loop-back (which needed grid-adjacency
+    # between branches that never happens here, since every branch
+    # radiates outward in one straight compass line), a mid-branch gate
+    # is a pure DATA operation -- lock one internal edge, place a
+    # switch elsewhere -- with no dependency on branch geometry at all.
+    # Deliberately allowed to target the SAME branch a switch/plate/
+    # key/rune gate above already claimed: those only ever lock a
+    # branch's own ROOT edge (hub -> branch's first room), this locks a
+    # genuinely different, INTERIOR edge one or more rooms further in,
+    # so there's no real collision -- same tolerance this generator's
+    # own rune-gate block already extends to the mandatory/switch/plate
+    # gates before it (never re-excluding every earlier pick).
+    mid_branch_candidates = [b for b in branches if b["idx"] != branch_idx and b["next_step"] >= 3]
+    if mid_branch_candidates and rng.random() < _MID_BRANCH_GATE_CHANCE:
+        mid_branch = rng.choice(mid_branch_candidates)
+        mid_branch_source_candidates = [b for b in branches if b["idx"] != mid_branch["idx"]]
+        if mid_branch_source_candidates:
+            mid_branch_source = rng.choice(mid_branch_source_candidates)
+            source_room_id = f"{new_dungeon_id}_b{mid_branch_source['idx']}_r0"
+            edge_index = rng.randint(0, mid_branch["next_step"] - 2)
+            from_room_id = f"{new_dungeon_id}_b{mid_branch['idx']}_r{edge_index}"
+            to_room_id = f"{new_dungeon_id}_b{mid_branch['idx']}_r{edge_index + 1}"
+            _, source_room = _find_room(campaign, source_room_id)
+            _, from_room = _find_room(campaign, from_room_id)
+            element = rng.choice(["fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical"])
+            switch_id = f"{new_dungeon_id}_midbranch_switch"
+            source_room.setdefault("lockables", []).append({
+                "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+            })
+            door_id = f"{new_dungeon_id}_midbranch_gate"
+            from_room["connections"].remove(to_room_id)
+            from_room.setdefault("locked_connections", {})[to_room_id] = door_id
+            from_room.setdefault("lockables", []).append({
+                "id": door_id, "kind": "multi_switch_gate", "name": "a real inner seal", "requires": [switch_id],
+            })
+            from_room["description"] += " A real inner seal blocks the way deeper in -- something elsewhere in this dungeon must open it."
 
     # Extra chest lockables -- comfortable lock_density padding, real
     # loot from items already known-good elsewhere in this same

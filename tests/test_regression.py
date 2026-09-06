@@ -33328,6 +33328,100 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(hits, 0, "expected at least one switch-gated evolve across 20 real seeds")
         self.assertLess(hits, 20, "expected at least one evolve WITHOUT a switch across 20 real seeds -- it should be a real fraction, not every time")
 
+    def test_evolve_dungeon_sometimes_places_a_real_mid_branch_gate_solvable_by_construction(self):
+        """
+        Real Phase L5 "Advanced Dungeons" mid-branch gate, ported from
+        rules/labyrinth.py's identical mechanic (2026-09-06, per
+        Coffee: "work on the lower-priority and unscheduled stuff").
+        Unlike loop-back (tried and abandoned here, see
+        [[project_overworld_loopback_dead_on_arrival]]), this is a
+        pure data operation with no dependency on branch geometry, so
+        it DOES port cleanly. Statistical: fires as a real fraction
+        (never every seed, per its own real chance gate), always locks
+        a genuine INTERIOR edge (never a branch's own root-to-hub
+        edge), and its own switch is reachable without the gate it
+        feeds -- solvable by construction, same rigor as the
+        Labyrinth's own identical mechanic.
+        """
+        import copy
+        import collections
+        hits = 0
+        for seed in range(30):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_midbranch_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            gate_id = f"{new_id}_midbranch_gate"
+            gate_room_id = next((rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == gate_id), None)
+            if gate_room_id is None:
+                continue
+            hits += 1
+            gate_room = rooms[gate_room_id]
+            to_room_id = next(d for d, lid in gate_room["locked_connections"].items() if lid == gate_id)
+            hub_id = next(rid for rid, r in rooms.items() if r.get("dungeon_hub"))
+            self.assertNotEqual(gate_room_id, hub_id, "must lock a real interior edge, never the branch's own root-to-hub edge")
+            switch_id = next(lk for lk in gate_room["lockables"] if lk["id"] == gate_id)["requires"][0]
+            switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == switch_id for lk in r.get("lockables", [])))
+            visited, frontier = {hub_id}, collections.deque([hub_id])
+            while frontier:
+                cur = frontier.popleft()
+                room = rooms[cur]
+                neighbors = set(room.get("connections", [])) | set(room.get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if cur == gate_room_id and nb == to_room_id:
+                        continue
+                    if nb in rooms and nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            self.assertIn(switch_room_id, visited, f"seed {seed}: mid-branch gate's own switch must be reachable without the gate it feeds")
+        self.assertGreater(hits, 0, "expected at least one real mid-branch gate across 30 seeds")
+        self.assertLess(hits, 30, "expected at least one evolve WITHOUT a mid-branch gate across 30 seeds -- it should be a real fraction")
+
+    async def test_evolve_dungeon_mid_branch_gate_blocks_deeper_progress_until_the_switch_is_hit_end_to_end(self):
+        """Real end-to-end companion, same shape as the Labyrinth's own identical test: a real move through bot._do_move is refused before the switch is hit, and allowed once it is."""
+        import copy
+        from unittest.mock import patch
+        campaign = None
+        new_id = None
+        for seed in range(30):
+            trial_campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            trial_id = f"goblin_warrens_evolved_midbranch_e2e_{seed}"
+            dungeon_evolve.evolve_dungeon(trial_campaign, "goblin_warrens", trial_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(trial_campaign, trial_id)
+            if any(lid == f"{trial_id}_midbranch_gate" for r in rooms.values() for lid in r.get("locked_connections", {}).values()):
+                campaign, new_id = trial_campaign, trial_id
+                break
+        self.assertIsNotNone(campaign, "expected a real mid-branch gate within 30 seeds")
+
+        rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+        gate_id = f"{new_id}_midbranch_gate"
+        gate_room_id = next(rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == gate_id)
+        to_room_id = next(d for d, lid in rooms[gate_room_id]["locked_connections"].items() if lid == gate_id)
+        switch_id = next(lk for lk in rooms[gate_room_id]["lockables"] if lk["id"] == gate_id)["requires"][0]
+        switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == switch_id for lk in r.get("lockables", [])))
+        switch_lockable = next(lk for lk in rooms[switch_room_id]["lockables"] if lk["id"] == switch_id)
+
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id = 960901
+            make_basic_character(user_id, "MidBranchEvolveTester", current_location=gate_room_id)
+            db.update_character(user_id, -999, visited_locations=[gate_room_id, to_room_id, switch_room_id])
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink), f"go to {rooms[to_room_id]['name']}")
+            character = db.get_character(user_id, -999)
+            self.assertNotEqual(character["current_location"], to_room_id, "must stay blocked before the real switch is hit")
+
+            db.update_character(user_id, -999, current_location=switch_room_id)
+            character = db.get_character(user_id, -999)
+            await bot._do_lockpick(FakeUpdate(user_id, "hit the crystal", [], chat_id=-999), character, dict(switch_lockable), "hit the crystal")
+
+            db.update_character(user_id, -999, current_location=gate_room_id)
+            sink2 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink2), f"go to {rooms[to_room_id]['name']}")
+            character = db.get_character(user_id, -999)
+            self.assertEqual(character["current_location"], to_room_id, "must open once the real switch is hit")
+
     def test_evolve_dungeon_sometimes_places_a_real_remote_torch_gate(self):
         """
         Real remote-gate mechanic (2026-09-01, per Coffee: "lighting a

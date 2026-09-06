@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.535] — feature: mid-branch gates ported to evolved overworld dungeons
+
+Per Coffee: "work on the lower-priority and unscheduled stuff" -- the
+first real `dungeon_evolve.py` port from the whole Advanced Dungeons
+research line. Unlike loop-back (tried and abandoned here in an
+earlier pass -- branches radiate outward in a straight compass line
+and never become grid-adjacent), a mid-branch gate is a pure data
+operation with no dependency on branch geometry, so it ports cleanly:
+a real chance (matching the density of the existing switch/plate/key/
+rune gates) locks a genuine INTERIOR edge of one branch, with the
+source switch sitting in a different branch. Verified solvable by
+construction across 60 real seeds and a real end-to-end movement test
+through bot._do_move.
+
+Found and fixed one real regression while shipping this: the new
+mechanic's own switch shares the same `kind: "switch"` shape as the
+existing elemental-switch gate, and had no chance gate of its own at
+first -- it fired on nearly every generation, silently breaking an
+existing statistical test that expected the ORIGINAL switch gate to
+be genuinely absent on some real seeds. Fixed by giving it its own
+real chance roll, same discipline every sibling mechanic already uses.
+
 ## [1.27.534] — feature: a repeated mini-boss gate ("Advanced Dungeons" Phase L5, v7)
 
 Per Coffee: "work on the lower-priority and unscheduled stuff" --
