@@ -1149,6 +1149,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # room's own reverse edge back out is untouched, so retreating
     # (to an already-visited room) is never blocked by this.
     convergence_chains: list = []
+    convergence_gate_lockable: dict | None = None
     if checkpoint and boss_pool and len(main_chain) >= 2:
         convergence_sources = [c for c in other_chains if c not in mandatory_source_chains]
         if len(convergence_sources) < 2:
@@ -1173,10 +1174,11 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             convergence_door_id = f"f{floor}_convergence_gate"
             rooms[approach_room_id]["connections"].remove(main_path_end)
             rooms[approach_room_id].setdefault("locked_connections", {})[main_path_end] = convergence_door_id
-            rooms[approach_room_id].setdefault("lockables", []).append({
+            convergence_gate_lockable = {
                 "id": convergence_door_id, "kind": "multi_switch_gate", "name": "a real converging seal",
                 "requires": convergence_switch_ids,
-            })
+            }
+            rooms[approach_room_id].setdefault("lockables", []).append(convergence_gate_lockable)
             rooms[approach_room_id]["description"] += (
                 f" A real converging seal blocks the way in -- it looks like it needs "
                 f"{len(convergence_switch_ids)} different things elsewhere on this floor to open."
@@ -1204,7 +1206,21 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     used_for_advanced = {tuple(c) for c in mandatory_source_chains} | {tuple(c) for c in convergence_chains}
     mid_branch_targets = [c for c in other_chains if len(c) >= 3 and tuple(c) not in used_for_advanced]
     if not mid_branch_targets:
-        mid_branch_targets = [c for c in other_chains if len(c) >= 3]
+        # Real fix (2026-09-06, sequential-chain feature): the fallback
+        # must still never reuse a `convergence_chains` entry -- the
+        # chain feature just below deliberately places its own switch
+        # at `mid_branch_chain[-1]`, and if that ever coincided with a
+        # real convergence switch's own room (which this same fallback
+        # allowed before this fix, by dropping every exclusion at
+        # once), the two switches would double up in a single room --
+        # never broken, just a real, confusing, unintended overlap.
+        # Falling back to `mandatory_source_chains` overlap ALONE (a
+        # pre-existing, already-tolerated case) keeps the mid-branch
+        # gate itself buildable in more seeds without reintroducing
+        # this specific collision.
+        convergence_only = {tuple(c) for c in convergence_chains}
+        mid_branch_targets = [c for c in other_chains if len(c) >= 3 and tuple(c) not in convergence_only]
+    mid_branch_chain: list | None = None
     if checkpoint and boss_pool and mid_branch_targets:
         mid_branch_chain = rng.choice(mid_branch_targets)
         source_candidates = [c for c in other_chains if tuple(c) != tuple(mid_branch_chain)]
@@ -1226,6 +1242,33 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 "requires": [switch_id],
             })
             rooms[from_room_id]["description"] += " A real inner seal blocks the way deeper in -- something elsewhere on this floor must open it."
+
+            # Real Phase L5 "Advanced Dungeons" v5 -- a TRUE sequential
+            # chain (2026-09-06, per Coffee: "do everything... lets get
+            # to our goal" -- see [[project_advanced_interconnected_
+            # dungeons_research]]'s own "still missing" table: "solving
+            # A unlocks B's own gate specifically, not just any order,
+            # all required"). When both a mid-branch gate AND the final
+            # convergence gate exist on the same floor, this branch's
+            # own tail becomes ONE of the convergence gate's real
+            # requirements too -- so reaching it (and therefore fully
+            # unlocking the boss approach) genuinely requires having
+            # already solved THIS gate first, not just visited some
+            # other, unrelated branch. A real A -> B -> final chain,
+            # layered on top of (not replacing) the existing parallel
+            # AND-requirement from the two other convergence branches.
+            # Solvable by construction: `mid_branch_chain[-1]` is
+            # already guaranteed reachable via this exact gate (that's
+            # the whole point of the gate above), so adding one more
+            # switch there can never create a real dead end.
+            if convergence_gate_lockable is not None:
+                chain_switch_room_id = mid_branch_chain[-1]
+                chain_element = rng.choice(_SWITCH_ELEMENTS)
+                chain_switch_id = f"f{floor}_chained_convergence_switch"
+                rooms[chain_switch_room_id].setdefault("lockables", []).append({
+                    "id": chain_switch_id, "kind": "switch", "name": f"a {chain_element} crystal", "element": chain_element,
+                })
+                convergence_gate_lockable["requires"].append(chain_switch_id)
 
     gated_chain = None
     if len(other_chains) >= 2 and rng.random() < _scaled_chance(_BRANCH_GATE_CHANCE, floor, 0.002, 0.55):
@@ -1599,8 +1642,21 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             # the SAME tail a warp already connects to silently
             # shortens that warp's own real distance-saved guarantee
             # (already computed and relied on above, before this
-            # puzzle's own placement runs).
-            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain and c[-1] not in warp_endpoint_ids]
+            # puzzle's own placement runs). Also excludes anything
+            # `_rooms_shadowed_by_a_real_gate` says is genuinely
+            # unreachable without solving some OTHER real gate first
+            # (2026-09-06, real regression found and fixed shipping
+            # Phase L5's own sequential-chain feature: this echo
+            # shortcut could land directly on a mid-branch gate's own
+            # target branch, handing out a free, ungated bypass around
+            # it -- same class of bug loop-back/tail-merge already hit
+            # and fixed, now closed here too using the same shared,
+            # general-purpose check instead of another one-off list).
+            shadowed_for_echo = _rooms_shadowed_by_a_real_gate(rooms, hub_id, connector["id"])
+            shortcut_pair = [
+                c[-1] for c in other_chains
+                if c is not seal_chain and c[-1] not in warp_endpoint_ids and c[-1] not in shadowed_for_echo
+            ]
             if len(shortcut_pair) >= 2:
                 shortcut_a, shortcut_b = rng.sample(shortcut_pair, 2)
                 rooms[shortcut_a].setdefault("locked_connections", {})[shortcut_b] = trigger_id
@@ -1677,14 +1733,14 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             })
             rooms[seal_parent].setdefault("collapsing_connections", {})[seal_leaf] = trigger_id
             rooms[seal_parent]["description"] += " Something here feels structurally unstable -- like a well-placed blow, twice over, could bring it down."
-            # Excludes real warp endpoints too (2026-09-05, real
-            # regression found and fixed while shipping "longer
-            # interconnectable pathways"): an echo shortcut landing on
-            # the SAME tail a warp already connects to silently
-            # shortens that warp's own real distance-saved guarantee
-            # (already computed and relied on above, before this
-            # puzzle's own placement runs).
-            shortcut_pair = [c[-1] for c in other_chains if c is not seal_chain and c[-1] not in warp_endpoint_ids]
+            # Excludes real warp endpoints and shadowed rooms too --
+            # same real regressions, same fixes, as the collapse
+            # puzzle's own identical echo-shortcut block above.
+            shadowed_for_echo = _rooms_shadowed_by_a_real_gate(rooms, hub_id, connector["id"])
+            shortcut_pair = [
+                c[-1] for c in other_chains
+                if c is not seal_chain and c[-1] not in warp_endpoint_ids and c[-1] not in shadowed_for_echo
+            ]
             if len(shortcut_pair) >= 2:
                 shortcut_a, shortcut_b = rng.sample(shortcut_pair, 2)
                 rooms[shortcut_a].setdefault("locked_connections", {})[shortcut_b] = trigger_id

@@ -35046,8 +35046,21 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # nearest descends_to room, walked one real hop at a time,
         # instead of assuming a single direct hub-to-stairs move.
         from collections import deque
+        import sessions
         run = db.get_labyrinth_run(chat_id, f"party:{party_id}")
-        while not run["rooms"][run["current_room_id"]].get("descends_to"):
+        # Real bounded loop (2026-09-06, real bug found and fixed: an
+        # unbounded `while` here span forever at 100% CPU once a
+        # gated miniboss/boss combat room -- a real live mechanic
+        # since v1.27.505 -- could land on floor 1's main path. Every
+        # `_do_labyrinth_move` into/through such a room is genuinely
+        # refused until it's fought, so with no fight-it-first handling
+        # (unlike `_walk_to_checkpoint` above, which already has this)
+        # the loop just re-computed the identical BFS forever with zero
+        # forward progress. Bounded the same way `_walk_to_checkpoint`
+        # is, and now fights a gated room exactly the same way too.
+        for _ in range(10 * labyrinth_module.SEGMENT_SIZE):
+            if run["rooms"][run["current_room_id"]].get("descends_to"):
+                break
             start = run["current_room_id"]
             start_room = run["rooms"][start]
             # Real live feature (2026-09-04): every floor now guarantees
@@ -35069,6 +35082,24 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                     bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)[lockable_id] = True
                 else:
                     bot._chat_scoped_set(bot._UNLOCKED, chat_id).add(lockable_id)
+            # Same real mechanic, same test-only resolution as
+            # `_walk_to_checkpoint` above: a gated miniboss/boss room
+            # genuinely blocks moving onward until its monsters are
+            # cleared -- fight it here before trying to continue.
+            if bot._is_gated_combat_room(start_room):
+                pre_gate_character = db.get_character(leader_id, chat_id)
+                original_hp_current, original_hp_max = pre_gate_character["hp_current"], pre_gate_character["hp_max"]
+                db.update_character(leader_id, chat_id, hp_current=999999, hp_max=999999)
+                await bot._do_labyrinth_attack(FakeUpdate(leader_id, "attack", [], chat_id=chat_id), "attack")
+                gate_session = sessions.get_session_for_user(chat_id, leader_id)
+                if gate_session is not None:
+                    for enemy in [p for p in gate_session.participants if gate_session.sides.get(p["telegram_user_id"]) == "enemy"]:
+                        enemy["hp_current"] = 0
+                    await bot._check_labyrinth_progress(FakeUpdate(leader_id, "", [], chat_id=chat_id), gate_session)
+                    sessions.end_session(chat_id, gate_session)
+                db.update_character(leader_id, chat_id, hp_current=original_hp_current, hp_max=original_hp_max)
+                run = db.get_labyrinth_run(chat_id, f"party:{party_id}")
+                continue
             came_from = {start: None}
             queue = deque([start])
             target_id = None
@@ -39548,6 +39579,144 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         sink2 = []
         await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), f"go to {rooms[to_room_id]['name']}")
         self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], to_room_id, "must open once the real switch is hit")
+
+        db.delete_labyrinth_run(chat_id, party_key)
+
+    def test_generate_floor_chains_the_mid_branch_gate_into_the_final_convergence(self):
+        """
+        Real Phase L5 "Advanced Dungeons" v5 -- a TRUE sequential chain
+        (2026-09-06, per Coffee: "do everything... lets get to our
+        goal" -- see [[project_advanced_interconnected_dungeons_
+        research]]'s own "still missing" table: "solving A unlocks B's
+        own gate specifically, not just any order, all required").
+        When both a mid-branch gate and the final convergence gate
+        exist on the same floor, the mid-branch gate's own target
+        branch also feeds the convergence gate -- a real, GENUINE
+        sequential dependency (must solve the mid-branch gate first),
+        layered on top of the existing parallel AND-requirement from
+        the other convergence branches. Statistical: the chained
+        switch's own room must be genuinely UNREACHABLE without first
+        solving the real mid-branch gate that leads to it (the
+        opposite property from every other Phase L5 gate tested so
+        far, which are all real proof of PARALLEL, not sequential,
+        structure).
+        """
+        import collections
+        chain_seen = False
+        for seed in range(60):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = floor_data["rooms"]
+            chained_switch_room_id = next((rid for rid, r in rooms.items() if any(lk["id"] == "f5_chained_convergence_switch" for lk in r.get("lockables", []))), None)
+            if chained_switch_room_id is None:
+                continue
+            chain_seen = True
+            mid_gate_room_id = next(rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == "f5_midbranch_gate")
+            mid_gate_to_id = next(d for d, lid in rooms[mid_gate_room_id]["locked_connections"].items() if lid == "f5_midbranch_gate")
+            # The chained switch must genuinely require the mid-branch
+            # gate: reachable from the hub with EVERY gate except the
+            # mid-branch one treated as freely passable (traversing both
+            # `connections` and `locked_connections`) must still NOT
+            # reach it -- proving this is a real sequential dependency,
+            # not a parallel one.
+            hub_id = floor_data["hub_room_id"]
+            visited, frontier = {hub_id}, collections.deque([hub_id])
+            while frontier:
+                cur = frontier.popleft()
+                room = rooms[cur]
+                neighbors = set(room.get("connections", [])) | set(room.get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if cur == mid_gate_room_id and nb == mid_gate_to_id:
+                        continue
+                    if nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            self.assertNotIn(
+                chained_switch_room_id, visited,
+                f"seed {seed}: the chained convergence switch must be genuinely UNREACHABLE without solving the mid-branch gate first -- otherwise this isn't a real sequential chain",
+            )
+            # And it MUST become reachable once that one gate is treated
+            # as open -- confirms this isn't just permanently unreachable
+            # dead code, only sequentially gated.
+            visited2, frontier2 = {hub_id}, collections.deque([hub_id])
+            while frontier2:
+                cur = frontier2.popleft()
+                room = rooms[cur]
+                neighbors = set(room.get("connections", [])) | set(room.get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if nb not in visited2:
+                        visited2.add(nb)
+                        frontier2.append(nb)
+            self.assertIn(chained_switch_room_id, visited2, f"seed {seed}: the chained switch must be reachable once the mid-branch gate is solved")
+        self.assertTrue(chain_seen, "expected at least one real chained convergence switch across 60 checkpoint-floor seeds")
+
+    async def test_labyrinth_chained_convergence_gate_requires_solving_the_mid_branch_gate_first(self):
+        """
+        Real end-to-end companion: using a REAL generated checkpoint
+        floor, confirm the boss room genuinely stays locked even after
+        hitting the OTHER convergence switches, until the chained
+        switch (which requires first solving the real mid-branch gate)
+        is also hit.
+        """
+        user_id, chat_id = 962093, -962093
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "SequentialChainTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        floor_data = None
+        for seed in range(60):
+            fd = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = fd["rooms"]
+            has_chain = any(lk["id"] == "f5_chained_convergence_switch" for r in rooms.values() for lk in r.get("lockables", []))
+            has_boss = any(r.get("is_boss_room") for r in rooms.values())
+            if has_chain and has_boss:
+                floor_data = fd
+                break
+        self.assertIsNotNone(floor_data, "expected a real chained convergence floor with a boss within 60 seeds")
+
+        rooms = floor_data["rooms"]
+        boss_id = next(rid for rid, r in rooms.items() if r.get("is_boss_room"))
+        gate_room_id = next(rid for rid, r in rooms.items() if boss_id in r.get("locked_connections", {}))
+        convergence_lockable = next(lk for lk in rooms[gate_room_id]["lockables"] if lk["kind"] == "multi_switch_gate" and lk.get("id") == rooms[gate_room_id]["locked_connections"][boss_id])
+        switch_ids = convergence_lockable["requires"]
+        chained_switch_id = next(sid for sid in switch_ids if sid == "f5_chained_convergence_switch")
+        mid_gate_room_id = next(rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == "f5_midbranch_gate")
+        mid_gate_lockable = next(lk for lk in rooms[mid_gate_room_id]["lockables"] if lk["id"] == "f5_midbranch_gate")
+        mid_switch_id = mid_gate_lockable["requires"][0]
+        mid_switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == mid_switch_id for lk in r.get("lockables", [])))
+        mid_switch_lockable = next(lk for lk in rooms[mid_switch_room_id]["lockables"] if lk["id"] == mid_switch_id)
+        chained_switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == chained_switch_id for lk in r.get("lockables", [])))
+        chained_switch_lockable = next(lk for lk in rooms[chained_switch_room_id]["lockables"] if lk["id"] == chained_switch_id)
+
+        # Hit every OTHER real convergence switch directly (not under
+        # test here), leaving only the chained one outstanding.
+        for other_switch_id in switch_ids:
+            if other_switch_id == chained_switch_id:
+                continue
+            bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)[other_switch_id] = True
+
+        for rid in rooms:
+            rooms[rid]["visited"] = True
+        db.create_labyrinth_run(chat_id, party_key, floor=5, seed=0, current_room_id=mid_gate_room_id, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {rooms[boss_id]['name']}")
+        self.assertNotEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], boss_id, "must stay blocked -- the chained switch, behind the mid-branch gate, hasn't been hit yet")
+
+        # Solve the real mid-branch gate the honest way: hit its own
+        # switch, then move through it.
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=mid_switch_room_id)
+        await bot._do_lockpick(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), db.get_character(user_id, chat_id), dict(mid_switch_lockable), "hit the crystal")
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=mid_gate_room_id)
+        mid_gate_to_id = next(d for d, lid in rooms[mid_gate_room_id]["locked_connections"].items() if lid == "f5_midbranch_gate")
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", [], chat_id=chat_id), f"go to {rooms[mid_gate_to_id]['name']}")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], mid_gate_to_id, "must have genuinely passed the mid-branch gate")
+
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=chained_switch_room_id)
+        await bot._do_lockpick(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), db.get_character(user_id, chat_id), dict(chained_switch_lockable), "hit the crystal")
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=gate_room_id)
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), f"go to {rooms[boss_id]['name']}")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], boss_id, "must open now that every real requirement, including the chained one, is satisfied")
 
         db.delete_labyrinth_run(chat_id, party_key)
 

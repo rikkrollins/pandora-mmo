@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.530] — feature: true sequential gate chains ("Advanced Dungeons" Phase L5, v5)
+
+Coffee: "do everything and then audit your output of the generator
+then self-improve it. lets get to our goal." Closes the last "still
+missing" pattern from [[project_advanced_interconnected_dungeons_research]]:
+solving one specific gate now genuinely unlocks a SPECIFIC other one,
+not just any-order-all-required. When a checkpoint floor rolls both a
+mid-branch gate and the final boss convergence gate, the mid-branch
+gate's own target branch now ALSO feeds the convergence gate: a new
+switch sits at the very end of that branch, and reaching it (which
+already requires solving the mid-branch gate first) becomes one more
+real requirement on the convergence seal -- layered on top of, not
+replacing, the existing 1-2 parallel branch requirements. A genuine
+A -> B -> final dependency chain, same shape as the deeper multi-gate
+sequences the SNES/NES Zelda research called out.
+
+Two more real, pre-existing bugs found and fixed while building this:
+the collapse/carry-puzzle "echo shortcut" mechanic could hand out a
+free, ungated bypass straight into a mid-branch gate's own tail room
+(now excluded via the same shared `_rooms_shadowed_by_a_real_gate`
+check loop-back/tail-merge already use); and the mid-branch gate's own
+branch-selection fallback could collide two different switches into
+one room when it dropped every exclusion at once (now preserves the
+convergence-chain exclusion specifically).
+
+Also fixes a real, unrelated, serious test-only infinite loop found
+auditing this release: `test_run_is_shared_across_party_members` used
+an unbounded `while` loop to walk toward the stairs with no handling
+for a gated miniboss/boss combat room -- a real mechanic live since
+v1.27.505 -- so once such a room landed on floor 1's main path, every
+move was silently refused forever and the loop spun at 100% CPU with
+zero forward progress (reproduced: an 87-minute hang before being
+killed and diagnosed). Bounded the loop and gave it the same
+fight-it-first handling `_walk_to_checkpoint` already had. No game
+code was at fault -- this never affected live play.
+
 ## [1.27.529] — feature: defeating a real boss reveals a live shortcut back to the hub ("Advanced Dungeons" Phase L5, v4)
 
 Coffee: "keep going... generate dungeons like the samples and
