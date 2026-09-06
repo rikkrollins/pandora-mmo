@@ -2988,7 +2988,7 @@ async def _continue_character_creation(update: Update, context: ContextTypes.DEF
 
         spell_line = ""
         if character["known_spells"]:
-            spell_names = [spells_module.get_spell(s)["name"] for s in character["known_spells"]]
+            spell_names = [sp["name"] for s in character["known_spells"] if (sp := spells_module.get_spell(s)) is not None]
             spell_line = f"Spells known: {', '.join(spell_names)}\n"
         if character["spell_slots_max"] > 0:
             spell_line += f"Spell slots: {character['spell_slots_current']}/{character['spell_slots_max']}\n"
@@ -20660,7 +20660,17 @@ def _format_character_sheet(character: dict) -> str:
     sheets should show a real full sheet per member, including
     recruits/AI companions, not just names).
     """
-    spell_names = [spells_module.get_spell(s)["name"] for s in character["known_spells"]]
+    # Defensive fix (2026-09-06, found auditing scripts/check_error_
+    # log.py's own history -- not the actual root cause of either real
+    # crash logged there, both already fixed, see test_character_
+    # sheet_never_crashes_while_deep_in_the_labyrinth's own docstring).
+    # spells.get_spell's own real `-> dict | None` contract was never
+    # actually honored here: a stale/renamed spell id lingering in a
+    # character's own known_spells would crash this whole sheet with a
+    # bare subscript. Skips anything the current catalog no longer
+    # recognizes instead -- a sheet missing one unrecognized spell name
+    # is a much smaller problem than a sheet that can't render at all.
+    spell_names = [sp["name"] for s in character["known_spells"] if (sp := spells_module.get_spell(s)) is not None]
     race_data = races_module.get_race(character["race"])
     features = class_features_module.get_class_features(character["char_class"])
     slot_line = ""

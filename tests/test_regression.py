@@ -23985,6 +23985,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sheet = bot._format_character_sheet(character)
         self.assertIn("Labyrinth", sheet)
 
+    def test_character_sheet_never_crashes_on_a_stale_unrecognized_spell_id(self):
+        """
+        Defensive fix (2026-09-06, found auditing scripts/check_error_
+        log.py's own history): spells.get_spell's own real `-> dict |
+        None` contract was never honored in _format_character_sheet's
+        spell_names list comprehension -- a stale/renamed spell id in
+        known_spells would crash the whole sheet. Skips the
+        unrecognized entry instead of crashing; a real, still-
+        recognized spell alongside it still shows up normally.
+        """
+        user_id = 900515
+        character = make_basic_character(user_id, "StaleSpellTester", char_class="Sorcerer", known_spells=["fireball", "this_spell_id_does_not_exist"])
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("Fireball", sheet)
+        self.assertNotIn("this_spell_id_does_not_exist", sheet)
+
     def test_character_sheet_shows_real_practiced_proficiency_percentages(self):
         """
         Real request (2026-08-22, Coffee): "under our character sheets

@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.532] — fix: proactive error-log audit, a real latent character-sheet crash closed
+
+Ran `scripts/check_error_log.py` as routine proactive maintenance (not
+a player report) and reviewed every unprocessed entry against current
+code. Two of the three real crash classes logged were already fixed in
+earlier work (the Labyrinth-location fast-travel crash, and the
+`current_location` sheet crash -- both already covered by real tests).
+The third, `_format_character_sheet`'s spell-name list, never actually
+honored `spells.get_spell`'s own `-> dict | None` contract -- a stale
+or renamed spell id lingering in any character's `known_spells` would
+crash the whole sheet on a bare subscript. Fixed here and at the
+matching character-creation call site: an unrecognized spell id is now
+skipped instead of crashing the sheet. Cursor advanced past the
+reviewed batch.
+
 ## [1.27.531] — feature: Labyrinth Shards, a real collectible gate to the next segment
 
 Real live request (2026-09-03, Coffee: "can we use that as a mechanic
