@@ -7483,6 +7483,22 @@ async def _ai_turn_pacing_delay() -> None:
     await asyncio.sleep(AI_TURN_PACING_SECONDS)
 
 
+def _ai_turn_iteration_safety_cap(session: sessions.Session) -> int:
+    """
+    Real live report investigated and fixed (2026-09-06, Coffee,
+    dev-bridge screenshot: "Investigate this" -- a flat 200-iteration
+    cap firing on a real, legitimately long 6-vs-2 fight against two
+    Paymaster's Scouts scaled to ~3000 HP each, ~124 avg damage per
+    hit -- see _resolve_ai_turns_inner's own docstring for the full
+    investigation). Scales with the real number of combatants (60
+    rounds' worth per combatant) instead of a fixed constant, floored
+    at the original 200 for small fights, so a bigger fight against
+    tankier scaled content gets proportionally more real room before
+    this safety net needs to step in.
+    """
+    return max(len(session.turn_order) * 60, 200)
+
+
 async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> None:
     """
     Resolves consecutive AI-controlled turns AND auto-resolved death-save
@@ -7499,9 +7515,17 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
     character doesn't die from a stalemate). A hard iteration cap is also
     included as defense-in-depth against any other future logic bug that
     might otherwise cause an infinite loop.
+
+    The hard cap itself now scales with combatant count -- see
+    _ai_turn_iteration_safety_cap's own docstring for the real
+    live report this fixes. Also now actually logged server-side when
+    it fires (previously only ever reached the player via _safe_send,
+    leaving zero trace in bot_live_tmp.log) so a genuine stuck loop, if
+    one ever does occur, leaves a real trail, not just a live chat
+    message.
     """
     consecutive_noop_turns = 0
-    iteration_safety_cap = 200
+    iteration_safety_cap = _ai_turn_iteration_safety_cap(session)
     iterations = 0
     # Real wall-clock circuit breaker (2026-07-24) -- see _post_narrated's
     # docstring: this whole function can need several real Ollama calls
@@ -7517,6 +7541,15 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
     while not session.is_combat_over():
         iterations += 1
         if iterations > iteration_safety_cap:
+            enemy_hp_summary = ", ".join(
+                f"{p.get('name', '?')}: {p.get('hp_current')}/{p.get('hp_max')}"
+                for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"
+            )
+            logger.warning(
+                f"[combat] iteration safety cap hit: chat_id={session.chat_id} "
+                f"iterations={iterations} cap={iteration_safety_cap} combatants={len(session.turn_order)} "
+                f"enemy_hp=[{enemy_hp_summary}]"
+            )
             await _safe_send(
                 update,
                 "⚠️ Combat seems stuck in a loop — ending it automatically. "

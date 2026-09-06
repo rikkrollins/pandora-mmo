@@ -24407,6 +24407,62 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         sessions.end_session(-999)
 
+    def test_ai_turn_iteration_safety_cap_scales_with_combatant_count(self):
+        """
+        Real live report investigated and fixed (2026-09-06, Coffee,
+        dev-bridge screenshot: "Investigate this" -- a flat 200-
+        iteration cap firing on a real, legitimately long 6-vs-2 fight
+        against two Paymaster's Scouts scaled to ~3000 HP each with a
+        real ~124 avg damage per hit; the stalemate check never fired,
+        confirming real damage was flowing both directions the whole
+        time -- not an infinite loop, just a fight the flat cap was
+        never revised to accommodate). Now scales with the real number
+        of combatants, floored at the original 200 for small fights.
+        """
+        import sessions
+        small_session = sessions.Session(chat_id=-999, participants=[], turn_order=[1, 2], sides={})
+        self.assertEqual(bot._ai_turn_iteration_safety_cap(small_session), 200)
+        big_session = sessions.Session(chat_id=-999, participants=[], turn_order=list(range(12)), sides={})
+        self.assertEqual(bot._ai_turn_iteration_safety_cap(big_session), 720)
+
+    async def test_ai_turn_iteration_safety_cap_still_fires_and_logs_on_a_genuine_runaway(self):
+        """
+        Real end-to-end companion: confirms the safety net still
+        actually fires (and now logs server-side -- previously this
+        only ever reached the player via _safe_send, leaving zero
+        trace in bot_live_tmp.log, confirmed empty on grep while
+        investigating the real report above) once a fight genuinely
+        outlasts its own real cap, not just that the formula computes
+        a bigger number. Both sides are given deliberately enormous HP
+        so real, ongoing (never-stalemated) combat outlasts the small
+        session's own 200-iteration floor.
+        """
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        human_id = 900940
+        make_basic_character(human_id, "RunawayTester", current_location="crossroads_tavern", hp_max=999999, is_ai=True)
+        human = db.get_character(human_id, -999)
+        enemy = {
+            "telegram_user_id": -700800, "name": "Unkillable Test Dummy", "is_ai": True,
+            "hp_current": 999999, "hp_max": 999999, "armor_class": 14,
+            "strength": 14, "dexterity": 16, "proficiency_bonus": 3,
+            "monster_key": "giant_spider", "xp_reward": 200, "conditions": [],
+        }
+        session = sessions.start_session(-999, [human, enemy], {human_id: "party", enemy["telegram_user_id"]: "enemy"})
+        session.turn_order = [human_id, enemy["telegram_user_id"]]
+        self.assertEqual(bot._ai_turn_iteration_safety_cap(session), 200, "a 2-combatant fight must keep the original floor")
+
+        sink = []
+        update = FakeUpdate(human_id, "irrelevant", sink)
+        with patch("bot.narrate_action", return_value="A blow lands."), self.assertLogs("pandora_mmo", level="WARNING") as log_ctx:
+            await bot._resolve_ai_turns(update, session)
+
+        self.assertTrue(any("stuck in a loop" in s for s in sink), sink)
+        self.assertTrue(any("iteration safety cap hit" in msg for msg in log_ctx.output), log_ctx.output)
+        self.assertTrue(any("Unkillable Test Dummy" in msg for msg in log_ctx.output), log_ctx.output)
+        self.assertIsNone(sessions.get_session_for_user(-999, human_id), "the runaway session must still be genuinely ended")
+
     async def test_multiattack_announcement_not_repeated_on_a_crash_and_retry(self):
         # Real live bug (2026-08-05, Coffee, Development topic screenshot:
         # "This was a double prompt also" -- "Grask Emberscale has 2

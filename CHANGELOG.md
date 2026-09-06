@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.539] — fix: combat "stuck in a loop" safety net was too tight for real high-HP fights
+
+Investigated a real dev-bridge report (screenshot: combat auto-ended
+with "Combat seems stuck in a loop"). Root-caused: NOT an infinite
+loop -- the stalemate check never fired, meaning real damage was
+flowing both directions the whole fight. It was a genuinely long
+6-vs-2 fight against two Paymaster's Scouts scaled to ~3000 HP each
+(via the existing undertuned_monster_stat_multiplier over-level
+scaling) dealing ~124 avg damage per hit, tripping a flat 200-
+iteration cap that was set once, years before that scaling system
+existed, and never revised.
+
+The cap now scales with the real number of combatants (60 rounds'
+worth per combatant, floored at the original 200 for small fights) --
+a big fight against tanky scaled content gets proportionally more real
+room before this safety net needs to step in. Also fixed a real
+diagnostic gap found while investigating: this event previously only
+ever reached the player via a chat message, leaving zero trace in
+bot_live_tmp.log -- confirmed empty on grep during this exact
+investigation. It's now also logged server-side with real combat
+state (enemy HP, iteration count), so a genuine stuck loop, if one
+ever does occur, leaves a real trail.
+
 ## [1.27.538] — feature: boss-defeat shortcut ported to evolved overworld dungeons
 
 Per Coffee: "keep going" -- the fourth and final `dungeon_evolve.py`
