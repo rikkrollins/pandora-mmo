@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.533] — feature: Key Cavern redundant key mesh ("Advanced Dungeons" Phase L5, v6)
+
+Closes the last real "still missing" pattern from
+[[project_advanced_interconnected_dungeons_research]] -- Key Cavern's
+own real pattern, "each locked door has a key hidden in the area it
+bars... Link is always able to access at least one key and progress."
+On checkpoint floors, two different branches now each gate the
+OTHER's own interior, with each branch's own switch sitting in the
+OTHER branch's root room -- always open straight off the hub, never
+itself gated by this mechanic. Unlike v5's own strict A -> B -> final
+sequential chain, there's no forced first branch here: whichever one a
+player finds first hands them the other's own key immediately, with
+zero prerequisites. Verified by hand-tracing real generated output and
+a real statistical test across 80 checkpoint-floor seeds confirming
+both switches stay reachable with BOTH mesh gates treated as locked at
+once (the actual "no forced order" invariant, not just "eventually
+solvable").
+
+This closes out the whole "Advanced Dungeons" research line -- all 6
+real patterns identified across 30+ studied dungeons are now shipped
+(v1.27.526-530, 533), Labyrinth-only; a `dungeon_evolve.py` port
+remains unattempted, and lower-priority items (a repeated-gate
+mechanic, deeper multi-hop chains) remain open but unscheduled.
+
 ## [1.27.532] — fix: proactive error-log audit, a real latent character-sheet crash closed
 
 Ran `scripts/check_error_log.py` as routine proactive maintenance (not

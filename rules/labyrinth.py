@@ -1296,6 +1296,48 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 })
                 convergence_gate_lockable["requires"].append(chain_switch_id)
 
+    # Real Phase L5 "Advanced Dungeons" v6 -- a Key Cavern-style
+    # redundant key MESH (2026-09-06, per Coffee, the last real "still
+    # missing" pattern from [[project_advanced_interconnected_dungeons_
+    # research]]: "each locked door has a key hidden in the area it
+    # bars... Link is always able to access at least one key and
+    # progress" -- a real ALTERNATIVE to v5's own STRICT A->B->final
+    # chain above, not a replacement for it: two DIFFERENT branches
+    # each gate the OTHER'S own interior, with each branch's own
+    # switch sitting in the OTHER branch's ROOT room (branch[0],
+    # always open straight off the hub, never itself gated by this
+    # mechanic) -- so there is no single required first branch. A
+    # player who finds either branch first immediately gets the
+    # OTHER's own key with zero prerequisites, matching Key Cavern's
+    # real "always able to access at least one key" solvability
+    # guarantee -- distinct from every existing gate in this generator,
+    # which either locks a branch's own ROOT edge (never an interior
+    # one) or forms a strict, ordered chain (v5 above).
+    mesh_used = used_for_advanced | ({tuple(mid_branch_chain)} if mid_branch_chain else set())
+    mesh_eligible = [c for c in other_chains if len(c) >= 2 and tuple(c) not in mesh_used]
+    if checkpoint and boss_pool and len(mesh_eligible) >= 2:
+        mesh_branches = rng.sample(mesh_eligible, 2)
+        mesh_switch_ids = []
+        for i, branch in enumerate(mesh_branches):
+            element = rng.choice(_SWITCH_ELEMENTS)
+            switch_id = f"f{floor}_mesh_switch_{i}"
+            rooms[branch[0]].setdefault("lockables", []).append({
+                "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+            })
+            mesh_switch_ids.append(switch_id)
+        for i, branch in enumerate(mesh_branches):
+            other_switch_id = mesh_switch_ids[1 - i]
+            edge_index = rng.randint(0, len(branch) - 2)
+            from_room_id, to_room_id = branch[edge_index], branch[edge_index + 1]
+            door_id = f"f{floor}_mesh_gate_{i}"
+            rooms[from_room_id]["connections"].remove(to_room_id)
+            rooms[from_room_id].setdefault("locked_connections", {})[to_room_id] = door_id
+            rooms[from_room_id].setdefault("lockables", []).append({
+                "id": door_id, "kind": "multi_switch_gate", "name": "a real, answering seal",
+                "requires": [other_switch_id],
+            })
+            rooms[from_room_id]["description"] += " A real, answering seal blocks the way deeper in -- something in a different part of this floor answers it."
+
     gated_chain = None
     if len(other_chains) >= 2 and rng.random() < _scaled_chance(_BRANCH_GATE_CHANCE, floor, 0.002, 0.55):
         _branch_gate_eligible = [c for c in other_chains if c not in mandatory_source_chains]

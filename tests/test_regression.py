@@ -39682,6 +39682,120 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(switch_room_id, visited, f"seed {seed}: mid-branch gate's own switch room must be reachable without the gate it feeds")
         self.assertTrue(gate_seen, "expected at least one real mid-branch gate across 60 checkpoint-floor seeds")
 
+    def test_generate_floor_places_a_real_key_cavern_mesh_solvable_either_order(self):
+        """
+        Real Phase L5 "Advanced Dungeons" v6 (2026-09-06, per Coffee,
+        the last real "still missing" pattern from
+        [[project_advanced_interconnected_dungeons_research]]): Key
+        Cavern's own real pattern, "each locked door has a key hidden
+        in the area it bars... Link is always able to access at least
+        one key and progress" -- two branches gate EACH OTHER's own
+        interior, with each branch's own switch sitting in the OTHER
+        branch's ROOT room. Statistical: when it fires, BOTH mesh
+        gates are real, each locks its own branch's interior (never
+        the root-to-hub edge), and EACH switch is reachable with BOTH
+        gates treated as impassable at once -- no forced first branch,
+        unlike v5's own strict sequential chain.
+        """
+        import collections
+        mesh_seen = False
+        for seed in range(80):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = floor_data["rooms"]
+            gate_ids = ["f5_mesh_gate_0", "f5_mesh_gate_1"]
+            gate_rooms = {}
+            for gate_id in gate_ids:
+                room_id = next((rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == gate_id), None)
+                if room_id is None:
+                    break
+                gate_rooms[gate_id] = room_id
+            if len(gate_rooms) != 2:
+                continue
+            mesh_seen = True
+            hub_id = floor_data["hub_room_id"]
+            cut_edges = set()
+            switch_rooms = {}
+            for gate_id, gate_room_id in gate_rooms.items():
+                gate_room = rooms[gate_room_id]
+                to_room_id = next(d for d, lid in gate_room["locked_connections"].items() if lid == gate_id)
+                self.assertNotEqual(gate_room_id, hub_id, "a mesh gate must never sit on the branch's own root-to-hub edge")
+                lockable = next(lk for lk in gate_room["lockables"] if lk["id"] == gate_id)
+                self.assertEqual(lockable["kind"], "multi_switch_gate")
+                self.assertEqual(len(lockable["requires"]), 1)
+                switch_id = lockable["requires"][0]
+                switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == switch_id for lk in r.get("lockables", [])))
+                switch_rooms[gate_id] = switch_room_id
+                cut_edges.add((gate_room_id, to_room_id))
+            # Real, both-gates-locked-at-once reachability check -- the
+            # whole point of a mesh (vs. v5's own strict chain) is that
+            # NEITHER gate is a prerequisite for the other's own switch.
+            visited, frontier = {hub_id}, collections.deque([hub_id])
+            while frontier:
+                cur = frontier.popleft()
+                room = rooms[cur]
+                neighbors = set(room.get("connections", [])) | set(room.get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if (cur, nb) in cut_edges:
+                        continue
+                    if nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            for gate_id, switch_room_id in switch_rooms.items():
+                self.assertIn(switch_room_id, visited, f"seed {seed}: {gate_id}'s own switch room must be reachable with BOTH mesh gates locked at once")
+        self.assertTrue(mesh_seen, "expected at least one real Key Cavern mesh across 80 checkpoint-floor seeds")
+
+    async def test_labyrinth_key_cavern_mesh_can_be_solved_starting_from_either_branch(self):
+        """
+        Real end-to-end companion to the mesh statistical test above:
+        confirms the mesh's real "no forced first branch" property
+        through the actual handlers, not just the generated data --
+        gate 1 opens once gate 0's own switch is hit, regardless of
+        which branch a player happens to walk into first.
+        """
+        user_id, chat_id = 962204, -962204
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "MeshGateTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        floor_data = None
+        for seed in range(80):
+            fd = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = fd["rooms"]
+            if all(
+                any(lid == gate_id for r in rooms.values() for lid in r.get("locked_connections", {}).values())
+                for gate_id in ("f5_mesh_gate_0", "f5_mesh_gate_1")
+            ):
+                floor_data = fd
+                break
+        self.assertIsNotNone(floor_data, "expected a real Key Cavern mesh within 80 seeds")
+
+        rooms = floor_data["rooms"]
+        gate1_room_id = next(rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == "f5_mesh_gate_1")
+        gate1_to_room_id = next(d for d, lid in rooms[gate1_room_id]["locked_connections"].items() if lid == "f5_mesh_gate_1")
+        gate1_switch_id = next(lk for lk in rooms[gate1_room_id]["lockables"] if lk["id"] == "f5_mesh_gate_1")["requires"][0]
+        # Gate 1's own switch lives at gate 0's branch root (branch 0
+        # is always freely reachable straight off the hub) -- reaching
+        # it and hitting it must never depend on gate 0 itself being
+        # solved, the whole point of a mesh vs. v5's own strict chain.
+        switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == gate1_switch_id for lk in r.get("lockables", [])))
+        switch_lockable = next(lk for lk in rooms[switch_room_id]["lockables"] if lk["id"] == gate1_switch_id)
+        for r in rooms.values():
+            r["visited"] = True
+        db.create_labyrinth_run(chat_id, party_key, floor=5, seed=0, current_room_id=gate1_room_id, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {rooms[gate1_to_room_id]['name']}")
+        self.assertNotEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], gate1_to_room_id, "gate 1 must stay blocked before its own switch is hit")
+
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=switch_room_id)
+        await bot._do_lockpick(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), db.get_character(user_id, chat_id), dict(switch_lockable), "hit the crystal")
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=gate1_room_id)
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), f"go to {rooms[gate1_to_room_id]['name']}")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], gate1_to_room_id, "gate 1 must open once its own switch (sitting in the OTHER branch, never gated by gate 0) is hit")
+
+        db.delete_labyrinth_run(chat_id, party_key)
+
     async def test_labyrinth_mid_branch_gate_blocks_deeper_progress_until_the_switch_is_hit(self):
         """
         Real end-to-end companion: using a REAL generated checkpoint
