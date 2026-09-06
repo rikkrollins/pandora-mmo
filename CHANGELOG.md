@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.536] — feature: Key Cavern redundant key mesh ported to evolved overworld dungeons
+
+Per Coffee: "work on the lower-priority and unscheduled stuff" -- the
+second real `dungeon_evolve.py` port. Same pure-data shape as
+v1.27.535's mid-branch gate, so it ports the same clean way: two
+branches each gate the OTHER's own interior, switches sitting in each
+other's always-open root rooms, no forced first branch. Verified
+solvable by construction across 32 real firings (both mesh gates
+treated as locked at once) and a real statistical test.
+
+Found and fixed a genuine, more general regression while shipping
+this: a branch root can independently be chosen as a switch's home by
+MULTIPLE mechanics now (the pre-existing collapse-puzzle switch, the
+new mid-branch gate, and the new mesh's own two switches all draw from
+the same branch-root pool) -- two switches landing in one room makes
+an existing real rule (`_find_lockable`'s "same-kind ambiguous,
+refuse") silently swallow whichever action a player takes there,
+breaking every mechanic sharing that room at once. `dungeon_audit.py`
+never catches this (an ambiguous lockable is a gameplay problem, not a
+graph-structure one). Fixed by having every switch-placing mechanic in
+this generator check for and skip an already-occupied room, with a new
+regression test locking the invariant in directly.
+
 ## [1.27.535] — feature: mid-branch gates ported to evolved overworld dungeons
 
 Per Coffee: "work on the lower-priority and unscheduled stuff" -- the

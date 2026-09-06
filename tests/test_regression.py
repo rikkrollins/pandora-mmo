@@ -33422,6 +33422,98 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             character = db.get_character(user_id, -999)
             self.assertEqual(character["current_location"], to_room_id, "must open once the real switch is hit")
 
+    def test_evolve_dungeon_sometimes_places_a_real_key_cavern_mesh_solvable_either_order(self):
+        """
+        Real Phase L5 "Advanced Dungeons" Key Cavern redundant key
+        mesh, ported from rules/labyrinth.py's identical mechanic
+        (2026-09-06, per Coffee: "work on the lower-priority and
+        unscheduled stuff"). Same pure-data shape as the mid-branch
+        gate, so it ports the same clean way. Statistical: fires as a
+        real fraction, and each of the two switches is reachable with
+        BOTH mesh gates treated as locked at once -- no forced first
+        branch, the real "no ordering can dead-end the player"
+        invariant, not just "eventually solvable."
+        """
+        import copy
+        import collections
+        hits = 0
+        for seed in range(40):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_mesh_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            gate_ids = [f"{new_id}_mesh_gate_0", f"{new_id}_mesh_gate_1"]
+            gate_rooms = {}
+            for gate_id in gate_ids:
+                room_id = next((rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == gate_id), None)
+                if room_id is None:
+                    break
+                gate_rooms[gate_id] = room_id
+            if len(gate_rooms) != 2:
+                continue
+            hits += 1
+            hub_id = next(rid for rid, r in rooms.items() if r.get("dungeon_hub"))
+            cut_edges = set()
+            switch_rooms = {}
+            for gate_id, gate_room_id in gate_rooms.items():
+                to_room_id = next(d for d, lid in rooms[gate_room_id]["locked_connections"].items() if lid == gate_id)
+                self.assertNotEqual(gate_room_id, hub_id, "a mesh gate must never sit on the branch's own root-to-hub edge")
+                switch_id = next(lk for lk in rooms[gate_room_id]["lockables"] if lk["id"] == gate_id)["requires"][0]
+                switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == switch_id for lk in r.get("lockables", [])))
+                switch_rooms[gate_id] = switch_room_id
+                cut_edges.add((gate_room_id, to_room_id))
+            visited, frontier = {hub_id}, collections.deque([hub_id])
+            while frontier:
+                cur = frontier.popleft()
+                room = rooms[cur]
+                neighbors = set(room.get("connections", [])) | set(room.get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if (cur, nb) in cut_edges:
+                        continue
+                    if nb in rooms and nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            for gate_id, switch_room_id in switch_rooms.items():
+                self.assertIn(switch_room_id, visited, f"seed {seed}: {gate_id}'s own switch room must be reachable with BOTH mesh gates locked at once")
+        self.assertGreater(hits, 0, "expected at least one real Key Cavern mesh across 40 seeds")
+        self.assertLess(hits, 40, "expected at least one evolve WITHOUT a mesh across 40 seeds -- it should be a real fraction")
+
+    def test_evolve_dungeon_never_places_two_switch_lockables_in_one_room(self):
+        """
+        Real regression found and fixed shipping the mid-branch gate/
+        Key Cavern mesh mechanics (2026-09-06): a branch root can
+        independently be chosen as a switch's home by more than one
+        mechanic (the pre-existing collapse-puzzle switch, the
+        mid-branch gate's own source switch, and the mesh's own two
+        switches all draw from the same branch-root pool). Scoped to
+        `kind: "switch"` specifically, not lockables generally -- two
+        different CHESTS in one room, for example, still disambiguate
+        fine via `_find_lockable`'s own distinctive-name-word matching
+        (different flavor text), but two switches can genuinely roll
+        the identical element/name, making `_find_lockable`'s real
+        "same-kind ambiguous, refuse" rule (v1.27.513) silently swallow
+        whichever action a player takes there, breaking every mechanic
+        sharing that room at once. `dungeon_audit.py`'s own checks
+        never catch this (an ambiguous lockable is a gameplay problem,
+        not a graph-structure one), so this is checked directly across
+        many real seeds/sources.
+        """
+        import copy
+        checked = 0
+        for source in ("goblin_warrens", "sunken_root_caverns", "greymoor_downs"):
+            for seed in range(40):
+                campaign = copy.deepcopy(bot.CAMPAIGN)
+                rng = random.Random(seed)
+                new_id = f"{source}_evolved_switch_collision_{seed}"
+                dungeon_evolve.evolve_dungeon(campaign, source, new_id, "underground", rebirth_gate=1, target_band=(20, 30), rng=rng)
+                rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+                checked += 1
+                for room_id, room in rooms.items():
+                    switch_count = sum(1 for lk in room.get("lockables", []) if lk.get("kind") == "switch")
+                    self.assertLessEqual(switch_count, 1, f"{source} seed={seed}: room {room_id!r} has {switch_count} real switch lockables -- ambiguous to _find_lockable")
+        self.assertGreater(checked, 0)
+
     def test_evolve_dungeon_sometimes_places_a_real_remote_torch_gate(self):
         """
         Real remote-gate mechanic (2026-09-01, per Coffee: "lighting a

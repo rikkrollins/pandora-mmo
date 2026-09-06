@@ -98,6 +98,11 @@ _GATED_ENCOUNTER_CHANCE = 0.3
 # silently made that other test's own "not every time" assumption false.
 _MID_BRANCH_GATE_CHANCE = 0.4
 
+# Real Phase L5 "Advanced Dungeons" Key Cavern redundant key mesh
+# chance (2026-09-06), ported from rules/labyrinth.py's identical
+# mechanic -- same "roll for it" discipline as every sibling gate.
+_KEY_MESH_CHANCE = 0.3
+
 # Loop-back connections (rules/labyrinth.py's own "densify the tree
 # into a real grid" mechanic) were tried here too (2026-09-03) and
 # deliberately NOT shipped: real testing across 3 source dungeons x 40
@@ -580,10 +585,28 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     # so there's no real collision -- same tolerance this generator's
     # own rune-gate block already extends to the mandatory/switch/plate
     # gates before it (never re-excluding every earlier pick).
+    # Real regression found and fixed shipping the mesh mechanic below
+    # (2026-09-06): a branch root can ALREADY hold a switch-kind
+    # lockable from an earlier, independent mechanic (the collapse-
+    # puzzle's own switch, confirmed via real testing to land on a
+    # branch root too) -- placing a SECOND one in that same room makes
+    # `_find_lockable`'s real "same-kind ambiguous, refuse" rule
+    # (v1.27.513) silently swallow whichever action a player takes
+    # there, breaking BOTH mechanics at once. `dungeon_audit.py`'s own
+    # checks never catch this (an ambiguous lockable is a gameplay
+    # problem, not a graph-structure one), so both new mechanics below
+    # check for it directly before ever placing a switch.
+    def _room_already_has_a_switch(room_id: str) -> bool:
+        _, room = _find_room(campaign, room_id)
+        return any(lk.get("kind") == "switch" for lk in room.get("lockables", []))
+
+    mid_branch = None
     mid_branch_candidates = [b for b in branches if b["idx"] != branch_idx and b["next_step"] >= 3]
     if mid_branch_candidates and rng.random() < _MID_BRANCH_GATE_CHANCE:
         mid_branch = rng.choice(mid_branch_candidates)
-        mid_branch_source_candidates = [b for b in branches if b["idx"] != mid_branch["idx"]]
+        mid_branch_source_candidates = [
+            b for b in branches if b["idx"] != mid_branch["idx"] and not _room_already_has_a_switch(f"{new_dungeon_id}_b{b['idx']}_r0")
+        ]
         if mid_branch_source_candidates:
             mid_branch_source = rng.choice(mid_branch_source_candidates)
             source_room_id = f"{new_dungeon_id}_b{mid_branch_source['idx']}_r0"
@@ -604,6 +627,48 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                 "id": door_id, "kind": "multi_switch_gate", "name": "a real inner seal", "requires": [switch_id],
             })
             from_room["description"] += " A real inner seal blocks the way deeper in -- something elsewhere in this dungeon must open it."
+
+    # Real Phase L5 "Advanced Dungeons" Key Cavern redundant key mesh,
+    # ported from rules/labyrinth.py's identical mechanic (2026-09-06,
+    # per Coffee: "work on the lower-priority and unscheduled stuff").
+    # Same pure-data shape as the mid-branch gate above, so it ports
+    # the same clean way. Two DIFFERENT branches each gate the OTHER's
+    # own interior, with each branch's own switch sitting in the OTHER
+    # branch's root room (always open straight off the hub) -- no
+    # forced first branch, unlike the mid-branch gate's own strict
+    # dependency. Excludes `mid_branch` (not just this block's own
+    # picks) so the two mechanics never target the identical branch,
+    # matching the Labyrinth's own `mesh_used` exclusion discipline.
+    mesh_used_idx = {mid_branch["idx"]} if mid_branch else set()
+    mesh_candidates = [
+        b for b in branches if b["idx"] != branch_idx and b["idx"] not in mesh_used_idx and b["next_step"] >= 2
+        and not _room_already_has_a_switch(f"{new_dungeon_id}_b{b['idx']}_r0")
+    ]
+    if len(mesh_candidates) >= 2 and rng.random() < _KEY_MESH_CHANCE:
+        mesh_branches = rng.sample(mesh_candidates, 2)
+        mesh_switch_ids = []
+        for i, branch in enumerate(mesh_branches):
+            switch_room_id = f"{new_dungeon_id}_b{branch['idx']}_r0"
+            _, switch_room = _find_room(campaign, switch_room_id)
+            element = rng.choice(["fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical"])
+            switch_id = f"{new_dungeon_id}_mesh_switch_{i}"
+            switch_room.setdefault("lockables", []).append({
+                "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+            })
+            mesh_switch_ids.append(switch_id)
+        for i, branch in enumerate(mesh_branches):
+            other_switch_id = mesh_switch_ids[1 - i]
+            edge_index = rng.randint(0, branch["next_step"] - 2)
+            from_room_id = f"{new_dungeon_id}_b{branch['idx']}_r{edge_index}"
+            to_room_id = f"{new_dungeon_id}_b{branch['idx']}_r{edge_index + 1}"
+            _, mesh_from_room = _find_room(campaign, from_room_id)
+            door_id = f"{new_dungeon_id}_mesh_gate_{i}"
+            mesh_from_room["connections"].remove(to_room_id)
+            mesh_from_room.setdefault("locked_connections", {})[to_room_id] = door_id
+            mesh_from_room.setdefault("lockables", []).append({
+                "id": door_id, "kind": "multi_switch_gate", "name": "a real, answering seal", "requires": [other_switch_id],
+            })
+            mesh_from_room["description"] += " A real, answering seal blocks the way deeper in -- something in a different part of this dungeon answers it."
 
     # Extra chest lockables -- comfortable lock_density padding, real
     # loot from items already known-good elsewhere in this same
@@ -771,7 +836,20 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         seal_branch = rng.choice(seal_eligible)
         seal_leaf = seal_branch["tail_id"]
         seal_parent = hub_id if seal_branch["next_step"] <= 1 else f"{new_dungeon_id}_b{seal_branch['idx']}_r{seal_branch['next_step'] - 2}"
-        other_branches = [b for b in non_boss_branches if b["idx"] != seal_branch["idx"]]
+        # Real regression found and fixed shipping the mid-branch gate/
+        # key-mesh mechanics (2026-09-06): those can ALSO place a real
+        # switch at a branch root, and this block runs after them --
+        # without this check, two same-kind "switch" lockables could
+        # land in the identical room, and `_find_lockable`'s own real
+        # "same-kind ambiguous, refuse" rule (v1.27.513) would silently
+        # swallow whichever action a player takes there, breaking BOTH
+        # mechanics at once. dungeon_audit.py's own checks never catch
+        # this (an ambiguous lockable is a gameplay problem, not a
+        # graph-structure one).
+        other_branches = [
+            b for b in non_boss_branches
+            if b["idx"] != seal_branch["idx"] and not _room_already_has_a_switch(f"{new_dungeon_id}_b{b['idx']}_r0")
+        ]
         if len(other_branches) >= 2:
             switch_host_branch = rng.choice(other_branches)
             switch_host_id = f"{new_dungeon_id}_b{switch_host_branch['idx']}_r0"
