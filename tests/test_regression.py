@@ -36189,6 +36189,84 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("A Mirror (II)" in s for s in sink2))
         sessions.end_session(chat_id, session)
 
+    def test_generate_floor_sometimes_places_a_real_repeated_miniboss_gate(self):
+        """
+        Real Phase L5 "Advanced Dungeons" v7 (2026-09-06, per Coffee:
+        "work on the lower-priority and unscheduled stuff" -- Catfish's
+        Maw's own real pattern: the SAME encounter must be beaten
+        several separate times before its real reward is granted).
+        Statistical: across many non-checkpoint-floor seeds, this
+        fires sometimes, always with a real 2-3 repeat count and the
+        stashed monster key matching the room's own original monster.
+        """
+        repeat_seen = False
+        for seed in range(200):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(seed))
+            rooms = floor_data["rooms"]
+            miniboss_room = next((r for r in rooms.values() if r.get("is_miniboss_room")), None)
+            if miniboss_room is None or not miniboss_room.get("miniboss_repeat_required"):
+                continue
+            repeat_seen = True
+            self.assertIn(miniboss_room["miniboss_repeat_required"], (2, 3))
+            self.assertEqual(miniboss_room["miniboss_repeat_progress"], 0)
+            self.assertEqual(miniboss_room["miniboss_monster_key"], miniboss_room["monsters"][0])
+        self.assertTrue(repeat_seen, "expected at least one real repeated mini-boss gate across 200 seeds")
+
+    async def test_labyrinth_repeated_miniboss_only_grants_the_real_reward_on_the_last_defeat(self):
+        """
+        Real end-to-end companion: a mini-boss with a real repeat gate
+        must be fought and "defeated" the full required number of
+        times -- each earlier win respawns the SAME monster and grants
+        nothing, only the LAST one actually clears the room and grants
+        the real guaranteed reward.
+        """
+        import sessions
+        user_id, chat_id = 962205, -962205
+        # Real, inflated HP (same discipline as _walk_to_checkpoint's own
+        # gated-combat handling): this fights the SAME real miniboss
+        # TWICE with real, unseeded enemy turns in between -- a bare
+        # test character can genuinely go down to two real exchanges,
+        # same documented risk every other repeated-combat test here
+        # already guards against.
+        make_basic_character(user_id, "RepeatMinibossTester", chat_id=chat_id, current_location="the_colosseum", hp_max=999999)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=999999)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        miniboss_room_id = "laby_repeat_miniboss_test"
+        rooms[miniboss_room_id] = {
+            "id": miniboss_room_id, "floor": 20, "name": "A Real Repeated Chamber",
+            "connections": [hub_id], "monsters": ["goblin"], "is_miniboss_room": True,
+            "miniboss_monster_key": "goblin", "miniboss_repeat_required": 2, "miniboss_repeat_progress": 0,
+        }
+        rooms[hub_id]["connections"].append(miniboss_room_id)
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=miniboss_room_id)
+
+        async def _fight_once():
+            await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+            session = sessions.get_session_for_user(chat_id, user_id)
+            for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+                enemy["hp_current"] = 0
+            sink = []
+            await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
+            sessions.end_session(chat_id, session)
+            return sink
+
+        sink1 = await _fight_once()
+        run_after_1 = db.get_labyrinth_run(chat_id, party_key)
+        self.assertTrue(any("flees deeper" in s for s in sink1), sink1)
+        self.assertFalse(any("mini-boss falls" in s for s in sink1), sink1)
+        self.assertEqual(run_after_1["rooms"][miniboss_room_id]["monsters"], ["goblin"], "the same monster must respawn, not clear the room")
+        self.assertEqual(run_after_1["rooms"][miniboss_room_id]["miniboss_repeat_progress"], 1)
+
+        sink2 = await _fight_once()
+        run_after_2 = db.get_labyrinth_run(chat_id, party_key)
+        self.assertTrue(any("mini-boss falls" in s for s in sink2), sink2)
+        self.assertEqual(run_after_2["rooms"][miniboss_room_id]["monsters"], [], "the room must clear for good on the real final defeat")
+        self.assertTrue(run_after_2["rooms"][miniboss_room_id]["miniboss_reward_claimed"])
+
     async def test_labyrinth_miniboss_defeat_grants_a_real_guaranteed_item_once_only(self):
         """
         Real, guaranteed mini-boss reward (2026-09-03, Phase L4, item

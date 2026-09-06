@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.534] — feature: a repeated mini-boss gate ("Advanced Dungeons" Phase L5, v7)
+
+Per Coffee: "work on the lower-priority and unscheduled stuff" --
+Catfish's Maw's own real pattern (Master Stalfos, defeated FOUR
+separate times before its real reward is ever actually obtainable).
+A rare, independent roll on top of an already-placed mini-boss: the
+exact same monster respawns into the room on each "defeat" until a
+real 2-3 count is reached, narrated as "wounded, it flees deeper" each
+time short of the last -- only the LAST defeat clears the room for
+good and grants the existing guaranteed reward (milestone item,
+Labyrinth Rune, Labyrinth Shard, rare spell tonic chance), unchanged.
+
 ## [1.27.533] — feature: Key Cavern redundant key mesh ("Advanced Dungeons" Phase L5, v6)
 
 Closes the last real "still missing" pattern from

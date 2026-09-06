@@ -10860,47 +10860,66 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     miniboss_rune_line = None
     miniboss_tonic_line = None
     shard_line = None
+    flee_line = None
     if room.get("is_miniboss_room") and not room.get("miniboss_reward_claimed"):
-        room["miniboss_reward_claimed"] = True
-        item_id = labyrinth_module._milestone_item_for_floor(room.get("floor", run["floor"]))
-        item = items_module.get_item(item_id)
-        members = _labyrinth_active_party_members(character)
-        for m in members:
-            if not m.get("is_ai"):
-                db.add_item(m["telegram_user_id"], update.effective_chat.id, item_id, 1)
-        reward_line = f"🏆 The mini-boss falls, and leaves behind something real: **{item['name'] if item else item_id}** (added to the party's stash)."
-        # Real live feature (2026-09-04, per Coffee: "have the mini
-        # boss, and boss and scatter them around" -- the Labyrinth has
-        # no separate is_boss_room concept at all, so its miniboss room
-        # already IS the boss-tier encounter here). Reuses this same
-        # one-time miniboss_reward_claimed flag -- one trigger, two
-        # real grants, same "no extra step" shape as the milestone item.
-        rune_item = items_module.get_item("labyrinth_rune")
-        for m in members:
-            if not m.get("is_ai"):
-                db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_rune", 1)
-        miniboss_rune_line = f"🔹 It also drops **{rune_item['name'] if rune_item else 'a Labyrinth Rune'}** — added to the party's stash."
-        # Real Labyrinth Shard (2026-09-06, per Coffee: "collect them to
-        # gain access to the next labyrinth... have the mini boss, and
-        # boss and scatter them around, have it collected by battle and
-        # by chests"). Per-run only (tracked on the labyrinth_runs row,
-        # never a real inventory item -- his own "resets on leave"
-        # choice), so this is a direct run-column increment, not
-        # db.add_item. See rules/labyrinth.required_shards_for_segment
-        # for what _do_descend_labyrinth spends this against.
-        run["shards"] = run.get("shards", 0) + 1
-        shard_line = "💠 A real Labyrinth Shard falls loose as it dies — banked for this run."
-        if random.random() < LABYRINTH_MINIBOSS_SPELL_TONIC_DROP_CHANCE:
-            tonic_id = random.choices(
-                list(BOSS_SPELL_TONIC_DROP_WEIGHTS.keys()), weights=list(BOSS_SPELL_TONIC_DROP_WEIGHTS.values()),
-            )[0]
-            tonic_item = items_module.get_item(tonic_id)
+        # Real Phase L5 "Advanced Dungeons" v7 -- a repeated gate
+        # (2026-09-06, Catfish's Maw's own real pattern: the SAME
+        # encounter must be beaten several separate times before its
+        # real reward is ever actually granted). `miniboss_monster_key`
+        # (set once at generation time, rules/labyrinth.py) survives
+        # the unconditional `room["monsters"] = []` reset above, so the
+        # exact same monster can be respawned into this room instead of
+        # inventing a new one -- the real reward only fires on the
+        # LAST defeat, everything below this block is unchanged.
+        repeat_required = room.get("miniboss_repeat_required")
+        if repeat_required and room.get("miniboss_repeat_progress", 0) + 1 < repeat_required:
+            room["miniboss_repeat_progress"] = room.get("miniboss_repeat_progress", 0) + 1
+            room["monsters"] = [room["miniboss_monster_key"]]
+            flee_line = (
+                f"💨 Wounded, it flees deeper into the shadows before you can finish it off -- "
+                f"you'll have to catch it again ({room['miniboss_repeat_progress']}/{repeat_required})."
+            )
+        else:
+            room["miniboss_reward_claimed"] = True
+            item_id = labyrinth_module._milestone_item_for_floor(room.get("floor", run["floor"]))
+            item = items_module.get_item(item_id)
+            members = _labyrinth_active_party_members(character)
             for m in members:
                 if not m.get("is_ai"):
-                    db.add_item(m["telegram_user_id"], update.effective_chat.id, tonic_id, 1)
-            miniboss_tonic_line = f"✨ Something about it hums with real magic -- **{tonic_item['name']}** — added to the party's stash."
-        else:
-            miniboss_tonic_line = None
+                    db.add_item(m["telegram_user_id"], update.effective_chat.id, item_id, 1)
+            reward_line = f"🏆 The mini-boss falls, and leaves behind something real: **{item['name'] if item else item_id}** (added to the party's stash)."
+            # Real live feature (2026-09-04, per Coffee: "have the mini
+            # boss, and boss and scatter them around" -- the Labyrinth has
+            # no separate is_boss_room concept at all, so its miniboss room
+            # already IS the boss-tier encounter here). Reuses this same
+            # one-time miniboss_reward_claimed flag -- one trigger, two
+            # real grants, same "no extra step" shape as the milestone item.
+            rune_item = items_module.get_item("labyrinth_rune")
+            for m in members:
+                if not m.get("is_ai"):
+                    db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_rune", 1)
+            miniboss_rune_line = f"🔹 It also drops **{rune_item['name'] if rune_item else 'a Labyrinth Rune'}** — added to the party's stash."
+            # Real Labyrinth Shard (2026-09-06, per Coffee: "collect them to
+            # gain access to the next labyrinth... have the mini boss, and
+            # boss and scatter them around, have it collected by battle and
+            # by chests"). Per-run only (tracked on the labyrinth_runs row,
+            # never a real inventory item -- his own "resets on leave"
+            # choice), so this is a direct run-column increment, not
+            # db.add_item. See rules/labyrinth.required_shards_for_segment
+            # for what _do_descend_labyrinth spends this against.
+            run["shards"] = run.get("shards", 0) + 1
+            shard_line = "💠 A real Labyrinth Shard falls loose as it dies — banked for this run."
+            if random.random() < LABYRINTH_MINIBOSS_SPELL_TONIC_DROP_CHANCE:
+                tonic_id = random.choices(
+                    list(BOSS_SPELL_TONIC_DROP_WEIGHTS.keys()), weights=list(BOSS_SPELL_TONIC_DROP_WEIGHTS.values()),
+                )[0]
+                tonic_item = items_module.get_item(tonic_id)
+                for m in members:
+                    if not m.get("is_ai"):
+                        db.add_item(m["telegram_user_id"], update.effective_chat.id, tonic_id, 1)
+                miniboss_tonic_line = f"✨ Something about it hums with real magic -- **{tonic_item['name']}** — added to the party's stash."
+            else:
+                miniboss_tonic_line = None
     # Real Phase L5 "Advanced Dungeons" event-gated live edge (2026-09-
     # 06, per Coffee: "keep going... generate dungeons like the samples
     # and references on the fly" -- Bottle Grotto's own real signature
@@ -10961,6 +10980,8 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     db.update_labyrinth_run(update.effective_chat.id, party_key, rooms=run["rooms"], shards=run.get("shards", 0))
     if hint_line:
         await _safe_send(update, hint_line)
+    if flee_line:
+        await _safe_send(update, flee_line)
     if reward_line:
         await _safe_send(update, reward_line)
     if miniboss_rune_line:

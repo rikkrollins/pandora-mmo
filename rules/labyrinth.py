@@ -102,6 +102,19 @@ _BRANCH_DEPTH_WEIGHTS = ([0, 1, 2, 3, 4], [0.10, 0.20, 0.25, 0.25, 0.20])
 _BRANCH_GATE_CHANCE = 0.35
 _MINIBOSS_CHANCE = 0.3
 
+# Real Phase L5 "Advanced Dungeons" v7 -- a repeated gate (2026-09-06,
+# per Coffee: "work on the lower-priority and unscheduled stuff" --
+# see [[project_advanced_interconnected_dungeons_research]]'s own
+# "still missing" table: Catfish's Maw's Master Stalfos, defeated FOUR
+# separate times before the real Hookshot reward is ever actually
+# obtainable). Independent of _MINIBOSS_CHANCE above -- rolled only
+# once a real mini-boss has already been placed, so this never changes
+# WHETHER a floor gets a mini-boss, only whether that one mini-boss
+# demands more than a single real fight. Deliberately rare (a genuine
+# mini-boss fight already reads as a real occasion; this is meant to
+# be a memorable exception on a floor, not the new normal).
+_MINIBOSS_REPEAT_CHANCE = 0.25
+
 # Real gap found while confirming Bottle Grotto coverage (2026-09-03,
 # per Coffee: "are you sure everything is included to make a dungeon
 # like the bottle grotto or face shrine or the Eagle's Tower?"):
@@ -1026,6 +1039,20 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             rooms[miniboss_room_id]["monsters"] = [strongest]
             rooms[miniboss_room_id]["is_miniboss_room"] = True
             rooms[miniboss_room_id]["description"] += " Something far stronger than the rest of this floor is waiting here."
+            # Real Phase L5 "Advanced Dungeons" v7 -- a repeated gate
+            # (Catfish's Maw's own real pattern: the SAME encounter must
+            # be beaten several separate times before its real reward is
+            # ever actually granted). `miniboss_monster_key` survives
+            # bot._check_labyrinth_progress's own unconditional
+            # `room["monsters"] = []` reset so the encounter can be
+            # respawned from the identical monster each time -- the
+            # real reward (and the room's own permanent "cleared" state)
+            # only fires on the LAST defeat.
+            if rng.random() < _MINIBOSS_REPEAT_CHANCE:
+                rooms[miniboss_room_id]["miniboss_monster_key"] = strongest
+                rooms[miniboss_room_id]["miniboss_repeat_required"] = rng.randint(2, 3)
+                rooms[miniboss_room_id]["miniboss_repeat_progress"] = 0
+                rooms[miniboss_room_id]["description"] += " It looks like the kind of thing that won't go down for good on the first real blow."
 
     # Real branch-gating, guaranteed solvable BY CONSTRUCTION (Metazelda's
     # own real technique, see the module-level research note above): a
