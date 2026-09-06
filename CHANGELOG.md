@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.531] — feature: Labyrinth Shards, a real collectible gate to the next segment
+
+Real live request (2026-09-03, Coffee: "can we use that as a mechanic
+where we have to collect them to gain access to the next labyrinth?
+have the mini boss, and boss and scatter them around, have it
+collected by battle and by chests?"), planned properly per his own
+explicit "we need to research and plan the system before doing
+anything" first (see [[project_labyrinth_shard_collection_mechanic_pending_research]]),
+then walked through the 5 open design questions with him directly
+before writing any code: name (Labyrinth Shard -- deliberately
+distinct from the existing labyrinth_rune item, to avoid two different
+mechanics sharing one name), gate mechanic (required ON TOP of the
+existing checkpoint, not replacing it), persistence (per-run, resets
+on leave), and economy (scales with depth).
+
+Descending past a segment's checkpoint (`_do_descend_labyrinth`) now
+consumes a real, depth-scaled number of Labyrinth Shards
+(`rules.labyrinth.required_shards_for_segment`: 2 for segment 1,
+growing by 1 each segment after) -- refused outright, naming the
+shortfall, if the run hasn't banked enough. Shards come from real
+combat (a mini-boss drops 1, a real boss drops 2, both one-time,
+alongside their existing guaranteed rewards) and from the segment's
+own checkpoint vault chest (a guaranteed 1, on top of its existing
+item/gold loot). Tracked entirely on the `labyrinth_runs` row (a new
+`shards` column) -- deliberately never a real inventory item, so
+leaving the Labyrinth genuinely resets the bank, matching his own
+explicit choice. The checkpoint room's own status line now shows the
+live "banked/needed" count.
+
 ## [1.27.530] — feature: true sequential gate chains ("Advanced Dungeons" Phase L5, v5)
 
 Coffee: "do everything and then audit your output of the generator

@@ -1120,6 +1120,20 @@ def init_db() -> None:
         if "carrying" not in labyrinth_runs_columns:
             conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN carrying TEXT")
 
+        # labyrinth_runs.shards (2026-09-06, real Labyrinth Shard
+        # collectible-gate, per Coffee: "collect them to gain access to
+        # the next labyrinth... have the mini boss, and boss and
+        # scatter them around, have it collected by battle and by
+        # chests"). Deliberately lives HERE, not as a real inventory
+        # item on the character -- per his own explicit "per-run,
+        # resets on leave" choice, the exact same lifetime every other
+        # column on this table already has (deleted the instant a party
+        # leaves, same as `rooms_json`/`current_room_id`). See
+        # rules/labyrinth.required_shards_for_segment for the real,
+        # depth-scaled cost _do_descend_labyrinth consumes this against.
+        if "shards" not in labyrinth_runs_columns:
+            conn.execute("ALTER TABLE labyrinth_runs ADD COLUMN shards INTEGER NOT NULL DEFAULT 0")
+
         # Real live gap (2026-09-05, Coffee, dev-bridge: "i had already
         # cleared that room to get to the first city right? ...next is
         # glimmer deep then the hush then the city" -- and he was right;

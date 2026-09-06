@@ -548,6 +548,22 @@ def is_checkpoint_floor(floor: int) -> bool:
     return floor % SEGMENT_SIZE == 0
 
 
+def required_shards_for_segment(segment: int) -> int:
+    """
+    Real Labyrinth Shard collectible-gate requirement (2026-09-06, per
+    Coffee: "collect them to gain access to the next labyrinth", with
+    an explicit "scales with depth" choice -- descending past segment
+    N's own checkpoint costs this many banked shards, consumed (not
+    just checked) by bot.py's _do_descend_labyrinth, so the scaling
+    stays meaningful instead of a one-time threshold a deep run could
+    coast past forever. Deliberately simple linear growth, not
+    exponential -- shards are a real, consumed resource every segment,
+    not a rare one-time unlock, so unbounded compounding growth would
+    make later segments unreachable rather than just harder.
+    """
+    return 2 + (segment - 1)
+
+
 def _hub_id(floor: int) -> str:
     return f"f{floor}_hub"
 
@@ -855,6 +871,16 @@ def _build_checkpoint_room(floor: int, hub_id: str, rng: random.Random, theme: d
         "lockables": [{
             "id": f"f{floor}_checkpoint_cache", "kind": "chest", "name": "a real, heavily reinforced vault",
             "loot": {item_id: 1}, "gold": rng.randint(100, 300) * floor,
+            # Real Labyrinth Shard collectible (2026-09-06, per Coffee:
+            # "collect them to gain access to the next labyrinth... have
+            # the mini boss, and boss and scatter them around, have it
+            # collected by battle and by chests"). Guaranteed here (the
+            # one real chest every segment always offers), on top of the
+            # miniboss (+1)/boss (+2) combat drops in bot.py's
+            # _check_labyrinth_progress -- per-run only (bot.py tracks
+            # it on the labyrinth_runs row, never a real inventory item),
+            # so it's deliberately absent from `loot` above.
+            "shards": 1,
         }],
     }
 

@@ -9670,6 +9670,14 @@ def _labyrinth_room_text(character: dict, room: dict, run: dict, chat_id: int, a
             f"🎯 Goal: reach floor {segment_end} for this segment's waystation "
             f"({remaining} floor{'s' if remaining != 1 else ''} to go)."
         )
+    else:
+        # Real Labyrinth Shard status (2026-09-06) -- shown right at the
+        # waystation, the one place it actually matters, same "computed
+        # fresh, never a static/guessed number" discipline as goal_line
+        # above.
+        shard_cost = labyrinth_module.required_shards_for_segment(labyrinth_module.segment_number_for_floor(floor))
+        have_shards = run.get("shards", 0)
+        goal_line = f"💠 Shards banked: {have_shards}/{shard_cost} needed to go deeper."
     if modifier == "lightless" and not _has_light_source(character, chat_id):
         lines = [
             header,
@@ -10033,6 +10041,25 @@ async def _do_descend_labyrinth(update: Update) -> None:
             message_thread_id=topics.thread_id_for(chat_id, "adventure"),
         )
         return
+
+    # Real Labyrinth Shard collectible gate (2026-09-06, per Coffee:
+    # "collect them to gain access to the next labyrinth"). Consumed,
+    # not just checked -- banking past the requirement once would make
+    # the "scales with depth" choice meaningless for the rest of the
+    # run, so descending genuinely spends the cost every time, same as
+    # any other real resource this game already gates progress with.
+    current_segment = labyrinth_module.segment_number_for_floor(run["floor"])
+    shard_cost = labyrinth_module.required_shards_for_segment(current_segment)
+    have_shards = run.get("shards", 0)
+    if have_shards < shard_cost:
+        await update.effective_chat.send_message(
+            f"💠 The waypoint won't break yet — going deeper needs {shard_cost} Labyrinth Shards, "
+            f"and this run has only banked {have_shards}. Mini-bosses, bosses, and the segment's own "
+            f"vault chest are the real sources.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
+    run = db.update_labyrinth_run(chat_id, party_key, shards=have_shards - shard_cost)
 
     new_segment = labyrinth_module.segment_number_for_floor(run["floor"]) + 1
     new_segment_seed = run["seed"] + new_segment
@@ -10832,6 +10859,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     reward_line = None
     miniboss_rune_line = None
     miniboss_tonic_line = None
+    shard_line = None
     if room.get("is_miniboss_room") and not room.get("miniboss_reward_claimed"):
         room["miniboss_reward_claimed"] = True
         item_id = labyrinth_module._milestone_item_for_floor(room.get("floor", run["floor"]))
@@ -10852,6 +10880,16 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             if not m.get("is_ai"):
                 db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_rune", 1)
         miniboss_rune_line = f"🔹 It also drops **{rune_item['name'] if rune_item else 'a Labyrinth Rune'}** — added to the party's stash."
+        # Real Labyrinth Shard (2026-09-06, per Coffee: "collect them to
+        # gain access to the next labyrinth... have the mini boss, and
+        # boss and scatter them around, have it collected by battle and
+        # by chests"). Per-run only (tracked on the labyrinth_runs row,
+        # never a real inventory item -- his own "resets on leave"
+        # choice), so this is a direct run-column increment, not
+        # db.add_item. See rules/labyrinth.required_shards_for_segment
+        # for what _do_descend_labyrinth spends this against.
+        run["shards"] = run.get("shards", 0) + 1
+        shard_line = "💠 A real Labyrinth Shard falls loose as it dies — banked for this run."
         if random.random() < LABYRINTH_MINIBOSS_SPELL_TONIC_DROP_CHANCE:
             tonic_id = random.choices(
                 list(BOSS_SPELL_TONIC_DROP_WEIGHTS.keys()), weights=list(BOSS_SPELL_TONIC_DROP_WEIGHTS.values()),
@@ -10877,6 +10915,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     # the same deterministic naming every real room on this floor
     # already uses) -- no extra state needs to be stored to find it.
     boss_shortcut_line = None
+    boss_shard_line = None
     if room.get("is_boss_room") and not room.get("boss_shortcut_revealed"):
         room["boss_shortcut_revealed"] = True
         hub_id = labyrinth_module._hub_id(room.get("floor", run["floor"]))
@@ -10885,6 +10924,13 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             hub_room.setdefault("connections", []).append(room["id"])
             room.setdefault("connections", []).append(hub_id)
             boss_shortcut_line = "🗝️ Something shifts in the wall as the boss falls -- a real, hidden shortcut back to this floor's own hub has opened."
+        # Real Labyrinth Shard (2026-09-06), same mechanic and per-run
+        # bookkeeping as the miniboss grant above -- a real boss is
+        # worth double, reusing this same one-time `boss_shortcut_
+        # revealed` flag as the trigger (defeating the boss IS the
+        # event either way, same "no extra step" shape).
+        run["shards"] = run.get("shards", 0) + 2
+        boss_shard_line = "💠 Two real Labyrinth Shards fall loose as the boss dies — banked for this run."
     # Real live feature (2026-09-04, Phase B of the combat-gating work,
     # per Coffee: "keys can be dropped by enemies or found in another
     # room"). Same real one-time-flag shape as the miniboss reward just
@@ -10912,7 +10958,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
             if not m.get("is_ai"):
                 db.add_item(m["telegram_user_id"], update.effective_chat.id, "labyrinth_rune", 1)
         rune_drop_line = f"🔹 Something here was carrying **{item['name'] if item else 'a Labyrinth Rune'}** — added to the party's stash."
-    db.update_labyrinth_run(update.effective_chat.id, party_key, rooms=run["rooms"])
+    db.update_labyrinth_run(update.effective_chat.id, party_key, rooms=run["rooms"], shards=run.get("shards", 0))
     if hint_line:
         await _safe_send(update, hint_line)
     if reward_line:
@@ -10921,6 +10967,10 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
         await _safe_send(update, miniboss_rune_line)
     if miniboss_tonic_line:
         await _safe_send(update, miniboss_tonic_line)
+    if shard_line:
+        await _safe_send(update, shard_line)
+    if boss_shard_line:
+        await _safe_send(update, boss_shard_line)
     if key_drop_line:
         await _safe_send(update, key_drop_line)
     if rune_drop_line:
@@ -13822,6 +13872,23 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
                 f"{qty}x {items_module.get_item(i)['name']}" for i, qty in lockable.get("loot", {}).items()
             )
             parts = [p for p in (loot_names, f"{lockable.get('gold', 0)} gold" if lockable.get("gold") else "") if p]
+            # Real Labyrinth Shard collectible (2026-09-06, per Coffee:
+            # "collected by battle and by chests"). A generation-time
+            # `shards` field on a chest lockable (currently only the
+            # real checkpoint vault, see rules/labyrinth._build_
+            # checkpoint_room), never folded into `loot` above -- it's a
+            # per-run bank on the labyrinth_runs row, never a real
+            # inventory item (his own explicit "resets on leave"
+            # choice), so it needs its own grant path, not db.add_item.
+            shard_count = lockable.get("shards", 0)
+            if shard_count and character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+                party_key = _labyrinth_party_key(character)
+                shard_run = db.get_labyrinth_run(update.effective_chat.id, party_key)
+                if shard_run is not None:
+                    db.update_labyrinth_run(
+                        update.effective_chat.id, party_key, shards=shard_run.get("shards", 0) + shard_count,
+                    )
+                    parts.append(f"{shard_count}x Labyrinth Shard")
             reward_line = f"\n🎁 You find: {', '.join(parts)}." if parts else ""
         else:
             reward_line = "\n🚪 The way is now open."

@@ -36275,6 +36275,134 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after2, before + 1, "expected the guaranteed rune drop to be one-time only")
         sessions.end_session(chat_id, session)
 
+    def test_required_shards_for_segment_scales_with_depth(self):
+        """
+        Real Labyrinth Shard collectible gate (2026-09-06, per Coffee:
+        "collect them to gain access to the next labyrinth", with an
+        explicit "scales with depth" choice). Simple linear growth --
+        segment 1 costs 2, growing by 1 each segment after.
+        """
+        self.assertEqual(labyrinth_module.required_shards_for_segment(1), 2)
+        self.assertEqual(labyrinth_module.required_shards_for_segment(2), 3)
+        self.assertEqual(labyrinth_module.required_shards_for_segment(5), 6)
+
+    async def test_labyrinth_shards_granted_by_miniboss_and_boss_defeat_once_only(self):
+        """
+        Real Labyrinth Shard collectible (2026-09-06, per Coffee:
+        "have the mini boss, and boss and scatter them around, have it
+        collected by battle"). Miniboss grants +1, a real boss grants
+        +2 (double, matching how the miniboss reward block already
+        treats a boss room as its own bigger event) -- both real,
+        one-time-only triggers, same convention as every other
+        Labyrinth guaranteed drop.
+        """
+        import sessions
+        user_id, chat_id = 962201, -962201
+        make_basic_character(user_id, "ShardCombatTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        miniboss_room_id = "laby_shard_miniboss_test"
+        boss_room_id = "laby_shard_boss_test"
+        rooms[miniboss_room_id] = {
+            "id": miniboss_room_id, "floor": 20, "name": "A Real Mini-Boss Chamber",
+            "connections": [hub_id], "monsters": ["goblin"], "is_miniboss_room": True,
+        }
+        rooms[boss_room_id] = {
+            "id": boss_room_id, "floor": 20, "name": "A Real Boss Chamber",
+            "connections": [hub_id], "monsters": ["goblin"], "is_boss_room": True,
+        }
+        rooms[hub_id]["connections"].extend([miniboss_room_id, boss_room_id])
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=miniboss_room_id)
+
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        sink = []
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
+        run_after_miniboss = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after_miniboss["shards"], 1, f"expected +1 shard from the mini-boss, got {sink}")
+        self.assertTrue(any("Labyrinth Shard" in s for s in sink), sink)
+        sessions.end_session(chat_id, session)
+
+        # Defeating it again (a real room the player could re-enter) never grants a second shard.
+        sink_repeat = []
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        session_repeat = sessions.get_session_for_user(chat_id, user_id)
+        if session_repeat is not None:
+            for enemy in [p for p in session_repeat.participants if session_repeat.sides.get(p["telegram_user_id"]) == "enemy"]:
+                enemy["hp_current"] = 0
+            await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink_repeat, chat_id=chat_id), session_repeat)
+            sessions.end_session(chat_id, session_repeat)
+        run_after_repeat = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after_repeat["shards"], 1, "expected the mini-boss shard grant to be one-time only")
+
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=boss_room_id)
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        boss_session = sessions.get_session_for_user(chat_id, user_id)
+        for enemy in [p for p in boss_session.participants if boss_session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+        sink_boss = []
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink_boss, chat_id=chat_id), boss_session)
+        run_after_boss = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after_boss["shards"], 3, f"expected +2 more shards from the boss (1 + 2 = 3 total), got {sink_boss}")
+        self.assertTrue(any("Two real Labyrinth Shards" in s for s in sink_boss), sink_boss)
+        sessions.end_session(chat_id, boss_session)
+
+    async def test_labyrinth_checkpoint_vault_grants_a_real_shard_via_lockpick(self):
+        """Real Labyrinth Shard collectible via chest (2026-09-06, per Coffee: "collected by battle and by chests") -- the checkpoint's own vault (rules/labyrinth._build_checkpoint_room) always carries one, on top of its existing item/gold loot."""
+        user_id, chat_id = 962202, -962202
+        make_basic_character(user_id, "ShardChestTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        hub = run["rooms"][run["current_room_id"]]
+        hub["lockables"] = [{
+            "id": "test_shard_vault", "kind": "chest", "name": "a real, heavily reinforced vault",
+            "loot": {"healing_potion": 1}, "gold": 20, "shards": 1,
+        }]
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+
+        sink = []
+        await bot._do_skill_check(FakeUpdate(user_id, "Pick the lock", sink, chat_id=chat_id), "dexterity", "Pick the lock", forced_roll=20)
+        self.assertIn("test_shard_vault", bot._UNLOCKED.get(chat_id, set()), f"expected the real vault to actually unlock, got: {sink}")
+        run_after = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after["shards"], 1, f"expected the real chest shard to actually be banked, got: {sink}")
+        self.assertTrue(any("Labyrinth Shard" in s for s in sink), sink)
+
+    async def test_do_descend_labyrinth_refuses_without_enough_shards_and_consumes_on_success(self):
+        """Real Labyrinth Shard gate (2026-09-06, per Coffee: "collect them to gain access to the next labyrinth") -- consumed, not just banked, so the depth-scaled cost stays meaningful across the whole run."""
+        user_id, chat_id = 962203, -962203
+        make_basic_character(user_id, "ShardGateTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = await self._walk_to_checkpoint(user_id, chat_id)
+        self.assertEqual(run["floor"], 5)
+        cost = labyrinth_module.required_shards_for_segment(1)
+        self.assertEqual(cost, 2)
+
+        db.update_labyrinth_run(chat_id, party_key, shards=cost - 1)
+        sink = []
+        await bot._do_descend_labyrinth(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        self.assertTrue(any("won't break yet" in s for s in sink), sink)
+        self.assertTrue(any(str(cost) in s for s in sink), sink)
+        run_still_floor5 = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_still_floor5["floor"], 5, "a refused descend must never actually move the party")
+        self.assertEqual(run_still_floor5["shards"], cost - 1, "a refused descend must never consume shards")
+
+        db.update_labyrinth_run(chat_id, party_key, shards=cost)
+        sink2 = []
+        await bot._do_descend_labyrinth(FakeUpdate(user_id, "", sink2, chat_id=chat_id))
+        run_after = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(run_after["floor"], 6, f"expected a real descend once shards are sufficient, got {sink2}")
+        self.assertEqual(run_after["shards"], 0, "expected the real shard cost to actually be consumed on descend")
+
     def test_enter_labyrinth_button_only_shows_once_unlocked(self):
         """Phase L2g: same hardcoded-location precedent as the hollow_stump_shrine prayer button -- never shown before the real unlock condition is met, a real discoverable tap target once it is."""
         colosseum = cl.get_location(bot.CAMPAIGN, "the_colosseum")
