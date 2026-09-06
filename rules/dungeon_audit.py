@@ -338,6 +338,19 @@ def check_reciprocity(campaign: dict, dungeon_id: str) -> list[str]:
     gated_pairs = {
         (src_id, dest_id) for src_id, room in rooms.items() for dest_id in room.get("locked_connections", {})
     }
+    # Real event-gated live edge, ported to evolved overworld dungeons
+    # (2026-09-06, per Coffee: "keep going" -- Bottle Grotto's own real
+    # "portal opens after mini-boss defeat" pattern, already shipped
+    # for the Labyrinth in v1.27.529). A story_gates-gated connection
+    # (requires_cleared_location) is the exact same kind of real,
+    # deliberate one-way-until-earned edge a locked_connections gate
+    # already is -- just checked by _check_story_gate instead of
+    # _lockable_is_open, since it needs to be per-CHARACTER (whether
+    # THIS character has beaten the boss), not per-chat like every
+    # other lock kind this generator has. Same exemption, same reason.
+    gated_pairs |= {
+        (src_id, dest_id) for src_id, room in rooms.items() for dest_id in room.get("story_gates", {})
+    }
     failures = []
     for room_id, room in rooms.items():
         for dest_id in room.get("connections", []):

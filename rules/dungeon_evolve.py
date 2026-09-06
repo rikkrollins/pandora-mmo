@@ -738,6 +738,33 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         boss_room["monsters"].append(boss_monster)
     boss_room["is_boss_room"] = True
 
+    # Real event-gated live edge, ported to evolved overworld dungeons
+    # (2026-09-06, per Coffee: "keep going" -- Bottle Grotto's own real
+    # "After Hinox defeat, a portal between this room and entrance is
+    # now usable, creating a shortcut," already shipped for the
+    # Labyrinth in v1.27.529). Two earlier approaches were rejected for
+    # real reasons (see [[project_advanced_interconnected_dungeons_
+    # research]]): a live campaign.json mutation would violate this
+    # module's own explicit "no live-instancing architecture" design,
+    # and a bidirectional `warps` pair would need to be ungated in the
+    # hub->boss direction (warps must be real bidirectional pairs, see
+    # check_warps_reference_real_rooms), letting a player skip the
+    # whole branch by naming the boss room directly. This is the real
+    # third option: the plain connection is written ONCE, at
+    # generation time, but `story_gates`/requires_cleared_location
+    # (already a real, per-CHARACTER gate -- see check_story_gate)
+    # keeps it genuinely closed in the hub-ward direction until this
+    # specific character has actually beaten the boss, exactly
+    # mirroring the Labyrinth's own "reveals a brand-new connection"
+    # feel without ever needing a live campaign mutation or an
+    # ungated backdoor. check_reciprocity's own real exemption for
+    # gated one-way edges now covers story_gates pairs too (see its
+    # own docstring).
+    if boss_room_id not in hub_room.get("connections", []):
+        boss_room.setdefault("connections", []).append(hub_id)
+        boss_room.setdefault("story_gates", {})[hub_id] = {"requires_cleared_location": boss_room_id}
+        boss_room["description"] += " Something here looks like it could open a much shorter way back, if it were ever truly dealt with."
+
     # Miniboss (2026-09-01, per the ALTTP research: dungeons almost
     # always have one "you're not ready yet" encounter partway through,
     # distinct from both trash and the real climax). A non-boss

@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.538] — feature: boss-defeat shortcut ported to evolved overworld dungeons
+
+Per Coffee: "keep going" -- the fourth and final `dungeon_evolve.py`
+port, closing the one item previously flagged as needing a real
+architecture decision rather than a direct copy. Two earlier
+approaches were confirmed non-viable: a live campaign.json mutation
+(this module's own design explicitly avoids that), and a bidirectional
+warp (would need an ungated hub-to-boss-room backdoor from the start,
+since warps must be real bidirectional pairs). The real third option:
+a plain connection from the boss room back to the hub, written once at
+generation time, kept genuinely closed in the hub-ward direction by a
+real, per-character `story_gates`/requires_cleared_location gate --
+the same mechanism sequential dungeon gating already uses elsewhere,
+not a new one. Found and fixed one small, real gap along the way:
+`check_reciprocity`'s own exemption for gated one-way edges only
+covered `locked_connections` pairs, not `story_gates` pairs -- now
+covers both.
+
+This closes the entire Advanced Dungeons research line for both
+generators -- every real pattern identified across 30+ studied
+dungeons is now built somewhere in this game.
+
 ## [1.27.537] — feature: repeated mini-boss gate ported to evolved overworld dungeons
 
 Per Coffee: "keep going" -- the third `dungeon_evolve.py` port, and a

@@ -32951,6 +32951,33 @@ class DungeonAuditTests(unittest.TestCase):
         self.assertTrue(failures)
         self.assertIn("but not vice versa", failures[0])
 
+    def test_reciprocity_allows_a_real_story_gates_gated_one_way_connection(self):
+        """
+        Real fix, ported alongside the evolved-dungeon boss shortcut
+        (2026-09-06, per Coffee: "keep going" -- see
+        [[project_advanced_interconnected_dungeons_research]]).
+        story_gates/requires_cleared_location is a real, deliberate
+        one-way-until-earned edge, the exact same shape a
+        locked_connections gate already is -- just checked per-
+        CHARACTER (bot._check_story_gate) instead of per-chat
+        (_lockable_is_open). check_reciprocity's own real exemption for
+        gated one-way edges (see its docstring) must cover this kind
+        too, not just locked_connections.
+        """
+        campaign = _minimal_dungeon_campaign()
+        # Mirrors the real shape dungeon_evolve.py's own boss shortcut
+        # writes: the FAR room lists the hub in its own `connections`
+        # (a real, one-way-in-this-direction edge), the hub does NOT
+        # list the far room back -- exactly what a genuine one-way
+        # connection looks like, same as the failing-case test above,
+        # except this one IS covered by a real story_gates entry.
+        campaign["locations"]["underground"]["fx_hub"]["connections"].remove("fx_side_room")
+        campaign["locations"]["underground"]["fx_side_room"]["story_gates"] = {
+            "fx_hub": {"requires_cleared_location": "fx_side_room"},
+        }
+        failures = dungeon_audit.check_reciprocity(campaign, "fixture_dungeon")
+        self.assertEqual(failures, [])
+
     def test_lock_density_fails_with_zero_lockables_across_many_rooms(self):
         campaign = _minimal_dungeon_campaign()
         for _ in range(20):
@@ -33501,6 +33528,62 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             hits += 1
             self.assertIn(miniboss_room["repeat_required"], (2, 3))
         self.assertGreater(hits, 0, "expected at least one real repeated mini-boss gate across 60 seeds")
+
+    def test_evolve_dungeon_boss_defeat_reveals_a_real_shortcut_data_shape(self):
+        """
+        Real event-gated live edge, ported to evolved overworld
+        dungeons (2026-09-06, per Coffee: "keep going" -- Bottle
+        Grotto's own real "portal opens after mini-boss defeat"
+        pattern, already shipped for the Labyrinth in v1.27.529). Two
+        earlier approaches were rejected for real reasons (see
+        [[project_advanced_interconnected_dungeons_research]]): a live
+        campaign.json mutation, and an ungated bidirectional warp. This
+        is the real third option -- a plain connection written once at
+        generation time, kept closed in the hub-ward direction by a
+        real, per-CHARACTER story_gates/requires_cleared_location gate
+        (not a live mutation, not an ungated backdoor). Statistical:
+        fires on every real generation (there's only ever one boss),
+        never the same edge a locked_connections gate already owns.
+        """
+        import copy
+        for seed in range(10):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_bossshortcut_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            hub_id = next(rid for rid, r in rooms.items() if r.get("dungeon_hub"))
+            boss_room_id = next(rid for rid, r in rooms.items() if r.get("is_boss_room"))
+            boss_room = rooms[boss_room_id]
+            self.assertIn(hub_id, boss_room.get("connections", []), f"seed {seed}: expected a real plain connection from the boss room back to the hub")
+            self.assertEqual(boss_room.get("story_gates", {}).get(hub_id, {}).get("requires_cleared_location"), boss_room_id)
+
+    async def test_evolve_dungeon_boss_shortcut_blocked_then_opens_once_cleared_end_to_end(self):
+        """Real end-to-end companion: bot._do_move genuinely refuses the boss-room-to-hub shortcut until this character's own cleared_locations records a real win there, then allows it -- the exact same per-character mechanism sequential dungeon gating already uses elsewhere, not a new one."""
+        import copy
+        from unittest.mock import patch
+        campaign = copy.deepcopy(bot.CAMPAIGN)
+        rng = random.Random(5)
+        new_id = "goblin_warrens_evolved_bossshortcut_e2e"
+        dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+        rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+        hub_id = next(rid for rid, r in rooms.items() if r.get("dungeon_hub"))
+        boss_room_id = next(rid for rid, r in rooms.items() if r.get("is_boss_room"))
+
+        with patch.object(bot, "CAMPAIGN", campaign):
+            user_id = 960902
+            make_basic_character(user_id, "BossShortcutTester", current_location=boss_room_id)
+            db.update_character(user_id, -999, visited_locations=[boss_room_id, hub_id])
+            sink = []
+            await bot._do_move(FakeUpdate(user_id, "", sink), f"go to {rooms[hub_id]['name']}")
+            character = db.get_character(user_id, -999)
+            self.assertNotEqual(character["current_location"], hub_id, "must stay blocked before this character has really cleared the boss room")
+
+            db.mark_location_cleared(user_id, -999, boss_room_id)
+            sink2 = []
+            await bot._do_move(FakeUpdate(user_id, "", sink2), f"go to {rooms[hub_id]['name']}")
+            character = db.get_character(user_id, -999)
+            self.assertEqual(character["current_location"], hub_id, "must open once this character has really cleared the boss room")
 
     def test_evolve_dungeon_never_places_two_switch_lockables_in_one_room(self):
         """
