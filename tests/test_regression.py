@@ -36071,6 +36071,37 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 break
         self.assertTrue(found, "expected at least one mirror pair across 200 real seeds")
 
+    def test_labyrinth_mirror_pair_never_overwrites_a_rooms_pre_existing_lockable(self):
+        """
+        Real bug found 2026-09-05 (Phase L5 mid-branch gate testing):
+        `room_ids` only ever holds branch ROOTS, and a branch root can
+        already carry real content by the time the mirror-pair roll
+        fires (this session's own new mid-branch gate, or the ordinary
+        30% chest roll every side room already gets from
+        _new_side_room). The mirror pair used to wholesale-REPLACE
+        (not append to) its own chest room's `lockables` list --
+        silently destroying a pre-existing plain chest's real loot, or
+        worse, leaving a real gate's `locked_connections` pointing at
+        a lockable id that no longer exists anywhere in the room,
+        permanently unresolvable for a real player. Fixed by only ever
+        picking rooms with genuinely EMPTY lockables/locked_connections
+        for either mirror-pair role, and appending the mirror's own
+        cache rather than assigning over it.
+        """
+        for seed in range(200):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = floor_data["rooms"]
+            mirrors = [r for r in rooms.values() if "mirror_twin" in r]
+            if not mirrors:
+                continue
+            for room in rooms.values():
+                for dest_id, lockable_id in room.get("locked_connections", {}).items():
+                    self.assertTrue(
+                        any(lk["id"] == lockable_id for lk in room.get("lockables", [])),
+                        f"seed {seed}: {room['id']}'s own locked_connections points at {lockable_id}, "
+                        f"which doesn't exist in its own lockables -- an unresolvable locked door",
+                    )
+
     async def test_labyrinth_mirror_hint_reveals_on_defeating_the_monster_half(self):
         """Phase L2f: defeating the monster half of a mirror pair reveals a one-time hint pointing at its twin, and clears the room's monster list so it isn't refightable forever (a real, separate pre-existing gap this closes for every Labyrinth room, not just mirrors)."""
         import sessions
@@ -39356,6 +39387,110 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         sink3 = []
         await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink3, chat_id=chat_id), f"go to {rooms[boss_id]['name']}")
         self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], boss_id, "must open once every real convergence switch is hit")
+
+        db.delete_labyrinth_run(chat_id, party_key)
+
+    def test_generate_floor_places_a_real_mid_branch_gate_solvable_by_construction(self):
+        """
+        Real Phase L5 "Advanced Dungeons" v2 (2026-09-05, per Coffee:
+        "keep going... generate dungeons like the samples" -- the
+        single most common real pattern across all 30+ dungeons
+        researched, see [[project_advanced_interconnected_dungeons_
+        research]]): a resource from one branch is needed to progress
+        DEEPER INSIDE a different branch, not just to open that
+        branch's own root door. Statistical: when the gate fires, it
+        must lock a real INTERNAL edge of its target branch (never the
+        branch's own root-to-hub edge, which every other existing gate
+        already owns), and its own switch must be reachable without
+        needing the gate it opens -- solvable by construction, same
+        rigor as every other real gate in this generator.
+        """
+        import collections
+        gate_seen = False
+        for seed in range(60):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = floor_data["rooms"]
+            gate_room_id = next((rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == "f5_midbranch_gate"), None)
+            if gate_room_id is None:
+                continue
+            gate_seen = True
+            gate_room = rooms[gate_room_id]
+            to_room_id = next(d for d, lid in gate_room["locked_connections"].items() if lid == "f5_midbranch_gate")
+            lockable = next(lk for lk in gate_room["lockables"] if lk["id"] == "f5_midbranch_gate")
+            self.assertEqual(lockable["kind"], "multi_switch_gate")
+            self.assertEqual(len(lockable["requires"]), 1)
+            switch_id = lockable["requires"][0]
+            switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == switch_id for lk in r.get("lockables", [])))
+            self.assertNotEqual(switch_room_id, gate_room_id, "the gate's own switch must never sit in the same room as the gate itself")
+            self.assertNotEqual(switch_room_id, to_room_id, "the gate's own switch must never sit behind the very gate it opens")
+            # Must be the branch's OWN interior edge, never the branch's
+            # root edge back to the hub (every hub-adjacent edge is
+            # already exclusively owned by the mandatory/branch/plate/
+            # key/rune gates).
+            self.assertNotEqual(floor_data["hub_room_id"], gate_room_id)
+            # Solvable by construction: reachable from the hub with every
+            # OTHER real gate treated as freely passable, only this one
+            # edge cut (same methodology as the convergence-gate test,
+            # and the same real fix applied there: a gated Labyrinth
+            # destination is removed from `connections` entirely, so
+            # "every other gate passable" means traversing BOTH
+            # `connections` and `locked_connections`).
+            hub_id = floor_data["hub_room_id"]
+            visited, frontier = {hub_id}, collections.deque([hub_id])
+            while frontier:
+                cur = frontier.popleft()
+                room = rooms[cur]
+                neighbors = set(room.get("connections", [])) | set(room.get("locked_connections", {}).keys())
+                for nb in neighbors:
+                    if cur == gate_room_id and nb == to_room_id:
+                        continue
+                    if nb not in visited:
+                        visited.add(nb)
+                        frontier.append(nb)
+            self.assertIn(switch_room_id, visited, f"seed {seed}: mid-branch gate's own switch room must be reachable without the gate it feeds")
+        self.assertTrue(gate_seen, "expected at least one real mid-branch gate across 60 checkpoint-floor seeds")
+
+    async def test_labyrinth_mid_branch_gate_blocks_deeper_progress_until_the_switch_is_hit(self):
+        """
+        Real end-to-end companion: using a REAL generated checkpoint
+        floor, confirm a mid-branch gate genuinely blocks moving deeper
+        into its own branch until the real switch (which lives in a
+        DIFFERENT branch entirely) has actually been hit.
+        """
+        user_id, chat_id = 962091, -962091
+        party_key = f"solo:{user_id}"
+        make_basic_character(user_id, "MidBranchGateTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        floor_data = gate_room_id = None
+        for seed in range(60):
+            fd = labyrinth_module.generate_floor(bot.CAMPAIGN, 5, random.Random(seed))
+            rooms = fd["rooms"]
+            gid = next((rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == "f5_midbranch_gate"), None)
+            if gid is not None:
+                floor_data, gate_room_id = fd, gid
+                break
+        self.assertIsNotNone(floor_data, "expected a real mid-branch gate within 60 seeds")
+
+        rooms = floor_data["rooms"]
+        to_room_id = next(d for d, lid in rooms[gate_room_id]["locked_connections"].items() if lid == "f5_midbranch_gate")
+        switch_id = next(lk for lk in rooms[gate_room_id]["lockables"] if lk["id"] == "f5_midbranch_gate")["requires"][0]
+        switch_room_id = next(rid for rid, r in rooms.items() if any(lk["id"] == switch_id for lk in r.get("lockables", [])))
+        switch_lockable = next(lk for lk in rooms[switch_room_id]["lockables"] if lk["id"] == switch_id)
+        rooms[gate_room_id]["visited"] = True
+        rooms[switch_room_id]["visited"] = True
+        db.create_labyrinth_run(chat_id, party_key, floor=5, seed=0, current_room_id=gate_room_id, rooms=rooms)
+
+        sink = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {rooms[to_room_id]['name']}")
+        self.assertNotEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], to_room_id, "must stay blocked before the real switch is hit")
+
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=switch_room_id)
+        await bot._do_lockpick(FakeUpdate(user_id, "hit the crystal", [], chat_id=chat_id), db.get_character(user_id, chat_id), dict(switch_lockable), "hit the crystal")
+        db.update_labyrinth_run(chat_id, party_key, current_room_id=gate_room_id)
+        sink2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), f"go to {rooms[to_room_id]['name']}")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], to_room_id, "must open once the real switch is hit")
 
         db.delete_labyrinth_run(chat_id, party_key)
 

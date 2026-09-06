@@ -1088,6 +1088,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # only the forward edge INTO the boss room is locked; the boss
     # room's own reverse edge back out is untouched, so retreating
     # (to an already-visited room) is never blocked by this.
+    convergence_chains: list = []
     if checkpoint and boss_pool and len(main_chain) >= 2:
         convergence_sources = [c for c in other_chains if c not in mandatory_source_chains]
         if len(convergence_sources) < 2:
@@ -1120,6 +1121,51 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 f" A real converging seal blocks the way in -- it looks like it needs "
                 f"{len(convergence_switch_ids)} different things elsewhere on this floor to open."
             )
+
+    # Real Phase L5 "Advanced Dungeons" v2 (2026-09-05, per Coffee:
+    # "keep going... generate dungeons like the samples" -- see
+    # [[project_advanced_interconnected_dungeons_research]]'s own
+    # "still missing" table). The single MOST common real pattern
+    # across all 30+ dungeons researched (Link's Awakening, NES Zelda
+    # 1, ALTTP): a resource from one branch is needed to progress
+    # DEEPER INSIDE a different branch, not just to open that branch's
+    # own hub-adjacent root door (v1.27.526's convergence gate only
+    # ever locks the final approach to the boss; every OTHER existing
+    # gate in this generator only ever locks a branch's own ROOT edge
+    # back to the hub -- neither ever locks an edge partway THROUGH a
+    # branch). A target branch of real length (>= 3 rooms, so there's
+    # a genuine interior edge past its own root) gets one of its own
+    # internal connections locked, sourced from a DIFFERENT branch's
+    # own tail -- Angler's Tunnel's own "you can't reach the chest on
+    # your left just yet" shape, generalized to a real movement gate
+    # instead of a single static chest. Same reused multi_switch_gate
+    # plumbing, same solvability guarantee (the source branch is
+    # already fully generated and reachable via the hub at this point).
+    used_for_advanced = {tuple(c) for c in mandatory_source_chains} | {tuple(c) for c in convergence_chains}
+    mid_branch_targets = [c for c in other_chains if len(c) >= 3 and tuple(c) not in used_for_advanced]
+    if not mid_branch_targets:
+        mid_branch_targets = [c for c in other_chains if len(c) >= 3]
+    if checkpoint and boss_pool and mid_branch_targets:
+        mid_branch_chain = rng.choice(mid_branch_targets)
+        source_candidates = [c for c in other_chains if tuple(c) != tuple(mid_branch_chain)]
+        if source_candidates:
+            mid_branch_source = rng.choice(source_candidates)
+            edge_index = rng.randint(0, len(mid_branch_chain) - 2)
+            from_room_id, to_room_id = mid_branch_chain[edge_index], mid_branch_chain[edge_index + 1]
+            source_room_id = mid_branch_source[-1]
+            element = rng.choice(_SWITCH_ELEMENTS)
+            switch_id = f"f{floor}_midbranch_switch"
+            rooms[source_room_id].setdefault("lockables", []).append({
+                "id": switch_id, "kind": "switch", "name": f"a {element} crystal", "element": element,
+            })
+            door_id = f"f{floor}_midbranch_gate"
+            rooms[from_room_id]["connections"].remove(to_room_id)
+            rooms[from_room_id].setdefault("locked_connections", {})[to_room_id] = door_id
+            rooms[from_room_id].setdefault("lockables", []).append({
+                "id": door_id, "kind": "multi_switch_gate", "name": "a real inner seal",
+                "requires": [switch_id],
+            })
+            rooms[from_room_id]["description"] += " A real inner seal blocks the way deeper in -- something elsewhere on this floor must open it."
 
     gated_chain = None
     if len(other_chains) >= 2 and rng.random() < _scaled_chance(_BRANCH_GATE_CHANCE, floor, 0.002, 0.55):
@@ -1355,8 +1401,27 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
 
     # L2f: a real mirror pair -- same connection shape (both are plain
     # hub-adjacent side rooms already), deliberately inverted contents.
-    if pool and len(room_ids) >= 2 and rng.random() < _MIRROR_PAIR_CHANCE:
-        monster_room_id, chest_room_id = rng.sample(room_ids, 2)
+    # Real bug found 2026-09-05 (Phase L5 mid-branch gate testing):
+    # `room_ids` only ever holds branch ROOTS, and a branch's own root
+    # can genuinely already carry real content by this point (this
+    # session's own new mid-branch gate, or the ordinary 30% chest roll
+    # `_new_side_room` already does for every side room) -- picking one
+    # of those as `chest_room_id` and then wholesale-REPLACING (not
+    # appending to) its `lockables` list silently destroyed whatever
+    # was already there. For a pre-existing plain chest this was a
+    # quiet, real loot loss no one had ever traced back to this line;
+    # for a real gate's own lockable, it left `locked_connections`
+    # pointing at an id that no longer exists anywhere in the room's
+    # own `lockables` -- an unresolvable, permanently-locked door for a
+    # real player. Fixed two ways: only real EMPTY-of-content rooms are
+    # now eligible at all, and the loot chest itself is appended, never
+    # assigned, matching every other lockable-adding site in this file.
+    mirror_eligible_room_ids = [
+        rid for rid in room_ids
+        if not rooms[rid].get("lockables") and not rooms[rid].get("locked_connections")
+    ]
+    if pool and len(mirror_eligible_room_ids) >= 2 and rng.random() < _MIRROR_PAIR_CHANCE:
+        monster_room_id, chest_room_id = rng.sample(mirror_eligible_room_ids, 2)
         strongest = max(pool, key=lambda mk: (campaign["monsters"].get(mk) or {}).get("hp_max", 0))
         # Numbered so both stay thematically identical but are always
         # individually nameable -- two rooms sharing the exact same
@@ -1374,10 +1439,10 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         chest_room["description"] = "This room feels like it's happening twice, somewhere else on this same floor."
         mirror_loot = {"greater_healing_potion": rng.randint(1, 2)}
         dungeon_audit.maybe_add_spell_tonic_to_loot(mirror_loot, rng)
-        chest_room["lockables"] = [{
+        chest_room.setdefault("lockables", []).append({
             "id": f"f{floor}_mirror_cache", "kind": "chest", "name": "an unguarded, matching cache",
             "loot": mirror_loot, "gold": rng.randint(60, 150) * floor,
-        }]
+        })
 
     # Real warp shortcut (2026-09-03, per Coffee: "do all of them" --
     # warps, a real Zelda reference mechanic, after Level 6/Level 7's
@@ -1428,10 +1493,21 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # by its own `locked_connections` gate, so this trigger would never
     # visibly do anything. `c[0] in hub["connections"]` requires the
     # branch root to still be a genuine, ungated, plain hub connection.
+    # Real follow-up bug (2026-09-05, Phase L5 mid-branch gate testing):
+    # the root-only check above missed a branch whose own TAIL edge
+    # (not its root) got locked by this session's new mid-branch gate
+    # -- `c[0] in hub["connections"]` only proves the branch's own
+    # entrance is still open, not that `seal_chain[-2] -> seal_chain
+    # [-1]` (the exact edge this puzzle is about to seal) is itself
+    # still a genuine plain connection. Checked directly: the seal
+    # target's own real parent room (the chain's second-to-last room,
+    # or the hub for a 1-room branch) must still list it as a plain
+    # connection.
     sealable_candidates = [
         c for c in branch_chains
         if c is not main_chain and len(c) >= 1 and c[0] in hub["connections"]
         and not any(lk.get("kind") == "switch" for lk in rooms[c[0]].get("lockables", []))
+        and c[-1] in rooms[c[-2] if len(c) >= 2 else hub_id].get("connections", [])
     ]
     if len(sealable_candidates) >= 1 and other_chains and rng.random() < _scaled_chance(_COLLAPSE_PUZZLE_CHANCE, floor, 0.001, 0.4):
         seal_chain = rng.choice(sealable_candidates)
@@ -1500,11 +1576,14 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     already_has_collapse = any(r.get("collapsing_connections") for r in rooms.values())
     # Same real fix as sealable_candidates above -- a branch already
     # gated by the pressure-plate mechanic (removed from hub[
-    # "connections"]) must never be picked as a seal target here either.
+    # "connections"]) must never be picked as a seal target here either,
+    # NOR one whose own tail edge got locked by a real mid-branch gate
+    # (2026-09-05 follow-up fix, same reasoning as sealable_candidates).
     carry_sealable = [
         c for c in branch_chains
         if c is not main_chain and len(c) >= 1 and c[0] in hub["connections"]
         and not any(lk.get("kind") == "switch" for lk in rooms[c[0]].get("lockables", []))
+        and c[-1] in rooms[c[-2] if len(c) >= 2 else hub_id].get("connections", [])
     ]
     if not already_has_collapse and len(carry_sealable) >= 1 and rng.random() < _scaled_chance(_CARRY_PUZZLE_CHANCE, floor, 0.001, 0.35):
         seal_chain = rng.choice(carry_sealable)

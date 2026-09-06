@@ -2,6 +2,61 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.527] — feature: real mid-branch gates ("Advanced Dungeons" Phase L5, v2) + two real pre-existing bugs found and fixed along the way
+
+Coffee: "keep going... your goal is to be able to generate dungeons
+like the samples and references on the fly." Continuing Phase L5 (see
+[[project_advanced_interconnected_dungeons_research]], now expanded
+with a full research pass on NES "The Legend of Zelda" (all 9
+dungeons) and SNES "A Link to the Past" (all 13 dungeons/sequences) --
+30+ real dungeons total. The single most common real pattern across
+every one of them: a resource from one branch is needed to progress
+DEEPER INSIDE a different branch, not just to open that branch's own
+root door.
+
+On checkpoint floors, a real branch of length >= 3 now sometimes gets
+one of its own INTERNAL connections locked (not just its root-to-hub
+edge, which every other existing gate already owns), sourced from a
+real switch in a different branch's own tail. Same reused
+`multi_switch_gate` plumbing as every other gate in this generator,
+zero new lockable kind or movement/render code -- purely a new
+placement pattern (an edge partway through a branch, not just at its
+boundary).
+
+**Two real, pre-existing bugs found and fixed** while verifying this
+(both existed before today, just never had a live trigger before):
+
+1. The Labyrinth's own mirror-pair mechanic (L2f) picked its "chest
+   room" from any branch root, without checking whether that room
+   already held real content -- and then wholesale-REPLACED (not
+   appended to) its `lockables` list. This silently destroyed a
+   pre-existing plain chest's real loot in the past; discovered here
+   because it could ALSO destroy a real gate's own lockable, leaving
+   `locked_connections` pointing at an id that no longer exists
+   anywhere -- an unresolvable, permanently-locked door for a real
+   player. Fixed: only genuinely empty rooms are eligible for either
+   mirror-pair role now, and the loot chest is appended, never assigned.
+2. The collapse-puzzle and carry-puzzle mechanics' own "is this branch
+   safe to seal" check only verified a branch's ROOT was still a plain
+   hub connection -- never that the branch's own TAIL edge (the exact
+   one about to be sealed) was still a genuine plain connection.
+   Harmless until a mid-branch gate could lock that exact edge for an
+   unrelated reason; fixed to check the seal target's real parent room
+   directly.
+
+Full LabyrinthTests/DungeonEvolveTests/DungeonAuditTests suite (205
+tests) re-run clean across 2 separate passes, only the project's own
+known pre-existing batch-order flake appearing (confirmed passing in
+isolation).
+
+Still queued: real branch-tail merging (two branches' own tails
+physically joined, Bottle Grotto's literal "two wings rejoin" shape),
+event-gated live edges (a miniboss kill or puzzle solve revealing a
+brand-new connection at runtime), true sequential chains (solving A
+unlocks B's own gate specifically, not just "any order, all
+required"), and any port to `dungeon_evolve.py`'s own overworld
+generator.
+
 ## [1.27.526] — feature: real multi-branch convergence gates ("Advanced Dungeons" Phase L5, v1)
 
 Coffee, right after v1.27.525's room-count reduction: "i dont want the
