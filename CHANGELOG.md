@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.548] — feat: a real level-20+ recipe book for the Forge Guild ladder
+
+Real deliverable (per Coffee: "add any recipies needed and make them
+available in the books at lv 20 +"). The 3 existing recipe books
+(Cook Book/Herbalism Guide/Crafting Book) are deliberately Lv-1-only
+by an earlier explicit decision ("Only show Lv 1 items tho — players
+must join guild for advanced recipies") — but that same 2026-08-11
+request already said "make tiered books... as the players progress,"
+so a higher tier was always the intended next step, not a reversal.
+
+New `Grandmaster's Forge Tome` (buyable at Maren's Wares, same shop as
+the basic Crafting Book) reads via a new `bot._do_read_advanced_
+recipe_book`, gated live on level 20+ and, per recipe, the reader's
+real guild/rebirth standing (`recipe_requirement_gate` — the same
+check a real craft attempt makes) — so it lists exactly the real
+`ADVANCED_RECIPES`/`ENCHANT_RECIPES` entries a reader has actually
+earned, including every recipe added this session for tasks #4
+(masterwork_dagger/shortsword/longbow/leather_armor/rapier,
+duelists_rapier) and #6 (`forge_magic_upgrade`). The original 3 books
+are completely unchanged. 3 new regression tests (sealed under 20,
+ungated-only for a non-guild level-20 reader, full ladder for a
+qualified Forge Guild member).
+
 ## [1.27.547] — feat: forge a plain weapon/armor/accessory into a real magic item
 
 Real new crafting system (per Coffee: "i want to be able to craft

@@ -752,6 +752,23 @@ ITEMS = {
         "price": 15, "weight": 1, "teaches_profession": "blacksmithing",
         "description": "Soot-smudged and warped from heat, like it's spent as much time by the forge as in a bag.",
     },
+    # Advanced/guild-tier tier of the same book series (2026-09-08, task
+    # #7, per Coffee: "add any recipies needed and make them available
+    # in the books at lv 20 +") -- Coffee's own ORIGINAL 2026-08-11 ask
+    # above already said "make tiered books... as the players progress,"
+    # so this is the first real tier past "basic," not a reversal of the
+    # "Only show Lv 1 items" rule. "teaches_advanced_profession" is a
+    # real, DIFFERENT field from "teaches_profession" -- read by
+    # bot._do_read_advanced_recipe_book, which lists ADVANCED_RECIPES/
+    # ENCHANT_RECIPES (guild-ladder content the basic books' own
+    # docstring explicitly says they can never leak) gated live, every
+    # read, on the reader's own real level/guild/rebirth via the same
+    # recipe_requirement_gate a real craft attempt uses.
+    "grandmasters_forge_tome": {
+        "name": "Grandmaster's Forge Tome", "type": "book", "rarity": "rare",
+        "price": 150, "weight": 2, "teaches_advanced_profession": "blacksmithing",
+        "description": "Bound in scorched iron plate; only someone who's actually stood at a real forge for years could make sense of it.",
+    },
 
     # --- Quest items (never sellable, never have a price) ---
     "waterlogged_journal": {

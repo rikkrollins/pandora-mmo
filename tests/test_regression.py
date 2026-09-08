@@ -13663,6 +13663,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated = db.get_character(950936, -999)
         self.assertEqual(updated["inventory"].get("cook_book_basic", 0), 1)
 
+    async def test_advanced_recipe_book_sealed_under_level_20(self):
+        """Real gap (2026-09-08, task #7): the new Grandmaster's Forge Tome refuses to teach anything below level 20, regardless of guild."""
+        make_basic_character(950942, "TooYoungReader", current_location="crossroads_tavern")
+        db.update_character(950942, -999, guild="forge_guild")
+        db.add_item(950942, -999, "grandmasters_forge_tome", 1)
+        sink = []
+        update = FakeUpdate(950942, "use my grandmasters forge tome", sink)
+        await bot._do_use_item(update, "use my grandmasters forge tome")
+        self.assertIn("level 20", sink[-1])
+        self.assertNotIn("Masterwork", sink[-1])
+
+    async def test_advanced_recipe_book_shows_ungated_recipes_to_a_non_guild_level_20_reader(self):
+        """A level 20+ reader who never joined the Forge Guild still sees the ungated masterwork_* recipes (no requires_guild field) but not the guild-locked ladder."""
+        make_basic_character(950943, "UngatedLevel20Reader", current_location="crossroads_tavern")
+        db.update_character(950943, -999, level=20)
+        db.add_item(950943, -999, "grandmasters_forge_tome", 1)
+        sink = []
+        update = FakeUpdate(950943, "use my grandmasters forge tome", sink)
+        await bot._do_use_item(update, "use my grandmasters forge tome")
+        combined = "\n".join(sink)
+        self.assertIn("Masterwork Dagger", combined)
+        self.assertIn("Masterwork Rapier", combined)
+        self.assertNotIn("Journeyman's Blade", combined)
+        self.assertNotIn("Godsforged Blade", combined)
+
+    async def test_advanced_recipe_book_shows_the_full_ladder_to_a_qualified_forge_guild_member(self):
+        """Real deliverable (2026-09-08, task #7): a level 20+ Forge Guild member sees the full real ladder, including the new task #4/#6 recipes."""
+        make_basic_character(950944, "QualifiedForgeReader", current_location="crossroads_tavern")
+        db.update_character(950944, -999, guild="forge_guild", level=20)
+        db.add_item(950944, -999, "grandmasters_forge_tome", 1)
+        sink = []
+        update = FakeUpdate(950944, "use my grandmasters forge tome", sink)
+        await bot._do_use_item(update, "use my grandmasters forge tome")
+        combined = "\n".join(sink)
+        self.assertIn("Masterwork Rapier", combined)  # task #4
+        self.assertIn("Journeyman's Blade", combined)  # pre-existing guild-gated ladder
+        self.assertIn("Forge Magic Upgrade", combined)  # task #6
+
     def test_profession_mastery_pct_persists_across_reload(self):
         character = make_basic_character(950937, "MasteryPersistTester", current_location="crossroads_tavern")
         bot._grind_profession_mastery(950937, -999, character, "blacksmithing")

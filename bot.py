@@ -21908,7 +21908,16 @@ async def _do_read_recipe_book(update: Update, item: dict) -> None:
     content. Same real, dynamically-grounded-from-the-actual-catalog
     convention as ai/support_agent.py's deterministic answers, so this
     never goes stale if a recipe's materials/DC change later.
+
+    "teaches_advanced_profession" (2026-09-08, task #7) is a real,
+    DIFFERENT field on a higher-tier book -- routed to a separate
+    function below rather than handled inline here, since it needs a
+    live level/guild/rebirth gate this plain-RECIPES listing never did.
     """
+    advanced_profession = item.get("teaches_advanced_profession")
+    if advanced_profession:
+        await _do_read_advanced_recipe_book(update, item, advanced_profession)
+        return
     profession = item.get("teaches_profession")
     recipe_lines = [
         f"- **{items_module.get_item(r['result_item'])['name']}** (DC {r['dc']} {r['ability']}): needs "
@@ -21924,6 +21933,58 @@ async def _do_read_recipe_book(update: Update, item: dict) -> None:
         "\n\nMore advanced recipes exist, but they're guild secrets — join the right guild to learn those.",
         speak=False,
     )
+
+
+async def _do_read_advanced_recipe_book(update: Update, item: dict, profession: str) -> None:
+    """
+    Advanced/guild-tier recipe books (2026-09-08, task #7, per Coffee:
+    "add any recipies needed and make them available in the books at lv
+    20 +"). Deliberately a SEPARATE listing source from _do_read_recipe_
+    book's own RECIPES-only convention (that function's own docstring:
+    "so a book can never leak guild-ladder content") -- an advanced book
+    is EXPECTED to leak that content, but only line-by-line to a reader
+    who's actually earned each specific recipe (right level/guild/
+    rebirth), checked live via recipe_requirement_gate -- the exact same
+    gate a real craft/enchant attempt would apply, so a book can never
+    show a recipe the reader couldn't actually use yet.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    if character.get("level", 1) < 20:
+        await _safe_send(
+            update,
+            f"The {item['name']}'s pages blur into nonsense — this knowledge is sealed until you're truly experienced (level 20+).",
+        )
+        return
+
+    lines = []
+    for r in ADVANCED_RECIPES.values():
+        if r.get("profession") != profession or recipe_requirement_gate(character, r):
+            continue
+        lines.append(
+            f"- **{r['name']}** ({r['tier']}, DC {r['dc']} {r['ability']}): needs "
+            + ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in r["materials"].items())
+        )
+    for recipe_id, r in ENCHANT_RECIPES.items():
+        if r.get("profession") != profession or recipe_requirement_gate(character, r):
+            continue
+        label = recipe_id.replace("enchant_", "").replace("_", " ").title()
+        lines.append(
+            f"- **{label}** (DC {r['dc']} {r['ability']}): needs "
+            + ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in r["materials"].items())
+        )
+
+    if not lines:
+        await _safe_send(
+            update,
+            f"The {item['name']} is written in a guild cipher you can't make sense of yet — the right guild membership unlocks it.",
+        )
+        return
+    await _safe_send(update, f"📖 **{item['name']}**\n" + "\n".join(lines), speak=False)
 
 
 async def _do_craft(update: Update, text: str) -> None:
