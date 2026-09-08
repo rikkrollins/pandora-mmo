@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.549] — feat: 16 new elemental scrolls, 2 tiers, Tier-2 gated to harder Labyrinth floors
+
+Real deliverable (per Coffee: "We want more elemental scrolls
+available and the next lvl of scrools shud be avaialbe in harder
+dungeons as a find, steal, or loot"). Before this, only fire
+(Fireball) and lightning (Lightning Bolt) had a real scroll — 7 real
+damage types (cold, earth, force, necrotic, poison, psychic, radiant)
+had none at all.
+
+**Tier 1** (7 new scrolls, same level-3/8d6 shape as the two
+originals, buyable at Vane's Curiosities): cold/earth reuse existing
+spells (Ice Storm, Mudslide); force/necrotic/poison/psychic/radiant
+needed 5 new level-3 spells added to `spells.py` (Force Lance, Bone
+Spear, Toxic Cloud, Mind Spike, Radiant Lance) since nothing in the
+catalog was anywhere near Fireball's own power band for those types.
+
+**Tier 2** ("Greater Scroll of X," all 9 elements, `epic` rarity):
+deliberately NOT craftable or buyable — find/steal/loot only, gated to
+Labyrinth floors past 25 (`rules.labyrinth.GREATER_ELEMENTAL_SCROLL_
+FLOOR_THRESHOLD`, matching the game's own existing "harder" band).
+Fire/lightning/cold/earth/necrotic/radiant/poison reuse existing
+strong spells (Flame Strike, Cyclone, Cone of Cold, Meteor, Voidcall,
+Starfall Lance, Insect Plague); force/psychic needed 2 new level-5
+spells (Force Cataclysm, Mind Shatter). All three distribution
+channels wired: **find** (the checkpoint vault's own seeded chest,
+`rules.labyrinth._build_checkpoint_room`, so it stays reproducible
+from a Labyrinth seed), **loot** (a real chance on mini-boss defeat,
+`bot._check_labyrinth_progress`), and **steal** (a low-weight
+candidate added to task #1's `LABYRINTH_STEAL_FALLBACK_POOL` past the
+same floor threshold). 6 new regression tests (spell damage/type, vault
+contents by floor, miniboss drop, steal reachability); full
+`LabyrinthTests` re-run clean (1 pre-existing, confirmed-unrelated
+batch-order flake).
+
 ## [1.27.548] — feat: a real level-20+ recipe book for the Forge Guild ladder
 
 Real deliverable (per Coffee: "add any recipies needed and make them

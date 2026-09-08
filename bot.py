@@ -10925,6 +10925,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     reward_line = None
     miniboss_rune_line = None
     miniboss_tonic_line = None
+    miniboss_scroll_line = None
     shard_line = None
     flee_line = None
     if room.get("is_miniboss_room") and not room.get("miniboss_reward_claimed"):
@@ -10986,6 +10987,19 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
                 miniboss_tonic_line = f"✨ Something about it hums with real magic -- **{tonic_item['name']}** — added to the party's stash."
             else:
                 miniboss_tonic_line = None
+            # Tier-2 elemental scroll, real "loot" channel (2026-09-08,
+            # task #3, per Coffee: "the next lvl of scrools shud be
+            # avaialbe in harder dungeons as a find, steal, or loot").
+            # Live-combat trigger, plain unseeded `random` (matches the
+            # spell-tonic roll just above) -- never part of the seeded,
+            # reproducible floor-generation path.
+            if room.get("floor", run["floor"]) > labyrinth_module.GREATER_ELEMENTAL_SCROLL_FLOOR_THRESHOLD and random.random() < LABYRINTH_MINIBOSS_SPELL_TONIC_DROP_CHANCE:
+                scroll_id = random.choice(labyrinth_module.GREATER_ELEMENTAL_SCROLL_IDS)
+                scroll_item = items_module.get_item(scroll_id)
+                for m in members:
+                    if not m.get("is_ai"):
+                        db.add_item(m["telegram_user_id"], update.effective_chat.id, scroll_id, 1)
+                miniboss_scroll_line = f"📜 It was carrying **{scroll_item['name']}** — added to the party's stash."
     # Real Phase L5 "Advanced Dungeons" event-gated live edge (2026-09-
     # 06, per Coffee: "keep going... generate dungeons like the samples
     # and references on the fly" -- Bottle Grotto's own real signature
@@ -11054,6 +11068,8 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
         await _safe_send(update, miniboss_rune_line)
     if miniboss_tonic_line:
         await _safe_send(update, miniboss_tonic_line)
+    if miniboss_scroll_line:
+        await _safe_send(update, miniboss_scroll_line)
     if shard_line:
         await _safe_send(update, shard_line)
     if boss_shard_line:
@@ -30617,6 +30633,15 @@ async def _do_steal_from_enemy(
         # comment above. 1 or 2 items, RNG, per Coffee's own spec.
         count = random.choice([1, 2])
         stealable = random.sample(LABYRINTH_STEAL_FALLBACK_POOL, k=min(count, len(LABYRINTH_STEAL_FALLBACK_POOL)))
+        # Tier-2 elemental scroll, real "steal" channel (2026-09-08,
+        # task #3, per Coffee: "the next lvl of scrools shud be
+        # avaialbe in harder dungeons as a find, steal, or loot").
+        # Small weight, same "rare item -> small %" spirit real
+        # stealable_items entries already use.
+        run = db.get_labyrinth_run(chat_id, _labyrinth_party_key(character))
+        if run and run.get("floor", 0) > labyrinth_module.GREATER_ELEMENTAL_SCROLL_FLOOR_THRESHOLD:
+            scroll_id = random.choice(labyrinth_module.GREATER_ELEMENTAL_SCROLL_IDS)
+            stealable = stealable + [{"item_id": scroll_id, "weight": 10}]
     if not stealable:
         await update.effective_chat.send_message(
             f"**{target['name']}** isn't carrying anything worth stealing.",

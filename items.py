@@ -296,6 +296,110 @@ ITEMS = {
         "price": 275, "weight": 0.1, "spell": "lightning_bolt",
         "description": "Deals 8d6 lightning damage (Dexterity save for half). It crackles faintly against your fingers, like it hasn't fully settled since it was written.",
     },
+
+    # Elemental scroll expansion, Tier 1 (2026-09-08, task #3, per
+    # Coffee: "We want more elemental scrolls available"). Same real
+    # level-3/~8d(6-8) shape as Scroll of Fireball/Lightning Bolt above,
+    # just the other 7 real damage types (rules.combat.apply_damage_
+    # type_modifier's own vocabulary) that had no scroll at all before
+    # this. Buyable, same as the two originals -- ordinary market/find
+    # content, not gated to harder dungeons (that's the Tier-2 "Greater"
+    # scrolls below).
+    "scroll_ice_storm": {
+        "name": "Scroll of Ice Storm", "type": "scroll", "rarity": "rare",
+        "price": 260, "weight": 0.1, "spell": "ice_storm",
+        "description": "Deals 6d8 cold damage (Dexterity save for half). The parchment is cold enough to sting bare fingers.",
+    },
+    "scroll_mudslide": {
+        "name": "Scroll of Mudslide", "type": "scroll", "rarity": "rare",
+        "price": 250, "weight": 0.1, "spell": "mudslide",
+        "description": "Deals 5d8 earth damage (Strength save for half). Smells faintly of wet clay, however it's been stored.",
+    },
+    "scroll_force_lance": {
+        "name": "Scroll of the Force Lance", "type": "scroll", "rarity": "rare",
+        "price": 275, "weight": 0.1, "spell": "force_lance",
+        "description": "Deals 8d6 force damage (Dexterity save for half). The page hums faintly, like it doesn't like being held.",
+    },
+    "scroll_bone_spear": {
+        "name": "Scroll of the Bone Spear", "type": "scroll", "rarity": "rare",
+        "price": 275, "weight": 0.1, "spell": "bone_spear",
+        "description": "Deals 8d6 necrotic damage (Constitution save for half). Written, unmistakably, in something other than ink.",
+    },
+    "scroll_toxic_cloud": {
+        "name": "Scroll of the Toxic Cloud", "type": "scroll", "rarity": "rare",
+        "price": 275, "weight": 0.1, "spell": "toxic_cloud",
+        "description": "Deals 8d6 poison damage (Constitution save for half). Best held at arm's length before it's read.",
+    },
+    "scroll_mind_spike": {
+        "name": "Scroll of the Mind Spike", "type": "scroll", "rarity": "rare",
+        "price": 275, "weight": 0.1, "spell": "mind_spike",
+        "description": "Deals 8d6 psychic damage (Wisdom save for half). Reading it silently is somehow louder than reading it aloud.",
+    },
+    "scroll_radiant_lance": {
+        "name": "Scroll of the Radiant Lance", "type": "scroll", "rarity": "rare",
+        "price": 275, "weight": 0.1, "spell": "radiant_lance",
+        "description": "Deals 8d6 radiant damage (Dexterity save for half). Faint light leaks from between its folds even rolled shut.",
+    },
+
+    # Elemental scroll expansion, Tier 2: "Greater" scrolls (2026-09-08,
+    # task #3, per Coffee: "the next lvl of scrools shud be avaialbe in
+    # harder dungeons as a find, steal, or loot"). Deliberately NOT in
+    # any shop inventory and NOT craftable -- same "left as a real find
+    # only" convention scroll_cure_wounds's own RECIPES comment already
+    # documents for Fireball/Revivify/etc, just a full tier stronger.
+    # Distribution lives in rules/labyrinth.py (checkpoint vault "find")
+    # and bot.py (miniboss/boss "loot", Labyrinth steal-fallback
+    # "steal") -- all three gated to floor > 25, past the game's first
+    # segment band. One per real damage type, all 9 -- fire/lightning/
+    # cold/earth/necrotic/radiant/poison reuse existing high-tier spells
+    # unchanged (Flame Strike/Cyclone/Cone of Cold/Meteor/Voidcall/
+    # Starfall Lance/Insect Plague), force/psychic use the two new
+    # spells added alongside these.
+    "greater_scroll_fire": {
+        "name": "Greater Scroll of Flame Strike", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "flame_strike",
+        "description": "Deals 8d6 fire damage (Dexterity save for half). The page itself looks half-charred, yet never quite burns through.",
+    },
+    "greater_scroll_lightning": {
+        "name": "Greater Scroll of the Cyclone", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "cyclone",
+        "description": "Deals 6d8 lightning damage (Dexterity save for half). It practically vibrates in your hand.",
+    },
+    "greater_scroll_cold": {
+        "name": "Greater Scroll of the Cone of Cold", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "cone_of_cold",
+        "description": "Deals 8d8 cold damage (Dexterity save for half). Frost creeps across whatever it touches.",
+    },
+    "greater_scroll_earth": {
+        "name": "Greater Scroll of the Meteor", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "meteor",
+        "description": "Deals 9d8 earth damage (Dexterity save for half). Impossibly heavy for a single sheet of parchment.",
+    },
+    "greater_scroll_force": {
+        "name": "Greater Scroll of Force Cataclysm", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "force_cataclysm",
+        "description": "Deals 9d8 force damage (Dexterity save for half). The air around it seems to bend slightly out of true.",
+    },
+    "greater_scroll_necrotic": {
+        "name": "Greater Scroll of Voidcall", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "voidcall",
+        "description": "Deals 10d8 necrotic damage (Constitution save for half). Cold in a way that has nothing to do with temperature.",
+    },
+    "greater_scroll_poison": {
+        "name": "Greater Scroll of the Insect Plague", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "insect_plague",
+        "description": "Deals 4d10 poison damage (Constitution save for half). Something inside it is very faintly buzzing.",
+    },
+    "greater_scroll_psychic": {
+        "name": "Greater Scroll of Mind Shatter", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "mind_shatter",
+        "description": "Deals 9d8 psychic damage (Wisdom save for half). Reading even the title gives you a headache.",
+    },
+    "greater_scroll_radiant": {
+        "name": "Greater Scroll of the Starfall Lance", "type": "scroll", "rarity": "epic",
+        "price": 0, "weight": 0.1, "spell": "starfall_lance",
+        "description": "Deals 8d8 radiant damage (Dexterity save for half). Too bright to look at directly, even folded shut.",
+    },
     "scroll_summon_spirit": {
         # Real live question (2026-08-20, Coffee: "do summoning scrolls
         # have anything to do with the remnants? if not we should

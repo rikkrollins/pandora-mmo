@@ -14014,6 +14014,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(gained) > 0, "a successful steal against an empty-handed Labyrinth enemy must still grant a real fallback item")
         sessions.end_session(-999)
 
+    async def test_steal_from_a_labyrinth_enemy_past_floor_25_can_offer_a_greater_elemental_scroll(self):
+        """
+        Real "steal" channel (2026-09-08, task #3, per Coffee: "the next
+        lvl of scrools shud be avaialbe in harder dungeons as a find,
+        steal, or loot"). Past the game's own existing "harder"
+        threshold (floor 26+), the Labyrinth steal-fallback pool
+        (task #1's LABYRINTH_STEAL_FALLBACK_POOL) also offers a real
+        Tier-2 "Greater" scroll as a genuine (if low-weight) candidate --
+        proven black-box, via the real weighted draw actually landing on
+        it across enough attempts, not by mocking the outcome directly.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        user_id, chat_id = 963059, -963059
+        make_basic_character(user_id, "DeepStealTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        db.update_labyrinth_run(chat_id, party_key, floor=30)
+
+        character = db.get_character(user_id, chat_id)
+        character["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -2_700_059, "name": "Deep Wisp", "dexterity": 10,
+            "xp_reward": 50, "monster_key": "no_such_monster_key", "hp_current": 10, "hp_max": 10,
+            "is_labyrinth_run": True,
+        }
+        session = sessions.start_session(chat_id, [character, enemy], {user_id: "party", -2_700_059: "enemy"})
+        session.turn_order = [user_id, -2_700_059]
+
+        update = FakeUpdate(user_id, "steal from the wisp", [], chat_id=chat_id)
+        got_scroll = False
+        with patch("bot.narrate_skill_check", return_value="You lift it clean."), \
+             patch("bot._resolve_ai_turns", new=AsyncMock()):
+            for _ in range(60):
+                session.current_turn_index = 0
+                await bot._do_steal(update, "steal from the wisp", forced_roll=20)
+                if db.get_character(user_id, chat_id)["inventory"].get("greater_scroll_force", 0) > 0:
+                    got_scroll = True
+                    break
+        self.assertTrue(got_scroll, "expected the greater scroll to be a real, reachable candidate within 60 forced-success steal attempts at floor 30")
+        sessions.end_session(chat_id)
+
     def test_steal_proficiency_pct_persists_and_scales_bonus(self):
         character = make_basic_character(960003, "StealProfTester", current_location="crossroads_tavern")
         self.assertEqual(bot._steal_proficiency_bonus(character), 0)
@@ -15333,6 +15376,27 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # never anywhere near the old flat 1-4 range.
         self.assertGreaterEqual(result["damage_dealt"], 15, result)
         sessions.end_session(-999)
+
+    def test_new_elemental_scroll_spells_deal_real_damage_of_the_right_type(self):
+        """
+        Real gap (2026-09-08, task #3, per Coffee: "We want more
+        elemental scrolls available"). Before this, force/necrotic/
+        poison/psychic/radiant had no spell anywhere near Fireball's own
+        level-3/8d6 shape to back a scroll with -- these 7 new spells
+        (5 Tier-1 at 8d6, 2 Tier-2 at 9d8) must actually resolve real
+        damage of their own stated type through the same rules-layer
+        pipeline every other damage spell already uses.
+        """
+        monster_caster = {"name": "TestCaster"}  # no "level" field -- monster-shaped, damage_bonus=0 no-op
+        for spell_id, expected_type, dice_range in [
+            ("force_lance", "force", (8, 48)), ("bone_spear", "necrotic", (8, 48)),
+            ("toxic_cloud", "poison", (8, 48)), ("mind_spike", "psychic", (8, 48)),
+            ("radiant_lance", "radiant", (8, 48)),
+            ("force_cataclysm", "force", (9, 72)), ("mind_shatter", "psychic", (9, 72)),
+        ]:
+            self.assertEqual(spells.SPELLS[spell_id]["damage_type"], expected_type, spell_id)
+            result = spells.resolve_damage_spell(spell_id, monster_caster, None)
+            self.assertTrue(dice_range[0] <= result["damage_dealt"] <= dice_range[1], f"{spell_id}: {result['damage_dealt']} out of range {dice_range}")
 
     def test_real_character_spellcasting_still_scales_by_power_scale_ratio_not_damage_bonus(self):
         """
@@ -36547,6 +36611,29 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         floor3 = labyrinth_module.generate_floor(campaign, 3, random.Random(1))
         self.assertFalse(floor3["is_checkpoint"])
 
+    def test_labyrinth_checkpoint_vault_offers_a_greater_elemental_scroll_past_floor_25(self):
+        """
+        Real "find" channel (2026-09-08, task #3, per Coffee: "the next
+        lvl of scrools shud be avaialbe in harder dungeons as a find,
+        steal, or loot"). A checkpoint past the game's own existing
+        "harder" threshold (floor 26+, matching _MILESTONE_ITEM_BANDS'
+        own high band) always carries a real Tier-2 "Greater" scroll in
+        its vault, on top of the milestone item -- an early, easy
+        checkpoint (floor 5) never does.
+        """
+        campaign = bot.CAMPAIGN
+        for seed in range(10):
+            floor30 = labyrinth_module.generate_floor(campaign, 30, random.Random(seed))
+            checkpoint = floor30["rooms"][floor30["connector_room_id"]]
+            loot = checkpoint["lockables"][0]["loot"]
+            self.assertEqual(len(loot), 2, f"seed {seed}: expected milestone item + 1 greater scroll")
+            scroll_ids = [iid for iid in loot if iid in labyrinth_module.GREATER_ELEMENTAL_SCROLL_IDS]
+            self.assertEqual(len(scroll_ids), 1, f"seed {seed}: {loot}")
+
+        floor5 = labyrinth_module.generate_floor(campaign, 5, random.Random(1))
+        checkpoint5 = floor5["rooms"][floor5["connector_room_id"]]
+        self.assertEqual(len(checkpoint5["lockables"][0]["loot"]), 1, "an easy floor-5 checkpoint must never carry a Tier-2 scroll")
+
     async def test_labyrinth_hazard_deals_real_damage_on_a_failed_save_once_only(self):
         """Phase L2d: a real DC13 dex save, real depth-scaled damage on failure, and never re-triggers on a later visit to the same room this same floor."""
         from unittest.mock import patch
@@ -36965,6 +37052,47 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         runes_after2 = db.get_character(user_id, chat_id).get("inventory", {}).get("labyrinth_rune", 0)
         self.assertEqual(after2, before + 1, "expected the guaranteed reward to be one-time only")
         self.assertEqual(runes_after2, runes_before + 1, "expected the guaranteed rune grant to be one-time only")
+        sessions.end_session(chat_id, session)
+
+    async def test_labyrinth_miniboss_defeat_can_grant_a_real_greater_elemental_scroll_past_floor_25(self):
+        """
+        Real "loot" channel (2026-09-08, task #3, per Coffee: "the next
+        lvl of scrools shud be avaialbe in harder dungeons as a find,
+        steal, or loot"). A mini-boss defeated past the game's own
+        existing "harder" threshold (floor 26+) can drop a real Tier-2
+        "Greater" scroll on top of its usual milestone-item reward; an
+        early, easy floor never does.
+        """
+        import sessions
+        from unittest.mock import patch
+        user_id, chat_id = 963057, -963057
+        make_basic_character(user_id, "MinibossScrollTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        miniboss_room_id = "laby_miniboss_scroll_test"
+        rooms[miniboss_room_id] = {
+            "id": miniboss_room_id, "floor": 30, "name": "A Real Deep Mini-Boss Chamber",
+            "connections": [hub_id], "monsters": ["goblin"], "is_miniboss_room": True,
+        }
+        rooms[hub_id]["connections"].append(miniboss_room_id)
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=miniboss_room_id)
+
+        await bot._do_labyrinth_attack(FakeUpdate(user_id, "attack", [], chat_id=chat_id), "attack")
+        session = sessions.get_session_for_user(chat_id, user_id)
+        self.assertIsNotNone(session)
+        for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
+            enemy["hp_current"] = 0
+
+        sink = []
+        with patch("bot.random.random", return_value=0.0), patch("bot.random.choice", return_value="greater_scroll_force"):
+            await bot._check_labyrinth_progress(FakeUpdate(user_id, "", sink, chat_id=chat_id), session)
+        after = db.get_character(user_id, chat_id).get("inventory", {}).get("greater_scroll_force", 0)
+        self.assertEqual(after, 1, f"expected a real Greater Scroll of Force Cataclysm granted, got {sink}")
+        self.assertTrue(any("Greater Scroll" in s for s in sink), sink)
         sessions.end_session(chat_id, session)
 
     async def test_labyrinth_guaranteed_rune_drop_grants_once_only(self):

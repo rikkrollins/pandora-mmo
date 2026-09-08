@@ -434,6 +434,59 @@ SPELLS = {
         "name": "Voidcall", "level": 5, "school": "necromancy",
         "effect": "damage", "damage_dice": "10d8", "save_ability": "constitution", "damage_type": "necrotic",
     },
+
+    # Elemental scroll expansion (2026-09-08, task #3, per Coffee: "We
+    # want more elemental scrolls available"). Before this, only fire
+    # (Fireball) and lightning (Lightning Bolt) had a real scroll --
+    # force/necrotic/poison/psychic/radiant had no spell in the whole
+    # catalog anywhere near Fireball's own level-3/8d6 shape (magic_
+    # missile is 1d4+1, eldritch_blast/vicious_mockery are cantrips,
+    # starfall_lance/voidcall above are already the STRONG end reserved
+    # for the new Tier-2 "Greater" scrolls below). Same real, deliberate
+    # "not in any CLASS_SPELL_LISTS entry" pattern starfall_lance/
+    # voidcall above already use, just for a different reason -- these
+    # are scroll-exclusive, never player-learnable any other way,
+    # matching how a scroll cast already bypasses class-list
+    # restriction entirely (same real 5E rule "anyone can use a scroll
+    # they can read").
+    "force_lance": {
+        "name": "Force Lance", "level": 3, "school": "evocation",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity", "damage_type": "force",
+    },
+    "bone_spear": {
+        "name": "Bone Spear", "level": 3, "school": "necromancy",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "constitution", "damage_type": "necrotic",
+    },
+    "toxic_cloud": {
+        "name": "Toxic Cloud", "level": 3, "school": "conjuration",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "constitution", "damage_type": "poison",
+        "aoe": True,
+    },
+    "mind_spike": {
+        "name": "Mind Spike", "level": 3, "school": "enchantment",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "wisdom", "damage_type": "psychic",
+    },
+    "radiant_lance": {
+        "name": "Radiant Lance", "level": 3, "school": "evocation",
+        "effect": "damage", "damage_dice": "8d6", "save_ability": "dexterity", "damage_type": "radiant",
+    },
+    # Tier-2 "Greater Scroll" backing (2026-09-08, task #3, per Coffee:
+    # "the next lvl of scrools shud be avaialbe in harder dungeons").
+    # force/psychic had nothing strong enough to pair with fire's own
+    # Flame Strike/lightning's Cyclone/cold's Cone of Cold/earth's
+    # Meteor/necrotic's Voidcall/radiant's Starfall Lance/poison's
+    # Insect Plague (all real, existing spells reused unchanged) --
+    # these two fill the exact same gap at the exact same power band.
+    "force_cataclysm": {
+        "name": "Force Cataclysm", "level": 5, "school": "evocation",
+        "effect": "damage", "damage_dice": "9d8", "save_ability": "dexterity", "damage_type": "force",
+        "aoe": True,
+    },
+    "mind_shatter": {
+        "name": "Mind Shatter", "level": 5, "school": "enchantment",
+        "effect": "damage", "damage_dice": "9d8", "save_ability": "wisdom", "damage_type": "psychic",
+        "aoe": True,
+    },
 }
 
 # Cantrips (level 0) each class has at-will, alongside their leveled spells.

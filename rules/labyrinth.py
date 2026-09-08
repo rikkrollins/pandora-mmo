@@ -433,6 +433,22 @@ _MILESTONE_ITEM_BANDS = (
     (26, 1_000_000, "scroll_magic_missile"),
 )
 
+# Tier-2 "Greater" elemental scrolls (2026-09-08, task #3, per Coffee:
+# "the next lvl of scrools shud be avaialbe in harder dungeons as a
+# find, steal, or loot"). Deliberately not craftable/buyable (see
+# items.py's own comment on these) -- this is the real, single source
+# of truth for "which floor counts as a harder dungeon" for all three
+# distribution channels (this file's own checkpoint vault "find",
+# bot.py's miniboss/boss "loot" and Labyrinth steal-fallback "steal"),
+# reusing _MILESTONE_ITEM_BANDS' own existing 26+ high band rather than
+# inventing a second, different depth threshold.
+GREATER_ELEMENTAL_SCROLL_FLOOR_THRESHOLD = 25
+GREATER_ELEMENTAL_SCROLL_IDS = (
+    "greater_scroll_fire", "greater_scroll_lightning", "greater_scroll_cold",
+    "greater_scroll_earth", "greater_scroll_force", "greater_scroll_necrotic",
+    "greater_scroll_poison", "greater_scroll_psychic", "greater_scroll_radiant",
+)
+
 # L2d. Environmental hazards -- a visible, telegraphed obstacle, same
 # "state it honestly" rule as the overworld's own pits/breakables.
 _HAZARD_CHANCE = 0.15
@@ -919,6 +935,13 @@ def _build_checkpoint_room(floor: int, hub_id: str, rng: random.Random, theme: d
     already authored for large overworld dungeons).
     """
     item_id = _milestone_item_for_floor(floor)
+    vault_loot = {item_id: 1}
+    # Tier-2 elemental scroll, real "find" channel (2026-09-08, task #3)
+    # -- this floor's own seeded rng, so the vault's contents stay fully
+    # reproducible from a given Labyrinth seed like everything else this
+    # function builds.
+    if floor > GREATER_ELEMENTAL_SCROLL_FLOOR_THRESHOLD:
+        vault_loot[rng.choice(GREATER_ELEMENTAL_SCROLL_IDS)] = 1
     return {
         "id": _checkpoint_id(floor), "floor": floor, "is_checkpoint": True,
         "name": f"{theme['name']} -- A Waystation (Floor {floor})",
@@ -927,7 +950,7 @@ def _build_checkpoint_room(floor: int, hub_id: str, rng: random.Random, theme: d
         "npcs": ["wandering_dungeon_trader"], "shop": "wandering_traders_pack",
         "lockables": [{
             "id": f"f{floor}_checkpoint_cache", "kind": "chest", "name": "a real, heavily reinforced vault",
-            "loot": {item_id: 1}, "gold": rng.randint(100, 300) * floor,
+            "loot": vault_loot, "gold": rng.randint(100, 300) * floor,
             # Real Labyrinth Shard collectible (2026-09-06, per Coffee:
             # "collect them to gain access to the next labyrinth... have
             # the mini boss, and boss and scatter them around, have it
