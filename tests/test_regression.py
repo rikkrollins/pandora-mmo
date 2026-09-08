@@ -36816,8 +36816,12 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         """
         import sessions
         user_id, chat_id = 962201, -962201
-        make_basic_character(user_id, "ShardCombatTester", chat_id=chat_id, current_location="the_colosseum")
-        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        # Real, inflated HP (same discipline as _walk_to_checkpoint's own
+        # gated-combat handling and the repeated-miniboss test below):
+        # this fights two real, unseeded encounters in a row -- a bare
+        # test character can genuinely go down before the second one.
+        make_basic_character(user_id, "ShardCombatTester", chat_id=chat_id, current_location="the_colosseum", hp_max=999999)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=999999)
         await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
         party_key = f"solo:{user_id}"
         run = db.get_labyrinth_run(chat_id, party_key)
@@ -39455,6 +39459,36 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 any("doesn't work this deep" in s for s in sink),
                 f"{action!r} ({raw_text!r}) still hit the generic Labyrinth refusal: {sink}",
             )
+
+    async def test_stale_overworld_travel_button_never_crashes_while_in_the_labyrinth(self):
+        """
+        Real live crash (2026-09-07, error log, two real players hit
+        this independently, confirmed via a genuinely empty
+        bot_live_tmp.log grep for any other trace of it): a stale
+        overworld travel button (from _look_action_keyboard, or the
+        one _lockable_travel_button_for reveals right after a real
+        unlock) tapped AFTER the character has since entered the
+        Labyrinth called bot._do_move directly with zero Labyrinth
+        check at all -- unlike _dispatch_intent's own text-based "move"
+        routing, which already redirects to _do_labyrinth_move.
+        _do_move's own cl.get_location(CAMPAIGN, character[
+        "current_location"]) returns None for LABYRINTH_LOCATION_
+        SENTINEL, crashing on the very next real `.get(...)` call.
+        """
+        user_id, chat_id = 962207, -962207
+        make_basic_character(user_id, "StaleTravelButtonTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+        sink = []
+        await bot.travel_menu_callback(
+            FakeCallbackUpdate(user_id, "travel|go|crossroads_tavern", sink, chat_id=chat_id), DummyContext(),
+        )
+        self.assertTrue(any("Labyrinth" in s for s in sink), f"expected a real, honest refusal, got: {sink}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL, "a stale button must never actually move the character out of a live Labyrinth run")
 
     async def test_ambient_ai_chat_inside_the_labyrinth_stays_silent_not_a_visible_refusal(self):
         """

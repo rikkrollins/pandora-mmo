@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.542] — fix: a stale overworld travel button could crash after entering the Labyrinth
+
+Found via the error log (two real players hit this independently,
+zero trace anywhere else since this event was never logged before --
+found only by reading the traceback directly). Root cause:
+`travel_menu_callback` (the button-tap handler for an overworld travel
+button) calls `_do_move` directly with no Labyrinth check at all --
+unlike `_dispatch_intent`'s own text-based "move" routing, which
+already redirects to `_do_labyrinth_move`. A stale button (from before
+entering the Labyrinth, or the one revealed right after unlocking a
+door) tapped afterward crashed on `_do_move`'s own
+`cl.get_location(...).get(...)` call, since that lookup returns `None`
+for the Labyrinth's own sentinel location. Now gives a real, honest
+refusal instead of crashing.
+
+Also fixed a real test flake found running the full suite: a shard-
+collectible test from v1.27.531 fought two real, unseeded encounters
+back to back without the same HP-inflation guard every other repeated-
+combat test in this file already uses.
+
 ## [1.27.541] — fix: "my player sheet" misread as a name search + most menu actions now work in the Labyrinth
 
 Two real dev-bridge gaps found via proactive review of unaddressed

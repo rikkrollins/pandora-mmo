@@ -23860,6 +23860,23 @@ async def travel_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     dest = cl.get_location(CAMPAIGN, parts[2])
     if dest is None:
         return
+    # Real live crash (2026-09-07, error log: two real players hit this
+    # independently): unlike _dispatch_intent's own text-based "move"
+    # routing, this button-tap callback never checked whether the
+    # tapper is currently inside the Labyrinth before calling _do_move
+    # -- an old overworld travel button (e.g. from before they entered,
+    # or the one _lockable_travel_button_for reveals right after an
+    # unlock) still exists and is still tappable, but _do_move's own
+    # `cl.get_location(CAMPAIGN, character["current_location"])` call
+    # returns None for LABYRINTH_LOCATION_SENTINEL, crashing on the very
+    # next `.get(...)` call. This overworld destination id means nothing
+    # inside a live Labyrinth run either (_do_labyrinth_move expects a
+    # real room name/id, not a CAMPAIGN location id), so the honest fix
+    # is a real refusal, not a silent redirect to the wrong handler.
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is not None and character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        await _safe_send(update, "That path isn't there anymore — you're deep in the Labyrinth now.", speak=False)
+        return
     await _do_move(update, dest["name"])
 
 
