@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.545] — feat: empty-handed Labyrinth enemies now have a real steal fallback
+
+Real gap (per Coffee: "any enemies that have nothing to steal shud
+have a tonic or other type of potion or scroll they can steal (only 1
+or two use RNG)") -- 45 of the 107 real non-boss monster templates
+(campaign.json) carry an empty `stealable_items` list, giving a flat
+"isn't carrying anything worth stealing" refusal every time. The
+Labyrinth's endless-grind loop surfaces that far more often than any
+curated overworld encounter would. `_do_steal_from_enemy` now checks
+the target's own `is_labyrinth_run` flag (stamped by
+`_build_labyrinth_enemy`, never touching a real campaign encounter)
+and, when the real stealable list is empty, rolls 1 or 2 items (RNG)
+from a new `LABYRINTH_STEAL_FALLBACK_POOL` of common/uncommon
+consumables (healing potion, antitoxin, vocal/spell tonic, and four
+scrolls), weighted the same way real per-monster `stealable_items`
+lists already are. Also added `"steal"` to the Labyrinth's own action
+allowlist (`_dispatch_intent`) -- `_do_steal` was already confirmed
+CAMPAIGN-safe (it checks combat first, before any location lookup),
+it just wasn't reachable by text in the Labyrinth before now. New
+regression test added; full `LabyrinthTests` re-run (2 pre-existing
+batch-order flakes, both confirmed unrelated in isolation).
+
 ## [1.27.544] — fix: Labyrinth floor 1 could serve a monster's full unscaled native AC
 
 Real live bug (per Coffee: "when we attack we are missing most of the

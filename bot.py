@@ -13279,6 +13279,28 @@ STEAL_DC = 15  # harder than an ordinary skill check — stealing carries real r
 # -- deliberately harder than the shop's own DC 15: a shopkeeper is
 # standing still and distracted, a live enemy is actively fighting you.
 STEAL_FROM_ENEMY_DC = 18
+# Labyrinth steal fallback (2026-09-08, per Coffee: "any enemies that
+# have nothing to steal shud have a tonic or other type of potion or
+# scroll they can steal (only 1 or two use RNG)"). 45 of the 107 real
+# non-boss monster templates (campaign.json) carry an EMPTY
+# stealable_items list -- a flat, honest refusal everywhere else in the
+# game, but the Labyrinth's endless-grind loop makes that refusal land
+# far more often there than anywhere else. Scoped to the Labyrinth only
+# (checked via the built enemy's own "is_labyrinth_run" flag,
+# bot._build_labyrinth_enemy) -- never invents loot for a real, curated
+# overworld/campaign encounter. Same weight scale (90/10-ish) real
+# stealable_items entries already use, common items favored heavily
+# over the two uncommon scrolls.
+LABYRINTH_STEAL_FALLBACK_POOL = [
+    {"item_id": "healing_potion", "weight": 30},
+    {"item_id": "antitoxin", "weight": 20},
+    {"item_id": "vocal_tonic", "weight": 15},
+    {"item_id": "spell_tonic", "weight": 15},
+    {"item_id": "scroll_magic_missile", "weight": 10},
+    {"item_id": "scroll_cure_wounds", "weight": 10},
+    {"item_id": "scroll_shield", "weight": 5},
+    {"item_id": "scroll_bless", "weight": 5},
+]
 
 
 def _practiced_bonus_for(telegram_user_id: int, chat_id: int, ability: str) -> int:
@@ -30367,6 +30389,13 @@ async def _do_steal_from_enemy(
 
     template = cl.get_monster_template(CAMPAIGN, target.get("monster_key")) if target.get("monster_key") else None
     stealable = template.get("stealable_items", []) if template else []
+    if not stealable and target.get("is_labyrinth_run"):
+        # Real gap (2026-09-08, per Coffee): 45 of 107 real non-boss
+        # monster templates carry an empty stealable_items list --
+        # scoped fallback, see LABYRINTH_STEAL_FALLBACK_POOL's own
+        # comment above. 1 or 2 items, RNG, per Coffee's own spec.
+        count = random.choice([1, 2])
+        stealable = random.sample(LABYRINTH_STEAL_FALLBACK_POOL, k=min(count, len(LABYRINTH_STEAL_FALLBACK_POOL)))
     if not stealable:
         await update.effective_chat.send_message(
             f"**{target['name']}** isn't carrying anything worth stealing.",
@@ -34092,7 +34121,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "give_item", "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
         "auto_equip", "equip_item", "unequip_item", "set_front_row", "set_back_row",
         "bench_party_member", "unbench_party_member", "check_sheet", "check_menu",
-        "check_equip_menu", "check_magic", "check_remnants", "check_story",
+        "check_equip_menu", "check_magic", "check_remnants", "check_story", "steal",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",

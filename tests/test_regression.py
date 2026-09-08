@@ -13796,6 +13796,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.current_participant_id(), leader_id)  # turn NOT consumed
         sessions.end_session(-999)
 
+    async def test_steal_from_a_labyrinth_enemy_with_nothing_listed_still_offers_a_real_fallback_item(self):
+        """
+        Real gap (2026-09-08, per Coffee: "any enemies that have nothing
+        to steal shud have a tonic or other type of potion or scroll they
+        can steal") -- 45 of 107 real non-boss monster templates carry an
+        empty stealable_items list, and the Labyrinth's endless-grind loop
+        surfaces the flat "nothing worth stealing" refusal far more often
+        than a curated overworld encounter ever would. Scoped to a real
+        Labyrinth enemy (the built enemy dict's own is_labyrinth_run
+        flag, exactly as bot._build_labyrinth_enemy stamps it) -- an
+        ordinary campaign enemy with nothing listed must still refuse
+        honestly (covered by the sibling test above).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        leader_id = 960003
+        make_basic_character(leader_id, "LabyrinthPickpocketTester", current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        enemy = {
+            "telegram_user_id": -2_700_003, "name": "Empty-Handed Wisp", "dexterity": 10,
+            "xp_reward": 50, "monster_key": "no_such_monster_key", "hp_current": 10, "hp_max": 10,
+            "is_labyrinth_run": True,
+        }
+        leader = db.get_character(leader_id, -999)
+        leader["telegram_user_id"] = leader_id
+        session = sessions.start_session(-999, [leader, enemy], {leader_id: "party", -2_700_003: "enemy"})
+        session.turn_order = [leader_id, -2_700_003]
+
+        sink = []
+        update = FakeUpdate(leader_id, "steal from the wisp", sink)
+        with patch("bot.narrate_skill_check", return_value="You lift it clean."), \
+             patch("bot._resolve_ai_turns", new=AsyncMock()):
+            await bot._do_steal(update, "steal from the wisp", forced_roll=20)
+        self.assertFalse(any("isn't carrying anything" in s for s in sink), "a Labyrinth enemy must never give the flat empty-handed refusal")
+        updated = db.get_character(leader_id, -999)
+        fallback_ids = {e["item_id"] for e in bot.LABYRINTH_STEAL_FALLBACK_POOL}
+        gained = set(updated["inventory"].keys()) & fallback_ids
+        self.assertTrue(len(gained) > 0, "a successful steal against an empty-handed Labyrinth enemy must still grant a real fallback item")
+        sessions.end_session(-999)
+
     def test_steal_proficiency_pct_persists_and_scales_bonus(self):
         character = make_basic_character(960003, "StealProfTester", current_location="crossroads_tavern")
         self.assertEqual(bot._steal_proficiency_bonus(character), 0)
