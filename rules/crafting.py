@@ -341,6 +341,55 @@ ADVANCED_RECIPES = {
         "ability": "strength", "dc": 29, "profession": "blacksmithing",
         "name": "Godsforged Blade", "requires_guild": "forge_guild", "min_rebirth": 3,
     },
+
+    # Remaining weapon/armor base coverage (2026-09-08, per Coffee:
+    # "investigate how to forge the next lv of weapons / armour - if
+    # there isnt next lv weapons and armour available add it in"). Every
+    # base above this point already had a real ADVANCED_RECIPES entry
+    # (longsword/greataxe/chain_shirt/chain_mail/wooden_shield) -- dagger/
+    # shortsword/longbow/leather were real bases in rules/item_generator.py
+    # with no recipe at all yet, and rapier had no base entry whatsoever
+    # (added just above, alongside this). Same masterwork-at-rare/no-gate
+    # shape the original 4 masterwork_* recipes above use.
+    "masterwork_dagger": {
+        "materials": {"iron_ore": 3, "moonpetal": 1},
+        "item_type": "weapon", "base_id": "dagger", "tier": "rare",
+        "ability": "strength", "dc": 14, "profession": "blacksmithing",
+        "name": "Masterwork Dagger",
+    },
+    "masterwork_shortsword": {
+        "materials": {"iron_ore": 4, "moonpetal": 1},
+        "item_type": "weapon", "base_id": "shortsword", "tier": "rare",
+        "ability": "strength", "dc": 15, "profession": "blacksmithing",
+        "name": "Masterwork Shortsword",
+    },
+    "masterwork_longbow": {
+        "materials": {"wood": 5, "iron_ore": 1, "moonpetal": 1},
+        "item_type": "weapon", "base_id": "longbow", "tier": "rare",
+        "ability": "strength", "dc": 16, "profession": "blacksmithing",
+        "name": "Masterwork Longbow",
+    },
+    "masterwork_leather_armor": {
+        "materials": {"silverleaf_herb": 3, "iron_ore": 1},
+        "item_type": "armor", "base_id": "leather", "tier": "rare",
+        "ability": "strength", "dc": 14, "profession": "blacksmithing",
+        "name": "Masterwork Leather Armor",
+    },
+    "masterwork_rapier": {
+        "materials": {"iron_ore": 5, "moonpetal": 1},
+        "item_type": "weapon", "base_id": "rapier", "tier": "rare",
+        "ability": "strength", "dc": 16, "profession": "blacksmithing",
+        "name": "Masterwork Rapier",
+    },
+    # Full-ladder parity for one of the new bases (matching longsword's
+    # own masterwork -> journeyman -> ... spread) -- rapier, since a
+    # duelist's-weapon flavor fits a guild-gated upper tier naturally.
+    "duelists_rapier": {
+        "materials": {"iron_ore": 9, "moonpetal": 3},
+        "item_type": "weapon", "base_id": "rapier", "tier": "very_rare",
+        "ability": "strength", "dc": 20, "profession": "blacksmithing",
+        "name": "Duelist's Rapier", "requires_guild": "forge_guild",
+    },
 }
 
 

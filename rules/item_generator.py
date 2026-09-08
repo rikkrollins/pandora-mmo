@@ -36,6 +36,16 @@ WEAPON_BASES = {
     # silently never trigger for it.
     "greataxe": {"damage_dice": "1d12", "ability": "strength", "base_price": 30, "weapon_category": "martial", "two_handed": True},
     "longbow": {"damage_dice": "1d8", "ability": "dexterity", "base_price": 50, "weapon_category": "martial", "ranged": True},
+    # Forge Guild ladder expansion (2026-09-08, per Coffee: "investigate
+    # how to forge the next lv of weapons... if there isnt next lv
+    # weapons and armour available add it in"). items.py's Stormcaller
+    # Rapier (a static rare item) had no real base entry here at all --
+    # a genuine gap, unlike dagger/shortsword/longbow above which were
+    # already real bases with just no ADVANCED_RECIPES entry yet. Real
+    # 5E rapier: martial, finesse (dexterity), no other bases here model
+    # "finesse" as a distinct flag, so this matches dagger/shortsword's
+    # own dexterity-based shape instead.
+    "rapier": {"damage_dice": "1d8", "ability": "dexterity", "base_price": 25, "weapon_category": "martial"},
 }
 
 ARMOR_BASES = {

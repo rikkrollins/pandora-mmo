@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.546] — feat: advanced-recipe coverage for the remaining weapon/armor bases
+
+Real gap found investigating "forge the next lv of weapons/armour"
+(per Coffee): `ADVANCED_RECIPES` (rules/crafting.py) already had a
+real 4-tier Forge Guild ladder (masterwork → journeyman → master/
+grandmaster → godsforged, producing real generated rare→mythic gear
+via `generate_item`) — but only for `longsword`/`greataxe`/
+`chain_shirt`/`chain_mail`/`wooden_shield`. `dagger`/`shortsword`/
+`longbow`/`leather` were already real bases in `rules/item_generator.py`
+with no recipe at all, and `rapier` had no base entry whatsoever
+(items.py's static Stormcaller Rapier had nothing backing it in the
+generator). Added: `masterwork_dagger`, `masterwork_shortsword`,
+`masterwork_longbow`, `masterwork_leather_armor`, `masterwork_rapier`
+(all rare, no gate, same shape as the existing 4 masterwork recipes),
+plus a new `rapier` `WEAPON_BASES` entry and a guild-gated upper tier
+(`duelists_rapier`, very_rare) for full-ladder parity on one of the new
+bases, matching longsword's own masterwork→journeyman spread. New
+regression test exercises every new recipe id through the real
+`resolve_advanced_craft` path.
+
 ## [1.27.545] — feat: empty-handed Labyrinth enemies now have a real steal fallback
 
 Real gap (per Coffee: "any enemies that have nothing to steal shud

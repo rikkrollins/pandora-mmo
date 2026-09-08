@@ -13108,6 +13108,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["generated_item"]["type"], "weapon")
         self.assertEqual(result["generated_item"]["rarity"], "rare")
 
+    def test_new_advanced_recipes_cover_the_remaining_weapon_and_armor_bases(self):
+        """
+        Real gap (2026-09-08, per Coffee: "investigate how to forge the
+        next lv of weapons / armour - if there isnt next lv weapons and
+        armour available add it in"). Before this, ADVANCED_RECIPES only
+        covered longsword/greataxe/chain_shirt/chain_mail/wooden_shield --
+        dagger/shortsword/longbow/leather were real rules.item_generator
+        bases with no recipe at all, and rapier had no base entry
+        whatsoever (added alongside these recipes). Exercises every new
+        recipe id through the real resolve_advanced_craft path.
+        """
+        from rules.crafting import resolve_advanced_craft, ADVANCED_RECIPES
+        new_recipes = {
+            "masterwork_dagger": "weapon", "masterwork_shortsword": "weapon",
+            "masterwork_longbow": "weapon", "masterwork_leather_armor": "armor",
+            "masterwork_rapier": "weapon", "duelists_rapier": "weapon",
+        }
+        for uid, (recipe_id, expected_type) in enumerate(new_recipes.items()):
+            telegram_user_id = 950920 + uid
+            character = make_basic_character(telegram_user_id, f"GearTester{uid}", char_class="Fighter", current_location="crossroads_tavern")
+            recipe = ADVANCED_RECIPES[recipe_id]
+            for item_id, qty in recipe["materials"].items():
+                db.add_item(telegram_user_id, -999, item_id, qty)
+            character = db.get_character(telegram_user_id, -999)
+            succeeded = False
+            for _ in range(40):
+                result = resolve_advanced_craft(character, recipe_id, practiced_bonus=50)
+                if result["outcome"] == "success":
+                    succeeded = True
+                    break
+            self.assertTrue(succeeded, f"{recipe_id} never succeeded even with a +50 practiced bonus")
+            self.assertEqual(result["generated_item"]["type"], expected_type, recipe_id)
+            self.assertEqual(result["generated_item"]["rarity"], recipe["tier"], recipe_id)
+
     def test_recipe_requirement_gate_rejects_wrong_guild_and_insufficient_rebirth(self):
         """
         Real feature (2026-08-11): guild-tier ladder recipes carry
