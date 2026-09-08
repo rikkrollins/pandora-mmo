@@ -12557,25 +12557,21 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             await _self_heal_stuck_ai_turn(update, session)
             session = sessions.get_session_for_user(chat_id, user_id)
             if session is None:
-                await update.effective_chat.send_message(
-                    "Combat had stalled and just resolved itself — nothing active right now.",
-                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-                )
+                # Real live crash (2026-09-07, error log): a raw send
+                # here had no RetryAfter retry -- _safe_send exists
+                # specifically for this, same fix already applied
+                # reactively to _do_fast_travel/_do_use_item and
+                # siblings (see [[project_fast_travel_flood_control_v1_27_464]]).
+                await _safe_send(update, "Combat had stalled and just resolved itself — nothing active right now.")
                 return
         if session.current_participant_id() != user_id:
             current_name = session.current_participant()["name"]
-            await update.effective_chat.send_message(
-                f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, f"It's not your turn — it's **{current_name}**'s turn.")
             return
 
         attacker = session.current_participant()
         if attacker["hp_current"] <= 0:
-            await update.effective_chat.send_message(
-                "You're unconscious (0 HP) and can't act until healed.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, "You're unconscious (0 HP) and can't act until healed.")
             return
 
         opposing = session.living_on_side(session.opposing_side(user_id))
@@ -12628,9 +12624,12 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
 
         if not opposing:
             if not await _try_end_stale_combat(update, session):
-                await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-                )
+                # Real live crash (2026-09-07, error log, found in
+                # _do_attack, same identical pattern repeated at every
+                # sibling combat-resolution site) -- a raw send here had
+                # no RetryAfter retry; _safe_send exists specifically
+                # for this.
+                await _safe_send(update, "No valid targets remain.")
             return
 
         # Physical-dice mode (2026-07-16, per Coffee): only the FIRST
@@ -14592,33 +14591,32 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
             await _self_heal_stuck_ai_turn(update, session)
             session = sessions.get_session_for_user(chat_id, user_id)
             if session is None:
-                await update.effective_chat.send_message(
-                    "Combat had stalled and just resolved itself — nothing active right now.",
-                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-                )
+                # Real live crash (2026-09-07, error log): a raw send
+                # here had no RetryAfter retry -- _safe_send exists
+                # specifically for this, same fix already applied
+                # reactively to _do_fast_travel/_do_use_item and
+                # siblings (see [[project_fast_travel_flood_control_v1_27_464]]).
+                await _safe_send(update, "Combat had stalled and just resolved itself — nothing active right now.")
                 return
         if session.current_participant_id() != user_id:
             current_name = session.current_participant()["name"]
-            await update.effective_chat.send_message(
-                f"It's not your turn — it's **{current_name}**'s turn.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, f"It's not your turn — it's **{current_name}**'s turn.")
             return
 
         attacker = session.current_participant()
         if attacker["hp_current"] <= 0:
-            await update.effective_chat.send_message(
-                "You're unconscious (0 HP) and can't act until healed.",
-                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, "You're unconscious (0 HP) and can't act until healed.")
             return
 
         opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
             if not await _try_end_stale_combat(update, session):
-                await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-                )
+                # Real live crash (2026-09-07, error log, found in
+                # _do_attack, same identical pattern repeated at every
+                # sibling combat-resolution site) -- a raw send here had
+                # no RetryAfter retry; _safe_send exists specifically
+                # for this.
+                await _safe_send(update, "No valid targets remain.")
             return
         target = _pick_target(action_text, opposing)
 
@@ -21874,9 +21872,7 @@ async def _do_craft(update: Update, text: str) -> None:
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!")
         return
 
     # Magic item system Phase 7 (2026-08-02): advanced recipes are
@@ -21910,10 +21906,10 @@ async def _do_craft(update: Update, text: str) -> None:
     if recipe_id is None:
         recipe_names = ", ".join(items_module.get_item(r)["name"] for r in RECIPES)
         adv_names = ", ".join(r["name"] for r in ADVANCED_RECIPES.values())
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"Not sure what you're trying to craft. Known recipes: {recipe_names}. "
             f"Advanced recipes: {adv_names}.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -21925,9 +21921,7 @@ async def _do_craft(update: Update, text: str) -> None:
     # requires_guild/min_rebirth; ungated recipes are unaffected.
     gate_rejection = recipe_requirement_gate(character, recipe)
     if gate_rejection:
-        await update.effective_chat.send_message(
-            gate_rejection, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, gate_rejection)
         return
 
     # 2026-07-14, per Coffee: crafting is its own named, levelable
@@ -21972,10 +21966,11 @@ async def _do_craft(update: Update, text: str) -> None:
         need = ", ".join(
             f"{qty}x {items_module.get_item(i)['name']}" for i, qty in recipe["materials"].items()
         )
-        await update.effective_chat.send_message(
-            f"You don't have the materials for that. You need: {need}.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        # Real live crash (2026-09-07, error log, 3 occurrences): a raw
+        # send here had no RetryAfter retry -- _safe_send exists
+        # specifically for this, same fix already applied reactively
+        # to _do_fast_travel/_do_use_item and siblings.
+        await _safe_send(update, f"You don't have the materials for that. You need: {need}.")
         return
 
     for item_id, qty in result["materials_consumed"].items():
@@ -23205,9 +23200,12 @@ async def _do_breath_weapon(update: Update) -> None:
         opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
             if not await _try_end_stale_combat(update, session):
-                await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-                )
+                # Real live crash (2026-09-07, error log, found in
+                # _do_attack, same identical pattern repeated at every
+                # sibling combat-resolution site) -- a raw send here had
+                # no RetryAfter retry; _safe_send exists specifically
+                # for this.
+                await _safe_send(update, "No valid targets remain.")
             return
         target = opposing[0]
 
@@ -23321,9 +23319,12 @@ async def _do_use_environment(update: Update) -> None:
         opposing = session.living_on_side(session.opposing_side(user_id))
         if not opposing:
             if not await _try_end_stale_combat(update, session):
-                await update.effective_chat.send_message(
-                    "No valid targets remain.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-                )
+                # Real live crash (2026-09-07, error log, found in
+                # _do_attack, same identical pattern repeated at every
+                # sibling combat-resolution site) -- a raw send here had
+                # no RetryAfter retry; _safe_send exists specifically
+                # for this.
+                await _safe_send(update, "No valid targets remain.")
             return
 
         # Real live feedback (2026-08-26, per Coffee, dev-bridge: "it

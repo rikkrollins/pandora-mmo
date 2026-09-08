@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.543] — fix: raw sends in `_do_attack`/`_do_craft` had no flood-control retry
+
+Found via the error log: real RetryAfter (Telegram flood control)
+crashes in `_do_attack` (turn/target rejection messages) and
+`_do_craft` (missing-materials, no-recipe-found, and guild-gate
+rejection messages) -- the same recurring bug class already fixed
+reactively in `_do_fast_travel`/`_do_use_item` and siblings (see
+[[project_fast_travel_flood_control_v1_27_464]]): a raw
+`send_message` with no retry silently eats the reply during a real
+flood-control window. Converted every raw send in both functions to
+`_safe_send`. Fixed reactively on real evidence only, per this
+project's own standing policy -- not a blanket sweep (~470+ other raw
+send sites remain elsewhere, untouched).
+
 ## [1.27.542] — fix: a stale overworld travel button could crash after entering the Labyrinth
 
 Found via the error log (two real players hit this independently,
