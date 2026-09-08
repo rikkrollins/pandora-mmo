@@ -4710,6 +4710,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ["my sheet", "my character", "my stats", "my class"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_sheet", text)
 
+    def test_my_player_sheet_phrasings_show_the_askers_own_sheet_not_a_search(self):
+        """
+        Real live report (2026-09-07, dev-bridge, Coffee, screenshot):
+        "Open my player sheet" answered "Nobody named player is playing
+        right now" -- the named-sheet regex already special-cased
+        "character" as a real filler word to skip before "sheet" (so
+        "my character sheet" correctly captured "my", excluded below),
+        but never gave "player" the same treatment, so it captured
+        "player" itself as a literal target name to search for. Covers
+        every phrasing Coffee's own report named: view/open/look at.
+        """
+        for text in [
+            "open my player sheet", "view my player sheet", "look at my player sheet",
+            "check my player sheet", "open my player's sheet", "show my player sheet",
+        ]:
+            result = _keyword_fallback(text, [])
+            self.assertEqual(result["action"], "check_sheet", text)
+            self.assertIsNone(result.get("target"), f"{text!r} must show the asker's OWN sheet, not search for a character named 'player': {result}")
+
     async def test_compound_message_still_sends_its_location_image(self):
         """
         Real live bug, caught via topic-activity monitoring on a real
@@ -39387,6 +39406,55 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         for enemy in [p for p in session.participants if session.sides.get(p["telegram_user_id"]) == "enemy"]:
             enemy["hp_current"] = 0
         sessions.end_session(chat_id, session)
+
+    async def test_menu_actions_now_work_inside_the_labyrinth(self):
+        """
+        Real live reports (2026-09-07, dev-bridge, Coffee + Sugar, 4
+        separate screenshots): "Give 10 scrolls of fireball to
+        @player", "Open trade with @player", "Auto equip my
+        character", and "Move laurienna to backrow" all hit the same
+        generic Labyrinth refusal. Coffee's own follow-up -- "most of
+        the things in the menu system should be available to the
+        character" -- made this a real allowlist audit, not four more
+        one-off patches. Confirms every newly-added action at least
+        clears the allowlist gate (never the generic "doesn't work
+        this deep" refusal), not that each one's own real handler
+        fully succeeds with no real target/item/trade-partner given.
+        """
+        user_id, chat_id = 962206, -962206
+        make_basic_character(user_id, "LabyrinthMenuTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        actions_and_text = [
+            ("check_sheet", "open my player sheet"),
+            ("check_menu", "open the menu"),
+            ("check_equip_menu", "show my equip menu"),
+            ("check_magic", "show my magic"),
+            ("check_remnants", "show my remnants"),
+            ("check_story", "check my story so far"),
+            ("auto_equip", "auto equip my character"),
+            ("give_item", "give 1 healing potion to nobody"),
+            ("trade_request", "open trade with nobody"),
+            ("trade_status", "trade status"),
+            ("trade_cancel", "cancel the trade"),
+            ("set_front_row", "move me to the front row"),
+            ("set_back_row", "move me to the back row"),
+            ("bench_party_member", "bench myself"),
+            ("unbench_party_member", "unbench myself"),
+            ("equip_item", "equip nothing"),
+            ("unequip_item", "unequip nothing"),
+        ]
+        for action, raw_text in actions_and_text:
+            sink = []
+            await bot._dispatch_intent(
+                FakeUpdate(user_id, raw_text, sink, chat_id=chat_id), DummyContext(),
+                {"action": action, "raw_text": raw_text}, raw_text,
+            )
+            self.assertFalse(
+                any("doesn't work this deep" in s for s in sink),
+                f"{action!r} ({raw_text!r}) still hit the generic Labyrinth refusal: {sink}",
+            )
 
     async def test_ambient_ai_chat_inside_the_labyrinth_stays_silent_not_a_visible_refusal(self):
         """

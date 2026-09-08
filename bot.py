@@ -34036,12 +34036,34 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # image) -- it never touches cl.get_location/CAMPAIGN at all, so
     # it's Labyrinth-safe by construction, same as every other action
     # added to this list above.
+    # Real live reports (2026-09-07, dev-bridge, Coffee + Sugar, 4
+    # separate screenshots): "Give 10 scrolls of fireball to @player",
+    # "Open trade with @player", "Auto equip my character"/"my
+    # character", and "Move laurienna to backrow" all hit this same
+    # generic refusal deep in the Labyrinth -- Coffee's own follow-up,
+    # "most of the things in the menu system should be available to
+    # the character," made clear this needed a real audit of the whole
+    # allowlist against the menu system, not four more one-off patches.
+    # Every action added below was confirmed CAMPAIGN-agnostic first,
+    # same discipline as everything already on this list: none of
+    # give_item/trade_*/auto_equip/equip_item/unequip_item/
+    # set_front_row/set_back_row/bench_party_member/unbench_party_
+    # member/check_sheet/check_menu/check_equip_menu/check_magic/
+    # check_remnants/check_story ever call cl.get_location or index
+    # CAMPAIGN["locations"] anywhere in their real bodies (check_story
+    # only reads CAMPAIGN["quests"], a plain dict with no location
+    # concept at all) -- every one degrades gracefully or simply
+    # doesn't care what LABYRINTH_LOCATION_SENTINEL even is.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
         "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
         "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant", "find_merchant",
         "rest", "go_inactive", "check_labyrinth_seed", "load_labyrinth_seed", "check_formation",
+        "give_item", "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
+        "auto_equip", "equip_item", "unequip_item", "set_front_row", "set_back_row",
+        "bench_party_member", "unbench_party_member", "check_sheet", "check_menu",
+        "check_equip_menu", "check_magic", "check_remnants", "check_story",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",

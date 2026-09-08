@@ -696,9 +696,19 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # excluded-words guard keeps "my"/"the"/pronoun-only phrasing
     # ("check my character sheet") from being misread as a party
     # member literally named "my".
-    named_sheet_match = re.search(r"(\w+)(?:'s)? (?:character )?sheet", lowered)
+    # Real live report (2026-09-07, dev-bridge, Coffee, screenshot: "Open
+    # my player sheet" -> "Nobody named player is playing right now").
+    # Root cause: this regex's own filler-word guard already special-
+    # cased "(?:character )?" as an optional literal to skip before
+    # "sheet", so "my character sheet" correctly captured "my" (excluded
+    # below) -- but "player" was never given the same treatment, so "my
+    # PLAYER sheet" instead captured "player" as the word immediately
+    # before "sheet" and misread it as a real target name to search for.
+    # "player"/"player's" are exactly as generic a filler as "character"
+    # here -- nobody is ever named literally "player".
+    named_sheet_match = re.search(r"(\w+)(?:'s)? (?:character |player )?sheet", lowered)
     if named_sheet_match and named_sheet_match.group(1) not in (
-        "my", "the", "a", "an", "her", "his", "their", "your", "our"
+        "my", "the", "a", "an", "her", "his", "their", "your", "our", "player", "players"
     ):
         return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
 
@@ -1917,7 +1927,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         "my sheet", "my stats", "my hp", "my health", "my character", "status",
         "active character", "current character", "who am i playing", "which character am i",
         "who am i currently playing", "my class", "what class", "my race", "what race",
-        "my gold", "how much gold", "how much money",
+        "my gold", "how much gold", "how much money", "player sheet", "player's sheet",
     ]):
         return {**base, "action": "check_sheet"}
 

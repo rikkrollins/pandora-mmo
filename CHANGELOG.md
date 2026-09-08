@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.541] — fix: "my player sheet" misread as a name search + most menu actions now work in the Labyrinth
+
+Two real dev-bridge gaps found via proactive review of unaddressed
+reports (Coffee + Sugar, 5 screenshots, 2026-09-07):
+
+- "Open my player sheet" answered "Nobody named player is playing
+  right now" -- a regex meant to extract a NAMED target from "X's
+  sheet"/"X sheet" phrasing already special-cased "character" as a
+  real filler word to skip before matching "sheet", but never gave
+  "player" the same treatment, so it captured "player" itself as a
+  literal name to search for. Fixed the same way "character" already
+  was, plus a direct keyword fallback for "my player('s) sheet".
+- give_item, the full trade_* family, auto_equip, equip_item/
+  unequip_item, set_front_row/set_back_row, bench/unbench_party_
+  member, and check_sheet/check_menu/check_equip_menu/check_magic/
+  check_remnants/check_story all hit the generic "That doesn't work
+  this deep in the Labyrinth" refusal -- confirmed CAMPAIGN-agnostic
+  (none ever call cl.get_location or index CAMPAIGN["locations"]) and
+  added to the Labyrinth's action allowlist, same discipline every
+  earlier addition to that list already used. Real live reports named
+  give/trade/auto-equip/formation specifically; the fuller list follows
+  Coffee's own explicit "most of the things in the menu system should
+  be available to the character."
+
 ## [1.27.540] — feature: the Labyrinth now genuinely gets larger, harder, and more complex with real depth
 
 Per Coffee, after a direct measurement audit: "make labyrinth ordinary
