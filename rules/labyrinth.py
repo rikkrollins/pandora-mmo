@@ -115,6 +115,23 @@ _MINIBOSS_CHANCE = 0.3
 # be a memorable exception on a floor, not the new normal).
 _MINIBOSS_REPEAT_CHANCE = 0.25
 
+# Real fix (2026-09-08, per Coffee: "make labyrinth ordinary floors
+# more complex like dungeons in the samples too" -- direct measurement
+# showed ordinary, non-checkpoint floors averaging 11-15 rooms with
+# ZERO Advanced Dungeons mechanics ever, at ANY depth, since the
+# mid-branch gate and Key Cavern mesh were both hard-gated to
+# `checkpoint and boss_pool`). Both mechanics are pure data operations
+# with no real dependency on a boss existing (unlike the convergence
+# gate and sequential chain, which genuinely do gate the boss/stairs
+# approach and stay checkpoint-exclusive) -- ordinary floors now roll
+# for them too, at a real, floor-scaled chance via `_scaled_chance`,
+# same "roll for it, grows with depth" discipline as every other
+# optional gate in this file already uses. Checkpoint floors are
+# UNCHANGED (still guaranteed whenever eligible, no chance roll) --
+# these are a genuinely separate, additive chance, ordinary floors only.
+_MID_BRANCH_ORDINARY_CHANCE = 0.1
+_KEY_MESH_ORDINARY_CHANCE = 0.08
+
 # Real gap found while confirming Bottle Grotto coverage (2026-09-03,
 # per Coffee: "are you sure everything is included to make a dungeon
 # like the bottle grotto or face shrine or the Eagle's Tower?"):
@@ -773,7 +790,34 @@ def _add_loop_back_connections(
             neighbor_id = by_cell.get((x + dx, y + dy))
             if neighbor_id is None or neighbor_id in excluded:
                 continue
-            if neighbor_id in room.get("connections", []) or neighbor_id in room.get("warps", []):
+            # Real bug found and fixed (2026-09-08, surfaced by the
+            # depth-scaling work above -- more real branches/rooms means
+            # more real grid-adjacency for this to find, which finally
+            # rolled a seed that hit it): this only ever checked plain
+            # `connections`/`warps` for an existing edge, never
+            # `locked_connections` -- a room already targeted by some
+            # OTHER mechanic's own locked edge (a collapse-puzzle's echo
+            # shortcut, a mid-branch/mesh gate, a lever) could still get
+            # a SECOND, entirely redundant PLAIN connection to the exact
+            # same destination, silently making that other gate a
+            # hollow no-op (the plain edge bypasses it for free). A
+            # pre-existing gap, not something this session's own depth
+            # changes introduced -- just never coincidentally rolled
+            # before.
+            # Checked in BOTH directions -- every existing gate in this
+            # generator is deliberately asymmetric (the locked entry
+            # lives on only ONE side, e.g. this exact echo-shortcut
+            # mechanic never writes a reverse entry on its own far
+            # room), so checking only `room`'s own locked_connections
+            # would miss it whenever this loop happens to visit the far
+            # room first (dict iteration order depends on generation
+            # order, not on which side owns the lock).
+            if (
+                neighbor_id in room.get("connections", [])
+                or neighbor_id in room.get("warps", [])
+                or neighbor_id in room.get("locked_connections", {})
+                or rid in rooms[neighbor_id].get("locked_connections", {})
+            ):
                 continue
             pair = frozenset((rid, neighbor_id))
             if pair in seen_pairs:
@@ -784,7 +828,7 @@ def _add_loop_back_connections(
     rng.shuffle(candidates)
     added = 0
     chance = _scaled_chance(_LOOP_BACK_CHANCE, floor, 0.05, 0.9)
-    max_edges = _LOOP_BACK_MAX_EDGES + min(floor // 10, 5)  # same depth-scaled-headroom shape as side_room_max above
+    max_edges = _LOOP_BACK_MAX_EDGES + min(floor // 10, 12)  # real ceiling raised alongside side_room_max above (2026-09-08) -- more real branches at depth means more real grid-adjacency for this to find in the first place
     for a, b in candidates:
         if added >= max_edges:
             break
@@ -941,7 +985,16 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # both key off `room_ids`, the flat hub-adjacent set -- keep working
     # exactly as before), but a branch can now run 0-2 rooms DEEPER, a
     # real path rather than a single dead-end hop.
-    side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 20, 2)  # depth-scaled RNG: more chambers per floor, deeper in -- gentler growth now that the base range itself is smaller (2026-09-05 room-count reduction)
+    # Real fix (2026-09-08, per Coffee: "fix the engine so it
+    # proceedurally gets larger and harder, and more complex/advanced
+    # pathing" -- real measurement showed checkpoint floors plateauing
+    # at ~21-22 rooms from floor 25 onward and never growing again, all
+    # the way out to floor 100, because this cap topped out at floor 40
+    # (`min(floor // 20, 2)`). Raised ceiling, much further floor
+    # runway before it plateaus again (floor 160 now, not floor 40) --
+    # still a real cap, not unbounded growth, so generation time and
+    # room-name pool usage stay sane at extreme depth.
+    side_room_max = _SIDE_ROOM_COUNT_RANGE[1] + min(floor // 8, 10)
     # Real, deliberate exception to that same reduction (2026-09-05,
     # per Coffee: "i dont want the dungeons smaller, i want the
     # dungeons to be getting larger... this is our goal is larger
@@ -967,7 +1020,15 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         rooms[room_id] = room
         room_ids.append(room_id)
         chain = [room_id]
-        depth = rng.choices(*_BRANCH_DEPTH_WEIGHTS)[0]
+        # Real fix (2026-09-08, per Coffee: "proceedurally gets larger
+        # and harder... more complex/advanced pathing"): individual
+        # branches themselves now also run genuinely deeper at real
+        # depth, not just more numerous -- _BRANCH_DEPTH_WEIGHTS alone
+        # never scaled with floor at all, so a floor 100 branch was
+        # exactly as long, on average, as a floor 1 one. Same capped-
+        # growth shape as side_room_max above (a real ceiling, not
+        # unbounded).
+        depth = rng.choices(*_BRANCH_DEPTH_WEIGHTS)[0] + min(floor // 15, 4)
         parent_id = room_id
         for _ in range(depth):
             # _new_side_room's own 2nd positional param is only ever used
@@ -1274,7 +1335,10 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         convergence_only = {tuple(c) for c in convergence_chains}
         mid_branch_targets = [c for c in other_chains if len(c) >= 3 and tuple(c) not in convergence_only]
     mid_branch_chain: list | None = None
-    if checkpoint and boss_pool and mid_branch_targets:
+    if mid_branch_targets and (
+        (checkpoint and boss_pool)
+        or (not checkpoint and rng.random() < _scaled_chance(_MID_BRANCH_ORDINARY_CHANCE, floor, 0.006, 0.55))
+    ):
         mid_branch_chain = rng.choice(mid_branch_targets)
         source_candidates = [c for c in other_chains if tuple(c) != tuple(mid_branch_chain)]
         if source_candidates:
@@ -1342,7 +1406,10 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # one) or forms a strict, ordered chain (v5 above).
     mesh_used = used_for_advanced | ({tuple(mid_branch_chain)} if mid_branch_chain else set())
     mesh_eligible = [c for c in other_chains if len(c) >= 2 and tuple(c) not in mesh_used]
-    if checkpoint and boss_pool and len(mesh_eligible) >= 2:
+    if len(mesh_eligible) >= 2 and (
+        (checkpoint and boss_pool)
+        or (not checkpoint and rng.random() < _scaled_chance(_KEY_MESH_ORDINARY_CHANCE, floor, 0.005, 0.45))
+    ):
         mesh_branches = rng.sample(mesh_eligible, 2)
         mesh_switch_ids = []
         for i, branch in enumerate(mesh_branches):
@@ -1959,12 +2026,70 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             if c is not main_chain and len(c) >= 2 and c[-1] not in shadowed and c[-1] not in warp_endpoint_ids
         ]
         if len(tail_merge_candidates) >= 2:
+            # Real bug found and fixed (2026-09-08, same root cause and
+            # fix as `_add_loop_back_connections`'s own identical gap
+            # above): a branch tail already used as an echo-shortcut's
+            # own SOURCE (a real `locked_connections` entry pointing at
+            # some other room) could still get picked here too, merging
+            # it into a SECOND, unconditionally-open destination -- the
+            # merge doesn't touch the locked entry itself, but a player
+            # reading "some other part of this floor" narration expects
+            # the merge target to be a genuinely NEW room, not one that
+            # happens to already be the far end of an existing gate. A
+            # real, single re-roll is enough here (unlike loop-back,
+            # which needs the check inline for every one of many
+            # candidate pairs) -- retry once excluding any tail with an
+            # existing locked_connections entry either direction.
+            def _tail_already_gated(tail_id: str) -> bool:
+                if rooms[tail_id].get("locked_connections"):
+                    return True
+                return any(tail_id in r.get("locked_connections", {}) for r in rooms.values())
+
+            tail_merge_candidates = [c for c in tail_merge_candidates if not _tail_already_gated(c[-1])]
+        if len(tail_merge_candidates) >= 2:
             merge_a, merge_b = rng.sample(tail_merge_candidates, 2)
             tail_a, tail_b = merge_a[-1], merge_b[-1]
             rooms[tail_a]["connections"].append(tail_b)
             rooms[tail_b]["connections"].append(tail_a)
             rooms[tail_a]["description"] += " A real passage leads on from here, deeper into the floor."
             rooms[tail_b]["description"] += " A real passage leads on from here, deeper into the floor."
+
+    # Real, general fix (2026-09-08, found running the full suite right
+    # after enabling the mid-branch gate/Key Cavern mesh on ordinary
+    # floors too): every mechanic below the warp block already excludes
+    # `warp_endpoint_ids` from ITS OWN new edges, but nothing has ever
+    # protected a warp from a shortcut landing ELSEWHERE in the graph
+    # that shrinks the real distance BETWEEN the warp's own two rooms
+    # without ever touching either one directly (an echo-shortcut/lever/
+    # tail-merge edge on a THIRD pair of rooms can still shorten the
+    # long way around) -- confirmed via a real seed this exact session
+    # produced. Rather than trying to defend every individual mechanic
+    # against every OTHER mechanic's own edges (an ever-growing, easy-
+    # to-miss list), this re-validates the warp's own real "genuinely
+    # saves distance" invariant ONE LAST TIME here, after every other
+    # topology-mutating mechanic above has already run -- same BFS
+    # shape the real regression test uses (`connections` +
+    # `locked_connections`, warps themselves excluded). If some later
+    # edge shrank it below a real 4-hop savings, the warp is removed
+    # entirely rather than left as a hollow, misleading no-op --
+    # exactly Coffee's own original complaint about this mechanic.
+    if warp_endpoint_ids:
+        warp_a, warp_b = tuple(warp_endpoint_ids)
+        visited = {warp_a: 0}
+        frontier = [warp_a]
+        while frontier:
+            cur = frontier.pop(0)
+            for nb in list(rooms[cur].get("connections", [])) + list(rooms[cur].get("locked_connections", {}).keys()):
+                if nb not in visited and nb in rooms:
+                    visited[nb] = visited[cur] + 1
+                    frontier.append(nb)
+        if visited.get(warp_b, 0) < 4:
+            rooms[warp_a]["warps"].remove(warp_b)
+            rooms[warp_b]["warps"].remove(warp_a)
+            if not rooms[warp_a]["warps"]:
+                del rooms[warp_a]["warps"]
+            if not rooms[warp_b]["warps"]:
+                del rooms[warp_b]["warps"]
 
     return {
         "rooms": rooms, "hub_room_id": hub_id, "connector_room_id": connector["id"],

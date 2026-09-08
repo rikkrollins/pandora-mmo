@@ -2,6 +2,51 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.540] — feature: the Labyrinth now genuinely gets larger, harder, and more complex with real depth
+
+Per Coffee, after a direct measurement audit: "make labyrinth ordinary
+floors more complex like dungeons in the samples too, and fix the
+engine so it proceedurally gets larger and harder, and more complex/
+advanced pathing." Real measurement before this fix: ordinary floors
+plateaued at 11-15 rooms with ZERO Advanced Dungenos mechanics at ANY
+depth (every one of those was hard-gated to checkpoint floors only),
+and even checkpoint floors stopped growing entirely past floor 25-40
+(~21-22 rooms all the way out to floor 100+) because every depth-scaling
+formula in the generator capped out early.
+
+- Branch-root count and individual branch depth both now scale much
+  further with real floor depth (old ceiling ~floor 40, new ceiling
+  ~floor 150-160) instead of plateauing.
+- The mid-branch gate and Key Cavern redundant-key-mesh mechanics --
+  previously checkpoint-exclusive -- now roll on ORDINARY floors too,
+  at a real, floor-scaled chance, since neither actually depends on a
+  boss existing (unlike the convergence gate and sequential chain,
+  which genuinely do gate the boss/stairs approach and stay
+  checkpoint-only by design).
+- Loop-back edge budget raised to match.
+
+Real measured result: ordinary floors now grow from ~12 rooms (floor
+3) to ~69 rooms (floor 100), with the fraction carrying at least one
+advanced mechanic climbing from 7% to 100%. Checkpoint floors grow
+from ~18 to ~69 rooms over the same range, with average stacked
+mechanics climbing from ~2.9 to ~3.9.
+
+Found and fixed two real, pre-existing bugs exposed by the added
+density (not introduced by it -- confirmed via direct reproduction,
+both existed before today, just never coincidentally rolled): (1)
+`_add_loop_back_connections` only ever checked `connections`/`warps`
+for an existing edge before adding a new one, never `locked_connections`
+-- a room already targeted by some other gate's own locked edge could
+still get a second, redundant PLAIN connection to the identical
+destination, silently making that gate a hollow no-op; (2) the
+checkpoint-only branch-tail-merge mechanic had the identical gap.
+Both fixed with the same real, bidirectional `locked_connections`
+check. Also fixed a real warp-distance regression risk the same
+density increase could expose: a final revalidation pass now runs
+after every other topology-mutating mechanic, removing a warp outright
+if a later shortcut ever shrinks its own real distance-saved guarantee
+below a genuine 4-hop savings.
+
 ## [1.27.539] — fix: combat "stuck in a loop" safety net was too tight for real high-HP fights
 
 Investigated a real dev-bridge report (screenshot: combat auto-ended
