@@ -126,7 +126,7 @@ from rules.leveling import (
     rebirth_hp_max, power_scale_ratio, full_hp_max_for, proficiency_bonus_for_level,
     MEDIUM_ENCOUNTER_XP_PER_CHARACTER, backstab_tier_multiplier, describe_subclass_effect,
     world_resistance_pct, world_damage_multiplier,
-    labyrinth_depth_multiplier, labyrinth_depth_resistance_pct,
+    labyrinth_depth_multiplier, labyrinth_depth_resistance_pct, labyrinth_monster_native_power_multiplier,
     formation_target_discipline, formation_target_weight_floor,
     rebirth_power_multiplier, extra_monster_actions,
 )
@@ -9481,11 +9481,22 @@ def _build_labyrinth_enemy(monster_key: str, floor: int, index: int, total: int,
     "frenzied" sets a plain flag the real per-turn attack-count code
     (near extra_monster_actions) reads directly, since that scaling
     happens live during combat resolution, not at build time.
+
+    `native_mult` (2026-09-08, real live bug: "when we attack we are
+    missing most of the time"): the catalog-wide monster pool means a
+    floor-1 fight could serve a monster with its full, unscaled native AC/
+    HP -- labyrinth_monster_native_power_multiplier normalizes that native
+    power toward what THIS floor should offer, using the same XP-budget
+    shrink/grow math already calibrated elsewhere in this file, before the
+    depth multiplier above compounds it further with floor. Still "depth
+    ALONE" in spirit -- this never looks at the real party, only at floor
+    and the monster's own template.
     """
     template = cl.get_monster_template(CAMPAIGN, monster_key)
     if template is None:
         return None
-    stat_mult = labyrinth_depth_multiplier(floor)
+    native_mult = labyrinth_monster_native_power_multiplier(floor, template.get("xp_reward", 0))
+    stat_mult = labyrinth_depth_multiplier(floor) * native_mult
     if modifier == "dangerous":
         stat_mult *= 1.2
     enemy_id = -4_000_000 - (abs(hash((monster_key, floor, index))) % 100_000) - index

@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.544] — fix: Labyrinth floor 1 could serve a monster's full unscaled native AC
+
+Real live bug (per Coffee: "when we attack we are missing most of the
+time"). Root cause: `_labyrinth_monster_pool` pulls from the full,
+unfiltered 135-monster catalog on every floor, and
+`labyrinth_depth_multiplier(floor)` is exactly `1.0` at floor 1 -- so
+a floor-1 fight could serve a monster's full, raw catalog AC (up to
+24 among real non-boss monsters) with zero adjustment for whether
+that monster was ever balanced for a floor-1 fight. Confirmed real
+example: `shadow_wisp` (AC 22, xp_reward 225 -- 4.5x a level-1
+character's real 50xp Medium-encounter budget) left a level-1
+attacker needing an 18+ on a d20 just to hit it (15% hit chance).
+
+Fixed with a new, shrink-only `labyrinth_monster_native_power_
+multiplier` (`rules/leveling.py`) that normalizes a monster's native
+AC/HP toward a floor-appropriate XP budget (`labyrinth_floor_
+reference_xp_budget`, the same compounding curve `labyrinth_depth_
+multiplier` already uses, anchored to a level-1 character's real 50xp
+budget) *before* the existing depth multiplier compounds it further.
+Deliberately shrink-only, not the two-directional shrink/grow shape
+`overtuned_monster_stat_multiplier`/`undertuned_monster_stat_
+multiplier` use elsewhere -- growth is already entirely `labyrinth_
+depth_multiplier`'s job, and the floor-based reference budget is
+unbounded (grows forever with floor), so a "grow" branch would
+eventually double-count against depth's own already-compounding
+growth for every fixed-xp_reward monster at a deep enough floor. The
+correction self-limits correctly: it fades back to a true no-op once
+a floor's own budget catches up to a monster's native power, and it
+never touches an already floor-appropriate monster (a starter goblin
+at xp_reward 50 is untouched at floor 1). Verified with real hit-rate
+math (`shadow_wisp` floor 1: 15% → 95% for a level-1 attacker) and 3
+new regression tests; full `LabyrinthTests`/`DungeonEvolveTests`/
+`DungeonAuditTests` re-run clean (230/231, the 1 failure the
+documented pre-existing `test_labyrinth_rest_refused_away_from_a_
+checkpoint...` flake, confirmed 3/3 in isolation).
+
 ## [1.27.543] — fix: raw sends in `_do_attack`/`_do_craft` had no flood-control retry
 
 Found via the error log: real RetryAfter (Telegram flood control)

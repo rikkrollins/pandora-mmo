@@ -906,3 +906,53 @@ def undertuned_monster_stat_multiplier(
         return 1.0
     ceiling = UNDERTUNED_BOSS_STAT_CEILING if is_boss else UNDERTUNED_TRASH_STAT_CEILING
     return min(ceiling, reference_budget / monster_xp_reward)
+
+
+def labyrinth_floor_reference_xp_budget(floor: int) -> float:
+    """
+    The Labyrinth's own equivalent of MEDIUM_ENCOUNTER_XP_PER_CHARACTER's
+    level-1 entry (50 xp), compounding by the exact same
+    LABYRINTH_FLOOR_GROWTH_RATE labyrinth_depth_multiplier already uses --
+    so a monster whose own native xp_reward already tracks this curve is
+    left completely alone at every depth, and labyrinth_depth_multiplier
+    remains the sole source of growth once a monster's native power
+    converges with what its floor should offer.
+    """
+    return MEDIUM_ENCOUNTER_XP_PER_CHARACTER[1] * LABYRINTH_FLOOR_GROWTH_RATE ** max(floor - 1, 0)
+
+
+def labyrinth_monster_native_power_multiplier(floor: int, monster_xp_reward: int) -> float:
+    """
+    Real live bug (2026-09-08, per Coffee, dev-bridge: "when we attack we
+    are missing most of the time"): _build_labyrinth_enemy (bot.py) scales
+    a monster's raw catalog AC/HP by labyrinth_depth_multiplier ALONE,
+    which is exactly 1.0 at floor 1 -- so floor 1 could (and did) serve a
+    monster with its full, unscaled catalog AC (up to 24 among real
+    non-boss monsters, confirmed via campaign.json) with zero regard for
+    whether that monster's own native power was ever balanced for a
+    floor-1 fight. shadow_wisp (AC 22, xp_reward 225 -- 4.5x a level-1
+    character's real Medium-encounter budget of 50) was a confirmed real
+    example: a level-1 attacker needed an 18+ on a d20 just to hit it.
+
+    SHRINK-ONLY, deliberately not the two-directional shrink/grow shape
+    overtuned_monster_stat_multiplier/undertuned_monster_stat_multiplier
+    above share -- growth is already entirely labyrinth_depth_multiplier's
+    job here, and labyrinth_floor_reference_xp_budget is UNBOUNDED (it
+    compounds forever with floor, unlike the capped level-1..20 XP table
+    the party-level versions use), so a "grow an undertuned monster"
+    branch would eventually treat EVERY fixed-xp_reward monster as
+    underbudget at a deep enough floor and stack a second growth
+    multiplier on top of depth_multiplier's own already-compounding one --
+    a real double-scaling bug caught during design, not live. Shrink-only
+    is also self-limiting in the right direction: as floor deepens and
+    reference_budget grows past a monster's fixed native xp_reward, this
+    naturally fades back to 1.0 and depth_multiplier alone takes back over
+    -- exactly the "still depth ALONE, natively-fair monsters untouched"
+    behavior this needs.
+    """
+    if monster_xp_reward <= 0:
+        return 1.0
+    reference_budget = labyrinth_floor_reference_xp_budget(floor)
+    if monster_xp_reward <= reference_budget:
+        return 1.0
+    return max(0.2, reference_budget / monster_xp_reward)

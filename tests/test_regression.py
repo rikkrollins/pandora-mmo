@@ -39924,6 +39924,42 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         trash = bot._build_labyrinth_enemy("goblin", 10, 0, 1)
         self.assertFalse(trash["is_boss"], "an ordinary trash monster must still never be flagged as a boss")
 
+    def test_labyrinth_floor_1_no_longer_serves_a_native_ac_a_level_1_character_can_barely_hit(self):
+        """
+        Real live bug (2026-09-08, per Coffee, dev-bridge: "when we attack
+        we are missing most of the time"). Root cause: _labyrinth_monster_
+        pool is catalog-wide/unfiltered by floor, and labyrinth_depth_
+        multiplier(1) is exactly 1.0, so floor 1 could serve a monster's
+        full raw catalog AC with zero adjustment. shadow_wisp (real
+        catalog entry: AC 22, xp_reward 225 -- 4.5x a level-1 character's
+        real 50xp Medium-encounter budget) is the confirmed real example:
+        before this fix, a level-1 attacker (+4 total bonus) needed an 18+
+        on a d20 to hit it (15%). After labyrinth_monster_native_power_
+        multiplier normalizes native power toward the floor-1 budget, the
+        built AC must be low enough for a normal hit chance.
+        """
+        enemy = bot._build_labyrinth_enemy("shadow_wisp", 1, 0, 1)
+        self.assertLessEqual(enemy["armor_class"], 10, "floor 1 must not serve a monster this far above a level-1 party's own real encounter budget at its full native AC")
+
+    def test_labyrinth_native_power_correction_fades_out_at_deep_floors(self):
+        """
+        Shrink-only by design (see labyrinth_monster_native_power_
+        multiplier's own docstring) -- as labyrinth_floor_reference_xp_
+        budget grows past a monster's fixed native xp_reward, the
+        correction must fade back to a true no-op (1.0), leaving
+        labyrinth_depth_multiplier as the sole source of growth. A
+        lingering non-1.0 multiplier at a deep floor would double-count
+        against depth_multiplier's own already-compounding growth.
+        """
+        from rules.leveling import labyrinth_monster_native_power_multiplier
+        self.assertEqual(labyrinth_monster_native_power_multiplier(200, 225), 1.0)
+        self.assertEqual(labyrinth_monster_native_power_multiplier(200, 3250), 1.0)
+
+    def test_labyrinth_native_power_never_touches_an_already_floor_appropriate_monster(self):
+        """A monster whose native xp_reward already matches floor 1's own real budget (a starter goblin, xp_reward 50) must be left completely unscaled -- this is a correction for genuine mismatches only, not a blanket nerf."""
+        from rules.leveling import labyrinth_monster_native_power_multiplier
+        self.assertEqual(labyrinth_monster_native_power_multiplier(1, 50), 1.0)
+
     def test_generate_floor_guarantees_a_real_boss_room_on_every_checkpoint_floor(self):
         """
         Real end-of-segment boss (2026-09-05, per Coffee: "we should
