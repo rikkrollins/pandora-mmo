@@ -15,6 +15,7 @@ from class_features import is_weapon_proficient
 from guilds import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT, held_guild_ids
 import config
 import hybrid_features
+import items
 import races
 
 
@@ -335,9 +336,18 @@ def reaction_precheck(attacker: dict, defender: dict, weapon: dict, round_number
     effective_defender_ac = (
         defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
     )
+    # Same equipped ability-bonus delta resolve_attack itself applies
+    # (see its own comment) -- kept in sync so this precheck's "would it
+    # hit" agrees with the real roll using the same forced_roll below.
+    equip_ability_bonus_score = items.equipped_ability_bonus(attacker, attack_ability)
+    equip_ability_bonus = (
+        ability_modifier(attacker.get(attack_ability, 10) + equip_ability_bonus_score)
+        - ability_modifier(attacker.get(attack_ability, 10))
+    ) if equip_ability_bonus_score else 0
     attack_result = roll_attack(
         attacker, target_ac=effective_defender_ac, ability=attack_ability,
         proficient=weapon_proficient, advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll,
+        bonus=equip_ability_bonus,
     )
     if "blessed" in attacker.get("conditions", []) and not attack_result["critical_fail"] and not attack_result["critical_hit"]:
         attack_result["total"] += 2
@@ -516,6 +526,18 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     # Real Fighting Style: Archery (2026-09-04) -- "+2 to attack rolls
     # with ranged weapons," real 5E's exact wording and value.
     archery_bonus = 2 if (attacker.get("fighting_style") == "Archery" and weapon.get("ranged")) else 0
+    # Magic item system Phase 8 (2026-09-08, task #6): a real equipped
+    # "+N to a stat" magic item must actually move the attack roll, not
+    # just sit on the character sheet. The real 5E modifier DELTA
+    # (ability_modifier(base+bonus) - ability_modifier(base)), not a
+    # flat 1:1 add -- floor-division means +1 to a score doesn't always
+    # shift the modifier by a whole point. A monster/enemy attacker (no
+    # "equipped_weapon" field at all) safely resolves to 0.
+    equip_ability_bonus_score = items.equipped_ability_bonus(attacker, attack_ability)
+    equip_ability_bonus = (
+        ability_modifier(attacker.get(attack_ability, 10) + equip_ability_bonus_score)
+        - ability_modifier(attacker.get(attack_ability, 10))
+    ) if equip_ability_bonus_score else 0
     attack_result = roll_attack(
         attacker,
         target_ac=effective_defender_ac,
@@ -524,7 +546,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         advantage=advantage,
         disadvantage=disadvantage,
         forced_roll=forced_roll,
-        bonus=archery_bonus,
+        bonus=archery_bonus + equip_ability_bonus,
     )
 
     # Bless (real 5E spell, 2026-08-04): a real, flat +2 to attack rolls
@@ -1110,9 +1132,17 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
         attack_result = {"raw_roll": None, "critical_hit": False, "critical_fail": False,
                           "total": effective_defender_ac, "hit": True}
     else:
+        # Same equipped ability-bonus delta resolve_attack applies (see
+        # its own comment) -- a magic item's +stat must move a thrown
+        # attack too, not just a main-hand one.
+        equip_ability_bonus_score = items.equipped_ability_bonus(attacker, weapon_ability)
+        equip_ability_bonus = (
+            ability_modifier(attacker.get(weapon_ability, 10) + equip_ability_bonus_score)
+            - ability_modifier(attacker.get(weapon_ability, 10))
+        ) if equip_ability_bonus_score else 0
         attack_result = roll_attack(
             attacker, target_ac=effective_defender_ac, ability=weapon_ability,
-            proficient=weapon_proficient, forced_roll=forced_roll,
+            proficient=weapon_proficient, forced_roll=forced_roll, bonus=equip_ability_bonus,
         )
 
     damage_dealt = 0

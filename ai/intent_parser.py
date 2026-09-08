@@ -152,6 +152,10 @@ without naming a specific item (e.g. "auto equip my character", "put on my gear 
 - "enchant_item" is for adding a new magic effect to a real, previously found/crafted item -- "enchant" and \
 "imbue" mean the same thing here (e.g. "enchant my longsword with flame", "imbue the shield with warding"). \
 Set "item_name" to the item.
+- "forge_magic_item" is DIFFERENT from "forge_item" above -- it turns an ORDINARY (not-yet-magic) weapon, \
+armor, or accessory into a real magic item with a random stat bonus, at the Forge Guild (e.g. "forge my \
+longsword into a magic item", "upgrade my armor into a magic item", "turn this ring into a magic item"). \
+Set "item_name" to the item.
 - "discard_item" is for permanently scrapping/throwing away an item from inventory, no refund \
 (e.g. "discard my rusty dagger", "scrap the longsword"). Set "item_name" to the item.
 - "dismantle_item" is for breaking down a weapon/armor/shield/ring/amulet the player no longer wants to \
@@ -2377,6 +2381,14 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # check in bot.py's guild_topic_handler, but that only fires inside
     # that guild's own dedicated Telegram topic, never through this
     # general classifier -- no collision.
+    # forge_magic_item (2026-09-08, task #6) checked BEFORE the plain
+    # forge_item trigger just below -- "forge my longsword into a magic
+    # item" would otherwise match "forge my" first and misfire as a
+    # plain tier-reforge instead. A player who just says "forge my X"
+    # with no "magic item" wording still falls through to forge_item,
+    # unaffected.
+    if any(w in lowered for w in ["into a magic item", "magic item out of", "make it magic", "magic upgrade", "forge a magic"]):
+        return {**base, "action": "forge_magic_item"}
     if any(w in lowered for w in ["forge my", "forge the", "i forge"]):
         return {**base, "action": "forge_item"}
     if any(w in lowered for w in ["enchant my", "enchant the", "imbue my", "imbue the", "i enchant", "i imbue"]):
@@ -2893,7 +2905,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "unequip_item", "auto_equip", "breath_weapon",
-                "forge_item", "enchant_item", "discard_item", "dismantle_item",
+                "forge_item", "forge_magic_item", "enchant_item", "discard_item", "dismantle_item",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "auto_level_up_party",
                 "set_description", "set_pronouns",

@@ -224,6 +224,16 @@ def recipe_requirement_gate(character: dict, recipe: dict) -> str | None:
     min_rebirth = recipe.get("min_rebirth")
     if min_rebirth and character.get("rebirth_count", 0) < min_rebirth:
         return f"That recipe demands the mastery of rebirth #{min_rebirth} or higher — you're not there yet."
+    # New third gate (2026-09-08, task #6, per Coffee's own explicit
+    # standalone constraint: "player must be Min lv 20 to craft a magic
+    # item"). No existing recipe needed a raw character-level gate
+    # before this -- guild/rebirth already covered "how far into
+    # end-game progression," but the magic-item-upgrade recipe is
+    # deliberately gated on ordinary character level instead, since it's
+    # meant to be a genuine mid-game (not end-game) milestone.
+    min_level = recipe.get("min_level")
+    if min_level and character.get("level", 1) < min_level:
+        return f"That recipe demands character level {min_level} or higher — you're not there yet."
     return None
 
 
@@ -730,6 +740,35 @@ ENCHANT_RECIPES = {
         "applies_to": ("weapon",),
         "ability": "intelligence", "dc": 28, "profession": "alchemy",
         "requires_guild": "enchanters_guild", "min_rebirth": 3,
+    },
+
+    # Magic item system Phase 8 (2026-09-08, per Coffee: "i want to be
+    # able to craft something better than a longsword... offer a new
+    # recipie to be able to generate a RNG magic item with a +1 to a RNG
+    # stat (they can craft any weapon or armour into a magic item that
+    # was looted or crafted previously)... Use the forging proficiency %
+    # to add + to whatever stat"). A genuinely new axis -- nothing
+    # before this let equipment touch a core ability score at all (see
+    # db._apply_affix's new "ability_bonus" kind). Deliberately a Forge
+    # Guild (blacksmithing) recipe, not Enchanters'/alchemy -- Coffee's
+    # own wording is "forging"/"forge guild" throughout. `"ability":
+    # "random"` is a special marker `bot._do_forge_magic_item` rolls at
+    # cast time (both WHICH ability and whether it's +1 or +2, per the
+    # forging proficiency % -- see that handler's own docstring) rather
+    # than a fixed value like every other recipe's affix above; this is
+    # the one recipe in this whole file whose outcome is genuinely
+    # randomized beyond success/fail and masterwork quality. Applies to
+    # weapon/armor/accessory per Coffee's own explicit answer when asked
+    # ("Weapons, Armor, Accessories"). min_level (2026-09-08, per
+    # Coffee's own standalone follow-up: "player must be Min lv 20 to
+    # craft a magic item") is a real, new gate kind -- see
+    # recipe_requirement_gate's own updated docstring.
+    "forge_magic_upgrade": {
+        "materials": {"iron_ore": 4, "moonpetal": 2},
+        "affix": {"kind": "ability_bonus", "ability": "random", "value": 1},
+        "applies_to": ("weapon", "armor", "shield", "ring", "amulet", "wondrous"),
+        "ability": "strength", "dc": 18, "profession": "blacksmithing",
+        "requires_guild": "forge_guild", "min_level": 20,
     },
 }
 

@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.547] — feat: forge a plain weapon/armor/accessory into a real magic item
+
+Real new crafting system (per Coffee: "i want to be able to craft
+something better than a longsword... offer a new recipie to be able
+to generate a RNG magic item with a +1 to a RNG stat (they can craft
+any weapon or armour into a magic item that was looted or crafted
+previously)... Use the forging proficiency % to add + to whatever
+stat", plus a standalone follow-up: "player must be Min lv 20 to
+craft a magic item"). Genuinely new axis: nothing before this let
+equipment touch a core ability score at all (only derived combat
+numbers like damage_bonus/AC via the existing `stat_bonus` affix) --
+added a real `ability_bonus` affix kind (`db._apply_affix`) and
+`items.equipped_ability_bonus`, wired into every real ability check in
+the game (10 sites in bot.py, 3 attack-roll sites in
+`rules/combat.py`) via the real 5E floor-division modifier delta, not
+a flat re-add.
+
+New Forge Guild recipe `forge_magic_upgrade` (level 20+, Forge Guild
+membership, real materials/ability-check gate) and handler
+`_do_forge_magic_item`: unlike `_do_enchant_item` (which only ever
+touches an already-magic item), this accepts ANY plain owned weapon,
+armor, or accessory (looted or crafted) and promotes it into a real
+per-instance magic item carrying the new affix, consuming the
+original. Forging proficiency % affects it on both axes Coffee asked
+for: the existing masterwork-quality roll decides +1 vs +2 (reusing
+`_roll_masterwork_quality`'s existing 1.5x value bump unchanged --
+round(1 * 1.5) == 2, no new odds mechanism needed), and mastery tier
+widens/biases which of the 6 ability scores are eligible (physical-
+only below 33%, all six from 33-66%, all six plus a bonus weight
+toward the crafter's own class-primary ability above 66%). New action
+`forge_magic_item` added to the intent classifier, checked before the
+existing `forge_item` (plain tier-reforge) trigger so "forge my X into
+a magic item" doesn't misfire as a reforge. 4 new regression tests
+(level gate, end-to-end promotion + masterwork, combat integration,
+intent classification); full `LabyrinthTests` re-run clean (2
+pre-existing batch-order flakes, both confirmed unrelated in
+isolation).
+
 ## [1.27.546] — feat: advanced-recipe coverage for the remaining weapon/armor bases
 
 Real gap found investigating "forge the next lv of weapons/armour"

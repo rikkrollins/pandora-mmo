@@ -1328,6 +1328,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 return
         self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
 
+    def test_equipped_ability_bonus_item_genuinely_moves_an_attack_roll(self):
+        """
+        Magic item system Phase 8 (2026-09-08, task #6): a real equipped
+        "+N to a stat" magic item must actually change combat outcomes,
+        not just sit on the character sheet. Strength 15 (mod +2) vs a
+        forced roll of 10 and AC 13 misses (10+2=12 < 13); the exact
+        same setup with a real +1 Strength item equipped (16, mod +3)
+        hits (10+3=13 >= 13) -- the real 5E floor-division modifier
+        shift, not a flat re-add.
+        """
+        item_id = db.create_item_instance(
+            item_type="ring", name="Ring of Testing", rarity="rare", price=0,
+            base_stats={"type": "ring", "name": "Ring of Testing", "rarity": "rare", "price": 0},
+            affixes=[{"kind": "ability_bonus", "ability": "strength", "value": 1}],
+        )
+        weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        defender = {"name": "Dummy", "dexterity": 10, "armor_class": 13, "hp_current": 100, "hp_max": 100}
+
+        bare_attacker = {
+            "name": "Bare", "dexterity": 10, "strength": 15, "armor_class": 15,
+            "hp_current": 20, "hp_max": 20, "char_class": "Fighter",
+        }
+        bare_result = resolve_attack(bare_attacker, dict(defender), weapon, forced_roll=10)
+        self.assertFalse(bare_result["hit"], "10 + str mod 2 = 12, must miss AC 13 with no item equipped")
+
+        equipped_attacker = dict(bare_attacker, equipped_accessories=[item_id])
+        equipped_result = resolve_attack(equipped_attacker, dict(defender), weapon, forced_roll=10)
+        self.assertTrue(equipped_result["hit"], "10 + str mod 3 (boosted by the +1 Strength ring) = 13, must hit AC 13")
+
     def test_warden_bonus_applies_via_a_secondary_promotion_guild(self):
         """
         Real live bug (2026-08-13, synergy pass, per Coffee: "make sure
@@ -13191,6 +13220,70 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated = db.get_character(950922, -999)
         self.assertEqual(updated["inventory"].get("iron_ore", 0), 10)
 
+    async def test_forge_magic_item_rejects_a_character_under_level_20(self):
+        """
+        Real, explicit standalone constraint (2026-09-08, per Coffee:
+        "player must be Min lv 20 to craft a magic item") on top of the
+        Forge Guild gate every other advanced recipe already has.
+        """
+        make_basic_character(950940, "TooLowLevel", current_location="crossroads_tavern")
+        db.update_character(950940, -999, guild="forge_guild")
+        db.add_item(950940, -999, "iron_ore", 4)
+        db.add_item(950940, -999, "moonpetal", 2)
+        db.add_item(950940, -999, "longsword", 1)
+        sink = []
+        update = FakeUpdate(950940, "forge my longsword into a magic item", sink)
+        await bot._do_forge_magic_item(update, "forge my longsword into a magic item")
+        self.assertIn("level 20", sink[-1])
+        unchanged = db.get_character(950940, -999)
+        self.assertEqual(unchanged["inventory"].get("iron_ore", 0), 4)  # materials untouched
+        self.assertEqual(unchanged["inventory"].get("longsword", 0), 1)  # original item untouched
+
+    async def test_forge_magic_item_turns_a_plain_owned_weapon_into_a_real_generated_magic_item(self):
+        """
+        Real gap (2026-09-08, per Coffee: "i want to be able to craft
+        something better than a longsword... they can craft any weapon
+        or armour into a magic item that was looted or crafted
+        previously... generate a RNG magic item with a +1 to a RNG
+        stat"). Unlike _do_enchant_item (which only ever touches an
+        ALREADY-generated item), this must accept a plain static item —
+        a Longsword bought/found, never magic before — and promote it
+        into a real per-instance magic item carrying a genuinely new
+        "ability_bonus" affix, consuming the original.
+        """
+        from unittest.mock import patch
+        make_basic_character(950941, "MagicForger", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(950941, -999, guild="forge_guild", level=20)
+        db.add_item(950941, -999, "iron_ore", 4)
+        db.add_item(950941, -999, "moonpetal", 2)
+        db.add_item(950941, -999, "longsword", 1)
+
+        sink = []
+        update = FakeUpdate(950941, "forge my longsword into a magic item", sink)
+        with patch("bot.narrate_skill_check", return_value="Power surges into the blade."), \
+             patch("bot._roll_masterwork_quality", return_value=True):
+            for _ in range(30):
+                db.add_item(950941, -999, "iron_ore", 4)
+                db.add_item(950941, -999, "moonpetal", 2)
+                sink.clear()
+                await bot._do_forge_magic_item(update, "forge my longsword into a magic item")
+                if not any("fails" in s.lower() for s in sink):
+                    break
+        combined = "\n".join(sink)
+        self.assertIn("magic", combined.lower())
+
+        updated = db.get_character(950941, -999)
+        self.assertEqual(updated["inventory"].get("longsword", 0), 0, "the original plain Longsword must be consumed")
+        generated_ids = [iid for iid in updated["inventory"] if iid.startswith(db.GENERATED_ITEM_ID_PREFIX)]
+        self.assertEqual(len(generated_ids), 1, "exactly one real generated item must be granted")
+        generated_item = db.materialize_item_instance(generated_ids[0])
+        self.assertEqual(generated_item["type"], "weapon")
+        self.assertEqual(len(generated_item.get("ability_bonuses", [])), 1)
+        bonus = generated_item["ability_bonuses"][0]
+        self.assertIn(bonus["ability"], ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"))
+        # masterwork forced True above -> round(1 * 1.5) == 2, not the plain +1.
+        self.assertEqual(bonus["value"], 2)
+
     def test_enchant_godsforged_ward_grants_ignore_resistance_to_a_real_weapon(self):
         """
         The true guild-ladder capstone: db._apply_affix's existing
@@ -13768,6 +13861,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("forge my longsword", [])["action"], "forge_item")
         self.assertEqual(_keyword_fallback("enchant my longsword with flame", [])["action"], "enchant_item")
         self.assertEqual(_keyword_fallback("imbue the shield with warding", [])["action"], "enchant_item")
+
+    def test_forge_magic_item_keyword_fallback_wins_over_plain_forge(self):
+        """
+        Real gap (2026-09-08, task #6): "forge my longsword" (a plain
+        tier-reforge) and "forge my longsword into a magic item" (the
+        new magic-upgrade recipe) share the "forge my" prefix -- the
+        more specific "into a magic item" phrasing must win, or every
+        real magic-upgrade request would silently misfire as a plain
+        reforge attempt instead.
+        """
+        self.assertEqual(_keyword_fallback("forge my longsword into a magic item", [])["action"], "forge_magic_item")
+        self.assertEqual(_keyword_fallback("upgrade my armor into a magic item", [])["action"], "forge_magic_item")
+        self.assertEqual(_keyword_fallback("forge my longsword", [])["action"], "forge_item")  # unaffected
 
     async def test_steal_from_enemy_success_awards_a_real_stealable_item(self):
         """

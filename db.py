@@ -1566,6 +1566,17 @@ def _apply_affix(item: dict, affix: dict) -> None:
         item.setdefault("proficiency_bonuses", []).append(
             {"stat": affix["stat"], "category": affix.get("category"), "value": affix["value"]}
         )
+    # Magic item system Phase 8 (2026-09-08, task #6: "generate a RNG
+    # magic item with a +1 to a RNG stat"). A real, brand-new axis --
+    # nothing before this let equipment touch a core ability score
+    # (strength/dexterity/etc.) at all, only derived combat numbers
+    # (damage_bonus/ac_base/ac_bonus via stat_bonus above). Appended to
+    # a list, same live-summed-at-read-time convention as profession_
+    # bonuses/proficiency_bonuses just above -- read by items.
+    # equipped_ability_bonus (bot.py's _effective_ability_check_bonus,
+    # rules/combat.py's attack rolls).
+    elif kind == "ability_bonus":
+        item.setdefault("ability_bonuses", []).append({"ability": affix["ability"], "value": affix["value"]})
 
 
 def materialize_item_instance(item_id: str) -> dict | None:

@@ -2232,6 +2232,28 @@ def _equipped_profession_bonus(character: dict, profession: str) -> int:
     return total
 
 
+def _effective_ability_check_bonus(character: dict, ability: str) -> int:
+    """
+    The real d20-total bonus an equipped ability_bonus affix contributes
+    to a check/attack/save using this ability -- the REAL 5E modifier
+    delta (ability_modifier(base+bonus) - ability_modifier(base)), not a
+    flat 1:1 add, since ability_modifier's floor-division math means +1
+    to a score doesn't always shift the modifier by a whole point (e.g.
+    14->15 is a no-op, 15->16 is +1). Meant to be added into the same
+    post-roll "bonus" accumulator every roll_ability_check call site in
+    this file already uses for _practiced_bonus_for/class_profession_
+    affinity_bonus/_equipped_profession_bonus, rather than mutating the
+    character dict's own ability score before rolling -- keeps the DB-
+    persisted base score always the true one, with zero risk of an
+    equipped bonus ever accidentally getting written back as permanent.
+    """
+    bonus_score = items_module.equipped_ability_bonus(character, ability)
+    if bonus_score == 0:
+        return 0
+    base_score = character.get(ability, 10)
+    return ability_modifier(base_score + bonus_score) - ability_modifier(base_score)
+
+
 def _compute_equipped_resist_profile(character: dict) -> dict:
     """
     Pure, read-only computation of a character's real defensive profile
@@ -13935,6 +13957,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     if "thieves_guild" in held_guild_ids(character):
         bonus += THIEVES_GUILD_LOCKPICK_BONUS
     bonus += _lockpick_proficiency_bonus(character)
+    bonus += _effective_ability_check_bonus(character, "dexterity")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
@@ -14289,6 +14312,7 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
         character["char_class"], character.get("level", 1), ability, character.get("proficiency_bonus", 0)
     )
     bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, ability)
+    bonus += _effective_ability_check_bonus(character, ability)
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     # Guidance/Thaumaturgy/Mage Hand/Prestidigitation (2026-08-04): a
@@ -14663,8 +14687,11 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
             return
 
         attacker_result = roll_ability_check(attacker, "strength", proficient=True, forced_roll=forced_roll)
+        attacker_result["total"] += _effective_ability_check_bonus(attacker, "strength")
         target_raw = roll_d20()
-        target_mod = max(ability_modifier(target.get("strength", 10)), ability_modifier(target.get("dexterity", 10)))
+        target_str_mod = ability_modifier(target.get("strength", 10)) + _effective_ability_check_bonus(target, "strength")
+        target_dex_mod = ability_modifier(target.get("dexterity", 10)) + _effective_ability_check_bonus(target, "dexterity")
+        target_mod = max(target_str_mod, target_dex_mod)
         target_total = target_raw + target_mod
         success = attacker_result["total"] > target_total  # ties favor the defender, per 5E contest rules
 
@@ -14753,6 +14780,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     result = roll_ability_check(
         fleeing, "dexterity", proficient=False, advantage=has_danger_sense, forced_roll=forced_roll
     )
+    result["total"] += _effective_ability_check_bonus(fleeing, "dexterity")
     success = result["total"] >= SKILL_CHECK_DC
 
     flavor = await asyncio.to_thread(
@@ -21601,6 +21629,7 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
     # 4th additive source, +1 per point invested in this profession.
     bonus += _skill_points(character, f"prof_{skill_key}")
+    bonus += _effective_ability_check_bonus(character, node["ability"])
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= SKILL_CHECK_DC
@@ -22169,6 +22198,7 @@ async def _forge_item_core(update: Update, item_id: str, item: dict, text: str) 
     # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
     # 4th additive source, +1 per point invested in this profession.
     bonus += _skill_points(character, f"prof_{profession}")
+    bonus += _effective_ability_check_bonus(character, "strength")
     check = roll_ability_check(character, "strength", proficient=False)
     check["total"] += bonus
     check["practiced_bonus"] = bonus
@@ -22373,6 +22403,7 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     # Universal Manipulation "prof_X" (2026-08-06, per Coffee): a real
     # 4th additive source, +1 per point invested in this profession.
     bonus += _skill_points(character, f"prof_{profession}")
+    bonus += _effective_ability_check_bonus(character, recipe["ability"])
     check = roll_ability_check(character, recipe["ability"], proficient=False)
     check["total"] += bonus
     check["practiced_bonus"] = bonus
@@ -22420,6 +22451,133 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     await _safe_send(update, message)
     if enchanted_item:
         await _maybe_send_item_image(update, item_id, enchanted_item)
+
+
+# Magic item system Phase 8 (2026-09-08, per Coffee: "player must be Min
+# lv 20 to craft a magic item"). Tiers the pool of ability scores a
+# forge_magic_upgrade roll can land on by the crafter's own forging
+# mastery % -- higher mastery both widens the pool AND biases it toward
+# the crafter's own class-primary ability (the "rarer/better stats"
+# half of Coffee's own "Both" answer when asked how mastery should
+# matter; the OTHER half, +1-vs-+2 odds, reuses _roll_masterwork_
+# quality's existing 1.5x-the-value bump completely unchanged --
+# round(1 * 1.5) == 2, so no new odds mechanism was needed at all).
+_FORGE_MAGIC_UPGRADE_COMMON_ABILITIES = ["strength", "dexterity", "constitution"]
+_FORGE_MAGIC_UPGRADE_ALL_ABILITIES = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"]
+
+
+def _roll_forge_magic_upgrade_ability(character: dict, profession: str) -> str:
+    mastery_pct = _profession_mastery_pct(character, profession)
+    if mastery_pct < 33:
+        pool = list(_FORGE_MAGIC_UPGRADE_COMMON_ABILITIES)
+    elif mastery_pct < 66:
+        pool = list(_FORGE_MAGIC_UPGRADE_ALL_ABILITIES)
+    else:
+        primary = CLASS_PRIMARY_ABILITY.get(character["char_class"].lower(), "strength")
+        pool = list(_FORGE_MAGIC_UPGRADE_ALL_ABILITIES) + [primary]
+    return random.choice(pool)
+
+
+async def _do_forge_magic_item(update: Update, text: str) -> None:
+    """
+    Magic item system Phase 8 (2026-09-08, per Coffee: "i want to be
+    able to craft something better than a longsword... offer a new
+    recipie to be able to generate a RNG magic item with a +1 to a RNG
+    stat (they can craft any weapon or armour into a magic item that
+    was looted or crafted previously)"). Deliberately a SEPARATE handler
+    from _do_enchant_item, not a special case bolted onto it -- every
+    existing enchant recipe legitimately requires an ALREADY-magic item
+    (adding a 2nd+ affix to something special), while this one's whole
+    point is turning an ORDINARY item magic for the first time, so the
+    two need genuinely different eligibility gates at the top.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    item = items_module.get_item(item_id) if item_id else None
+    if item_id is None or item is None:
+        await _safe_send(update, "Not sure which weapon, armor, or accessory you mean.")
+        return
+
+    recipe = get_enchant_recipe("forge_magic_upgrade")
+    if item["type"] not in recipe["applies_to"]:
+        await _safe_send(update, f"A {item['type']} can't be forged into a magic item — only weapons, armor, and accessories.")
+        return
+    # min_level (character level 20+) + requires_guild (Forge Guild) --
+    # see recipe_requirement_gate's own updated docstring.
+    gate_rejection = recipe_requirement_gate(character, recipe)
+    if gate_rejection:
+        await _safe_send(update, gate_rejection)
+        return
+    if not has_materials(character["inventory"], recipe):
+        need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
+        await _safe_send(update, f"You don't have the materials to forge a magic item. You need: {need}.")
+        return
+
+    profession = recipe.get("profession", "blacksmithing")
+    bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    bonus += _equipped_profession_bonus(character, profession)
+    bonus += _skill_points(character, f"prof_{profession}")
+    bonus += _effective_ability_check_bonus(character, recipe["ability"])
+    check = roll_ability_check(character, recipe["ability"], proficient=False)
+    check["total"] += bonus
+    check["practiced_bonus"] = bonus
+    dc = recipe["dc"]
+    success = check["total"] >= dc
+    # Masterwork quality (real, existing mastery-% roll): the "+1 vs +2"
+    # half of Coffee's own "Both" answer -- round(recipe's own value=1 *
+    # the existing 1.5x masterwork bump) == 2, reusing _roll_masterwork_
+    # quality/the affix["value"] scaling below completely unchanged.
+    masterwork = _roll_masterwork_quality(character, profession)
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, recipe["ability"],
+        {**check, "ability": recipe["ability"], "dc": dc, "success": success},
+    )
+    message = _format_skill_check_result(flavor, check, recipe["ability"], dc, success)
+    if not success:
+        message += f"\n🔨 The forging fails — the {item['name']} is unharmed, and your materials aren't wasted."
+        await _safe_send(update, message)
+        return
+
+    for mid, qty in recipe["materials"].items():
+        db.remove_item(update.effective_user.id, update.effective_chat.id, mid, qty)
+    db.record_skill_use(update.effective_user.id, update.effective_chat.id, profession)
+    _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
+
+    chosen_ability = _roll_forge_magic_upgrade_ability(character, profession)
+    affix = {"kind": "ability_bonus", "ability": chosen_ability, "value": recipe["affix"]["value"]}
+    masterwork_note = ""
+    if masterwork:
+        affix["value"] = round(affix["value"] * 1.5)
+        masterwork_note = " — a masterwork working, stronger than the usual result!"
+
+    # Promote a plain (not-yet-magic) item into a real generated
+    # instance first -- an already-generated item (found or previously
+    # crafted magic gear) is enchanted in place instead, same as
+    # _do_enchant_item.
+    if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+        target_item_id = item_id
+    else:
+        base_stats = {k: v for k, v in item.items() if k != "affixes"}
+        target_item_id = db.create_item_instance(
+            item_type=item["type"], name=item["name"], rarity=item.get("rarity", "common"),
+            price=item.get("price", 0), base_stats=base_stats, affixes=[], source="crafted",
+        )
+        db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
+        db.add_item(update.effective_user.id, update.effective_chat.id, target_item_id, 1)
+
+    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(target_item_id, affix)
+    message += f"\n✨ {enchant_msg} A surge of magic settles into it, granting +{affix['value']} {chosen_ability.title()}!{masterwork_note}"
+    await _safe_send(update, message)
+    if enchanted_item:
+        await _maybe_send_item_image(update, target_item_id, enchanted_item)
 
 
 async def _do_make_campfire(update: Update) -> None:
@@ -23382,6 +23540,7 @@ async def _do_use_environment(update: Update) -> None:
         # distinction _resolve_flee_attempt's own fleeing variable draws.
         live_actor = session.current_participant()
         check = roll_ability_check(character, "strength", proficient=True)
+        check["total"] += _effective_ability_check_bonus(character, "strength")
         if check["total"] < SKILL_CHECK_DC:
             retaliation_blocks = []
             for enemy in opposing:
@@ -30301,6 +30460,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     if character.get("subclass") == "Thief":
         bonus += THIEF_SUBCLASS_STEAL_BONUS
     bonus += _steal_proficiency_bonus(character)
+    bonus += _effective_ability_check_bonus(character, "dexterity")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= STEAL_DC
@@ -30419,6 +30579,7 @@ async def _do_steal_from_enemy(
     if character.get("subclass") == "Thief":
         bonus += THIEF_SUBCLASS_STEAL_BONUS
     bonus += _steal_proficiency_bonus(character)
+    bonus += _effective_ability_check_bonus(character, "dexterity")
     result["total"] += bonus
     result["practiced_bonus"] = bonus
     success = result["total"] >= STEAL_FROM_ENEMY_DC
@@ -34516,6 +34677,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_craft(update, text)
     elif action == "forge_item":
         await _do_forge_item(update, intent.get("raw_text", text))
+    elif action == "forge_magic_item":
+        await _do_forge_magic_item(update, intent.get("raw_text", text))
     elif action == "enchant_item":
         await _do_enchant_item(update, intent.get("raw_text", text))
     elif action == "discard_item":

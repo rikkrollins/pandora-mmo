@@ -975,6 +975,35 @@ def get_item(item_id: str) -> dict | None:
     return None
 
 
+def equipped_ability_bonus(character: dict, ability: str) -> int:
+    """
+    Magic item system Phase 8 (2026-09-08, task #6: "generate a RNG
+    magic item with a +1 to a RNG stat"). Sum of every equipped item's
+    real "ability_bonus" affix matching this ability, live-summed at
+    read time -- same convention every other equipped-gear bonus in
+    this game already uses (never baked into the character's own
+    stored ability score). Lives here, not in bot.py, so rules/combat.py
+    can call it directly for attack rolls without a circular import --
+    both bot.py and rules/combat.py already reach into this module
+    freely for get_item(). A monster/enemy dict (no "equipped_weapon"
+    field at all) safely resolves to 0 via the plain .get() calls below.
+    """
+    total = 0
+    equipped_ids = [
+        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
+    ] + character.get("equipped_accessories", [])
+    for item_id in equipped_ids:
+        if not item_id:
+            continue
+        item = get_item(item_id)
+        if not item:
+            continue
+        for entry in item.get("ability_bonuses", []):
+            if entry.get("ability") == ability:
+                total += entry.get("value", 0)
+    return total
+
+
 def is_sellable(item_id: str) -> bool:
     """
     Real live bug (2026-08-02, caught investigating a Development-topic
