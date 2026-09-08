@@ -2120,6 +2120,48 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     }
 
 
+# Rest stops (2026-09-08, task #5, per Coffee: "in harder dungeons use
+# RNG to offer a merchant room or safe place on the floors (only 1-3
+# in a 5 lvl segment at least 1 MUST be available on the MID of the
+# floor segments Example being lv 5-10, there shud be a rest on lv 8
+# where players can BUY, rest, heal (no waypoint tho)"). Deliberately
+# a lesser, non-waypoint sibling of the checkpoint's own bigger
+# waystation -- reuses the exact same real wandering-trader NPC/shop
+# the checkpoint already uses (never invents a second one), but never
+# sets is_checkpoint, so _do_descend_labyrinth (breaking the segment's
+# own waypoint) stays checkpoint-exclusive.
+REST_STOP_MIN_EXTRA = 0
+REST_STOP_MAX_EXTRA = 2
+
+
+def _place_rest_stop(floor_data: dict, rng: random.Random) -> bool:
+    """
+    Converts one existing, real side room on this floor into a rest
+    stop -- mutates an EXISTING room in place rather than adding a
+    brand-new one, so no new grid-position/connection wiring is needed
+    (unlike generate_segment's own cross-floor-puzzle gate_room, which
+    DOES add a new room and has to handle that). Returns False (a
+    graceful no-op) on the rare floor with no real side room available
+    -- never forces one onto the hub or connector/stairs room.
+    """
+    rooms = floor_data["rooms"]
+    hub_id = floor_data["hub_room_id"]
+    connector_id = floor_data["connector_room_id"]
+    candidates = [
+        rid for rid, room in rooms.items()
+        if rid not in (hub_id, connector_id) and not room.get("is_rest_stop") and not room.get("is_checkpoint")
+    ]
+    if not candidates:
+        return False
+    room = rooms[rng.choice(candidates)]
+    room["is_rest_stop"] = True
+    room["shop"] = "wandering_traders_pack"
+    room["npcs"] = list(dict.fromkeys(room.get("npcs", []) + ["wandering_dungeon_trader"]))
+    room["name"] = f"{room['name']} -- A Wanderer's Rest"
+    room["description"] = room["description"] + " A wandering trader has set up a small camp here -- a real, if temporary, safe place to rest."
+    return True
+
+
 def generate_segment(campaign: dict, segment: int, rng: random.Random) -> dict:
     """
     L3: builds SEGMENT_SIZE (5) real, interconnected floors at once --
@@ -2215,6 +2257,16 @@ def generate_segment(campaign: dict, segment: int, rng: random.Random) -> dict:
                 "id": f"seg{segment}_multi_gate", "kind": "multi_switch_gate", "name": "a real, second sealed archway",
                 "requires": switch_lockable_ids,
             })
+
+    # Rest stops -- see _place_rest_stop's own docstring. Guaranteed on
+    # the segment's own middle floor (3rd of 5); 0-2 more roll onto the
+    # OTHER non-checkpoint floors, capping the segment at 1-3 total.
+    middle_floor = floors[len(floors) // 2]
+    _place_rest_stop(floor_data_by_floor[middle_floor], rng)
+    extra_eligible = [f for f in floors[:-1] if f != middle_floor]
+    extra_count = rng.randint(REST_STOP_MIN_EXTRA, min(REST_STOP_MAX_EXTRA, len(extra_eligible)))
+    for floor in rng.sample(extra_eligible, extra_count):
+        _place_rest_stop(floor_data_by_floor[floor], rng)
 
     return {
         "rooms": all_rooms,

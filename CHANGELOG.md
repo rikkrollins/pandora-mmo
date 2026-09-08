@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.550] — feat: RNG rest stops per Labyrinth segment, guaranteed on the middle floor
+
+Real deliverable, the last of a 7-task burst (per Coffee: "in harder
+dungeons use RNG to offer a merchant room or safe place on the floors
+(only 1-3 in a 5 lvl segment at least 1 MUST be available on the MID
+of the floor segments... a rest on lv 8 where players can BUY, rest,
+heal (no waypoint tho)"). Segments are already real 5-floor units
+(`rules.labyrinth.SEGMENT_SIZE`) with floor 5 as the existing
+checkpoint waystation. New `_place_rest_stop` (called from
+`generate_segment`) converts one existing side room per eligible floor
+into a real, lesser rest stop — guaranteed on the segment's own middle
+floor (3rd of 5), plus 0-2 more on the other non-checkpoint floors,
+capping the segment at 1-3 total. Reuses the checkpoint's own real
+wandering-trader NPC/shop, but deliberately never sets `is_checkpoint`
+— `_do_descend_labyrinth` (breaking the segment's waypoint) stays
+checkpoint-exclusive.
+
+`_do_labyrinth_rest` now also works at a rest stop, same "heal over
+real time" mechanic as the checkpoint. Fixed a real, separate pre-
+existing gap found while wiring "BUY": `_do_buy` only ever checked
+`cl.get_location` (a CAMPAIGN lookup that always returns `None` for
+the Labyrinth's sentinel location), so the checkpoint's own
+`wandering_traders_pack` shop was NEVER actually reachable via a real
+purchase before this, despite being real, tested DATA since Phase L3 —
+now checks the current Labyrinth room's own `shop` field first. `"buy"`
+added to the Labyrinth text-action allowlist. 2 new regression tests
+(rest-stop placement statistics, end-to-end rest+buy+non-waypoint);
+full `LabyrinthTests`/`DungeonEvolveTests`/`DungeonAuditTests` re-run
+clean (2 pre-existing, confirmed-unrelated batch-order flakes).
+
+This closes out Coffee's 2026-09-08 seven-task burst: #1 (v1.27.545),
+#2 (v1.27.544), #3 (v1.27.549), #4 (v1.27.546), #5 (this release), #6
+(v1.27.547), #7 (v1.27.548).
+
 ## [1.27.549] — feat: 16 new elemental scrolls, 2 tiers, Tier-2 gated to harder Labyrinth floors
 
 Real deliverable (per Coffee: "We want more elemental scrolls

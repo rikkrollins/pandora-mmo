@@ -35361,6 +35361,35 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(back["floor"], 2)
         self.assertEqual(back["descends_to"], floor3_hub["id"])
 
+    def test_generate_segment_always_places_1_to_3_real_rest_stops_guaranteed_on_the_middle_floor(self):
+        """
+        Real deliverable (2026-09-08, task #5, per Coffee: "in harder
+        dungeons use RNG to offer a merchant room or safe place on the
+        floors (only 1-3 in a 5 lvl segment at least 1 MUST be
+        available on the MID of the floor segments... a rest on lv 8
+        where players can BUY, rest, heal (no waypoint tho)"). Across
+        many seeds: the segment's own middle floor (3rd of 5) always
+        has a real rest stop, the total across the whole segment is
+        always 1-3, and the checkpoint floor itself never gets one
+        (it already has its own, bigger waypoint version).
+        """
+        for seed in range(30):
+            data = labyrinth_module.generate_segment(bot.CAMPAIGN, 2, random.Random(seed))
+            rooms = data["rooms"]
+            rest_stops = [r for r in rooms.values() if r.get("is_rest_stop")]
+            self.assertGreaterEqual(len(rest_stops), 1, f"seed {seed}: expected at least 1 rest stop")
+            self.assertLessEqual(len(rest_stops), 3, f"seed {seed}: expected at most 3 rest stops")
+            floors_with_rest_stops = {r["floor"] for r in rest_stops}
+            start_floor = labyrinth_module.segment_start_floor(2)
+            middle_floor = start_floor + 2
+            self.assertIn(middle_floor, floors_with_rest_stops, f"seed {seed}: the segment's own middle floor must always have a rest stop")
+            checkpoint_floor = start_floor + labyrinth_module.SEGMENT_SIZE - 1
+            self.assertNotIn(checkpoint_floor, floors_with_rest_stops, f"seed {seed}: the checkpoint floor must never also get a rest stop")
+            for stop in rest_stops:
+                self.assertFalse(stop.get("is_checkpoint"), "a rest stop must never also be the checkpoint")
+                self.assertEqual(stop["shop"], "wandering_traders_pack")
+                self.assertIn("wandering_dungeon_trader", stop["npcs"])
+
     def test_generate_segment_is_deterministic_with_the_same_seed(self):
         """
         Real, load-bearing guarantee for the new seed-logging/replay
@@ -40020,6 +40049,62 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         character_after = db.get_character(user_id, chat_id)
         self.assertTrue(character_after.get("is_inactive"))
         self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL, "resting at a checkpoint must never relocate the character")
+
+    async def test_labyrinth_rest_and_buy_work_at_a_real_rest_stop_without_a_waypoint(self):
+        """
+        Real deliverable (2026-09-08, task #5, per Coffee: "a rest on
+        lv 8 where players can BUY, rest, heal (no waypoint tho)"). A
+        rest stop is a real, lesser safe spot -- rest/heal work there
+        exactly like at the checkpoint, and its own real wandering-
+        trader shop is actually reachable via a real buy (the
+        checkpoint's own identical shop field was never wired to any
+        real buy code path before this -- _do_buy only ever checked
+        cl.get_location, a CAMPAIGN lookup that always returns None for
+        the Labyrinth's sentinel location). Unlike the checkpoint, it
+        can never break the segment's own waypoint.
+        """
+        user_id, chat_id = 963090, -963090
+        make_basic_character(user_id, "RestStopTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        rest_stop_id = "laby_rest_stop_test"
+        rooms[rest_stop_id] = {
+            "id": rest_stop_id, "floor": run["floor"], "name": "A Real Rest Stop",
+            "description": "Safe, for now.", "connections": [hub_id], "monsters": [],
+            "is_rest_stop": True, "shop": "wandering_traders_pack", "npcs": ["wandering_dungeon_trader"],
+        }
+        rooms[hub_id]["connections"].append(rest_stop_id)
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=rest_stop_id)
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "I rest for now.", sink, chat_id=chat_id), DummyContext(),
+            {"action": "rest", "raw_text": "I rest for now."}, "I rest for now.",
+        )
+        self.assertTrue(any("settles in to rest" in s for s in sink), sink)
+        self.assertTrue(any("rest stop" in s for s in sink), sink)
+        character_after = db.get_character(user_id, chat_id)
+        self.assertTrue(character_after.get("is_inactive"))
+        self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL, "resting at a rest stop must never relocate the character")
+
+        db.update_character(user_id, chat_id, is_inactive=False, gold=500)
+        sink2 = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "buy a torch", sink2, chat_id=chat_id), DummyContext(),
+            {"action": "buy", "raw_text": "buy a torch"}, "buy a torch",
+        )
+        self.assertFalse(any("no shop here" in s.lower() for s in sink2), sink2)
+        updated = db.get_character(user_id, chat_id)
+        self.assertGreaterEqual(updated["inventory"].get("torch", 0), 1, sink2)
+
+        # Never a real waypoint -- descending still requires the actual checkpoint.
+        sink3 = []
+        await bot._do_descend_labyrinth(FakeUpdate(user_id, "", sink3, chat_id=chat_id))
+        self.assertTrue(any("waystation" in s for s in sink3), sink3)
 
     async def test_real_human_can_summon_a_bound_remnant_during_a_real_labyrinth_fight(self):
         """

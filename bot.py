@@ -10068,15 +10068,22 @@ async def _do_labyrinth_rest(update: Update) -> None:
     if run is None:
         return
     room = run["rooms"].get(run["current_room_id"])
-    if room is None or not room.get("is_checkpoint"):
+    # Rest stops (2026-09-08, task #5): a real, lesser safe spot,
+    # separate from the checkpoint's own bigger waystation -- resting
+    # works the same ordinary "heal over real time" way at either, but
+    # only the checkpoint (never a rest stop) can break the segment's
+    # waypoint (_do_descend_labyrinth's own is_checkpoint-only check is
+    # deliberately untouched).
+    if room is None or not (room.get("is_checkpoint") or room.get("is_rest_stop")):
         await _safe_send(
             update,
-            "There's nowhere safe to properly rest this deep in the Labyrinth -- reach this segment's own waystation first.",
+            "There's nowhere safe to properly rest this deep in the Labyrinth -- reach this segment's own waystation (or a wandering trader's rest stop) first.",
         )
         return
     db.mark_inactive(update.effective_user.id, chat_id)
     db.update_character(update.effective_user.id, chat_id, rest_started_at=datetime.now(timezone.utc).isoformat())
-    await _safe_send(update, f"😴 **{character['name']}** settles in to rest at the waystation, safe until they return -- they'll recover naturally the longer they rest.")
+    spot = "waystation" if room.get("is_checkpoint") else "wandering trader's rest stop"
+    await _safe_send(update, f"😴 **{character['name']}** settles in to rest at the {spot}, safe until they return -- they'll recover naturally the longer they rest.")
 
 
 async def _do_descend_labyrinth(update: Update) -> None:
@@ -30395,8 +30402,19 @@ async def _do_buy(update: Update, text: str) -> None:
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    location = cl.get_location(CAMPAIGN, character["current_location"])
-    shop_id = location.get("shop") if location else None
+    # Labyrinth checkpoint/rest-stop shop (2026-09-08, task #5): a
+    # Labyrinth room's own "shop" field (the checkpoint's real
+    # wandering-trader shop, and now a rest stop's identical one) was
+    # never actually reachable via this real buy path before -- it only
+    # ever checked cl.get_location, a CAMPAIGN lookup that always
+    # returns None for the Labyrinth's sentinel current_location.
+    if character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        run = db.get_labyrinth_run(update.effective_chat.id, _labyrinth_party_key(character))
+        room = run["rooms"].get(run["current_room_id"]) if run else None
+        shop_id = room.get("shop") if room else None
+    else:
+        location = cl.get_location(CAMPAIGN, character["current_location"])
+        shop_id = location.get("shop") if location else None
     if not shop_id:
         await update.effective_chat.send_message(
             "There's no shop here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
@@ -34368,7 +34386,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "give_item", "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
         "auto_equip", "equip_item", "unequip_item", "set_front_row", "set_back_row",
         "bench_party_member", "unbench_party_member", "check_sheet", "check_menu",
-        "check_equip_menu", "check_magic", "check_remnants", "check_story", "steal",
+        "check_equip_menu", "check_magic", "check_remnants", "check_story", "steal", "buy",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
