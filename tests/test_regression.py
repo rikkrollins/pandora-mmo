@@ -769,6 +769,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         a requires_item gate) had no connection from ANYWHERE in the
         whole campaign -- completely unreachable dead content. Fixed
         by adding ascends_to on The First City.
+
+        Real chapter-order audit (2026-09-09, per Coffee: "dont let
+        players skip chapters... has to be played in order"): holding
+        shard_of_dim_light alone used to be enough -- but that item is
+        Chapter 2's own first-quest reward, so a player who'd only
+        finished Chapter 2 could skip all ten of Chapter 3's quests
+        straight into Chapter 4. Now also requires
+        the_original_spires_reckoning (Chapter 3's real finale quest)
+        completed, via a real story_gates entry (requires_completed_
+        quest) on the_first_city -- checked by the same _check_story_
+        gate every other chapter boundary already uses.
         """
         user_id = 888888
         make_basic_character(user_id, "Roamer", current_location="the_first_city")
@@ -781,6 +792,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(character["current_location"], "the_first_city")  # blocked, no shard
 
         db.add_item(user_id, -999, "shard_of_dim_light", 1)
+        sink.clear()
+        await bot.adventure_master_handler(
+            FakeUpdate(user_id, "Ascend to the Unmoored Isle", sink), DummyContext())
+        character = db.get_character(user_id, -999)
+        self.assertEqual(
+            character["current_location"], "the_first_city",
+            "must still be blocked -- Chapter 3 (the_original_spires_reckoning) isn't done yet",
+        )
+
+        db.update_character(user_id, -999, completed_quests=["the_original_spires_reckoning"])
         sink.clear()
         await bot.adventure_master_handler(
             FakeUpdate(user_id, "Ascend to the Unmoored Isle", sink), DummyContext())
@@ -832,7 +853,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reply = "\n".join(sink)
         self.assertNotIn("Unmoored Isle", reply, "shouldn't be hinted at before the shard is held")
 
+        # Real chapter-order audit (2026-09-09): holding the shard alone
+        # must still NOT show the hint -- Chapter 3's finale quest
+        # (the_original_spires_reckoning) isn't done yet, and the hint
+        # would otherwise invite a move _do_move now correctly refuses.
         db.add_item(user_id, -999, "shard_of_dim_light", 1)
+        sink.clear()
+        with patch("bot._send_generated_image", side_effect=no_real_image_call), \
+             patch("ai.dm_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_look(FakeUpdate(user_id, "look around", sink))
+        reply = "\n".join(sink)
+        self.assertNotIn("Unmoored Isle", reply, "shouldn't be hinted at before Chapter 3 is actually done")
+
+        db.update_character(user_id, -999, completed_quests=["the_original_spires_reckoning"])
         sink.clear()
         with patch("bot._send_generated_image", side_effect=no_real_image_call), \
              patch("ai.dm_agent.requests.post", return_value=FakeResponse()):

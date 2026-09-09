@@ -25350,11 +25350,11 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
             lines.append(f"You can travel to: {', '.join(conn_labels)}")
     if "descends_to" in location:
         below = cl.get_location(CAMPAIGN, location["descends_to"])
-        if _character_can_currently_reach(character, below):
+        if _character_can_currently_reach(character, below, location, location["descends_to"]):
             lines.append(f"You could descend to: {below['name']}")
     if "ascends_to" in location:
         above = cl.get_location(CAMPAIGN, location["ascends_to"])
-        if _character_can_currently_reach(character, above):
+        if _character_can_currently_reach(character, above, location, location["ascends_to"]):
             lines.append(f"You could ascend to: {above['name']}")
     interactables = location.get("interactables", {})
     if interactables:
@@ -28799,7 +28799,9 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
     return None
 
 
-def _character_can_currently_reach(character: dict, destination: dict) -> bool:
+def _character_can_currently_reach(
+    character: dict, destination: dict, current: dict | None = None, destination_id: str | None = None,
+) -> bool:
     """
     Real live report (2026-08-26, Coffee: "in the first city you have a
     location showing (sky) but the location is for a evolved 3
@@ -28816,8 +28818,26 @@ def _character_can_currently_reach(character: dict, destination: dict) -> bool:
     genuinely strand themselves. Same three real gates _do_move already
     enforces at actual travel time, factored out so the DISPLAY can
     check them too instead of just the enforcement.
+
+    `current`/`destination_id` (2026-09-09, real chapter-order audit,
+    per Coffee: "dont let players skip chapters... has to be played in
+    order"): the_unmoored_isle -- Chapter 4's real entry point -- was
+    reachable from the_first_city holding only shard_of_dim_light (a
+    Chapter 2 reward), letting a player skip all of Chapter 3 entirely.
+    Fixed at the enforcement layer by adding a real story_gates entry
+    (requires_completed_quest: the_original_spires_reckoning, Chapter
+    3's own finale) to campaign.json -- _do_move already runs
+    _check_story_gate unconditionally for any destination_id, ascends_
+    to/descends_to included. This mirrors that SAME check here so the
+    display hint doesn't invite a player toward a move that would just
+    get refused, matching this function's own original purpose. Both
+    params default to None (backward compatible with any other real
+    call site that predates this and has no natural "current location"
+    to check a story_gates entry against).
     """
     if destination.get("requires_item") and destination["requires_item"] not in character.get("inventory", {}):
+        return False
+    if current is not None and destination_id is not None and _check_story_gate(character, current, destination_id):
         return False
     return _meets_location_level(character, destination) and _meets_rebirth_requirement(character, destination)
 

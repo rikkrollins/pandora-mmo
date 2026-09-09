@@ -2,6 +2,52 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.564] — fix: Chapter 3 could be skipped entirely into Chapter 4
+
+Real full audit requested by Coffee: "make sure a new player can
+successfully do and complete chapter 1... make sure before they
+complete chapter 1 they cannot do chapter 2 or greater content...
+each chapter is gated so players have to play through chapter 1, then
+chapter 2, then chapter 3, then chapter 4 (in order... no paths can be
+access[ed] too early... all gating works properly from chapters 1-8" —
+followed by "dont let players skip chapters" and "same with map
+locations."
+
+**Chapter 1 completable, Chapters 1→2 through 7→8 all confirmed
+already correctly gated** — extensive real investigation (not just
+code reading: `_offerable_quest_at_location` already enforces strict
+arc-order quest offering independent of physical reachability, and the
+"shared hub" locations reused across multiple arcs at different depths
+are an intentional, already-tested design, not a gating hole). Map
+reveal (`map_revealed_locations`, from "map" items) confirmed to NOT
+widen fast-travel eligibility — `_do_fast_travel` is keyed purely on
+`visited_locations` (genuinely walked there), so a revealed-but-never-
+visited location can't be warped to early.
+
+**One real, confirmed skip-ahead bug found and fixed**: `the_unmoored_
+isle` — Chapter 4's real entry point, reached from `the_first_city` via
+a special ascend move — was gated ONLY on holding `shard_of_dim_light`,
+which is Chapter 2's own FIRST-quest reward. A player who finished
+Chapter 2 already held it and could walk straight into Chapter 4,
+skipping all ten of Chapter 3's quests. Fixed with a real `story_gates`
+entry (`requires_completed_quest: the_original_spires_reckoning`,
+Chapter 3's actual finale quest) on `the_first_city`, checked by the
+same `_check_story_gate` every other chapter boundary already uses —
+no new mechanism, same one already proven everywhere else. The "You
+could ascend to: The Unmoored Isle" location-detail hint
+(`_character_can_currently_reach`) now checks the same gate too, so it
+no longer invites a move that would just get refused.
+
+3 tests updated/added covering the closed skip path (blocked with item
+alone, blocked until the real Chapter 3 finale quest, succeeds once
+genuinely earned) plus the matching display-hint case. Full targeted
+re-verification (46 tests across chapter/story-gate/first-city/
+unmoored-isle surfaces) clean. Separately found (not fixed, unrelated
+pre-existing issue, confirmed via `git stash` against clean HEAD): 35
+non-boss monsters across Chapters 5-8 exceed an existing `damage_
+bonus` balance ceiling test — flagged for a future balance pass, out
+of scope for this gating fix.
+
 ## [1.27.563] — fix: real party members skipped by combat-triggered board quest rewards
 
 Real dev-bridge report (2026-09-09, Coffee: "Laurienna didn't level up

@@ -2338,6 +2338,9 @@
           },
           "the_first_city_sunken_archive": {
             "requires_cleared_location": "the_first_city"
+          },
+          "the_unmoored_isle": {
+            "requires_completed_quest": "the_original_spires_reckoning"
           }
         },
         "combat_environment": {
