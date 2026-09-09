@@ -1832,6 +1832,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(daily["board_quest_id"], accepted_ids)
         self.assertEqual(len(accepted_ids), 4)
 
+    async def test_naming_an_already_taken_board_quest_gives_an_honest_reply_not_a_silent_wrong_accept(self):
+        """
+        Real live bug (2026-09-09, dev-bridge screenshot): Elduinn's own
+        "Accept: [Monthly] Trouble with the Goblins" board button
+        silently accepted the unrelated story quest "Grask's Freedom"
+        instead -- happened right after another player (Laurienna) took
+        the exact same board quest a moment earlier. Root cause:
+        _do_accept_quest's own "does this text name something else"
+        check only ever looked at `available` (not-yet-taken) board
+        quests, so text naming an ALREADY-taken quest fell through as
+        if nothing specific was named, silently accepting whatever
+        story quest happened to be offerable at the player's own
+        current location instead of the honest "already taken" reply
+        the board-quest section further down already gives.
+        """
+        import board_quests as board_quests_module
+        use_test_db("tests/tmp/quest_already_taken_test.db")
+        taker_id, watcher_id = 900810, 900811
+        make_basic_character(taker_id, "QuestTaker", current_location="crossroads_tavern")
+        make_basic_character(watcher_id, "QuestWatcher", current_location="crossroads_tavern")
+
+        bq = db.create_board_quest(
+            "crossroads_tavern", -999, board_quests_module._period_key("daily"),
+            "A Very Specific Bounty", "...", None, "gather_material", "wood", 3, 40, 20, tier="daily",
+        )
+        db.accept_board_quest(bq["board_quest_id"], taker_id, -999)
+
+        sink = []
+        await bot._do_accept_quest(
+            FakeUpdate(watcher_id, "I accept A Very Specific Bounty", sink), "I accept A Very Specific Bounty",
+        )
+        combined = "\n".join(sink)
+        self.assertNotIn("Grask's Freedom", combined)
+        self.assertNotIn("A Favor for Grimsby", combined)
+        self.assertIn("already", combined.lower(), combined)
+        watcher = db.get_character(watcher_id, -999)
+        self.assertNotIn("welcome_to_the_crossroads", watcher["active_quests"])
+
     async def test_accepting_exactly_the_cap_limit_of_weekly_monthly_quests_succeeds(self):
         import board_quests as board_quests_module
         use_test_db("tests/tmp/long_term_quest_cap_boundary_test.db")
@@ -16609,6 +16647,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         plain_weapon = generate_weapon(tier="common")
         self.assertTrue(plain_weapon["note"].startswith("A common find"))
 
+    def test_generated_item_name_reflects_its_actual_rolled_elemental_property(self):
+        """
+        Real dev-bridge report (2026-09-09, screenshot): a real generated
+        very_rare armor came back named "Emberbound Chain Mail Armor of
+        the First Flame" -- both fire-flavored words -- while its actual
+        rolled bonus was Resistance to FORCE, a total mismatch. Root
+        cause: the name was built before, and completely independent of,
+        the elemental affix roll. Across many rolls, any item that DOES
+        get an elemental affix must have its own real damage_type
+        reflected in the name's suffix, never a mismatched one.
+        """
+        from rules.item_generator import generate_weapon, generate_armor, ELEMENTAL_SUFFIXES
+        found_weapon = False
+        for _ in range(200):
+            w = generate_weapon(tier="very_rare")
+            elemental = next((a for a in w["affixes"] if a["kind"] == "elemental_damage"), None)
+            if elemental:
+                found_weapon = True
+                element = elemental["damage_type"]
+                self.assertTrue(
+                    any(suffix in w["name"] for suffix in ELEMENTAL_SUFFIXES[element]),
+                    f"{w['name']} doesn't reflect its own real {element} affix",
+                )
+        self.assertTrue(found_weapon, "expected at least one elemental weapon affix across 200 very_rare rolls")
+
+        found_armor = False
+        for _ in range(200):
+            a_item = generate_armor(tier="very_rare")
+            resist = next((a for a in a_item["affixes"] if a["kind"] == "resistance"), None)
+            if resist:
+                found_armor = True
+                element = resist["damage_type"]
+                self.assertTrue(
+                    any(suffix in a_item["name"] for suffix in ELEMENTAL_SUFFIXES[element]),
+                    f"{a_item['name']} doesn't reflect its own real {element} resistance",
+                )
+        self.assertTrue(found_armor, "expected at least one resistance affix across 200 very_rare armor rolls")
+
     async def test_reimage_preserves_item_view_action_buttons(self):
         """
         Real gap caught on self-review right after shipping v1.27.82
@@ -28366,6 +28442,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("no human hands or body parts", ability_prompt)
         self.assertIn("no creature or monster", ability_prompt)
         self.assertNotIn("dynamic action pose", ability_prompt)
+
+    def test_spell_image_prompt_never_says_elemental_to_avoid_a_real_creature_type_collision(self):
+        """
+        Real live feedback (2026-09-09, Coffee, dev-bridge screenshot): a
+        generated "Mudslide" (earth damage) image came back as a hulking
+        demon/wolf CREATURE, not an earth/mud effect, despite the
+        explicit "no creature" exclusion. Root cause: the old flavor
+        phrase "a {damage_type} elemental magical effect" is genuinely
+        ambiguous -- "Earth Elemental"/"Fire Elemental" are also real,
+        classic D&D monster names, so the image model read it as
+        depicting the CREATURE, not the element. The word "elemental"
+        must never appear in a damage-type spell's image prompt again.
+        """
+        for damage_type in ("fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth"):
+            prompt = bot._spell_image_prompt({"name": "Mudslide", "effect": "damage", "damage_type": damage_type})
+            self.assertNotIn("elemental", prompt.lower(), f"{damage_type}: {prompt}")
+            self.assertIn(damage_type, prompt)
+            self.assertIn("no creature or monster", prompt)
 
     def test_interactable_image_prompt_nudges_against_warped_objects(self):
         """

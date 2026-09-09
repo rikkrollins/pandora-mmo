@@ -17538,9 +17538,28 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
     companion_offer = _offerable_companion_quest(character)
     if offer is not None:
         quest_id, quest = offer
+        # Real live bug (2026-09-09, dev-bridge screenshot: Elduinn's
+        # "Accept: [Monthly] Trouble with the Goblins" board button
+        # silently accepted the unrelated story quest "Grask's Freedom"
+        # instead). Root cause: `names_something_else` only ever
+        # checked `available` (not-yet-taken) board quests -- but the
+        # button's own `text` is that exact board quest's title, and by
+        # the time the tap was processed, ANOTHER player (Laurienna, in
+        # the same screenshot) had already taken it a moment earlier,
+        # removing it from `available`. With the name no longer
+        # matching anything in `available`, this wrongly concluded the
+        # text "doesn't name anything specific" and fell through to
+        # silently accept the location's own unrelated story offer,
+        # instead of the honest "already taken" reply the board-quest
+        # section below already gives (2026-07-18 fix) -- that section
+        # was simply never reached. Checking `all_quests` (every board
+        # quest generated today, taken or not) instead of `available`
+        # fixes this the same way that earlier fix's own comment
+        # already documents doing for the board-quest-lookup path
+        # itself.
         names_something_else = (
             (companion_offer is not None and companion_offer[1]["title"].lower() in text.lower())
-            or any(q["title"].lower() in text.lower() for q in available)
+            or any(q["title"].lower() in text.lower() for q in all_quests)
         )
         if not names_something_else:
             # _accept_offered_story_quest also handles the
@@ -17557,9 +17576,11 @@ async def _do_accept_quest(update: Update, text: str = "") -> None:
     # accepting the companion quest instead, regardless of what was
     # actually typed. Now only takes the shortcut when the text doesn't
     # clearly name something else that's actually available here.
+    # Same all_quests (not available-only) fix as the story-offer check
+    # above, for the identical reason.
     if companion_offer is not None:
         quest_id, quest = companion_offer
-        names_something_else = any(q["title"].lower() in text.lower() for q in available)
+        names_something_else = any(q["title"].lower() in text.lower() for q in all_quests)
         if not names_something_else:
             opening_note = await _arc_opening_note(update, character, quest_id, quest)
             db.accept_quest(telegram_user_id, update.effective_chat.id, quest_id)
@@ -24692,10 +24713,21 @@ def _spell_image_prompt(spell: dict) -> str:
     creepy." Rewritten to describe ONLY the magical effect itself and
     explicitly exclude a person/hand/creature, rather than leaving that
     up to the image model's own interpretation of "spellcasting."
+
+    Real live feedback (2026-09-09, Coffee, dev-bridge screenshot of a
+    generated "Mudslide" image): came back as a hulking demon/wolf
+    creature, not any kind of earth/mud effect, despite the explicit
+    "no creature" exclusion just above. Root cause: the OLD flavor
+    phrase here was "a {damage_type} elemental magical effect" --
+    "earth elemental" (and "fire elemental") are also real, classic
+    D&D CREATURE names, so the phrase was genuinely ambiguous between
+    "an effect made of the earth element" and "an Earth Elemental's
+    effect," and the image model read it as the latter. Reworded to
+    drop "elemental" entirely so it can't be misread as a monster type.
     """
     damage_type = spell.get("damage_type")
     if spell.get("effect") == "damage" and damage_type:
-        flavor = f"a {damage_type} elemental magical effect"
+        flavor = f"a {damage_type}-themed magical energy effect"
     elif spell.get("effect") == "heal":
         flavor = "a warm, restorative golden magical light"
     else:

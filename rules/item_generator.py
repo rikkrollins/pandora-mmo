@@ -123,10 +123,42 @@ def roll_tier() -> str:
     return "mythic"
 
 
-def _name_for(base_label: str, tier: str) -> str:
+# Element-aware suffixes (2026-09-09, real dev-bridge report: a very_rare
+# armor rolled "Emberbound Chain Mail Armor of the First Flame" -- both
+# fire-flavored words from PREFIXES/SUFFIXES' own tier-only pools -- while
+# its ACTUAL rolled resistance affix was force, not fire. Root cause: the
+# name was always built from _maybe_elemental_affix's damage_type. Keyed
+# by damage_type, not tier -- the tier PREFIX above already conveys power
+# level; this only needs to convey WHICH element actually got rolled, so
+# one pool per element (not a tier x element cross-product) is enough to
+# fix the actual reported mismatch without a large new authoring surface.
+ELEMENTAL_SUFFIXES = {
+    "fire": ["of the First Flame", "of Embers", "of the Burning Heart", "of Cinder"],
+    "cold": ["of the Frostbite", "of the Deep Freeze", "of Winter's Grasp", "of Rime"],
+    "lightning": ["of the Storm", "of Thunderclap", "of the Tempest", "of Sparks"],
+    "force": ["of Shattered Will", "of the Unseen Blow", "of Kinetic Ruin", "of the Crushing Wave"],
+    "radiant": ["of the Dawnlight", "of Sunfire", "of the Holy Flame", "of Radiance"],
+    "psychic": ["of the Shattered Mind", "of Whispers", "of the Hollow Choir", "of Madness"],
+    "poison": ["of the Venomous Bite", "of Blight", "of the Creeping Rot", "of Toxin"],
+    "necrotic": ["of the Withering Grasp", "of the Grave", "of Decay", "of the Last Breath"],
+    "silver": ["of the Silvered Edge", "of Moonlight", "of the Silver Bane", "of Pure Light"],
+}
+
+
+def _name_for(base_label: str, tier: str, element: str | None = None) -> str:
+    """
+    `element` (2026-09-09): the real damage_type this specific item
+    instance actually rolled (from _maybe_elemental_affix), if any --
+    when given, the suffix names THAT element instead of a generic
+    tier-flavored one, so the name never claims a property the item
+    doesn't have. None (no elemental affix rolled) keeps the original
+    tier-only behavior unchanged.
+    """
     prefix = random.choice(PREFIXES[tier])
     name = f"{prefix} {base_label}"
-    if tier in SUFFIXES:
+    if element and element in ELEMENTAL_SUFFIXES:
+        name += f" {random.choice(ELEMENTAL_SUFFIXES[element])}"
+    elif tier in SUFFIXES:
         name += f" {random.choice(SUFFIXES[tier])}"
     return name
 
@@ -285,10 +317,14 @@ def generate_weapon(base_id: str | None = None, tier: str | None = None) -> dict
     base = WEAPON_BASES[base_id]
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
-    name = _name_for(base_id.replace("_", " ").title(), tier)
+    # Rolled BEFORE naming (2026-09-09) so the name can reflect whichever
+    # element actually landed -- see _name_for's own docstring.
+    elemental_affix = _maybe_elemental_affix(tier, "elemental_damage")
+    element = elemental_affix[0]["damage_type"] if elemental_affix else None
+    name = _name_for(base_id.replace("_", " ").title(), tier, element=element)
     affixes = (
         ([{"kind": "stat_bonus", "field": "damage_bonus", "value": bonus}] if bonus else [])
-        + _maybe_elemental_affix(tier, "elemental_damage")
+        + elemental_affix
         + _maybe_proficiency_affix(tier, "weapon", base["weapon_category"])
         + ([_mythic_affix("weapon")] if tier == "mythic" else [])
     )
@@ -319,10 +355,12 @@ def generate_armor(base_id: str | None = None, tier: str | None = None) -> dict:
     base = ARMOR_BASES[base_id]
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
-    name = _name_for(base_id.replace("_", " ").title() + " Armor", tier)
+    elemental_affix = _maybe_elemental_affix(tier, "resistance")
+    element = elemental_affix[0]["damage_type"] if elemental_affix else None
+    name = _name_for(base_id.replace("_", " ").title() + " Armor", tier, element=element)
     affixes = (
         ([{"kind": "stat_bonus", "field": "ac_base", "value": bonus}] if bonus else [])
-        + _maybe_elemental_affix(tier, "resistance")
+        + elemental_affix
         + _maybe_proficiency_affix(tier, "armor", base["armor_category"])
         + ([_mythic_affix("armor")] if tier == "mythic" else [])
     )
@@ -350,10 +388,12 @@ def generate_shield(base_id: str | None = None, tier: str | None = None) -> dict
     base = SHIELD_BASES[base_id]
     tier = tier or roll_tier()
     bonus = TIER_BONUS[tier]
-    name = _name_for(base_id.replace("_", " ").title(), tier)
+    elemental_affix = _maybe_elemental_affix(tier, "resistance")
+    element = elemental_affix[0]["damage_type"] if elemental_affix else None
+    name = _name_for(base_id.replace("_", " ").title(), tier, element=element)
     affixes = (
         ([{"kind": "stat_bonus", "field": "ac_bonus", "value": bonus}] if bonus else [])
-        + _maybe_elemental_affix(tier, "resistance")
+        + elemental_affix
         + _maybe_proficiency_affix(tier, "armor", base["armor_category"])
         + ([_mythic_affix("shield")] if tier == "mythic" else [])
     )

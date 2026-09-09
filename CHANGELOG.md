@@ -2,7 +2,51 @@
 
 All notable changes to Pandora MMO are documented here.
 
-## [1.27.551] — feat: Greater elemental scrolls now craftable at level 20+
+## [1.27.552] — fix: 4 real dev-bridge reports (quest bug, item naming, spell image, narration length)
+
+**Quest accept mismatch** (screenshot: Elduinn's board button tap for
+"[Monthly] Trouble with the Goblins" silently accepted the unrelated
+story quest "Grask's Freedom" instead). Root cause: `_do_accept_quest`'s
+own "does this text name something else" check only ever looked at
+`available` (not-yet-taken) board quests -- another player (Laurienna,
+same screenshot) had taken the exact quest moments earlier, removing
+it from `available`, so the check wrongly concluded nothing specific
+was named and silently fell through to the location's own story offer
+instead of the honest "already taken" reply the board-quest section
+already gives. Now checks `all_quests` (taken or not) in both the
+story-offer and companion-offer shortcuts.
+
+**Item names not reflecting real rolled properties** (screenshot: "Emberbound
+Chain Mail Armor of the First Flame" — Very Rare — actually rolled
+"Resistance to force," not fire; both fire-flavored words came from a
+tier-only pool with zero knowledge of the real elemental roll). Fixed
+in `rules/item_generator.py`: the elemental affix is now rolled BEFORE
+naming, and a real per-damage-type suffix pool (`ELEMENTAL_SUFFIXES`)
+replaces the generic tier-only suffix whenever an elemental affix
+actually lands, across `generate_weapon`/`generate_armor`/
+`generate_shield`.
+
+**Spell-cast image showing an unrelated creature** (screenshot: "Mudslide"
+generated a hulking demon/wolf figure, not any kind of earth/mud
+effect, despite the prompt's own explicit "no creature or monster"
+exclusion). Root cause: the flavor phrase "a {damage_type} elemental
+magical effect" is genuinely ambiguous — "Earth Elemental"/"Fire
+Elemental" are also real, classic D&D creature names, so the image
+model read "earth elemental" as the monster. Reworded to "a
+{damage_type}-themed magical energy effect," dropping "elemental"
+entirely so it can never be misread as a monster type again.
+
+**Narration too long, cluttering the chat** (screenshot: a single skill-
+check narration ran ~9-10 sentences of dense prose between combat
+lines). The live `story_mode` override was already lowered from 5 to
+3 in this same session (`db.set_setting`, takes effect immediately,
+no deploy needed) — a real, immediate qualitative step down (from
+"suspenseful, storybook tone" to "concise, with a light touch of
+atmosphere") using the exact same live-tunable mechanism Coffee's own
+"set story mode to N" command already exposes.
+
+5 new regression tests (quest-accept, item-naming, spell-image-prompt);
+targeted regression sweep clean.
 
 Standalone follow-up to v1.27.549 (per Coffee: "dont have tier 2
 scrolls in shops, they must be crafted by a lv 20 +"). The 9 Tier-2
