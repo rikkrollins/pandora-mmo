@@ -22,7 +22,9 @@ BOT_TOKEN=your-real-token-here
 ```
 Everything else in `.env` is already correct for a group with the
 standard Main / Support / Adventure / Development topic IDs — only
-change those if your topics use different thread IDs.
+change those if your topics use different thread IDs. (You don't
+actually have to hunt down and edit these by hand at all, though —
+see "Automatic topic setup" below.)
 
 ```bash
 pip install -r requirements.txt --break-system-packages
@@ -37,6 +39,22 @@ You should see:
 Make sure the bot account is actually added as a **member** of your
 Telegram group (Group Settings → Add Member) — creating it in
 BotFather alone isn't enough.
+
+### Automatic topic setup
+
+The moment the bot is added to a group as a member, it sends a welcome
+message and walks an admin through a one-time setup conversation:
+whether to create the Adventure/Support topics for you automatically
+(if Telegram's Topics/forum mode is on and the bot has been made an
+admin with "Manage Topics" permission), or manual step-by-step
+instructions otherwise. It then asks whether this group should run its
+own separate **Private World** or join the shared **Public World** at
+the official group instead. Under the hood this is the same
+`/set_topic <main|support|adventure>` command you can also run
+yourself, from inside any real topic, at any time — no `.env` editing
+needed for any of it. The one topic this can never set up for a group
+other than the official one is **Development**: that's the official
+group's own exclusive maintainer channel, not a per-group option.
 
 ## 2. How to play
 

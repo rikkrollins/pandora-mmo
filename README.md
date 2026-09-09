@@ -16,19 +16,22 @@ You won't be walking alone, either. To a newcomer, this looks like an ordinary g
 
 ---
 
-## Official Telegram group
+## Just want to play?
 
-**[t.me/PandoraMMO](https://t.me/PandoraMMO)** — the official Pandora MMO Telegram group, where @PandoraMMO_Bot is live and running.
+**[t.me/PandoraMMO](https://t.me/PandoraMMO)** — the official Pandora MMO Telegram group. @PandoraMMO_Bot is already live and running there, right now. Join, create a character, and start talking — nothing to install, nothing to configure.
 
 ---
 
 ## Getting Started
 
-**👉 Full installation instructions live in [`SETUP_GUIDE.md`](./SETUP_GUIDE.md).**
+The [`SETUP_GUIDE.md`](./SETUP_GUIDE.md) instructions are for standing up your **own, self-hosted copy** of Pandora MMO — your own bot token, your own server, your own Ollama instance. **You do not need any of that to play** — see "Just want to play?" above.
 
-It walks you through everything: dependencies, your bot token, connecting to Ollama, and getting the bot running and polling in your own Telegram group, start to finish.
+Two reasons you might still want it:
 
-Once it's running, all you need to do is talk.
+- **Add the shared bot to your own group instead.** You don't need to run your own copy at all — invite `@PandoraMMO_Bot` into any Telegram group you own, and the moment it's added it walks an admin through a one-time setup conversation (enabling Topics, wiring up an Adventure topic and, optionally, Support), then asks whether that group wants its own separate **Private World** (its own characters, quests, economy) or to join the shared **Public World** above instead. No installation needed for this path either — it's the exact same running bot.
+- **Run a fully independent instance.** Follow [`SETUP_GUIDE.md`](./SETUP_GUIDE.md) for a self-hosted deployment — your own token, your own dependencies, your own Ollama model, polling in whatever group(s) you choose.
+
+**One thing every group gets, and doesn't:** every group — the official one and any you set up yourself — gets Adventure (gameplay) and, optionally, Support (help/questions) and Main (general chat). The **Development** topic is different: it's the official group's own private maintainer channel, exclusive to that one group, and is never offered, created, or available to any other group or self-hosted instance — there's nothing to configure here, it's simply not part of what a new group gets.
 
 ---
 
@@ -58,7 +61,7 @@ You'll choose a name, a race, a class, and the dice will hand you six numbers to
 **A few other things worth knowing:**
 - **Main** is for regular, out-of-character chat between players.
 - **Support** is where to ask questions about how to play.
-- **Development** is for the people running the server — not part of the game.
+- **Development** is for the people running the *official* server — not part of the game, and not something any other group (including your own) has access to or can set up.
 - You can adventure with friends. Everyone shares the same world, the same threats, the same discoveries.
 
 ---

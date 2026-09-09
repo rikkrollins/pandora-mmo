@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.554] — docs: clarify install-vs-play in README/SETUP_GUIDE, ahead of going public
+
+Real, direct ask (per Coffee: "be clear on the github the INSTALL is
+ONLY FOR PERSONAL SETUP of the BOT, Public server is already online
+and available... let them kno to join the main community for group
+play... if they want to create thier own group... show them how...
+DEV topic is ONLY for Sugar and I, new group creations cannot use a
+DEV topic and will NOT have one available to them").
+
+Before touching any docs, verified via real, already-passing tests
+(`test_onboarding_consent_flow_auto_setup_and_private_world`,
+`test_onboarding_public_world_choice_points_at_the_real_invite_link`,
+`test_private_dm_to_the_bot_gets_a_real_getting_started_reply`,
+`test_set_topic_command_gates_and_persists_correctly`) that the
+underlying behavior already does exactly this — a new group getting
+this bot added is walked through a real, tested onboarding
+conversation (auto/manual topic setup, then Private-vs-Public World),
+a DM to the bot points at the main group or explains adding it to
+your own, and `/set_topic development` is already hard-refused for
+every chat except the real home group. Nothing to fix in the bot
+itself — only the docs were unclear.
+
+`README.md`: split "Official Telegram group" into its own "Just want
+to play?" section up top; rewrote "Getting Started" to lead with
+"you don't need to install anything to play," explain the two real
+reasons to still want `SETUP_GUIDE.md` (adding the shared bot to your
+own group vs. running a fully independent instance), and state
+plainly that Development is the official group's own exclusive
+channel, never available to any other group. `SETUP_GUIDE.md`: added
+a real "Automatic topic setup" section documenting the in-chat
+onboarding flow and `/set_topic` command (previously undocumented
+entirely, despite already being the easier path — the guide only ever
+described hand-editing `.env` thread IDs).
+
 ## [1.27.553] — fix: real flood-control crashes found in the error log (`_do_move`, `_do_switch_character`, `_do_delete_character`, `_send_layer_map`)
 
 Found via `scripts/check_error_log.py` while checking dev-bridge
