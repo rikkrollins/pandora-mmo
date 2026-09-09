@@ -1991,6 +1991,41 @@ def the_unspoken_defeat_line() -> str:
     )
 
 
+def the_last_glyph_confrontation_script() -> str:
+    """
+    Chapter 3's real finale ("The Original Spire") -- every glyph in
+    the buried city was "leading down to the same place," per the
+    quest's own clue, and this entity's real mechanical identity
+    (echoes_damage_type: True -- a free backlash on the third hit of
+    the same damage type, per CLAUDE.md's own documented "the Undertone
+    ... echoing that exact wound back" mechanic) gives the theme a
+    literal shape: it doesn't converse, it repeats -- the same phrase,
+    worn down to fragments by however many thousand years of repeating
+    it. Hand-written, zero Ollama calls.
+    """
+    return (
+        "*It isn't shaped like anything that was ever alive -- just glyphs, layered so many "
+        "thousand deep that the oldest ones at the center have worn smooth, repeating themselves "
+        "the way a word said too many times stops sounding like a word.*\n\n"
+        "**The Last Glyph:** \"...the count is not finished. the count is not finished. "
+        "the count...\"\n\n"
+        "*It doesn't seem to notice the party at all, not really -- more like the party has "
+        "simply become the next thing the counting has to go through.*\n\n"
+        "**The Last Glyph:** \"...the count is not finished.\""
+    )
+
+
+def the_last_glyph_defeat_line() -> str:
+    """Companion piece to the_last_glyph_confrontation_script -- fired as the Chapter 3 ending's opening beat."""
+    return (
+        "*The glyphs don't shatter so much as finally stop repeating -- layer after layer going "
+        "still, the way a held breath finally lets go.*\n\n"
+        "**The Last Glyph:** \"...the count is--\"\n\n"
+        "*It doesn't finish. For the first time in longer than anyone down here can guess, "
+        "nothing in the Original Spire is still counting anything.*"
+    )
+
+
 def narrate_scouting_grounds_ending(character_name: str) -> str:
     """
     Chapter 7's real finale beat, closing "Fresh Tracks"

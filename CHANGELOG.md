@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.570] — feat: Chapter 3's real finale gets a named speaking antagonist (story completion pass, 4/7)
+
+Chapter 3's finale (`the_original_spires_reckoning`, "The Original
+Spire") had real buildup ("every glyph in this whole buried city has
+been leading down to the same place") but `the_last_glyph` itself was
+silent — zero personality, generic AI narration on completion.
+
+Added `the_last_glyph_confrontation_script`/`the_last_glyph_defeat_line`
+(`ai/dm_agent.py`) — hand-written, zero Ollama calls. Built on the
+monster's own real mechanical identity (`echoes_damage_type: true` —
+a free backlash on the third hit of the same damage type, CLAUDE.md's
+documented "the Undertone... echoing that exact wound back" mechanic):
+an ancient intelligence that doesn't converse, it repeats — the same
+worn-down phrase, over and over, until it finally stops. Wired at the
+same two checkpoints as Chapters 1-2's antagonists (`_do_start_combat`
+boss-intro dispatch, `_complete_quest_and_announce` ending dispatch +
+climax image), same plain-`monsters`-dict approach, zero migration
+risk to existing behavior.
+
+3 new regression tests (both scripts, the real fight-start dispatch,
+the real quest-completion dispatch + image). Confirmed no other
+existing test touches `the_last_glyph`'s combat-start path.
+
 ## [1.27.569] — feat: Chapter 2's real finale gets a named speaking antagonist (story completion pass, 3/7)
 
 Chapter 2's finale (`the_hush_stage3_the_unspoken`, "What Answers

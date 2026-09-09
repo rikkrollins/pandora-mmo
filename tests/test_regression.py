@@ -7802,6 +7802,59 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         prompt_arg = mock_image.await_args.args[1]
         self.assertIn("What Answers Back", prompt_arg)
 
+    # -- Chapter 3's real finale (2026-09-09, story completion pass,
+    #    4/7): a named speaking antagonist built on its own real
+    #    echoes_damage_type mechanic ------------------------------
+    def test_the_last_glyph_scripts_are_hand_written(self):
+        import ai.dm_agent as dm_agent_module
+        confrontation = dm_agent_module.the_last_glyph_confrontation_script()
+        self.assertIn("The Last Glyph:", confrontation)
+        defeat = dm_agent_module.the_last_glyph_defeat_line()
+        self.assertIn("The Last Glyph:", defeat)
+
+    async def test_starting_combat_with_the_last_glyph_fires_the_real_confrontation(self):
+        """
+        End-to-end: starting a fight with the_last_glyph must route
+        through the hand-written confrontation, not the generic
+        narrate_boss_intro AI path -- confirmed by NOT patching
+        narrate_boss_intro at all.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 900966
+        make_basic_character(
+            user_id, "GlyphWitness", chat_id=-997, char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -997, level=38, hp_current=1500, hp_max=1500)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the last glyph", sink, chat_id=-997),
+                                        monster_key="the_last_glyph", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("The Last Glyph:", combined)
+        sessions.end_session(-997)
+
+    async def test_completing_the_original_spires_reckoning_fires_the_real_ending(self):
+        """
+        End-to-end: completing the_original_spires_reckoning must route
+        through the hand-written defeat line, not the generic
+        narrate_chapter_climax AI path. Also confirms the climax image
+        fires with the real quest's own title grounding it.
+        """
+        from unittest.mock import patch, AsyncMock
+        user_id = 900967
+        make_basic_character(user_id, "SpireWitness", current_location="the_first_city_the_original_spire")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_original_spires_reckoning")
+        combined = "\n".join(sink)
+        self.assertIn("The Last Glyph:", combined)
+        mock_image.assert_awaited_once()
+        prompt_arg = mock_image.await_args.args[1]
+        self.assertIn("The Original Spire", prompt_arg)
+
     def test_sunken_root_caverns_lockable_chests_grant_real_loot(self):
         for loc_id in ("sunken_root_caverns_the_hidden_cache", "sunken_root_caverns_the_second_pool"):
             loc = cl.get_location(bot.CAMPAIGN, loc_id)

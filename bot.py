@@ -79,6 +79,7 @@ from ai.dm_agent import (
     narrate_scouting_grounds_ending,
     goblin_boss_confrontation_script, goblin_boss_defeat_line,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
+    the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     grask_supply_tunnels_reaction, grask_deep_larders_reaction,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
@@ -9115,6 +9116,8 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 intro = goblin_boss_confrontation_script()
             elif monster_key == "the_unspoken":
                 intro = the_unspoken_confrontation_script(requester["name"])
+            elif monster_key == "the_last_glyph":
+                intro = the_last_glyph_confrontation_script()
             else:
                 intro = await asyncio.to_thread(
                     narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"],
@@ -17167,6 +17170,15 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # confrontation_script's own docstring for the real mechanical
         # hook (silences its targets) this entity's voice is built on.
         climax_narration = f"{the_unspoken_defeat_line()}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
+    elif quest_id == "the_original_spires_reckoning":
+        # Chapter 1-8 story completion pass (2026-09-09): Chapter 3's
+        # own finale gets a real named speaking antagonist instead of
+        # the generic AI climactic flourish -- see the_last_glyph_
+        # confrontation_script's own docstring for the real mechanical
+        # hook (echoes_damage_type) this entity's repeating voice is
+        # built on.
+        climax_narration = f"{the_last_glyph_defeat_line()}\n\n"
         await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest.get("weight") == "climactic":
         climax_text = await asyncio.to_thread(
