@@ -1955,6 +1955,42 @@ def goblin_boss_defeat_line() -> str:
     )
 
 
+def the_unspoken_confrontation_script(character_name: str) -> str:
+    """
+    Chapter 2's real finale ("What Answers Back") -- the quest's own
+    title/clue already promise an entity that describes the party back
+    to themselves; the real mechanical hook (on_hit_condition:
+    "silenced", punishes_own_condition: True -- it hits harder against
+    anyone it's already gone quiet) gives that literal shape: it talks
+    constantly while taking everyone else's voice away. Interpolates
+    character_name once, the same way kess_shrine_vigil_script does,
+    since the whole point of this entity is that it already knows who
+    it's talking to. Hand-written, zero Ollama calls.
+    """
+    return (
+        f"*It doesn't have a mouth, not really -- the voice arrives from everywhere in the dark "
+        f"at once, and it already knows {character_name}'s name before anyone's said it out loud "
+        "down here.*\n\n"
+        "**The Unspoken:** \"You talk so much on the way in. I've been listening to all of it. "
+        "It's rude, really, how much of yourselves you just hand over for free.\"\n\n"
+        "*The dark presses in closer, and for a moment it isn't the entity's voice at all -- "
+        "it's someone's own, played back a half-second late.*\n\n"
+        "**The Unspoken:** \"There. Now you know how it feels. Let's see how much you have left "
+        "to say once I'm done.\""
+    )
+
+
+def the_unspoken_defeat_line() -> str:
+    """Companion piece to the_unspoken_confrontation_script -- fired as the Chapter 2 ending's opening beat."""
+    return (
+        "*It doesn't die so much as run out of things to repeat -- the voice thins, "
+        "stutters on half-finished borrowed words, and finally goes quiet.*\n\n"
+        "**The Unspoken:** \"...you talk so much...\"\n\n"
+        "*And then, for the first time since anyone came down here, actual silence -- the real "
+        "kind, the kind that isn't listening back. It's almost worse than the voice was.*"
+    )
+
+
 def narrate_scouting_grounds_ending(character_name: str) -> str:
     """
     Chapter 7's real finale beat, closing "Fresh Tracks"

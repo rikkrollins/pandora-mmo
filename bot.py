@@ -78,6 +78,7 @@ from ai.dm_agent import (
     kess_shrine_vigil_script, kess_scouting_confrontation_script, kess_scouting_flees_line,
     narrate_scouting_grounds_ending,
     goblin_boss_confrontation_script, goblin_boss_defeat_line,
+    the_unspoken_confrontation_script, the_unspoken_defeat_line,
     grask_supply_tunnels_reaction, grask_deep_larders_reaction,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
@@ -9112,6 +9113,8 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             # to these already-shipped bosses stays completely untouched.
             if monster_key == "goblin_boss":
                 intro = goblin_boss_confrontation_script()
+            elif monster_key == "the_unspoken":
+                intro = the_unspoken_confrontation_script(requester["name"])
             else:
                 intro = await asyncio.to_thread(
                     narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"],
@@ -17156,6 +17159,14 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # Chapter 5's real payoff much later. Hand-written, zero Ollama
         # calls, same discipline as every Kess beat.
         climax_narration = f"{goblin_boss_defeat_line()}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
+    elif quest_id == "the_hush_stage3_the_unspoken":
+        # Chapter 1-8 story completion pass (2026-09-09): Chapter 2's
+        # own finale gets a real named speaking antagonist instead of
+        # the generic AI climactic flourish -- see the_unspoken_
+        # confrontation_script's own docstring for the real mechanical
+        # hook (silences its targets) this entity's voice is built on.
+        climax_narration = f"{the_unspoken_defeat_line()}\n\n"
         await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest.get("weight") == "climactic":
         climax_text = await asyncio.to_thread(

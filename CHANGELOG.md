@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.569] — feat: Chapter 2's real finale gets a named speaking antagonist (story completion pass, 3/7)
+
+Chapter 2's finale (`the_hush_stage3_the_unspoken`, "What Answers
+Back") had real, specific buildup text ("something down there has
+started describing YOU back") but the entity itself was silent —
+`the_unspoken` had zero personality and fell through to generic AI
+narration on completion.
+
+Added `the_unspoken_confrontation_script`/`the_unspoken_defeat_line`
+(`ai/dm_agent.py`) — hand-written, zero Ollama calls. Built directly on
+the monster's own real mechanical identity (`on_hit_condition:
+"silenced"`, `punishes_own_condition: true` — it hits harder against
+anyone it's already gone quiet): an entity that talks constantly by
+repeating the party's own words back at them, then takes their voice
+away. Wired at the same two checkpoints as Chapter 1's `goblin_boss`
+(`_do_start_combat`'s boss-intro dispatch, `_complete_quest_and_
+announce`'s ending dispatch + climax image), same "keep it a plain
+monsters-dict entry" approach to avoid any regression risk to existing
+bestiary/defeat-tracking behavior.
+
+3 new regression tests (both scripts, the real fight-start dispatch,
+the real quest-completion dispatch + image). Re-ran every other
+existing `the_unspoken`-touching test — all clean.
+
 ## [1.27.568] — feat: Chapter 1's real finale gets the game's first named speaking antagonist (story completion pass, 2/7)
 
 Chapter 1's finale (`clear_the_warrens`, "Clear the Goblin Warrens")
