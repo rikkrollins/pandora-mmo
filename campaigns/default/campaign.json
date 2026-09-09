@@ -9025,7 +9025,7 @@
         "type": "reach_location",
         "location": "glimmerdeep_grotto"
       },
-      "clue": "Travelers who've passed the Sunken Root Caverns mention a faint, wrong-colored light deeper in."
+      "clue": "Travelers who've passed the Sunken Root Caverns mention a faint, wrong-colored light deeper in -- the same travelers still grumbling about tolls further up on the surface roads, like both problems started around the same time."
     },
     "the_hush_stage1_signs": {
       "title": "Into the Hush",
@@ -9102,7 +9102,7 @@
         "type": "reach_location",
         "location": "crossroads_tavern"
       },
-      "clue": "Find the paladin at the Crossroads Tavern and ask about the Rising Concerns."
+      "clue": "Find the paladin at the Crossroads Tavern and ask about the Rising Concerns -- he's the same one who never did stop chasing that lead on the coin."
     },
     "unmoored_isle_arrival": {
       "title": "What the Sky Was Hiding",
@@ -9114,7 +9114,7 @@
         "type": "reach_location",
         "location": "the_unmoored_isle"
       },
-      "clue": "Follow where the shard wants to go — up, past the spire, into open sky."
+      "clue": "Follow where the shard wants to go — up, past the spire, into open sky. Whatever's still moving coin through the roads far below will have to wait; the shard only pulls one direction, and it isn't down."
     },
     "the_unmoored_isle_quest": {
       "title": "What Waits Above",

@@ -8104,6 +8104,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("lead", quests["borins_resolution"]["clue"].lower())
         self.assertIn("tolls", quests["wrens_root_worry"]["clue"].lower())
 
+    # -- Kess foreshadowing extended to Chapters 2-4 (2026-09-10, per
+    #    Coffee: "what's left to fill in chapters 2-4 and 8" -> "yes go
+    #    ahead and add those") -- Chapters 2-4's own antagonists (the_
+    #    unspoken/the_last_glyph/the_high_approach_sentinel) stay
+    #    untouched (silence/echo/duty, not banditry -- forcing coin talk
+    #    into their own dialogue would ring false), so these three go on
+    #    quests ADJACENT to those fights instead: arc_2's own opening
+    #    rumor quest, arc_3's already-existing Borin touchpoint (ties
+    #    back to his v1.27.574 recruitment-chain hint), and arc_4's
+    #    arrival quest (deliberately the thinnest touch -- a floating
+    #    isle has no real tie to a road-toll network, so this is an
+    #    acknowledgment of unfinished business, not a real plant).
+    def test_kess_foreshadowing_extended_to_chapters_2_to_4(self):
+        quests = bot.CAMPAIGN["quests"]
+        self.assertIn("tolls", quests["the_wrong_color"]["clue"].lower())
+        self.assertIn("coin", quests["conflict_at_crossroads_tavern"]["clue"].lower())
+        self.assertIn("coin", quests["unmoored_isle_arrival"]["clue"].lower())
+
     def test_vrakk_and_paymasters_shadow_lines_now_name_tolls_and_the_network(self):
         import ai.dm_agent as dm_agent_module
         self.assertIn("toll", dm_agent_module.goblin_boss_confrontation_script().lower())
@@ -21204,7 +21222,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(hint)
         self.assertEqual(hint["location_name"], "The First City")
         self.assertEqual(
-            hint["clue"], "Find the paladin at the Crossroads Tavern and ask about the Rising Concerns.",
+            hint["clue"],
+            "Find the paladin at the Crossroads Tavern and ask about the Rising Concerns -- "
+            "he's the same one who never did stop chasing that lead on the coin.",
         )
 
     async def test_grask_reacts_to_the_supply_tunnels_and_deep_larder_beats_when_present(self):

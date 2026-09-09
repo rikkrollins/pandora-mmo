@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.575] — feat: extend Kess foreshadowing to Chapters 2-4
+
+Follow-up to v1.27.574, after Coffee asked "what's left to fill in
+chapters 2-4 and 8" and confirmed: go ahead and add it. Chapter 8
+needs nothing (Kess's own arc is already the complete payoff).
+Chapters 2-4 had zero Kess-adjacent text — their own antagonists
+(`the_unspoken`, `the_last_glyph`, `the_high_approach_sentinel`) are
+built on silence, echo, and duty, not banditry, so this deliberately
+does NOT touch their dialogue (that would ring false). Instead, three
+small clue-text edits land on quests adjacent to those fights:
+
+- **Chapter 2** — `the_wrong_color`'s clue now ties its own "travelers"
+  rumor to the surface tolls, framing both as starting "around the
+  same time."
+- **Chapter 3** — `conflict_at_crossroads_tavern` already sends the
+  player to "the paladin at the Crossroads Tavern" (Borin, by class)
+  — its clue now explicitly calls back to his v1.27.574 recruitment-
+  chain hint ("that lead on the coin"), so this isn't a new thread,
+  just the existing one resurfacing.
+- **Chapter 4** — `unmoored_isle_arrival`'s clue gets the thinnest
+  touch on purpose: a floating isle has no real tie to a road-toll
+  network, so this is an acknowledgment that the thread is being left
+  behind for now, not a genuine plant.
+
+2 new regression tests (Chapters 2-4 substring checks, both existing
+foreshadowing tests still green). Found and fixed one real pre-existing
+test (`test_next_step_hint_surfaces_the_bridge_quest_once_its_arc_
+mates_are_done`) that asserted the OLD `conflict_at_crossroads_tavern`
+clue text verbatim — updated to match. 66 related tests re-run clean.
+
 ## [1.27.574] — feat: thread Kess through Chapters 1-6, close arc_7's missed second boss, fix a real quest/NPC location bug
 
 Follow-up to the Chapter 1-8 story completion pass, after Coffee asked
