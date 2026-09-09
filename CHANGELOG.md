@@ -2,6 +2,58 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.561] — feat: real multi-checkpoint Labyrinth waypoints, for grinding an earlier segment
+
+Real dev-bridge report (2026-09-09, Coffee, two messages with a
+screenshot): "does taking a waypoint reset our progress?" and
+"labyrinth Way points should be kept in its own sub folder and when we
+complete level five... we should also have a waypoint to be able to go
+back to level one."
+
+**Investigated first — the progress-reset worry was already
+unfounded**: `_do_enter_labyrinth` already resumes a live run exactly
+where it was left, and (once left) always starts the NEXT fresh
+segment at `labyrinth_checkpoint_floor + 1`, never back at floor 1.
+Confirmed via the existing real test coverage, no code change needed
+for that half.
+
+**The real, confirmed gap was the second ask**:
+`labyrinth_checkpoint_floor` only ever remembered the single highest
+checkpoint reached, and the Waypoints list showed exactly one
+Labyrinth entry that always warped to that same furthest point — no
+way to revisit an earlier, easier segment for loot/XP grinding once
+you'd moved past it.
+
+Added `labyrinth_checkpoints_reached` (a real, permanent, ever-growing
+per-character history of every checkpoint floor ever personally
+banked — never removed, only appended) and a genuinely new "🌀
+Labyrinth Waypoints" sub-menu (Coffee's own "own sub folder" framing)
+listing every one of them ("Floor 1-5 Waystation", "Floor 6-10
+Waystation", etc.) alongside a "Continue" option for real frontier
+progress — reachable by button or by typing "labyrinth waypoints"
+(plural, distinct from the existing singular "labyrinth"/"waystation"
+phrasing, which still just resumes as before). Picking an earlier
+floor generates a genuinely fresh random segment there via the
+existing seed-replay `forced_segment` mechanic (never the exact
+original layout) for real grinding, refusing only if the party's
+already mid-run elsewhere or the floor was never actually earned.
+
+**Real regression risk found and fixed while building this**: the
+checkpoint-claim handler wrote `labyrinth_checkpoint_floor`
+UNCONDITIONALLY every time — harmless before now (normal play only
+ever claims a checkpoint going forward), but re-claiming an OLDER
+segment's (freshly regenerated) checkpoint room for this new grinding
+feature would have silently regressed a character's real frontier
+progress backward. Now a real max-guard, matching
+`labyrinth_best_floor`'s own existing "only if higher" semantics.
+
+7 new regression tests (history accumulation, no-regression-on-revisit,
+unearned-floor refusal, already-mid-run refusal, sub-menu contents,
+plural-phrase text dispatch); 1 existing test updated for the new
+sub-menu button; full `LabyrinthTests` (176 tests) re-run twice clean
+(one already-known, pre-existing, unrelated batch-order flake
+reconfirmed in isolation both times).
+
 ## [1.27.560] — feat: generic tavern rumors on the Story So Far screen
 
 Real gap found scanning FEATURE_WISHLIST.md against the actual code

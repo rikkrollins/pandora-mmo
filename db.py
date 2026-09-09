@@ -1058,6 +1058,23 @@ def init_db() -> None:
         if "labyrinth_checkpoint_floor" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_checkpoint_floor INTEGER NOT NULL DEFAULT 0")
 
+        # labyrinth_checkpoints_reached (2026-09-09, real dev-bridge
+        # report -- Coffee: "labyrinth Way points should be kept in its
+        # own sub folder and when we complete level five of the
+        # labyrinth, we should also have a waypoint to be able to go
+        # back to level one... would this fill the waypoint gap for
+        # labyrinths?"). labyrinth_checkpoint_floor above only ever
+        # remembers the SINGLE highest checkpoint -- there was no way to
+        # warp back to an earlier one for grinding once you'd moved past
+        # it. This is the full history instead: every distinct segment-
+        # end floor this character has ever personally claimed, never
+        # removed even once a later one is reached. See bot.py's
+        # _resolve_labyrinth_checkpoint (appends here) and
+        # _do_enter_labyrinth_at_checkpoint (reads this to validate a
+        # requested floor was actually earned, not just guessed).
+        if "labyrinth_checkpoints_reached" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN labyrinth_checkpoints_reached TEXT NOT NULL DEFAULT '[]'")
+
         # labyrinth_intro_seen (2026-09-02, per Coffee: "if its the first
         # time, can u give them a brief rundown on what the labarynth is
         # and how to play it") -- permanent, per-character, so each real
@@ -1208,6 +1225,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["spell_mastery_pct"] = json.loads(d["spell_mastery_pct"])
     d["element_mastery_pct"] = json.loads(d["element_mastery_pct"])
     d["location_defeat_counts"] = json.loads(d["location_defeat_counts"])
+    d["labyrinth_checkpoints_reached"] = json.loads(d["labyrinth_checkpoints_reached"])
     return d
 
 
@@ -1339,7 +1357,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1383,7 +1401,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])

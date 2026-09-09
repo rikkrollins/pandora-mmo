@@ -39915,7 +39915,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, chat_id)
         kb = bot._waypoint_keyboard(character["visited_locations"], character["current_location"], character.get("labyrinth_checkpoint_floor", 0))
         datas = [btn.callback_data for row in kb.inline_keyboard for btn in row]
-        self.assertIn("waypoint|labyrinth", datas)
+        # Real dev-bridge request (2026-09-09): the top-level Waypoints
+        # list now opens a dedicated Labyrinth sub-menu instead of
+        # dropping straight into a resume -- see the new submenu tests
+        # below for the actual "waypoint|labyrinth" resume entry.
+        self.assertIn("waypoint|labyrinth_menu", datas)
 
         sink = []
         await bot._do_fast_travel(FakeUpdate(user_id, "warp to the labyrinth waystation", sink, chat_id=chat_id), "warp to the labyrinth waystation")
@@ -39923,6 +39927,116 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(character_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
         run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
         self.assertEqual(run["floor"], 6)  # resumes past the cleared checkpoint, not back inside the discarded segment
+
+    # -- Real dev-bridge request (2026-09-09, Coffee: "this should allow
+    #    us to go back to previous labyrinth if possible for future
+    #    grinding" + "when we complete level five of the labyrinth, we
+    #    should also have a waypoint to be able to go back to level
+    #    one"). labyrinth_checkpoint_floor only ever remembered the
+    #    single highest checkpoint -- labyrinth_checkpoints_reached is
+    #    the new full history, and _do_enter_labyrinth_at_checkpoint is
+    #    the new way to warp back to an earlier one -----------------
+    async def test_labyrinth_checkpoint_history_accumulates_without_regressing_progress(self):
+        user_id, chat_id = 962300, -962300
+        make_basic_character(user_id, "CheckpointHistoryTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["labyrinth_checkpoints_reached"], [5])
+        self.assertEqual(character["labyrinth_checkpoint_floor"], 5)
+
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))  # resumes segment 2, floor 6
+        await self._walk_to_checkpoint(user_id, chat_id)
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["labyrinth_checkpoints_reached"], [5, 10])
+        self.assertEqual(character["labyrinth_checkpoint_floor"], 10)
+
+    async def test_do_enter_labyrinth_at_checkpoint_warps_to_an_earlier_earned_floor_without_regressing_progress(self):
+        user_id, chat_id = 962301, -962301
+        make_basic_character(user_id, "GrindTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)  # real frontier is now floor 10
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        await bot._do_enter_labyrinth_at_checkpoint(FakeUpdate(user_id, "", [], chat_id=chat_id), 5)
+        run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        self.assertEqual(run["floor"], 1)  # a FRESH segment 1, not the discarded original layout
+
+        # Re-claiming floor 5's (brand-new) checkpoint room again must
+        # NOT regress real frontier progress back down from 10.
+        await self._walk_to_checkpoint(user_id, chat_id)
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["labyrinth_checkpoint_floor"], 10)
+        self.assertEqual(character["labyrinth_checkpoints_reached"], [5, 10])
+
+    async def test_do_enter_labyrinth_at_checkpoint_refuses_an_unearned_floor(self):
+        user_id, chat_id = 962302, -962302
+        make_basic_character(user_id, "UnearnedFloorTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._do_enter_labyrinth_at_checkpoint(FakeUpdate(user_id, "", sink, chat_id=chat_id), 10)
+        self.assertTrue(any("haven't reached" in m for m in sink))
+        self.assertIsNone(db.get_labyrinth_run(chat_id, f"solo:{user_id}"))
+
+    async def test_do_enter_labyrinth_at_checkpoint_refuses_while_a_run_is_already_live(self):
+        """
+        Isolates the run-already-exists guard specifically: a genuine
+        live run persists under this party_key (never left), with
+        current_location forced back to the Colosseum to reach that
+        guard at all (matching the one real scenario it exists for --
+        a party member whose own location field can legitimately drift
+        out of sync with a shared party run still in progress under
+        their party_key).
+        """
+        user_id, chat_id = 962303, -962303
+        make_basic_character(user_id, "AlreadyMidRunTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)  # live run still active, never left
+        db.update_character(user_id, chat_id, current_location="the_colosseum")
+
+        sink = []
+        await bot._do_enter_labyrinth_at_checkpoint(FakeUpdate(user_id, "", sink, chat_id=chat_id), 5)
+        self.assertTrue(any("already mid-run" in m for m in sink))
+
+    def test_labyrinth_waypoint_submenu_lists_continue_plus_every_earned_checkpoint(self):
+        kb = bot._labyrinth_waypoint_submenu_keyboard([5, 10])
+        datas = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        labels = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertIn("waypoint|labyrinth", datas)
+        self.assertIn("waypoint|labyrinth_at|5", datas)
+        self.assertIn("waypoint|labyrinth_at|10", datas)
+        self.assertTrue(any("Floor 1-5" in label for label in labels))
+        self.assertTrue(any("Floor 6-10" in label for label in labels))
+
+    async def test_labyrinth_waypoints_plural_phrase_opens_the_submenu_via_text(self):
+        user_id, chat_id = 962304, -962304
+        make_basic_character(user_id, "PluralPhraseTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+
+        sink = []
+        await bot._do_fast_travel(
+            FakeUpdate(user_id, "labyrinth waypoints", sink, chat_id=chat_id), "labyrinth waypoints",
+        )
+        combined = " ".join(sink)
+        self.assertIn("Labyrinth Waypoints", combined)
+        # Must NOT have entered the Labyrinth directly (that's the
+        # singular "labyrinth"/"waystation" phrasing's job, unchanged).
+        self.assertNotEqual(db.get_character(user_id, chat_id)["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
 
     def test_every_theme_signature_hazard_can_actually_be_generated(self):
         """Phase L3, per Coffee: "themes shud have hazards for them" -- each theme's real signature_hazard/secondary_hazard shows up in real generated output across enough seeds."""

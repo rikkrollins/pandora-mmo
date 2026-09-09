@@ -9866,7 +9866,24 @@ async def _resolve_labyrinth_checkpoint(update: Update, character: dict, room: d
             skill_points=m.get("skill_points", 0) + 1,
         )
         if not m.get("is_ai"):
-            db.update_character_by_id(m["character_id"], labyrinth_checkpoint_floor=floor)
+            # Real regression risk fixed here (2026-09-09, found while
+            # building the multi-checkpoint waypoint system below): this
+            # write used to be UNCONDITIONAL -- harmless
+            # today since normal play only ever reaches a checkpoint
+            # floor going forward, but the new "revisit an earlier
+            # segment to grind" waypoint deliberately re-triggers this
+            # exact function for an OLD floor number, which would have
+            # silently regressed real frontier progress (e.g. floor 20
+            # -> floor 5) the moment that feature shipped. Now a real
+            # max-guard, matching labyrinth_best_floor's own existing
+            # SQL-level "only if higher" semantics (db.bump_labyrinth_
+            # best_floor) instead of a plain overwrite.
+            checkpoints_reached = set(m.get("labyrinth_checkpoints_reached") or [])
+            checkpoints_reached.add(floor)
+            update_fields = {"labyrinth_checkpoints_reached": sorted(checkpoints_reached)}
+            if floor > m.get("labyrinth_checkpoint_floor", 0):
+                update_fields["labyrinth_checkpoint_floor"] = floor
+            db.update_character_by_id(m["character_id"], **update_fields)
             refreshed = db.get_character_by_id(m["character_id"])
             await _check_and_award_achievements(update, refreshed)
     db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
@@ -9968,6 +9985,59 @@ async def _do_enter_labyrinth(update: Update, forced_seed: int | None = None, fo
     await _maybe_send_labyrinth_room_image(update, character, room, chat_id)
     if new_segment_theme is not None:
         await _send_labyrinth_segment_flavor_when_ready(update, new_segment_theme, run["floor"])
+
+
+async def _do_enter_labyrinth_at_checkpoint(update: Update, floor: int) -> None:
+    """
+    Real dev-bridge request (2026-09-09, Coffee: "this should allow us
+    to go back to previous labyrinth if possible for future grinding" +
+    "when we complete level five of the labyrinth, we should also have
+    a waypoint to be able to go back to level one"). Warps the party
+    into a FRESH segment at an EARLIER checkpoint floor they've already
+    personally cleared, purely for grinding (loot/XP/mastery) -- a
+    genuinely new random layout each time (same "type any seed number,
+    always get a real world back" generation _do_enter_labyrinth's own
+    forced_segment param already provides for seed-replay), never the
+    exact original room-for-room layout.
+
+    Deliberately separate from plain _do_enter_labyrinth (which always
+    resumes at the party's real FURTHEST progress) rather than one
+    function branching on floor -- keeps the "your real progress always
+    advances via the normal entry" guarantee simple to reason about:
+    this function can NEVER be the one that starts a brand-new-frontier
+    segment, only ever an already-banked one.
+
+    Refuses if a live run already exists (no supported way to hold two
+    simultaneous positions in the Labyrinth with today's one-run-per-
+    party model -- finish or leave the current one first) or if the
+    requested floor was never actually banked by THIS character
+    (labyrinth_checkpoints_reached, not just a plausible-looking number
+    someone typed).
+    """
+    chat_id = update.effective_chat.id
+    character = db.get_character(update.effective_user.id, chat_id)
+    if character is None:
+        await _safe_send(update, "You don't have a character yet!", speak=False)
+        return
+    if character["current_location"] != "the_colosseum":
+        await _safe_send(update, "The Labyrinth only opens from the Colosseum.", speak=False)
+        return
+    if not _labyrinth_unlocked(character):
+        await _safe_send(update, "Something here waits on the Colosseum Champion falling first.", speak=False)
+        return
+    if floor not in (character.get("labyrinth_checkpoints_reached") or []):
+        await _safe_send(update, "You haven't reached that waystation yet.", speak=False)
+        return
+    party_key = _labyrinth_party_key(character)
+    if db.get_labyrinth_run(chat_id, party_key) is not None:
+        await _safe_send(
+            update,
+            "Your party is already mid-run in the Labyrinth — finish or leave that one first before "
+            "warping to an earlier waystation.",
+            speak=False,
+        )
+        return
+    await _do_enter_labyrinth(update, forced_segment=labyrinth_module.segment_number_for_floor(floor))
 
 
 async def _do_leave_labyrinth(update: Update) -> None:
@@ -28820,9 +28890,20 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     # visited_locations loop below; recognized here as its own free-text
     # destination, same as the button _waypoint_keyboard now offers.
     checkpoint_floor = character.get("labyrinth_checkpoint_floor", 0)
-    if checkpoint_floor and character["current_location"] != LABYRINTH_LOCATION_SENTINEL and re.search(r"\b(labyrinth|waystation|way station)\b", text.lower()):
-        await _do_enter_labyrinth(update)
-        return
+    lowered_travel_text = text.lower()
+    if checkpoint_floor and character["current_location"] != LABYRINTH_LOCATION_SENTINEL:
+        # "labyrinth waypoints" (2026-09-09, real dev-bridge request):
+        # plural/list phrasing opens the real sub-menu of every
+        # personally-earned checkpoint instead of always resuming at
+        # the party's furthest progress -- checked BEFORE the singular
+        # match just below so "labyrinth waypoints" doesn't fall
+        # through to the resume-only branch first.
+        if re.search(r"\blabyrinth\s+way\s?points?\b", lowered_travel_text):
+            await _do_show_labyrinth_waypoints(update)
+            return
+        if re.search(r"\b(labyrinth|waystation|way station)\b", lowered_travel_text):
+            await _do_enter_labyrinth(update)
+            return
 
     # Real live crash (2026-09-04, error log, Sheri/Charvenna, count=3):
     # LABYRINTH_LOCATION_SENTINEL is never a real CAMPAIGN location, so
@@ -33447,8 +33528,36 @@ def _waypoint_keyboard(visited_locations: list[str], current_location_id: str, l
         # real checkpoint room -- see _is_fast_travel_eligible.
         if loc and _is_fast_travel_eligible(loc):
             rows.append([InlineKeyboardButton(f"📍 {loc['name']}", callback_data=f"waypoint|go|{loc_id}")])
+    # Real dev-bridge request (2026-09-09, Coffee: "labyrinth Way
+    # points should be kept in its own sub folder"): this used to be a
+    # single button that always dropped straight into
+    # _do_enter_labyrinth (real frontier progress only) -- now opens a
+    # dedicated sub-menu instead (_labyrinth_waypoint_submenu_keyboard),
+    # since there can be several real, earned Labyrinth waypoints once
+    # a character has ever revisited an earlier one for grinding, and
+    # cramming N of those into this shared, non-Labyrinth list would
+    # bury the character's real overworld destinations.
     if labyrinth_checkpoint_floor and current_location_id != LABYRINTH_LOCATION_SENTINEL:
-        rows.append([InlineKeyboardButton(f"🌀 The Labyrinth Waystation (Floor {labyrinth_checkpoint_floor})", callback_data="waypoint|labyrinth")])
+        rows.append([InlineKeyboardButton("🌀 Labyrinth Waypoints", callback_data="waypoint|labyrinth_menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _labyrinth_waypoint_submenu_keyboard(checkpoints_reached: list[int]) -> InlineKeyboardMarkup:
+    """
+    The Labyrinth's own "sub folder" of waypoints (2026-09-09, see
+    _waypoint_keyboard's docstring) -- one row per distinct checkpoint
+    floor this character has personally banked, oldest first, each a
+    real, separate destination for future grinding
+    (_do_enter_labyrinth_at_checkpoint), plus a "Continue" row that's
+    the exact same real-frontier-progress entry the old single button
+    always was (_do_enter_labyrinth, unchanged).
+    """
+    rows = [[InlineKeyboardButton("▶️ Continue (your furthest progress)", callback_data="waypoint|labyrinth")]]
+    for floor in sorted(checkpoints_reached):
+        start = floor - labyrinth_module.SEGMENT_SIZE + 1
+        rows.append([InlineKeyboardButton(
+            f"🌀 Floor {start}-{floor} Waystation", callback_data=f"waypoint|labyrinth_at|{floor}",
+        )])
     return InlineKeyboardMarkup(rows)
 
 
@@ -33479,12 +33588,43 @@ async def _do_show_waypoints(update: Update) -> None:
     )
 
 
+async def _do_show_labyrinth_waypoints(update: Update) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    checkpoints_reached = character.get("labyrinth_checkpoints_reached") or []
+    if not checkpoints_reached:
+        await update.effective_chat.send_message(
+            "You haven't reached a real Labyrinth waystation yet.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    await _safe_send(
+        update, "🌀 **Labyrinth Waypoints** — tap one to fast-travel there:",
+        reply_markup=_labyrinth_waypoint_submenu_keyboard(checkpoints_reached),
+        speak=False,
+    )
+
+
 async def waypoint_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles taps on _waypoint_keyboard -- dispatches through the exact same _do_fast_travel/_do_enter_labyrinth a typed destination name already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+    if action == "labyrinth_menu":
+        await _do_show_labyrinth_waypoints(update)
+        return
+    if action == "labyrinth_at" and len(parts) >= 3:
+        try:
+            floor = int(parts[2])
+        except ValueError:
+            return
+        await _do_enter_labyrinth_at_checkpoint(update, floor)
+        return
     if action == "labyrinth":
         await _do_enter_labyrinth(update)
         return
