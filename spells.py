@@ -61,7 +61,7 @@ SPELLS = {
     },
     "invisibility": {
         "name": "Invisibility", "level": 2, "school": "illusion",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     "fireball": {
         "name": "Fireball", "level": 3, "school": "evocation",
@@ -105,13 +105,26 @@ SPELLS = {
         "name": "Detect Magic", "level": 1, "school": "divination",
         "effect": "buff", "duration_rounds": 10,
     },
+    # Real 5E concentration (2026-09-09, gap found scanning
+    # FEATURE_WISHLIST.md against the actual codebase): a "concentration"
+    # flag marks the standing-buff spells that real 5E requires ongoing
+    # focus to maintain -- a caster can hold only ONE of these at once
+    # (casting a new one ends whatever they were already concentrating
+    # on), and taking damage risks losing it early (see bot.py's
+    # _check_concentration/_start_concentration). Every spell WITHOUT
+    # this flag is completely unaffected, including other "buff"-effect
+    # spells real 5E itself doesn't require concentration for (Shield,
+    # Death Ward, Longstrider, Charm Person, Animal Friendship) -- this
+    # only ever narrows the 8 real 5E concentration spells this engine
+    # already has a mechanical hook for (a condition applied via
+    # bot._apply_timed_condition), never a blanket rule.
     "bless": {
         "name": "Bless", "level": 1, "school": "enchantment",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     "faerie_fire": {
         "name": "Faerie Fire", "level": 1, "school": "evocation",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     "thaumaturgy": {
         "name": "Thaumaturgy", "level": 0, "school": "transmutation",
@@ -260,7 +273,7 @@ SPELLS = {
     },
     "protection_from_evil_and_good": {
         "name": "Protection from Evil and Good", "level": 1, "school": "abjuration",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     "animal_friendship": {
         "name": "Animal Friendship", "level": 1, "school": "enchantment",
@@ -268,11 +281,11 @@ SPELLS = {
     },
     "hunters_mark": {
         "name": "Hunter's Mark", "level": 1, "school": "divination",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     "hex": {
         "name": "Hex", "level": 1, "school": "enchantment",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     "longstrider": {
         "name": "Longstrider", "level": 1, "school": "transmutation",
@@ -292,7 +305,7 @@ SPELLS = {
     },
     "hold_person": {
         "name": "Hold Person", "level": 2, "school": "enchantment",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     "lesser_restoration": {
         # Real live gap (2026-08-26, per Coffee: "what cures silence?" ->
@@ -380,7 +393,7 @@ SPELLS = {
     },
     "hold_monster": {
         "name": "Hold Monster", "level": 5, "school": "enchantment",
-        "effect": "buff", "duration_rounds": 10,
+        "effect": "buff", "duration_rounds": 10, "concentration": True,
     },
     # Elemental Foundations (2026-08-30, per Coffee: "Charvenna wondered
     # if we had earth type spells? Earthquake? Mudslide? Meteor?" -- real

@@ -12109,13 +12109,21 @@ async def _resolve_attack_with_reaction_check(
     uncanny_dodge_confirmed = (
         await _maybe_confirm_reaction(update, defender, "uncanny_dodge") if precheck["uncanny_dodge_eligible"] else False
     )
-    return resolve_attack(
+    result = resolve_attack(
         attacker, defender, weapon, advantage=advantage, disadvantage=disadvantage,
         defender_relentless_endurance_available=defender_relentless_endurance_available,
         round_number=round_number, forced_roll=precheck["raw_roll"],
         forced_damage_roll=forced_damage_roll, damage_multiplier=damage_multiplier,
         shield_reaction_confirmed=shield_confirmed, uncanny_dodge_confirmed=uncanny_dodge_confirmed,
     )
+    # Real 5E concentration (2026-09-09) -- every real weapon-attack call
+    # site in this file already funnels through this one wrapper (see its
+    # own docstring), so this is the single choke point that covers every
+    # physical hit a concentrating defender takes, both player-vs-monster
+    # and monster-vs-player.
+    if session is not None and result["hit"]:
+        _check_concentration(defender, result["damage_dealt"], session)
+    return result
 
 
 async def _maybe_monster_cast_spell(
@@ -12235,6 +12243,7 @@ async def _maybe_monster_cast_spell(
         caster_hp_max = caster.get("hp_max", caster["hp_current"])
         caster["hp_current"] = min(caster["hp_current"] + elemental_heal_gained, caster_hp_max)
     target["hp_current"] = max(target["hp_current"] - pre_elemental_dmg, 0)
+    _check_concentration(target, pre_elemental_dmg, session)
 
     # Spell Mastery for monsters/bosses (2026-08-22, per Coffee: "give
     # enemies/bosses the ability to hit multiple players with magic
@@ -12269,6 +12278,7 @@ async def _maybe_monster_cast_spell(
             if extra_heal_gained:
                 caster["hp_current"] = min(caster["hp_current"] + extra_heal_gained, caster.get("hp_max", caster["hp_current"]))
             extra["hp_current"] = max(extra["hp_current"] - extra_dmg, 0)
+            _check_concentration(extra, extra_dmg, session)
             _sync_player_to_db(extra)
             await _safe_send(
                 update,
@@ -14640,6 +14650,62 @@ def _apply_timed_condition(character: dict, condition: str, duration_rounds: int
         character["conditions"].append(condition)
     character.setdefault("condition_expires_round", {})
     character["condition_expires_round"][condition] = session.round_number + max(duration_rounds, 1)
+
+
+def _start_concentration(caster: dict, session: sessions.Session, condition: str, targets: list[dict]) -> None:
+    """
+    Real 5E concentration (2026-09-09) -- casting a new concentration
+    spell immediately ends whatever the caster was already
+    concentrating on, checked BEFORE the new condition is applied, so a
+    caster can never hold two concentration effects at once. `targets`
+    is every participant dict the condition actually landed on (the
+    whole party for Bless, a single ally/enemy for everything else) --
+    kept as live object references, not ids, so losing concentration
+    later can remove the condition from exactly the right dict(s) via
+    Session._end_timed_condition without a separate lookup.
+    """
+    previous = caster.get("concentrating_on")
+    if previous:
+        for target in previous["targets"]:
+            session._end_timed_condition(target, previous["condition"])
+    caster["concentrating_on"] = {"condition": condition, "targets": targets}
+
+
+def _check_concentration(participant: dict, damage_taken: int, session: sessions.Session) -> None:
+    """
+    The OTHER real 5E concentration trigger (2026-09-09) -- taking
+    damage while concentrating forces a save or the effect ends early.
+    Same fixed SKILL_CHECK_DC (13) this game already uses everywhere
+    instead of 5E's real "10 or half damage taken, whichever is
+    higher" formula, matching CLAUDE.md's own "one fixed DC for every
+    situation" design rule. A no-op for anyone not currently
+    concentrating (the overwhelming majority of damage events) or for
+    zero/negative damage. On a failed save, appends a real notice to
+    session.pending_condition_notices -- same drain-and-announce
+    mechanism the early-save-ends-a-condition system already uses
+    (_advance_turn_and_resolve_ai_turns), rather than trying to send a
+    message from every one of this function's several call sites
+    directly.
+    """
+    if damage_taken <= 0:
+        return
+    concentrating_on = participant.get("concentrating_on")
+    if not concentrating_on:
+        return
+    save_roll = roll_d20()
+    save_bonus = ability_modifier(participant.get("constitution", 10))
+    if is_proficient_in_save(participant.get("char_class"), "constitution"):
+        save_bonus += participant.get("proficiency_bonus", 2)
+    save_total = save_roll + save_bonus
+    if save_total >= SKILL_CHECK_DC:
+        return
+    for target in concentrating_on["targets"]:
+        session._end_timed_condition(target, concentrating_on["condition"])
+    participant["concentrating_on"] = None
+    session.pending_condition_notices.append(
+        f"💥 **{participant['name']}**'s concentration breaks! "
+        f"(Constitution save: {save_roll}+{save_bonus}={save_total} vs DC {SKILL_CHECK_DC})"
+    )
 
 
 async def _do_shove(update: Update, action_text: str, forced_roll: int | None = None) -> None:
@@ -32595,10 +32661,13 @@ async def _cast_utility_spell(
                 # (e.g. Song of Rest).
                 if not await spend():
                     return
+                blessed_targets = []
                 for p in session.participants:
                     if session.sides.get(p["telegram_user_id"]) == session.sides.get(user_id) and p["hp_current"] > 0:
                         _apply_timed_condition(p, "blessed", duration, session)
+                        blessed_targets.append(p)
                         _maybe_boost_companion_affinity_for_support(update, character, p, 1, "cast Bless on")
+                _start_concentration(caster, session, "blessed", blessed_targets)
                 await _finish(f"🌟 **{character['name']}** casts {spell['name']} — the whole party fights truer for {duration} rounds.")
                 return
 
@@ -32636,6 +32705,8 @@ async def _cast_utility_spell(
             # shield feeds the same computation above).
             actual_duration = duration
             _apply_timed_condition(target_p, condition_for_spell, actual_duration, session)
+            if spell.get("concentration"):
+                _start_concentration(caster, session, condition_for_spell, [target_p])
             _maybe_boost_companion_affinity_for_support(update, character, target_p, 2, f"cast {spell['name']} on")
             note = f" on **{target_p['name']}**" if target_p["telegram_user_id"] != user_id else ""
             await _finish(f"✨ **{character['name']}** casts {spell['name']}{note} — real effect for {actual_duration} round(s).")
@@ -32692,7 +32763,9 @@ async def _cast_utility_spell(
             if not await spend():
                 return
             caster["marked_target_id"] = target["telegram_user_id"]
-            _apply_timed_condition(caster, "hex_mark" if spell_id == "hex" else "hunters_mark", duration, session)
+            mark_condition = "hex_mark" if spell_id == "hex" else "hunters_mark"
+            _apply_timed_condition(caster, mark_condition, duration, session)
+            _start_concentration(caster, session, mark_condition, [caster])
             await _finish(f"🎯 **{character['name']}** casts {spell['name']} on **{target['name']}** — every weapon hit against them now bites deeper.")
             return
 
@@ -32700,6 +32773,7 @@ async def _cast_utility_spell(
             if not await spend():
                 return
             _apply_timed_condition(target, "faerie_fire", duration, session)
+            _start_concentration(caster, session, "faerie_fire", [target])
             await _finish(f"✨ **{character['name']}** casts {spell['name']} — **{target['name']}** is outlined in light, unable to hide from attacks.")
             return
 
@@ -32707,6 +32781,7 @@ async def _cast_utility_spell(
             if not await spend():
                 return
             _apply_timed_condition(target, "paralyzed", duration, session)
+            _start_concentration(caster, session, "paralyzed", [target])
             await _finish(f"⛓️ **{character['name']}** casts {spell['name']} — **{target['name']}** locks up, paralyzed!")
             return
 

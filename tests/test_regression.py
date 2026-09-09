@@ -27951,6 +27951,124 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         adv3, disadv3 = bot._attack_advantage_disadvantage(invis_attacker, plain_defender)
         self.assertTrue(adv3)
 
+    # -- Real 5E concentration (2026-09-09, gap found scanning
+    #    FEATURE_WISHLIST.md against the actual codebase): a caster can
+    #    only hold ONE concentration spell at a time, and taking damage
+    #    while concentrating risks losing it early -------------------
+    async def test_casting_a_second_concentration_spell_ends_the_first(self):
+        import sessions
+        caster_id, ally_id, enemy_id = 800201, 800202, -800201
+        make_basic_character(caster_id, "Concentrator", char_class="Cleric")
+        make_basic_character(ally_id, "Buddy", char_class="Fighter")
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 30, "hp_max": 30,
+                 "armor_class": 10, "strength": 10, "dexterity": 10, "is_ai": 1, "xp_reward": 10, "conditions": []}
+        session = sessions.start_session(
+            -999, [db.get_character(caster_id, -999), db.get_character(ally_id, -999), enemy],
+            {caster_id: "party", ally_id: "party", enemy_id: "enemy"},
+        )
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+
+        bot._apply_timed_condition(ally_p, "blessed", 10, session)
+        bot._start_concentration(caster_p, session, "blessed", [ally_p])
+        self.assertIn("blessed", ally_p["conditions"])
+        self.assertEqual(caster_p["concentrating_on"]["condition"], "blessed")
+
+        bot._apply_timed_condition(caster_p, "hex_mark", 10, session)
+        bot._start_concentration(caster_p, session, "hex_mark", [caster_p])
+        self.assertNotIn("blessed", ally_p["conditions"])
+        self.assertEqual(caster_p["concentrating_on"]["condition"], "hex_mark")
+        sessions.end_session(-999, session)
+
+    async def test_concentration_breaks_on_a_failed_constitution_save_when_damaged(self):
+        import sessions
+        from unittest.mock import patch
+        caster_id, ally_id, enemy_id = 800203, 800204, -800202
+        make_basic_character(caster_id, "Fragile", char_class="Cleric")
+        make_basic_character(ally_id, "Buddy2", char_class="Fighter")
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 30, "hp_max": 30,
+                 "armor_class": 10, "strength": 10, "dexterity": 10, "is_ai": 1, "xp_reward": 10, "conditions": []}
+        session = sessions.start_session(
+            -999, [db.get_character(caster_id, -999), db.get_character(ally_id, -999), enemy],
+            {caster_id: "party", ally_id: "party", enemy_id: "enemy"},
+        )
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        bot._apply_timed_condition(ally_p, "blessed", 10, session)
+        bot._start_concentration(caster_p, session, "blessed", [ally_p])
+
+        with patch("bot.roll_d20", return_value=1):
+            bot._check_concentration(caster_p, 10, session)
+        self.assertNotIn("blessed", ally_p["conditions"])
+        self.assertIsNone(caster_p["concentrating_on"])
+        self.assertTrue(any("concentration breaks" in n for n in session.pending_condition_notices))
+        sessions.end_session(-999, session)
+
+    async def test_concentration_holds_on_a_successful_constitution_save(self):
+        import sessions
+        from unittest.mock import patch
+        caster_id, ally_id, enemy_id = 800205, 800206, -800203
+        make_basic_character(caster_id, "Steady", char_class="Cleric")
+        make_basic_character(ally_id, "Buddy3", char_class="Fighter")
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 30, "hp_max": 30,
+                 "armor_class": 10, "strength": 10, "dexterity": 10, "is_ai": 1, "xp_reward": 10, "conditions": []}
+        session = sessions.start_session(
+            -999, [db.get_character(caster_id, -999), db.get_character(ally_id, -999), enemy],
+            {caster_id: "party", ally_id: "party", enemy_id: "enemy"},
+        )
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        bot._apply_timed_condition(ally_p, "blessed", 10, session)
+        bot._start_concentration(caster_p, session, "blessed", [ally_p])
+
+        with patch("bot.roll_d20", return_value=20):
+            bot._check_concentration(caster_p, 10, session)
+        self.assertIn("blessed", ally_p["conditions"])
+        self.assertIsNotNone(caster_p["concentrating_on"])
+        self.assertEqual(session.pending_condition_notices, [])
+        sessions.end_session(-999, session)
+
+    async def test_check_concentration_is_a_no_op_with_zero_damage_or_nothing_active(self):
+        caster_p = {"name": "Idle", "constitution": 10, "char_class": "Cleric", "concentrating_on": None}
+        bot._check_concentration(caster_p, 10, None)  # nothing active -- must not touch `session`
+        concentrating_p = {"name": "Untouched", "constitution": 10, "char_class": "Cleric",
+                            "concentrating_on": {"condition": "blessed", "targets": []}}
+        bot._check_concentration(concentrating_p, 0, None)  # zero damage -- must not touch `session`
+        self.assertIsNotNone(concentrating_p["concentrating_on"])
+
+    async def test_a_weapon_hit_can_break_a_concentrating_defenders_spell(self):
+        """
+        Integration check on the actual wired-in choke point
+        (_resolve_attack_with_reaction_check), not just the raw
+        _check_concentration helper -- every real weapon attack in this
+        game funnels through that one wrapper.
+        """
+        import sessions
+        from unittest.mock import patch
+        caster_id, ally_id, enemy_id = 800207, 800208, -800204
+        make_basic_character(caster_id, "Targeted", char_class="Cleric", armor_class=5)
+        make_basic_character(ally_id, "Buddy4", char_class="Fighter")
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "hp_current": 30, "hp_max": 30,
+                 "armor_class": 10, "strength": 10, "dexterity": 10, "is_ai": 1, "xp_reward": 10, "conditions": []}
+        session = sessions.start_session(
+            -999, [db.get_character(caster_id, -999), db.get_character(ally_id, -999), enemy],
+            {caster_id: "party", ally_id: "party", enemy_id: "enemy"},
+        )
+        caster_p = next(p for p in session.participants if p["telegram_user_id"] == caster_id)
+        ally_p = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        bot._apply_timed_condition(ally_p, "blessed", 10, session)
+        bot._start_concentration(caster_p, session, "blessed", [ally_p])
+
+        weapon = {"damage_dice": "1d1", "damage_bonus": 5, "ability": "strength", "damage_type": "physical"}
+        with patch("bot.roll_d20", return_value=1):
+            result = await bot._resolve_attack_with_reaction_check(
+                SimpleNamespace(), enemy, caster_p, weapon, round_number=1, forced_roll=15, session=session,
+            )
+        self.assertTrue(result["hit"])
+        self.assertNotIn("blessed", ally_p["conditions"])
+        self.assertIsNone(caster_p["concentrating_on"])
+        sessions.end_session(-999, session)
+
     def test_level_gap_advantage_fires_only_when_both_levels_are_real_and_the_gap_is_big_enough(self):
         """
         Real live report (2026-08-16, Coffee: "the enemy shud have an

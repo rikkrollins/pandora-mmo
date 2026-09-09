@@ -2,6 +2,55 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.559] — feat: real 5E spell concentration
+
+Real gap found scanning FEATURE_WISHLIST.md against the actual code
+(per Coffee: "do 1,2,3"): the 8 real 5E concentration spells this
+engine already had a mechanical hook for (Bless, Faerie Fire,
+Invisibility, Hex, Hunter's Mark, Protection from Evil and Good, Hold
+Person, Hold Monster — each a real timed condition via
+`_apply_timed_condition`) could all be held active on a caster at
+once, and taking damage never put any of them at risk, even though
+this is one of the two defining 5E rules for how these spells are
+supposed to work.
+
+Both real 5E triggers now function:
+- **One at a time**: casting a new concentration spell (gated by
+  `spells.py`'s new `"concentration": True` flag) immediately ends
+  whatever the caster was already concentrating on
+  (`bot._start_concentration`), before the new condition is applied —
+  a caster can never hold two at once.
+- **Breaks on damage**: taking damage while concentrating forces a
+  save (`bot._check_concentration`) — same fixed SKILL_CHECK_DC (13)
+  this game already uses everywhere instead of 5E's real "10 or half
+  damage taken" formula, matching CLAUDE.md's own "one fixed DC for
+  every situation" rule. Wired into both real damage paths that matter
+  here: every weapon attack (`_resolve_attack_with_reaction_check`,
+  the one wrapper every real attack in this file already funnels
+  through) and monster spell-cast damage (`_maybe_monster_cast_spell`,
+  including its AOE extra-target branch).
+
+Every OTHER "buff"-effect spell real 5E itself doesn't require
+concentration for (Shield, Death Ward, Longstrider, Charm Person,
+Animal Friendship) is completely unaffected — this only narrows the 8
+real concentration spells, never a blanket rule. A failed save appends
+a real notice to the same `session.pending_condition_notices`
+drain-and-announce mechanism the existing early-save-ends-a-condition
+system already uses, rather than a new send path.
+
+7 new regression tests (one concentration spell ending another,
+save-fails-breaks-it, save-succeeds-holds-it, no-op guards, and a
+full integration test through the real attack wrapper); confirmed
+zero regressions across the existing spell/combat/attack test surface
+(180 tests). Separately, while verifying, found 3 real PRE-EXISTING
+test failures unrelated to this change (confirmed via `git stash`
+against clean HEAD before any of this session's edits): 17 Remnant-
+summon-exclusive spells reported "unreachable by any class" by
+`test_no_orphaned_spells_unreachable_by_any_class`, a sneak-attack
+damage-scaling mismatch, and a stale DC-ceiling constant in a crafting
+test. Not touched here — flagged for a future pass, out of scope for
+this change.
+
 ## [1.27.558] — feat: real 5E-style item attunement, capped at 3 at once
 
 Real gap found scanning FEATURE_WISHLIST.md against the actual code
