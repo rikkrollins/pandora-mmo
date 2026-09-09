@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.562] — fix: 3 pre-existing test failures found during the concentration work (v1.27.559)
+
+Flagged in memory but deliberately left alone at the time as out of
+scope; investigated and fixed properly now.
+
+**18 "unreachable by any class" spells — real dead-content cleanup,
+not a test bug.** Traced each: 5 (`force_lance`/`bone_spear`/
+`toxic_cloud`/`mind_spike`/`radiant_lance`) are genuinely reachable
+via real scroll items (`items.py`'s `"spell"` field) — the test now
+computes this reachability path live from `items.py` instead of a
+second hardcoded id list, so it can't go stale the same way a third
+time. The other 8 (`spirit_lash`/`bolt`/`flare`/`ray`/`rend`/`wail`/
+`dread`/`collapse`) turned out to be genuinely dead: a real "2 cantrips
+per summon tier" design (2026-08-21) was fully superseded 9 days later
+when a summon's `known_spells` changed to mimicking the CASTER's own
+real spells instead (2026-08-30, per Coffee: "make sure the spirits
+can use them all") — the redesign never removed the now-orphaned spell
+entries it left behind. Confirmed via a full-repo grep that nothing
+has referenced any of the 8 since; deleted from `spells.py` rather
+than exempted, since they have zero real path to ever fire again.
+
+**Sneak-attack damage-scaling test (114 != 105) — a real, intentional
+mechanic the test predates, not a combat bug.** Root cause:
+`formation_damage_bonus_pct` (2026-08-14, "Smarter, Formation-Aware
+Enemy AI") deliberately treats a MISSING `formation_row` as front row
+— a documented real-solo-fight fallback, not a bug — applying a real
++10% damage bonus this older test's synthetic attacker dicts never
+accounted for. The level-1 case only ever passed by `int()`-truncation
+coincidence (8×1.10=8.8 truncates back down to 8); the level-10 case
+(24×1.10=26.4, truncates UP) is what actually surfaced the drift. Test
+now computes the real front-row multiplier via `config.FRONT_ROW_
+DAMAGE_BONUS_PCT`, matching `resolve_attack`'s actual order of
+operations.
+
+**Crafting DC-ceiling test (24 != 18) — a real, intentional later
+feature the test predates, not a crafting bug.** v1.27.551 added 9 real
+"Greater" scroll recipes at DC 24 (min_level 20) — genuinely harder
+content this test's 2026-08-10 hardcoded exclusion list never
+accounted for. Now excludes by "carries a real `min_level` gate" (the
+actual shared trait) instead of a literal id list, for the same
+won't-go-stale-again reason as the spell-reachability fix above.
+
+Zero game-logic changes anywhere in this fix — every change is either
+a genuine dead-content deletion or a test correction to match already-
+real, already-intentional, already-shipped mechanics. Full targeted
+re-verification (93 tests across spells/crafting/combat/formation
+surfaces) clean, zero regressions.
+
 ## [1.27.561] — feat: real multi-checkpoint Labyrinth waypoints, for grinding an earlier segment
 
 Real dev-bridge report (2026-09-09, Coffee, two messages with a

@@ -1268,6 +1268,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # that real reachability path, same stale-assumption shape as the
         # 3 tests fixed in 822e728.
         referenced.update(guilds.ARCANE_CIRCLE_EXCLUSIVE_SPELLS)
+        # Scroll-only spells (2026-09-09, same stale-assumption shape
+        # again -- found via a real, confirmed dev-bridge-adjacent
+        # investigation, not just re-run and ignored): a real find/buy/
+        # loot scroll is just as real a reachability path as a class
+        # list or guild membership, and this must stay computed live
+        # from items.py rather than a second hardcoded id list that can
+        # drift out of sync with future scrolls the way this exact test
+        # already has twice.
+        for item in items_module.ITEMS.values():
+            if item.get("type") == "scroll" and item.get("spell"):
+                referenced.add(item["spell"])
         orphaned = set(spells.SPELLS.keys()) - referenced
         self.assertEqual(orphaned, set(), f"unreachable by any class: {orphaned}")
 
@@ -3220,9 +3231,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         wrong shape for a fixed-effect catalog consumable.
         """
         from rules.crafting import RECIPES, ADVANCED_RECIPES
+        # Real stale-test fix (2026-09-09, found chasing a real, confirmed
+        # failure -- 24 != 18): v1.27.551 added 9 real "Greater" scroll
+        # recipes at DC 24, min_level 20 -- genuinely harder, later-added
+        # content this test's original hardcoded exclusion list (written
+        # 2026-08-10, before that feature existed) never accounted for.
+        # Excluding by "carries a real min_level gate" (the actual trait
+        # that makes a recipe belong to this later, harder-gated
+        # generation) rather than hardcoding 9 more literal ids keeps this
+        # from going stale the same way a third time.
         prior_ceiling = max(
             r["dc"] for rid, r in RECIPES.items()
-            if rid not in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic")
+            if rid not in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic") and not r.get("min_level")
         )
         self.assertEqual(prior_ceiling, 18)
         for recipe_id in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic"):
@@ -23690,9 +23710,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # each side now also scales by its OWN attacker's ratio -- recomputed
         # here via the real function rather than hardcoded, so this stays valid
         # if the ratio formula itself is ever retuned again.
+        #
+        # Real stale-test fix (2026-09-09, found chasing a real, confirmed
+        # failure -- 114 != 105 for the level-10 case): neither attacker
+        # dict here sets `formation_row`, and formation_damage_bonus_pct's
+        # own real, documented default (2026-08-14, "Smarter, Formation-
+        # Aware Enemy AI" -- per Coffee: "front row used for aggressors")
+        # treats a MISSING formation_row exactly like "front row" (a real
+        # solo-fight fallback, not a bug), applying config.FRONT_ROW_
+        # DAMAGE_BONUS_PCT before the power-scale multiply. This test
+        # predates that feature and never accounted for it -- the level-1
+        # case only ever passed by int()-truncation coincidence (8*1.10=8.8
+        # truncates back down to 8), which is exactly why only the level-10
+        # case (24*1.10=26.4, truncates UP to a real extra point vs the old
+        # un-bonused 24) ever surfaced the drift.
         from rules.leveling import power_scale_ratio
-        expected_low = int(8 * power_scale_ratio(1, 0))
-        expected_high = int(24 * power_scale_ratio(10, 0))
+        front_row_multiplier = 1 + config.FRONT_ROW_DAMAGE_BONUS_PCT / 100
+        expected_low = int(int(8 * front_row_multiplier) * power_scale_ratio(1, 0))
+        expected_high = int(int(24 * front_row_multiplier) * power_scale_ratio(10, 0))
         self.assertEqual(result_low["damage_dealt"], expected_low)
         self.assertEqual(result_high["damage_dealt"], expected_high)
 

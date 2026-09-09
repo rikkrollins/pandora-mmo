@@ -180,55 +180,23 @@ SPELLS = {
             "hp_max": 9, "proficiency_bonus": 2,
         },
     },
-    # Real spirit-summon abilities (2026-08-21, per Coffee: "make sure
-    # the spirits also have abilits they can use 2 for each tier, a
-    # magic type, and a damage type"). AI-only -- never offered to a
-    # real player (no class known_spells entry, no scroll) -- picked up
-    # automatically by the existing, already-tested side-agnostic
-    # monster-spellcasting mechanic (bot.py's _decide_monster_spell/
-    # _maybe_monster_cast_spell, MONSTER_SPELLCAST_CHANCE per turn) the
-    # instant a summon's own known_spells lists them; no new AI-decision
-    # code needed. Each tier gets its own distinct elemental identity.
-    # Deliberately small base damage_dice (cantrip-shaped, same scale as
-    # eldritch_blast/fire_bolt below) -- resolve_damage_spell already
-    # applies power_scale_ratio(effective_level, rebirth_count) for any
-    # caster with a real "level" field (a summon always has one, its
-    # own capped effective_level), the same real scaling mechanism a
-    # player's own spell damage gets, so these grow to match the
-    # summon's own tier automatically rather than needing hand-tuned
-    # huge numbers per tier here.
-    "spirit_lash": {
-        "name": "Spirit Lash", "level": 0, "school": "conjuration",
-        "effect": "damage", "damage_dice": "2d6", "damage_type": "force",
-    },
-    "spirit_bolt": {
-        "name": "Spirit Bolt", "level": 0, "school": "conjuration",
-        "effect": "damage", "damage_dice": "2d6", "damage_type": "force",
-    },
-    "spirit_flare": {
-        "name": "Spirit Flare", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "3d6", "damage_type": "radiant",
-    },
-    "spirit_ray": {
-        "name": "Spirit Ray", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "3d6", "damage_type": "radiant",
-    },
-    "spirit_rend": {
-        "name": "Spirit Rend", "level": 0, "school": "necromancy",
-        "effect": "damage", "damage_dice": "4d6", "damage_type": "necrotic",
-    },
-    "spirit_wail": {
-        "name": "Spirit Wail", "level": 0, "school": "necromancy",
-        "effect": "damage", "damage_dice": "4d6", "damage_type": "necrotic",
-    },
-    "spirit_dread": {
-        "name": "Spirit Dread", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "6d6", "damage_type": "psychic",
-    },
-    "spirit_collapse": {
-        "name": "Spirit Collapse", "level": 0, "school": "evocation",
-        "effect": "damage", "damage_dice": "6d6", "damage_type": "psychic",
-    },
+    # Removed 2026-09-09 (real dead-content cleanup, found via
+    # test_no_orphaned_spells_unreachable_by_any_class): a real, once-
+    # intentional "2 spirit cantrips per summon tier" family
+    # (spirit_lash/bolt/flare/ray/rend/wail/dread/collapse, added
+    # 2026-08-21) was fully superseded 9 days later when a summon's
+    # known_spells changed from "this fixed 2-spell-per-tier list" to
+    # "a genuine copy of the CASTER's own real known_spells" (2026-08-30,
+    # per Coffee: "make sure the spirits can use them all" -- see
+    # bot.py's summon-effect handler, `"known_spells": list(character.
+    # get("known_spells") or [])`). The redesign never removed the now-
+    # orphaned spell entries it left behind -- confirmed via a full-repo
+    # grep that nothing (no class list, no scroll, no monster template)
+    # has referenced any of these 8 ids since. Deleted rather than
+    # exempted in the test, since they have zero real path to ever fire
+    # again, not a deliberately-narrow-but-real one (unlike, say, the
+    # Arcane Circle exclusive spells, which stay exempted below because
+    # guild membership genuinely does still grant them).
     # --- Cantrips added for full per-class coverage (2026-07-11) ---
     "eldritch_blast": {
         "name": "Eldritch Blast", "level": 0, "school": "evocation",
