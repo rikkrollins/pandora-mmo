@@ -63,6 +63,18 @@ def use_test_db(path: str) -> None:
     config.DB_PATH = path
     db.init_db()
     sessions.SNAPSHOT_PATH = path + ".sessions_snapshot.json"
+    # Also isolates topics.py's per-tenant fallback (2026-09-09, real
+    # multi-tenant hardening before going public): topics._resolve now
+    # only falls back to the home-group TOPIC_*_ID constants for the
+    # REAL home chat (config.TELEGRAM_CHAT_ID) in production, closing a
+    # real coincidental-thread-id-collision gap for a genuinely new
+    # third-party group -- but this whole suite's near-universal
+    # chat_id=-999 (and dozens of other made-up per-test ids) convention
+    # relies on the ORIGINAL "falls back for any chat" behavior, since
+    # tests use unique chat_ids for DB/session isolation, not to
+    # deliberately exercise per-tenant topic routing. See config.
+    # TOPIC_FALLBACK_FOR_ANY_CHAT's own docstring.
+    config.TOPIC_FALLBACK_FOR_ANY_CHAT = True
     narration_cache.CACHE_DB_PATH = path + ".narration_cache.db"
     # 2026-08-01 multi-fight rewrite: sessions.py replaced the old single
     # _ACTIVE_SESSIONS (chat_id-keyed)/_CHAT_LOCKS pair with a real

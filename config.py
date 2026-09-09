@@ -53,6 +53,30 @@ GUILD_TOPIC_IDS = {
 _raw_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 TELEGRAM_CHAT_ID = int(_raw_chat_id) if _raw_chat_id else None
 
+# Real, narrow multi-tenant gap closed before going public (2026-09-09):
+# topics._resolve used to fall back to the TOPIC_*_ID constants above
+# for ANY chat lacking a real per-chat /set_topic mapping, including a
+# brand-new THIRD-PARTY group -- Telegram forum topic ids are just that
+# chat's own message-id counter, so a busier/older group adding this
+# bot could coincidentally already have an unrelated topic sitting at
+# thread_id 41, and is_development()/is_support() would then treat an
+# ordinary message there as OUR Development/Support topic purely by
+# coincidence, before that group ever configured anything.
+#
+# The fix (only fall back for the real home chat, TELEGRAM_CHAT_ID)
+# is correct for real production use, but this whole test suite's
+# near-universal `chat_id=-999` (and dozens of other made-up per-test
+# ids) convention relies on the ORIGINAL convenience fallback behaving
+# like the home group by default -- tests use unique chat_ids for real
+# DB/session isolation, not to deliberately exercise per-tenant topic
+# routing, so tightening this for real production would otherwise
+# break a huge swath of unrelated tests for no real safety gain (test
+# chat_ids never touch a real Telegram API or another real tenant).
+# tests/helpers.py's use_test_db() flips this True for the whole
+# suite; real production code (bot.py's actual running process, which
+# never calls use_test_db) always keeps the safe, tightened default.
+TOPIC_FALLBACK_FOR_ANY_CHAT = False
+
 # SQLite database file path
 DB_PATH = os.getenv("DB_PATH", "pandora_mmo.db")
 

@@ -14367,12 +14367,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Real multi-tenant scaling Phase 3 deliverable (2026-08-02, task
         #250): topics.py's is_adventure/is_support/is_development/
         is_main/thread_id_for all gained a required chat_id parameter,
-        looking up db.chat_topic_config first -- but ANY chat with no
-        row there (including every real message this bot's own live
-        group has ever sent, which has never run /set_topic) falls back
-        to the exact same config.py constants as before. This is the
-        core backward-compat guarantee: the live group's behavior is
-        byte-for-byte unchanged by this phase.
+        looking up db.chat_topic_config first -- but the REAL home chat
+        (config.TELEGRAM_CHAT_ID, including every real message this
+        bot's own live group has ever sent, which has never run
+        /set_topic) falls back to the exact same config.py constants as
+        before. This is the core backward-compat guarantee: the live
+        group's behavior is byte-for-byte unchanged by this phase.
+
+        This chat_id is genuinely different from the real home chat
+        (config.TELEGRAM_CHAT_ID, loaded from the real .env even in
+        tests) -- this still passes only because tests/helpers.py's
+        use_test_db sets config.TOPIC_FALLBACK_FOR_ANY_CHAT True for
+        the whole suite (tests use unique chat_ids for DB/session
+        isolation, not to deliberately exercise per-tenant topic
+        routing). See the sibling test just below for the real
+        2026-09-09 hardening this doesn't cover: in real production use
+        (that flag off), a genuinely different chat no longer gets this
+        fallback at all.
         """
         unregistered_chat_id = 424242
         self.assertTrue(topics.is_adventure(unregistered_chat_id, config.TOPIC_ADVENTURE_ID))
@@ -14381,6 +14392,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(topics.is_main(unregistered_chat_id, None))
         self.assertTrue(topics.is_adventure(None, config.TOPIC_ADVENTURE_ID))
         self.assertEqual(topics.thread_id_for(unregistered_chat_id, "adventure"), config.TOPIC_ADVENTURE_ID)
+
+    def test_a_genuinely_different_chat_never_gets_the_home_fallback_in_real_production_mode(self):
+        """
+        Real, narrow multi-tenant gap closed before going public
+        (2026-09-09): Telegram forum topic ids are just that chat's own
+        message-id counter, so a busier/older THIRD-PARTY group adding
+        this bot could coincidentally already have an unrelated topic
+        sitting at thread_id 41 (config.TOPIC_DEVELOPMENT_ID) -- before
+        this fix, is_development()/is_support() would treat an ordinary
+        message there as OUR Development/Support topic purely by
+        coincidence, before that group ever configured anything.
+        Simulates real production mode (TOPIC_FALLBACK_FOR_ANY_CHAT
+        False, what a real running bot process always has -- only this
+        test suite flips it True) against a chat_id guaranteed genuinely
+        different from the real home chat.
+        """
+        from unittest.mock import patch
+        other_chat_id = (config.TELEGRAM_CHAT_ID or 0) + 999999
+        with patch("config.TOPIC_FALLBACK_FOR_ANY_CHAT", False):
+            self.assertFalse(topics.is_development(other_chat_id, config.TOPIC_DEVELOPMENT_ID))
+            self.assertFalse(topics.is_support(other_chat_id, config.TOPIC_SUPPORT_ID))
+            self.assertFalse(topics.is_adventure(other_chat_id, config.TOPIC_ADVENTURE_ID))
+            self.assertIsNone(topics.thread_id_for(other_chat_id, "adventure"))
+            # Main is unaffected -- a real None thread_id (Telegram's own
+            # General topic) is unconditionally Main regardless of chat.
+            self.assertTrue(topics.is_main(other_chat_id, None))
+            # The real home chat is completely unaffected by any of this.
+            if config.TELEGRAM_CHAT_ID is not None:
+                self.assertTrue(topics.is_development(config.TELEGRAM_CHAT_ID, config.TOPIC_DEVELOPMENT_ID))
 
     async def test_a_second_tenant_chat_routes_through_its_own_configured_topic_id(self):
         """

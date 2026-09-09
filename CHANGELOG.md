@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.555] — fix: real multi-tenant topic-ID collision hardening, ahead of going public
+
+Real, narrow gap found while auditing readiness for the public repo:
+`topics._resolve` fell back to the home group's own literal thread-id
+constants (1/22/23/41) for ANY chat lacking a real per-chat
+`/set_topic` mapping — including a brand-new THIRD-PARTY group.
+Telegram forum topic ids are just that chat's own message-id counter,
+so a busier/older group adding this bot could genuinely already have
+an unrelated topic sitting at thread_id 41, and `is_development()`/
+`is_support()` would then treat an ordinary message there as OUR
+Development/Support topic purely by coincidence, before that group
+ever configured anything.
+
+Fixed in `topics._resolve`: now falls back to the home constants only
+for the real home chat (`config.TELEGRAM_CHAT_ID`) in actual
+production use. This has **zero effect on the real home/public
+group** — it matches `config.TELEGRAM_CHAT_ID` exactly, so its own
+fallback behavior is completely unchanged.
+
+An earlier attempt at this same fix (this session) broke the entire
+test suite's near-universal `chat_id=-999`-and-friends convention,
+which relies on the original fallback behaving like the home group by
+default — those chat_ids exist for real DB/session isolation between
+tests, never to deliberately exercise per-tenant topic routing. Fixed
+properly this time with a new `config.TOPIC_FALLBACK_FOR_ANY_CHAT`
+flag: `tests/helpers.py`'s `use_test_db` (called by every test class's
+setup) sets it True, preserving the entire suite's existing behavior
+byte-for-byte; real production code never touches it, so a live
+deployment always gets the tightened, safe default. 2 new/updated
+regression tests (the real production-mode behavior, explicitly
+distinguished from the test-suite convenience fallback); full
+`LabyrinthTests` re-run clean (2 pre-existing, confirmed-unrelated
+batch-order flakes).
+
 ## [1.27.554] — docs: clarify install-vs-play in README/SETUP_GUIDE, ahead of going public
 
 Real, direct ask (per Coffee: "be clear on the github the INSTALL is

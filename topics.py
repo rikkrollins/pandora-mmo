@@ -29,11 +29,35 @@ _ID_TO_NAME = {v: k for k, v in TOPIC_IDS.items()}
 
 
 def _resolve(chat_id: int | None, topic_name: str) -> int | None:
-    """Per-tenant topic thread_id lookup, falling back to the home-group constants above."""
+    """
+    Per-tenant topic thread_id lookup, falling back to the home-group
+    constants above ONLY for the real home chat (config.TELEGRAM_CHAT_ID),
+    a caller with no chat_id at all (a one-off script with no real chat
+    context), or the whole test suite (config.TOPIC_FALLBACK_FOR_ANY_CHAT,
+    see its own docstring in config.py for why tests are exempted).
+
+    Real gap closed before going public (2026-09-09): a brand-new group
+    that's added this bot but hasn't run /set_topic yet (or run it for
+    every topic) used to fall back to the HOME group's own literal
+    thread-id constants (1/22/23/41) for whichever topic wasn't yet
+    configured -- Telegram forum topic ids are just that chat's own
+    message-id counter, so a busier/older group adding this bot could
+    genuinely already have a topic sitting at thread_id 41 for
+    unrelated reasons, and is_development()/is_support() would then
+    treat an ordinary message there as if it came from OUR Development/
+    Support topic purely by coincidence, before that group ever
+    consciously configured anything. Now returns None (this topic
+    genuinely isn't configured for this chat yet) for any OTHER real
+    chat_id in real production use, matching the honest "nothing
+    happens here until you configure it" contract the onboarding flow
+    already promises.
+    """
     if chat_id is not None:
         configured = db.get_chat_topic_id(chat_id, topic_name)
         if configured is not None:
             return configured
+        if chat_id != config.TELEGRAM_CHAT_ID and not config.TOPIC_FALLBACK_FOR_ANY_CHAT:
+            return None
     return TOPIC_IDS.get(topic_name)
 
 
