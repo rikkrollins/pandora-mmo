@@ -35504,6 +35504,8 @@ _PENDING_ONBOARDING: dict[int, str] = {}  # chat_id -> "awaiting_setup_choice" |
 # span (`@PandoraMMO_Bot`) instead -- Telegram doesn't parse
 # entities inside a code span, so the real underscore in the actual
 # username is just literal text there, no escaping needed at all.
+_GITHUB_REPO_URL = "github.com/rikkrollins/pandora-mmo"
+
 _DM_GETTING_STARTED_TEXT = (
     "👋 Hey, I'm Pandora MMO! I only play inside a Telegram *group*, not here in a private chat "
     "with me — but here's how to get started either way:\n\n"
@@ -35511,7 +35513,8 @@ _DM_GETTING_STARTED_TEXT = (
     f"{_PUBLIC_WORLD_INVITE_LINK}\n\n"
     "*Or run your own* — add me (`@PandoraMMO_Bot`) to your own Telegram group instead. The moment "
     "I'm added, I'll message that group and walk an admin through a one-time setup (topics, and "
-    "whether that group wants its own Private World or to join the Public World above)."
+    "whether that group wants its own Private World or to join the Public World above).\n\n"
+    f"*Curious how I work, or want to self-host your own instance?* Source code: {_GITHUB_REPO_URL}"
 )
 
 
@@ -35592,7 +35595,8 @@ async def bot_added_to_group_handler(update: Update, context: ContextTypes.DEFAU
                 "topics myself, if this group already has Telegram's Topics (forum) mode on and I've "
                 "been made an admin with permission to manage topics.\n\n"
                 "Reply **auto** to have me try that, or **manual** for step-by-step instructions to "
-                "do it yourself."
+                "do it yourself.\n\n"
+                f"(Curious how I work? Source code: {_GITHUB_REPO_URL})"
             ),
             parse_mode="Markdown",
         )

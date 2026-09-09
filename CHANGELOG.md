@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.557] — feat: bot's own onboarding messages now link back to the real GitHub repo
+
+Per Coffee, asked directly while confirming public-repo readiness:
+GitHub -> Telegram was already fully covered (README/SETUP_GUIDE
+point curious readers at joining the main group), but the reverse
+direction had a real, confirmed gap -- `bot.py` had ZERO mentions of
+"github" anywhere, so nothing the bot itself ever said pointed a
+player back at the source code.
+
+Added a real `_GITHUB_REPO_URL` constant, referenced from both real
+onboarding surfaces: `_DM_GETTING_STARTED_TEXT` (a private DM to the
+bot) and the welcome message `bot_added_to_group_handler` sends the
+moment an admin adds the bot to a brand-new group. Confirmed via the
+actual code (not memory) that both existing real flows already work
+correctly and needed no other change: a private DM already points at
+joining the main group or adding the bot elsewhere; adding the bot to
+a new group already walks an admin through real auto/manual topic
+setup and a Private/Public World choice, fully self-contained, no
+GitHub visit ever required just to play.
+
+1 new regression test confirming the URL is present in both real
+messages (drives the actual `bot_added_to_group_handler` handler, not
+just a string literal check); existing onboarding/markdown-entity
+tests re-run clean.
+
 ## [1.27.556] — chore: scrub trademarked game-brand references, ahead of going public
 
 Per Coffee ("leave out copyritten names like Final fantasy, zelda,

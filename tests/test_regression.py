@@ -19912,6 +19912,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                           "odd number of single '*' markers -- Telegram's legacy Markdown parser "
                           "will fail to find a matching close for an unpaired one")
 
+    async def test_dm_and_group_welcome_both_link_the_real_github_repo(self):
+        """
+        Real gap found 2026-09-09 (Coffee, asked directly): GitHub ->
+        Telegram was already fully covered (README/SETUP_GUIDE point at
+        joining the main group), but nothing in the BOT ITSELF ever
+        pointed a curious player back at the source repo -- bot.py had
+        zero mentions of "github" anywhere. Both real onboarding
+        surfaces (a private DM's getting-started text, and the message
+        sent the moment an admin adds this bot to a new group) now
+        include the real repo URL.
+        """
+        self.assertIn(bot._GITHUB_REPO_URL, bot._DM_GETTING_STARTED_TEXT)
+
+        chat_id, fake_bot_id = -5103, 999998
+
+        class _OnboardingFakeBot:
+            def __init__(self, bot_id):
+                self.id = bot_id
+                self.sent = []
+
+            async def send_message(self, chat_id, text, message_thread_id=None, parse_mode=None):
+                self.sent.append(text)
+
+        tg_bot = _OnboardingFakeBot(fake_bot_id)
+        ctx = SimpleNamespace(bot=tg_bot, user_data={}, args=[])
+        added = SimpleNamespace(
+            chat=SimpleNamespace(id=chat_id, title="Another Test Group"),
+            old_chat_member=SimpleNamespace(status="left"),
+            new_chat_member=SimpleNamespace(status="member", user=SimpleNamespace(id=fake_bot_id)),
+        )
+        await bot.bot_added_to_group_handler(
+            SimpleNamespace(effective_chat=None, effective_user=None, my_chat_member=added), ctx,
+        )
+        self.assertTrue(any(bot._GITHUB_REPO_URL in t for t in tg_bot.sent))
+
     def test_get_party_members_does_not_leak_across_tenant_chats(self):
         """
         Real cross-tenant leak, found and fixed 2026-08-08 (multi-tenant
