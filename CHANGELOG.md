@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.558] — feat: real 5E-style item attunement, capped at 3 at once
+
+Real gap found scanning FEATURE_WISHLIST.md against the actual code
+(per Coffee: "do 1,2,3" after reviewing the scan): equipping a rare+
+magic item applied its bonuses completely unconditionally, with no
+cap at all on how many a character could stack simultaneously — real
+5E caps this at 3. Gated by each item's own existing `rarity` field
+(rare/very_rare/legendary/mythic/epic/unique now require attunement;
+common/uncommon are untouched, exactly as before) — no new per-item
+authoring needed, since every item already carries this field.
+
+Deliberately NOT a separate stored "attuned_items" list on the
+character row: this game's equip model has no true "worn but
+magically inert" state (equipping armor bakes its AC delta straight
+into the stored `armor_class` column on every swap, and profession/
+ability/resistance bonuses are already read LIVE from whatever's
+currently equipped, same convention `_equipped_profession_bonus`/
+`_compute_equipped_resist_profile` already use). Piggybacking on that
+same live-computed convention (`db._attuned_count`) means attunement
+state can never drift out of sync with what's actually equipped — a
+character's real 3-slot cap is just "how many currently-equipped
+items are rare+," recomputed fresh at every equip attempt, never a
+second copy of the same fact that could go stale on an unequip this
+code doesn't know about.
+
+Wired into every real equip path: weapon, armor, shield, offhand
+weapon (dual wielding), and rings/amulets/wondrous accessories.
+Swapping one rare+ item for a different one in the SAME slot correctly
+excludes the outgoing item from its own count, so a character already
+at the cap can still legitimately swap gear rather than getting stuck.
+Item view (`_format_item_stats_line`/`_format_item_detail_block`) now
+shows "Requires attunement (max 3 at once)" for any rare+ equipable,
+matching the existing "shows what's required to equip" convention
+already used for weapon/armor proficiency and mythic equip
+requirements.
+
+6 new regression tests (cap enforcement, common/uncommon exemption,
+same-slot swap doesn't double-count, re-equipping the same item is
+never refused, item-view display); the full existing equip/ring/
+amulet/magic-item test surface (111 tests across item_generator,
+crafting, and every equip path) re-run clean with zero regressions.
+
 ## [1.27.557] — feat: bot's own onboarding messages now link back to the real GitHub repo
 
 Per Coffee, asked directly while confirming public-repo readiness:

@@ -5017,6 +5017,81 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         success, message, _ = db.equip_item(user_id, -999, "waterlogged_journal")
         self.assertFalse(success)
 
+    # -- Real 5E attunement (2026-09-09, gap found scanning
+    #    FEATURE_WISHLIST.md against the actual codebase): equipping a
+    #    rare+ item used to apply its bonuses completely unconditionally,
+    #    with no cap at all on how many could be stacked at once ---------
+    def test_a_fourth_rare_accessory_is_refused_once_attuned_to_three(self):
+        use_test_db("tests/tmp/attunement_test1.db")
+        user_id = 900501
+        make_basic_character(user_id, "Attuner", current_location="crossroads_tavern")
+        for iid in ("ring_of_protection", "amulet_of_health", "stormguard_cloak", "lantern_of_true_sight"):
+            db.add_item(user_id, -999, iid, 1)
+        s1, _, _ = db.equip_item(user_id, -999, "ring_of_protection")
+        s2, _, _ = db.equip_item(user_id, -999, "amulet_of_health")
+        s3, _, _ = db.equip_item(user_id, -999, "stormguard_cloak")
+        self.assertTrue(s1 and s2 and s3)
+        success, message, updated = db.equip_item(user_id, -999, "lantern_of_true_sight")
+        self.assertFalse(success)
+        self.assertIn("attuned", message.lower())
+        self.assertNotIn("lantern_of_true_sight", updated["equipped_accessories"])
+
+    def test_common_and_uncommon_gear_never_counts_toward_the_attunement_cap(self):
+        """
+        The real point of this system is capping RARE+ magic items --
+        common/uncommon gear (the vast majority of a market/starting
+        inventory) must never be affected, no matter how many pieces are
+        worn at once.
+        """
+        use_test_db("tests/tmp/attunement_test2.db")
+        user_id = 900502
+        make_basic_character(user_id, "Unaffected", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "ring_of_protection", 1)
+        db.add_item(user_id, -999, "amulet_of_health", 1)
+        db.add_item(user_id, -999, "stormguard_cloak", 1)
+        db.add_item(user_id, -999, "ring_of_the_undertow", 1)  # uncommon -- the 4th accessory overall
+        for iid in ("ring_of_protection", "amulet_of_health", "stormguard_cloak", "ring_of_the_undertow"):
+            success, message, _ = db.equip_item(user_id, -999, iid)
+            self.assertTrue(success, f"{iid} should have equipped fine: {message}")
+
+    def test_swapping_a_rare_weapon_for_a_different_rare_weapon_does_not_double_count(self):
+        """
+        The outgoing weapon must be excluded from its own slot's count --
+        otherwise a character already at the cap could never legitimately
+        swap one rare weapon for another, even though the old one is
+        leaving the moment the new one arrives.
+        """
+        use_test_db("tests/tmp/attunement_test3.db")
+        user_id = 900503
+        make_basic_character(user_id, "WeaponSwapper", current_location="crossroads_tavern")
+        for iid in ("ring_of_protection", "amulet_of_health", "flametongue_shortsword", "stoneheart_warhammer"):
+            db.add_item(user_id, -999, iid, 1)
+        db.equip_item(user_id, -999, "ring_of_protection")
+        db.equip_item(user_id, -999, "amulet_of_health")
+        s1, _, updated1 = db.equip_item(user_id, -999, "flametongue_shortsword")
+        self.assertTrue(s1)
+        self.assertEqual(updated1["equipped_weapon"], "flametongue_shortsword")
+
+        # Now at 3/3 (2 rings + the flametongue) -- swapping to a
+        # DIFFERENT rare weapon must still succeed, since the flametongue
+        # is leaving the same slot the warhammer is entering.
+        s2, message2, updated2 = db.equip_item(user_id, -999, "stoneheart_warhammer")
+        self.assertTrue(s2, message2)
+        self.assertEqual(updated2["equipped_weapon"], "stoneheart_warhammer")
+
+        # Re-equipping the SAME already-equipped rare item must also
+        # never be refused for "being at the cap" -- it's a no-op swap.
+        s3, message3, _ = db.equip_item(user_id, -999, "stoneheart_warhammer")
+        self.assertTrue(s3, message3)
+
+    def test_item_stats_line_and_detail_block_both_show_attunement_requirement(self):
+        rare_ring = items_module.get_item("ring_of_protection")
+        common_ring_like = {"type": "amulet", "rarity": "common", "ac_bonus": 0}
+        self.assertIn("requires attunement", bot._format_item_stats_line(rare_ring))
+        self.assertIn("Requires attunement", bot._format_item_detail_block(rare_ring))
+        stats_common = bot._format_item_stats_line(common_ring_like)
+        self.assertTrue(stats_common is None or "attunement" not in stats_common)
+
     def test_cloak_of_elvenkind_grants_advantage_on_sneak_checks(self):
         use_test_db("tests/tmp/cloak_test.db")
         user_id = 900409
