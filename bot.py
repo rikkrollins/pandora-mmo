@@ -6425,6 +6425,25 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
                     )
                 else:
                     db.complete_board_quest(updated["board_quest_id"])
+                    # Real live bug (2026-09-09, Coffee: "Laurienna didn't
+                    # level up with the rest of us... she was active but
+                    # not in battle" for a real 187,500 XP Monthly Goblin
+                    # quest): unlike every OTHER quest-reward path in this
+                    # game (_share_quest_rewards_with_party, used by story
+                    # quests and board-quest turn-ins), this location-
+                    # scoped defeat_monster completion only ever credited
+                    # real_party_ids -- the literal fighters in THIS one
+                    # session -- never the rest of the party who weren't
+                    # personally in that battle. Now matches the same
+                    # "100% for the fighters, INACTIVE_PARTY_XP_SHARE
+                    # (50%) for every other real party_id member" rule
+                    # already established everywhere else. Deduped by
+                    # telegram_user_id (not character_id) so a dormant
+                    # alt of someone who WAS a fighter (e.g. Laurienna/
+                    # Charvenna, the same real owner) never double-dips a
+                    # second share on top of their own active character's
+                    # full credit.
+                    credited_owner_ids = set()
                     for pid in real_party_ids:
                         # Same real bug as the other non-combat XP sources
                         # (2026-07-19, Coffee) -- this board-quest reward
@@ -6438,9 +6457,31 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
                         character = db.get_character(pid, update.effective_chat.id)
                         db.update_character(pid, update.effective_chat.id, gold=character["gold"] + updated["reward_gold"])
                         db.increment_board_quests_completed(pid, update.effective_chat.id)
+                        credited_owner_ids.add(pid)
+                    fighter_party_ids = {
+                        c["party_id"] for c in (db.get_character(pid, update.effective_chat.id) for pid in real_party_ids)
+                        if c and c.get("party_id")
+                    }
+                    for party_id in fighter_party_ids:
+                        for m in db.get_party_members_by_id(party_id):
+                            member_id = m["telegram_user_id"]
+                            if member_id in credited_owner_ids:
+                                continue
+                            credited_owner_ids.add(member_id)
+                            before = db.get_character(member_id, update.effective_chat.id)
+                            if before is None:
+                                continue
+                            bonus_xp = max(int(updated["reward_xp"] * INACTIVE_PARTY_XP_SHARE), 1)
+                            bonus_gold = max(int(updated["reward_gold"] * INACTIVE_PARTY_XP_SHARE), 1)
+                            after = db.add_xp(member_id, update.effective_chat.id, bonus_xp)
+                            if after["level"] > before["level"]:
+                                level_up_notes.append(_level_up_note(before, after))
+                                _log_world_event(event_location, f"{after['name']} reached level {after['level']}.", session.chat_id)
+                            db.update_character(member_id, update.effective_chat.id, gold=before["gold"] + bonus_gold)
                     board_notes.append(
                         f"\n📜 **Board quest complete: {updated['title']}!** "
-                        f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each."
+                        f"Party earns {updated['reward_xp']} XP, {updated['reward_gold']} gold each "
+                        f"({int(INACTIVE_PARTY_XP_SHARE * 100)}% for party members elsewhere)."
                     )
             else:
                 board_notes.append(

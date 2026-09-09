@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.563] — fix: real party members skipped by combat-triggered board quest rewards
+
+Real dev-bridge report (2026-09-09, Coffee: "Laurienna didn't level up
+with the rest of us... she was active but not in battle" for a real
+187,500 XP `[Monthly] Thin the Goblins` quest).
+
+Root cause: unlike a board-quest TURN-IN or a story quest (both
+already route through `_share_quest_rewards_with_party` — 100% for
+every present real party member, `INACTIVE_PARTY_XP_SHARE` (50%) for
+anyone active but elsewhere), a location-scoped `defeat_monster` board
+quest that completes MID-COMBAT (the instant enough of the target
+monster are killed in any fight at that location) used a much older
+code path that only ever credited `real_party_ids` — the literal
+fighters in that one session — never the rest of the party. A real
+party member who wasn't personally in that specific battle got
+nothing at all, not even the 50% share.
+
+Now matches the same rule everywhere else: every other real party_id
+member gets 50% of the reward, deduped by `telegram_user_id` (not
+`character_id`) so a real owner with two characters in the same party
+(the exact live scenario this was found from — Laurienna/Charvenna,
+one real Telegram account) is never double-credited through their own
+dormant alt on top of whichever character actually fought.
+
+**Real backfill**: Laurienna was manually credited the 50% share she
+was owed for the missed quest (93,750 XP, 6,250 gold) — matching the
+now-corrected rule exactly, not the full 187,500 (per Coffee's own
+confirmation this should stay consistent with how every other absent-
+but-active party member is already treated elsewhere).
+
+2 new regression tests (party-wide sharing on a combat-triggered
+board-quest completion; a real owner's dormant alt never double-
+credited). Full targeted re-verification (33 tests across board-quest/
+victory-XP/favor surfaces) clean, zero regressions.
+
 ## [1.27.562] — fix: 3 pre-existing test failures found during the concentration work (v1.27.559)
 
 Flagged in memory but deliberately left alone at the time as out of

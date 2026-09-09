@@ -8620,6 +8620,113 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after_affinity - before_affinity, board_quests.COMPANION_FAVOR_REWARD_AFFINITY)
         sessions.end_session(chat_id)
 
+    async def test_location_defeat_quest_shares_reward_with_the_rest_of_the_party_not_just_fighters(self):
+        """
+        Real live bug (2026-09-09, Coffee: "Laurienna didn't level up
+        with the rest of us... she was active but not in battle" for a
+        real 187,500 XP Monthly Goblin quest). Unlike a board-quest
+        TURN-IN or a story quest (both already go through
+        _share_quest_rewards_with_party), a location-scoped
+        defeat_monster board quest that completes mid-combat only ever
+        credited real_party_ids -- the literal fighters in THAT ONE
+        session -- never the rest of the party. Now matches the same
+        100%-present/50%-absent rule everywhere else in this game.
+        """
+        import sessions
+        chat_id = -999049
+        sessions.end_session(chat_id)
+        fighter_id, absent_id = 900986, 900987
+        make_basic_character(fighter_id, "GoblinFighter", chat_id=chat_id, current_location="stonearch_bridge")
+        party_id = db.create_party(fighter_id, chat_id)
+        make_basic_character(absent_id, "ActiveButElsewhere", chat_id=chat_id, current_location="crossroads_tavern")
+        db.update_character(absent_id, chat_id, party_id=party_id)
+
+        bq = db.create_board_quest(
+            "stonearch_bridge", chat_id, "test-day", "[Monthly] Trouble with the Goblins", "...", None,
+            "defeat_monster", "goblin", 1, 187500, 12500, tier="monthly",
+        )
+        db.accept_board_quest(bq["board_quest_id"], fighter_id, chat_id)
+
+        enemy_id = -2_600_502
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 50, "monster_key": "goblin"}
+        fighter = db.get_character(fighter_id, chat_id)
+        fighter["telegram_user_id"] = fighter_id
+        session = sessions.start_session(chat_id, [fighter, enemy], {enemy_id: "enemy", fighter_id: "party"})
+        session.turn_order = [fighter_id, enemy_id]
+
+        absent_before = db.get_character(absent_id, chat_id)
+        await bot._award_victory_xp(FakeUpdate(fighter_id, "", [], chat_id=chat_id), session)
+
+        fighter_after = db.get_character(fighter_id, chat_id)
+        absent_after = db.get_character(absent_id, chat_id)
+        updated_quest = db.get_active_board_quests("stonearch_bridge", chat_id, "test-day", tier="monthly")[0]
+        self.assertIsNotNone(updated_quest["completed_at"])
+        self.assertGreaterEqual(fighter_after["xp"], 187500)
+        # The absent member's real total here is two INDEPENDENT, real,
+        # legitimately-stacking 50% shares -- the board-quest reward
+        # this test targets (187500 * 50%), PLUS the enemy's own
+        # separate, pre-existing real combat-kill XP absent-party-
+        # member bonus (its xp_reward=50 * 50%) -- both fire from this
+        # one real kill, exactly as they would live.
+        board_quest_bonus = int(187500 * bot.INACTIVE_PARTY_XP_SHARE)
+        combat_kill_bonus = round(50 * bot.INACTIVE_PARTY_XP_SHARE)
+        self.assertEqual(absent_after["xp"] - absent_before["xp"], board_quest_bonus + combat_kill_bonus)
+        self.assertEqual(absent_after["gold"] - absent_before["gold"], int(12500 * bot.INACTIVE_PARTY_XP_SHARE))
+        sessions.end_session(chat_id)
+
+    async def test_location_defeat_quest_never_double_credits_a_fighters_own_dormant_alt(self):
+        """
+        Companion case to the sharing fix above: a real owner with TWO
+        characters in the same party (e.g. Laurienna/Charvenna, the
+        exact live scenario this whole fix was found from) must only
+        ever be credited ONCE per quest completion -- via whichever of
+        their own characters actually fought -- never also collecting
+        the 50% "absent" share through their own dormant alt sitting in
+        the same party.
+        """
+        import sessions
+        chat_id = -999050
+        sessions.end_session(chat_id)
+        owner_id = 900988
+        fighter_char = make_basic_character(owner_id, "ActiveAlt", chat_id=chat_id, current_location="stonearch_bridge")
+        party_id = db.create_party(owner_id, chat_id)
+        # A second character owned by the SAME telegram_user_id, sitting
+        # dormant in the same party -- db.create_character allows this
+        # (multiple characters per owner; only one is ever "active").
+        dormant_alt = db.create_character(
+            telegram_user_id=owner_id, chat_id=chat_id, name="DormantAlt", race="Human", char_class="Fighter",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=10, armor_class=10, gold=0, inventory={}, known_spells=[],
+        )
+        db.update_character_by_id(dormant_alt["character_id"], party_id=party_id, current_location="stonearch_bridge")
+        # create_character always makes the NEW character active -- switch
+        # back so ActiveAlt (the one that actually fights below) is once
+        # again this owner's active character, and DormantAlt is the real
+        # dormant alt this test is named for.
+        db.switch_character(owner_id, chat_id, fighter_char["character_id"])
+
+        bq = db.create_board_quest(
+            "stonearch_bridge", chat_id, "test-day-2", "[Monthly] Trouble with the Goblins", "...", None,
+            "defeat_monster", "goblin", 1, 187500, 12500, tier="monthly",
+        )
+        db.accept_board_quest(bq["board_quest_id"], owner_id, chat_id)
+
+        enemy_id = -2_600_503
+        enemy = {"telegram_user_id": enemy_id, "name": "Goblin", "dexterity": 10, "xp_reward": 50, "monster_key": "goblin"}
+        fighter = db.get_character(owner_id, chat_id)  # resolves to the ACTIVE character (ActiveAlt)
+        fighter["telegram_user_id"] = owner_id
+        session = sessions.start_session(chat_id, [fighter, enemy], {enemy_id: "enemy", owner_id: "party"})
+        session.turn_order = [owner_id, enemy_id]
+
+        await bot._award_victory_xp(FakeUpdate(owner_id, "", [], chat_id=chat_id), session)
+
+        # The dormant alt shares the same telegram_user_id -- its xp/gold
+        # must be completely untouched, not a second 50% share.
+        dormant_after = db.get_character_by_id(dormant_alt["character_id"])
+        self.assertEqual(dormant_after["xp"], 0)
+        self.assertEqual(dormant_after["gold"], 0)
+        sessions.end_session(chat_id)
+
     async def test_favor_never_credited_once_the_companion_has_left_the_party(self):
         from unittest.mock import patch
         import board_quests
