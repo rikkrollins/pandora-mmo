@@ -2026,6 +2026,38 @@ def the_last_glyph_defeat_line() -> str:
     )
 
 
+def the_high_approach_sentinel_confrontation_script() -> str:
+    """
+    Chapter 4's real finale ("What the Light Was Reaching For") -- the
+    quest's own title/clue frame this as a threshold guardian, not a
+    predator, and its real name ("Sentinel") implies duty rather than
+    malice -- deliberately the one tonal outlier among these 6 new
+    antagonists: not cruel, not hungry, just standing exactly where
+    it's always stood. Hand-written, zero Ollama calls.
+    """
+    return (
+        "*It doesn't lunge, doesn't posture -- it simply turns to face the party, radiant and "
+        "utterly still, the way something stands when it's been standing in the exact same "
+        "spot for longer than anyone alive has been counting.*\n\n"
+        "**The Sentinel:** \"You are not the first to reach for what's past me. You will not be "
+        "the last, if I have anything to say about it -- and I do.\"\n\n"
+        "*There's no anger in it. If anything, it sounds almost apologetic.*\n\n"
+        "**The Sentinel:** \"I was asked to hold this threshold. No one ever came back to tell me "
+        "I could stop.\""
+    )
+
+
+def the_high_approach_sentinel_defeat_line() -> str:
+    """Companion piece to the_high_approach_sentinel_confrontation_script -- fired as the Chapter 4 ending's opening beat."""
+    return (
+        "*It doesn't fall so much as finally allow itself to -- the light going out of it slowly, "
+        "almost gratefully.*\n\n"
+        "**The Sentinel:** \"...ah. Good. Someone came back after all.\"\n\n"
+        "*Past the threshold it spent so long guarding, the true source is finally, fully visible -- "
+        "and whatever it is, it was worth guarding.*"
+    )
+
+
 def narrate_scouting_grounds_ending(character_name: str) -> str:
     """
     Chapter 7's real finale beat, closing "Fresh Tracks"

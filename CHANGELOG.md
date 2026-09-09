@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.571] — feat: Chapter 4's real finale gets a named speaking antagonist + 2 real data bugs fixed (story completion pass, 5/7)
+
+Chapter 4's finale (`the_suns_thresholds_secret`, "What the Light Was
+Reaching For") was the single most under-served finale in the game —
+confirmed via the story-completeness audit: it had no `"weight":
+"climactic"` key at all (falling to a completely bare template on
+completion, not even the generic AI flourish the other 3 finales got),
+and its own boss, `the_high_approach_sentinel`, was miscategorized
+`is_boss: false` despite being a real level-30, 2800-HP chapter
+finale — meaning it was silently missing the real scaling protection
+("never shrinks a hand-placed boss") and bestiary level-hiding-until-
+defeated treatment every other story boss gets. Both real data bugs
+fixed in `campaign.json` alongside the new antagonist; confirmed via
+grep that no existing test depended on the old (wrong) `is_boss: false`
+value, and re-ran the full boss-scaling/bestiary/arc_4 test surface
+clean.
+
+Added `the_high_approach_sentinel_confrontation_script`/`..._defeat_line`
+(`ai/dm_agent.py`) — hand-written, zero Ollama calls. Deliberately the
+one sympathetic tonal outlier among these 6 new antagonists: a
+threshold guardian bound by an old, unrescinded duty rather than a
+predator — "I was asked to hold this threshold. No one ever came back
+to tell me I could stop." Wired at the same two checkpoints as
+Chapters 1-3 (`_do_start_combat` boss-intro dispatch,
+`_complete_quest_and_announce` ending dispatch + climax image).
+
+4 new regression tests (the 2 data-bug fixes, both scripts, the real
+fight-start dispatch, the real quest-completion dispatch + image).
+
 ## [1.27.570] — feat: Chapter 3's real finale gets a named speaking antagonist (story completion pass, 4/7)
 
 Chapter 3's finale (`the_original_spires_reckoning`, "The Original

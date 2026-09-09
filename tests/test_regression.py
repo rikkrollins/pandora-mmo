@@ -7855,6 +7855,67 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         prompt_arg = mock_image.await_args.args[1]
         self.assertIn("The Original Spire", prompt_arg)
 
+    # -- Chapter 4's real finale (2026-09-09, story completion pass,
+    #    5/7): the single most under-served finale in the game -- no
+    #    "weight": "climactic" at all, and is_boss was miscategorized
+    #    False. Both data bugs fixed alongside the new antagonist ------
+    def test_the_high_approach_sentinel_is_correctly_flagged_a_real_boss(self):
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_high_approach_sentinel")
+        self.assertTrue(template["is_boss"], "Chapter 4's real finale boss was miscategorized as a non-boss")
+        quest = bot.CAMPAIGN["quests"]["the_suns_thresholds_secret"]
+        self.assertEqual(quest.get("weight"), "climactic")
+
+    def test_the_high_approach_sentinel_scripts_are_hand_written(self):
+        import ai.dm_agent as dm_agent_module
+        confrontation = dm_agent_module.the_high_approach_sentinel_confrontation_script()
+        self.assertIn("The Sentinel:", confrontation)
+        defeat = dm_agent_module.the_high_approach_sentinel_defeat_line()
+        self.assertIn("The Sentinel:", defeat)
+
+    async def test_starting_combat_with_the_sentinel_fires_the_real_confrontation(self):
+        """
+        End-to-end: starting a fight with the_high_approach_sentinel
+        must route through the hand-written confrontation, not the
+        generic narrate_boss_intro AI path -- confirmed by NOT patching
+        narrate_boss_intro at all.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 900968
+        make_basic_character(
+            user_id, "SentinelWitness", chat_id=-997, char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -997, level=30, hp_current=1200, hp_max=1200)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the sentinel", sink, chat_id=-997),
+                                        monster_key="the_high_approach_sentinel", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("The Sentinel:", combined)
+        sessions.end_session(-997)
+
+    async def test_completing_the_suns_thresholds_secret_fires_the_real_ending(self):
+        """
+        End-to-end: completing the_suns_thresholds_secret must route
+        through the hand-written defeat line, not the plain bare-
+        template else-branch it fell into before this fix. Also
+        confirms the climax image fires with the real quest's own
+        title grounding it.
+        """
+        from unittest.mock import patch, AsyncMock
+        user_id = 900969
+        make_basic_character(user_id, "ThresholdWitness", current_location="unmoored_isle_the_high_approach")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_suns_thresholds_secret")
+        combined = "\n".join(sink)
+        self.assertIn("The Sentinel:", combined)
+        mock_image.assert_awaited_once()
+        prompt_arg = mock_image.await_args.args[1]
+        self.assertIn("What the Light Was Reaching For", prompt_arg)
+
     def test_sunken_root_caverns_lockable_chests_grant_real_loot(self):
         for loc_id in ("sunken_root_caverns_the_hidden_cache", "sunken_root_caverns_the_second_pool"):
             loc = cl.get_location(bot.CAMPAIGN, loc_id)

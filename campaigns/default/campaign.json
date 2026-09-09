@@ -10233,7 +10233,8 @@
         "type": "defeat_monster",
         "monster": "the_high_approach_sentinel"
       },
-      "clue": "The High Approach Sentinel guards the last real stretch before the sun's own threshold."
+      "clue": "The High Approach Sentinel guards the last real stretch before the sun's own threshold.",
+      "weight": "climactic"
     },
     "deeper_rubbles_lurker": {
       "title": "What the Rubble Was Hiding",
@@ -13179,7 +13180,7 @@
       "damage_dice": "1d8",
       "damage_bonus": 62,
       "damage_type": "radiant",
-      "is_boss": false,
+      "is_boss": true,
       "stealable_items": [
         {
           "item_id": "greater_spell_tonic",
