@@ -7660,6 +7660,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Kess:", combined)
         self.assertIn("Whispers", combined)
 
+    # -- Chapter 1-8 story completion pass (2026-09-09, per Coffee: "is
+    #    the story done from chapter 1-8, no gaps") -- Chapter 7's real
+    #    finale already had a bespoke confrontation/flee (Kess's third
+    #    form) but fell through to generic AI narration on completion --
+    def test_narrate_scouting_grounds_ending_is_hand_written(self):
+        import ai.dm_agent as dm_agent_module
+        result = dm_agent_module.narrate_scouting_grounds_ending("Ravenloft")
+        self.assertIn("Ravenloft", result)
+        self.assertIn("GREYMOOR", result)
+
+    async def test_completing_the_scouting_grounds_warning_fires_the_real_ending(self):
+        """
+        End-to-end: completing the_scouting_grounds_warning must route
+        through the hand-written bridging ending, not the generic
+        narrate_chapter_climax AI path -- confirmed by NOT patching
+        narrate_chapter_climax at all (if the code ever fell through to
+        it, this test would hang/fail on a real network call).
+        """
+        user_id = 900961
+        make_basic_character(user_id, "ScoutingWitness2", current_location="stonearch_bridge_the_scouting_ground")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_scouting_grounds_warning")
+        combined = "\n".join(sink)
+        self.assertIn("GREYMOOR", combined)
+
     def test_sunken_root_caverns_lockable_chests_grant_real_loot(self):
         for loc_id in ("sunken_root_caverns_the_hidden_cache", "sunken_root_caverns_the_second_pool"):
             loc = cl.get_location(bot.CAMPAIGN, loc_id)

@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.566] — feat: Chapter 7's real finale gets a bespoke ending (story completion pass, 1/7)
+
+First of 7 planned chapters closing the "is the story done from
+chapter 1-8, no gaps" audit finding. Chapter 7's real finale
+(`the_scouting_grounds_warning`, "Fresh Tracks") already had a bespoke
+pre-fight confrontation and flee line — it's Kess's own third form,
+`kess_scouting` — but fell through to the generic AI-narrated
+`narrate_chapter_climax` path on completion, the one real seam in an
+otherwise-complete beat.
+
+Added `narrate_scouting_grounds_ending` (`ai/dm_agent.py`) — hand-
+written, zero Ollama calls, same discipline as every other Kess beat —
+and wired it into `_complete_quest_and_announce`'s existing dispatch
+chain (`bot.py`) alongside `kess_first_reckoning`/`kess_the_unbound_
+reckoning`/`the_kept_shrines_vigil`. She's already fled by the time
+this fires (same "defeat = flee, not die" mechanic her other forms
+share); the beat picks up right after, finds her half-finished message
+left behind, and bridges directly into Chapter 8 instead of Chapter 7
+ending on an unresolved shrug.
+
+2 new regression tests (the narration function itself, and the real
+end-to-end completion path — confirmed by deliberately NOT mocking
+`narrate_chapter_climax`, so a regression back to the generic path
+would hang the test on a real network call instead of silently
+passing). Existing Kess-arc tests re-run clean.
+
 ## [1.27.565] — chore: trademark-scrub miss caught during a Chapter 1-8 story audit
 
 Found while auditing chapter narrative completeness (per Coffee: "is

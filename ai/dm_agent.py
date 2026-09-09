@@ -1922,6 +1922,29 @@ def kess_scouting_flees_line() -> str:
     )
 
 
+def narrate_scouting_grounds_ending(character_name: str) -> str:
+    """
+    Chapter 7's real finale beat, closing "Fresh Tracks"
+    (the_scouting_grounds_warning) -- fires right after kess_scouting_
+    flees_line, same "pick the cutscene back up after combat" discipline
+    every other Kess beat already uses. Deliberately NOT a victory: the
+    quest completes because she fled (the same "defeat = flee, not die"
+    mechanic her other two forms share), and this exists purely to make
+    that land as a real story beat instead of a silent stat-only
+    completion, and to bridge directly into Chapter 8 rather than
+    ending Chapter 7 on an unresolved shrug. Hand-written, zero Ollama
+    calls, same voice discipline as every other Kess beat.
+    """
+    return (
+        f"*{character_name} finds the tracks again past the ridge, but the ground's already gone quiet "
+        "-- whatever she was running from here, she's not running from it anymore.*\n\n"
+        "*What's left behind is worse than a fight would have been: a name scratched into the dirt, "
+        "half-finished, like she meant to write more and ran out of time or nerve.* **GREYMOOR**\n\n"
+        "*There's nothing else. No tracks leading anywhere in particular -- just the one word, "
+        "and the unmistakable feeling that she wanted it found.*"
+    )
+
+
 def grask_supply_tunnels_reaction() -> str:
     """
     Hand-written (Kess Arc plan, party-composition requirement: a short
