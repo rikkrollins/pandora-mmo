@@ -31106,6 +31106,38 @@ async def story_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await _do_replay_chapter_intro(update, parts[2])
 
 
+# Generic tavern rumors (2026-09-09, gap found scanning
+# FEATURE_WISHLIST.md against the actual codebase: "random tables --
+# names, encounters, treasures, rumors -- generate on the fly"). The
+# Whispers block already had real content, but it was 100% Remnant-
+# specific (remnants_module.rumors_for_character) -- nothing generic,
+# non-quest-critical, classic-tabletop "word around the world" flavor
+# existed anywhere. Hand-authored (never AI-generated at call time,
+# same "deterministic, no extra Ollama call" discipline the Remnant
+# Whispers already follow) and deliberately generic -- no proper noun
+# tied to any specific location/NPC/quest in this game's own campaign,
+# so it can never accidentally spoil or contradict real quest content,
+# and no other company's copyrighted material (this repo's own
+# standing policy).
+_GENERIC_TAVERN_RUMORS = [
+    "A merchant swears the roads have gotten quieter lately -- fewer bandits, or fewer travelers left to rob.",
+    "Someone at the bar claims they saw lantern-light moving through old ruins at night, where nothing should still be burning.",
+    "A retired adventurer says the deep caves smell different this season -- like something down there is finally waking up.",
+    "A local mutters that the well water tastes faintly of copper again, same as it did the year before the last uprising.",
+    "Word is a courier went missing on the northern trail three days back -- no body, no ransom note, nothing.",
+    "An old farmer insists the crows have been gathering over the same field for a week straight, refusing to leave.",
+    "A trader passing through says a whole caravan turned back rather than cross the ridge after dark.",
+    "Someone swears they heard a bell toll from an abandoned watchtower, though no one's rung it in years.",
+    "A guard grumbles that patrol routes keep getting rerouted around the same stretch of forest, and no one will say why.",
+    "A drunk regular claims his own shadow moved wrong in the torchlight -- everyone laughed, but he hasn't been back since.",
+    "A fisherman says the river's run unusually cold this month, even for the season.",
+    "There's talk of a hooded figure buying up every lockpick and length of rope in town, paying well above asking.",
+    "A child says they found a locked chest buried in an orchard, but their parents wouldn't let them dig further.",
+    "An old soldier mutters that the last time the air felt like this, it wasn't a good sign.",
+    "Two merchants were overheard arguing over whether the mountain pass is 'cursed' or just 'unlucky.'",
+]
+
+
 async def _do_show_story_so_far(update: Update) -> None:
     """
     Task #176 menu revision, per Coffee ("I want that to be like a
@@ -31231,10 +31263,17 @@ async def _do_show_story_so_far(update: Update) -> None:
     # has genuinely visited but hasn't bound yet -- never a spoiler of
     # one they haven't found, never the 5 pure-secret ones at all.
     rumors = remnants_module.rumors_for_character(character)
-    whispers_block = ""
-    if rumors:
-        rumor_lines = "\n".join(f"— *{data['name']}*: {data['lore']}" for _rid, data in rumors)
-        whispers_block = f"\n\n━━━━━━━━━━━━━━\n🕯️ **Whispers**\n{rumor_lines}"
+    rumor_lines_list = [f"— *{data['name']}*: {data['lore']}" for _rid, data in rumors]
+    # Generic tavern rumor (2026-09-09): one always-present, non-Remnant
+    # line alongside whatever real Remnant whispers exist -- seeded off
+    # the character's own name+id so the SAME viewing of this screen
+    # shows a stable rumor rather than a new random one on every re-open,
+    # while still varying character to character.
+    generic_pick = _GENERIC_TAVERN_RUMORS[
+        (character["telegram_user_id"] + len(character["name"])) % len(_GENERIC_TAVERN_RUMORS)
+    ]
+    rumor_lines_list.append(f"— {generic_pick}")
+    whispers_block = f"\n\n━━━━━━━━━━━━━━\n🕯️ **Whispers**\n" + "\n".join(rumor_lines_list)
 
     # The chapter-art image (2026-07-25, per Coffee: "include images too
     # please for all that") was already kicked off above, concurrently

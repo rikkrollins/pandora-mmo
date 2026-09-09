@@ -32762,6 +32762,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_show_story_so_far(FakeUpdate(996099, "story so far", sink))
         self.assertTrue(any("Whispers" in msg and story_tied_data["name"] in msg for msg in sink), sink)
 
+    async def test_story_so_far_always_shows_a_generic_rumor_even_with_no_remnant_whisper(self):
+        """
+        Real gap found scanning FEATURE_WISHLIST.md (2026-09-09): the
+        Whispers block used to be 100% Remnant-specific -- a character
+        who'd visited no story-tied Remnant location got no Whispers
+        block at all. A generic, non-Remnant rumor is now always
+        present regardless.
+        """
+        from unittest.mock import patch
+        make_basic_character(996101, "NoWhispersYet", current_location="crossroads_tavern")
+        db.update_character(996101, -999, visited_locations=[])
+        self.assertEqual(remnants_module.rumors_for_character(db.get_character(996101, -999)), [])
+        sink = []
+        with patch("bot.narrate_story_so_far", return_value="Their tale so far."), \
+             patch("bot.narrate_next_step_hint", return_value="Onward."), \
+             patch("bot._send_generated_image", return_value=None):
+            await bot._do_show_story_so_far(FakeUpdate(996101, "story so far", sink))
+        combined = "\n".join(sink)
+        self.assertIn("Whispers", combined)
+        self.assertTrue(any(rumor in combined for rumor in bot._GENERIC_TAVERN_RUMORS), combined)
+
+    def test_generic_tavern_rumor_pick_is_stable_for_the_same_character(self):
+        character_a = {"telegram_user_id": 12345, "name": "Alduin"}
+        character_b = dict(character_a)
+        pick_a = bot._GENERIC_TAVERN_RUMORS[
+            (character_a["telegram_user_id"] + len(character_a["name"])) % len(bot._GENERIC_TAVERN_RUMORS)
+        ]
+        pick_b = bot._GENERIC_TAVERN_RUMORS[
+            (character_b["telegram_user_id"] + len(character_b["name"])) % len(bot._GENERIC_TAVERN_RUMORS)
+        ]
+        self.assertEqual(pick_a, pick_b)
+
     async def test_guild_curriculum_step_not_credited_before_real_cooldown_elapses(self):
         """
         Real "must grind it out" pacing gate (per Coffee): satisfying a

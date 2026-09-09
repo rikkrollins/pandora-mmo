@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.560] — feat: generic tavern rumors on the Story So Far screen
+
+Real gap found scanning FEATURE_WISHLIST.md against the actual code
+(per Coffee: "do 1,2,3" — this is #3): the "🕯️ Whispers" block on the
+Story So Far screen was 100% Remnant-specific
+(`remnants_module.rumors_for_character`) — a character who hadn't
+visited a story-tied Remnant's location got no Whispers block at all,
+and there was zero generic, non-quest-critical "word around the
+world" tabletop flavor anywhere in the game.
+
+Added `bot._GENERIC_TAVERN_RUMORS` (15 hand-authored lines, same
+"deterministic, never AI-generated at call time" discipline the
+Remnant Whispers already follow) and wired one into the Whispers block
+alongside any real Remnant whisper — now always present, never
+conditional on Remnant progress. The pick is stable per character
+(seeded off telegram_user_id + name length) so re-opening the same
+screen shows the same rumor rather than reshuffling every time, while
+still varying character to character. Deliberately generic — no
+proper noun tied to any real location/NPC/quest in this campaign, so
+it can never spoil or contradict real content, and (per this repo's
+own standing policy) no copyrighted material.
+
+3 new regression tests (always-present even with zero Remnant
+progress, stable pick per character, existing Remnant-whisper test
+re-verified unaffected).
+
 ## [1.27.559] — feat: real 5E spell concentration
 
 Real gap found scanning FEATURE_WISHLIST.md against the actual code
