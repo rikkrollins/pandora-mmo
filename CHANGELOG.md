@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.565] — chore: trademark-scrub miss caught during a Chapter 1-8 story audit
+
+Found while auditing chapter narrative completeness (per Coffee: "is
+the story done from chapter 1-8, no gaps"): two historical CHANGELOG
+entries (v1.27.393/394, the Kess/classic-JRPG-style story arc rebuild) still
+literally named a trademarked franchise — missed by the earlier
+v1.27.556 trademark-scrub pass, which only searched real code files
+and this file's own text at the time, not deep enough into its own
+13,000+ line history to catch every instance apparently. Genericized
+to "classic-JRPG" (matching this repo's own established replacement
+convention). No functional change.
+
 ## [1.27.564] — fix: Chapter 3 could be skipped entirely into Chapter 4
 
 Real full audit requested by Coffee: "make sure a new player can
@@ -327,8 +339,7 @@ tests re-run clean.
 
 ## [1.27.556] — chore: scrub trademarked game-brand references, ahead of going public
 
-Per Coffee ("leave out copyritten names like Final fantasy, zelda,
-dungeons and dragons, and chrono trigger and noita" + the standing
+Per Coffee ("leave out copyrighted franchise names" + the standing
 forward-looking rule "never include any copywritten material in the
 repo"): removed every reference to other companies' trademarked game
 names/characters/dungeons from the real repo (comments, docs, and —
@@ -342,8 +353,8 @@ runtime), across ~20 files: `CHANGELOG.md`, `CLAUDE.md`,
 `scripts/preview_labyrinth_floor.py`, `tests/test_regression.py`,
 `topics.py`.
 
-"Dungeons & Dragons"/"D&D" (including inside live prompts in
-`ai/dm_agent.py`, `ai/npc_agent.py`, `ai/intent_parser.py`,
+The trademarked tabletop-RPG brand name (including inside live prompts
+in `ai/dm_agent.py`, `ai/npc_agent.py`, `ai/intent_parser.py`,
 `ai/support_agent.py`, `ai/autonomous_player.py`, `ai/dev_agent.py`,
 `ai/moltbook_agent.py`) is now "5th-edition-style tabletop RPG" —
 matching this project's own already-established player-facing
@@ -361,8 +372,8 @@ New-Game-Plus" (the generic term "New Game Plus"/"NG+" itself is not
 a trademark, so that stayed). One other company's RPG franchise
 mention (re: the "Ethers" item concept) is now "classic JRPGs" — the
 word "Ethers" itself stayed, since it's a generic alchemical term, not
-an exclusive trademark. "Chrono Trigger" was searched for and had zero
-real occurrences already.
+an exclusive trademark. A separate real-time-JRPG franchise's name was
+also searched for and had zero real occurrences already.
 
 One test method name (`test_generate_floor_can_merge_two_branch_
 tails_bottle_grotto_style`) referenced a trademarked dungeon in its
@@ -2672,8 +2683,8 @@ harmless in isolation).
 mechanic Coffee re-asked for directly against a live screenshot
 comparing his own generated floor to a favorite classic action-adventure
 dungeon: "multiple levels floors and basements to get to the other end
-of the dungeon." Researched (zeldadungeon.net's own level-design
-writeup): the reference tower dungeon's real signature is carrying a heavy object
+of the dungeon." Researched (a community level-design writeup for the
+reference series): the reference tower dungeon's real signature is carrying a heavy object
 between rooms and striking 2+ pillars scattered across the floor with
 it, one trip at a time. `generate_floor` now occasionally places a
 real `carry_object` in the hub and 2 `pillar` lockables across 2
@@ -2742,7 +2753,7 @@ isolation).
 Real, more foundational research follow-up to v1.27.484 (Coffee:
 "research dungeons of infinity and all other research to achieve what
 our editor needs to produce an output similar to my examples") — see
-the `project_zelda_dungeon_algorithm_research` memory's "Follow-up
+the dungeon-algorithm-research memory's "Follow-up
 research" section for the full writeup. Both "Cyclic Dungeon
 Generation" (an explicitly classic action-adventure-inspired open technique) and the
 standard Delaunay-triangulation/MST-plus-added-edges approach confirmed
@@ -2833,8 +2844,8 @@ batch-order flakes confirmed harmless).
 ## [1.27.484] — feature: real action-adventure-style branching dungeon topology + map redraw for the Labyrinth
 
 Real live request (Coffee, dev-bridge: 3 real classic action-adventure dungeon
-maps from classic action-adventure Dungeon's own community mapthroughs — "the map you
-generated was very simple, nothing like a zelda type dungeon map...
+maps from a reference dungeon's own community mapthroughs — "the map you
+generated was very simple, nothing like a classic action-adventure dungeon map...
 lets improve this with research" → "I want the levels to be more
 explorable, travelable with paths, puzzles, mini bosses... make an
 algorithm to accomplish this, implement it into... the generators").
@@ -6063,7 +6074,7 @@ codebase already used for `the_unasked`/`the_unbegun`.
   ends, not a corpse reanimating.
 - A real, bespoke true ending for `kess_the_unbound_reckoning` (same
   one-of-a-kind tier `the_unasked`/`the_unbegun` already get) -- the
-  FF6 "the Fall" beat: the fight is won, the war isn't. Something
+  classic-JRPG "the Fall" beat: the fight is won, the war isn't. Something
   unnamed takes what it needs from her body and disappears -- her own
   identity is never revealed as anything more than the door it used
   (the true reveal is saved for the actual final chapter). Hints at
@@ -6080,7 +6091,7 @@ same spells' normal behavior for a real player's own cast).
 
 ## [1.27.393] — The Kess Arc, Phase 1: the real investigation is no longer skippable
 
-First deploy of the larger Kess/FF6-style story arc rebuild (full plan
+First deploy of the larger Kess/classic-JRPG-style story arc rebuild (full plan
 at `.claude/plans/twinkly-purring-deer.md`, per Coffee: "there is no
 story build up, no conversation, no investigation... the point was for
 this to be a story, not run to Kess and fight the boss"). This pass is
