@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.573] — feat: Chapter 6's real finale closes the full Chapter 1-8 story completion pass (7/7)
+
+The last chapter of the pass Coffee's audit question started ("is the
+story done from chapter 1-8, no gaps"). Chapter 6's finale
+(`the_sources_reckoning`, "The Source") is the real payoff of arc_6's
+own "whatever's actually keeping it moving" thread — `the_keeping_
+current` had zero personality and fell through to generic AI
+narration despite already being real and correctly tagged.
+
+Added `the_keeping_current_confrontation_script`/`..._defeat_line`
+(`ai/dm_agent.py`) — hand-written, zero Ollama calls. Built on the
+boss's own real mechanical identity (`resists_dot_stacking` — nothing
+lingering or repeating ever sticks to it): an ancient, patient entity
+defined by constant motion, deliberately the tonal opposite of Chapter
+3's Last Glyph (which can't stop repeating) rather than a re-tread of
+the same idea. Wired at the same two checkpoints as every other
+chapter in this pass.
+
+**Pass summary (v1.27.566-573, all 8 chapters now complete):**
+Chapter 7 got its missing ending (Kess's existing confrontation/flee
+already worked); Chapters 1-6 each got a brand-new named speaking
+antagonist with a real confrontation, a real ending, and a real
+generated image, all grounded in that specific monster's own existing
+mechanical identity rather than invented flavor; Chapter 4 also had 2
+real data bugs fixed (`is_boss` miscategorized, missing `"weight":
+"climactic"`) found along the way. Every boss was kept as a plain
+`monsters`-dict entry (never migrated to Kess's own `npcs`-dict shape)
+specifically to avoid any regression risk to already-shipped defeat-
+tracking, bestiary, or scaling behavior — confirmed via 26 new
+regression tests plus a full re-run of every existing test touching
+any of these 6 monsters, all clean throughout.
+
+4 new regression tests for this final chapter (both scripts, the real
+fight-start dispatch, the real quest-completion dispatch + image). Full
+51-test story-completion-pass suite re-run together, clean.
+
 ## [1.27.572] — feat: Chapter 5's real finale gets a named speaking antagonist (story completion pass, 6/7)
 
 Chapter 5's finale (`the_true_paymasters_reckoning`, "The True

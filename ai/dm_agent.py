@@ -2096,6 +2096,41 @@ def the_paymasters_shadow_defeat_line() -> str:
     )
 
 
+def the_keeping_current_confrontation_script() -> str:
+    """
+    Chapter 6's real finale ("The Source") -- the real payoff of arc_6's
+    own "whatever's actually keeping it moving" thread. Its real
+    mechanical identity (resists_dot_stacking -- nothing lingering or
+    repeating ever really sticks to it) gives the theme a literal
+    shape: unlike Chapter 3's Last Glyph (which can't stop repeating),
+    this entity is defined by refusing to hold still or hold a grudge
+    -- ancient, patient, and entirely unbothered by being found.
+    Hand-written, zero Ollama calls.
+    """
+    return (
+        "*The water here doesn't behave like water anywhere else in the caverns -- it moves "
+        "toward the party rather than around them, patient in a way that has nothing to do "
+        "with hurry.*\n\n"
+        "**The Keeping Current:** \"You took long enough. Everything else down here just "
+        "settles, eventually. I don't have that luxury.\"\n\n"
+        "*It doesn't rise up to threaten, doesn't posture -- it simply keeps moving, the way "
+        "it clearly always has.*\n\n"
+        "**The Keeping Current:** \"Something has to keep this all flowing. It might as well "
+        "still be me. Let's see if that's still true when this is over.\""
+    )
+
+
+def the_keeping_current_defeat_line() -> str:
+    """Companion piece to the_keeping_current_confrontation_script -- fired as the Chapter 6 ending's opening beat."""
+    return (
+        "*For the first time since anyone can guess, the water here finally does what water is "
+        "supposed to do -- it just settles.*\n\n"
+        "**The Keeping Current:** \"...oh. That's -- that's not unpleasant, actually.\"\n\n"
+        "*Whatever kept it moving all this time lets go without a fight, and the whole cavern "
+        "system goes still around it -- not dead, just finally, genuinely at rest.*"
+    )
+
+
 def narrate_scouting_grounds_ending(character_name: str) -> str:
     """
     Chapter 7's real finale beat, closing "Fresh Tracks"
