@@ -2058,6 +2058,44 @@ def the_high_approach_sentinel_defeat_line() -> str:
     )
 
 
+def the_paymasters_shadow_confrontation_script(character_name: str) -> str:
+    """
+    Chapter 5's real finale ("The True Paymaster") -- the real payoff
+    of a thread this whole arc's own quest clues have been building
+    ("whoever's really paying for all this"), and one Chapter 1's own
+    goblin_boss (Vrakk) already planted the seed for ("ask the coin
+    where it's really going"). The name itself is the hook: not "The
+    Paymaster," its SHADOW -- deliberately left ambiguous whether this
+    is a proxy for something further removed, mirroring (at a much
+    smaller, self-contained scale) the same "the boss you just fought
+    isn't the final one" structure Kess's own arc uses, without
+    requiring or promising any future chapter's payoff. Hand-written,
+    zero Ollama calls.
+    """
+    return (
+        f"*It doesn't have a face, exactly -- more like the idea of one, cast by a light that "
+        f"isn't actually in the room. It's been sitting on the same ledger for what looks like "
+        f"years, and it doesn't get up when {character_name} and the others arrive.*\n\n"
+        "**The Paymaster's Shadow:** \"You found Vrakk's warning, then. Good. Saves us both the "
+        "small talk.\"\n\n"
+        "*A hand made of the same borrowed light taps the ledger, once.*\n\n"
+        "**The Paymaster's Shadow:** \"I'm not the Paymaster. I'm just what's left standing in "
+        "for him down here -- and I intend to keep standing, if it's all the same to you.\""
+    )
+
+
+def the_paymasters_shadow_defeat_line() -> str:
+    """Companion piece to the_paymasters_shadow_confrontation_script -- fired as the Chapter 5 ending's opening beat."""
+    return (
+        "*The borrowed light finally gives out, and whatever was casting the shadow from "
+        "somewhere else entirely simply stops bothering to.*\n\n"
+        "**The Paymaster's Shadow:** \"...he'll just send another one down. He always does.\"\n\n"
+        "*The ledger's still sitting there, untouched, the real name at the top of it smudged "
+        "past reading -- whoever the actual Paymaster is, they were never planning to be found "
+        "here at all.*"
+    )
+
+
 def narrate_scouting_grounds_ending(character_name: str) -> str:
     """
     Chapter 7's real finale beat, closing "Fresh Tracks"

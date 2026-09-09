@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.572] — feat: Chapter 5's real finale gets a named speaking antagonist (story completion pass, 6/7)
+
+Chapter 5's finale (`the_true_paymasters_reckoning`, "The True
+Paymaster") is the real payoff of a thread this whole arc's own quest
+clues have been building toward ("whoever's really paying for all
+this") — one Chapter 1's own goblin_boss (Vrakk) already planted the
+seed for ("ask the coin where it's really going, next time"). The
+monster itself, `the_paymasters_shadow`, had zero personality and fell
+through to generic AI narration despite already being real, present,
+and correctly tagged `"weight": "climactic"`.
+
+Added `the_paymasters_shadow_confrontation_script`/`..._defeat_line`
+(`ai/dm_agent.py`) — hand-written, zero Ollama calls. Built directly on
+the boss's own name: not "The Paymaster," its SHADOW — deliberately
+confirms it's a proxy standing in for someone further removed, closing
+the loop Vrakk opened without inventing a promise of future-chapter
+payoff (self-contained ambiguity, matching this world's own established
+"not everything gets fully explained" tone). Wired at the same two
+checkpoints as every prior chapter in this pass.
+
+4 new regression tests (both scripts, the real fight-start dispatch,
+the real quest-completion dispatch + image). Re-ran the existing
+`the_paymasters_shadow` data-correctness test — clean.
+
 ## [1.27.571] — feat: Chapter 4's real finale gets a named speaking antagonist + 2 real data bugs fixed (story completion pass, 5/7)
 
 Chapter 4's finale (`the_suns_thresholds_secret`, "What the Light Was

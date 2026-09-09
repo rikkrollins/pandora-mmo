@@ -81,6 +81,7 @@ from ai.dm_agent import (
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
+    the_paymasters_shadow_confrontation_script, the_paymasters_shadow_defeat_line,
     grask_supply_tunnels_reaction, grask_deep_larders_reaction,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
@@ -9121,6 +9122,8 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 intro = the_last_glyph_confrontation_script()
             elif monster_key == "the_high_approach_sentinel":
                 intro = the_high_approach_sentinel_confrontation_script()
+            elif monster_key == "the_paymasters_shadow":
+                intro = the_paymasters_shadow_confrontation_script(requester["name"])
             else:
                 intro = await asyncio.to_thread(
                     narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"],
@@ -17192,6 +17195,15 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # tonal outlier among these 6 -- a threshold guardian, not a
         # predator.
         climax_narration = f"{the_high_approach_sentinel_defeat_line()}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
+    elif quest_id == "the_true_paymasters_reckoning":
+        # Chapter 1-8 story completion pass (2026-09-09): Chapter 5's
+        # own finale gets a real named speaking antagonist -- the real
+        # payoff of the "whoever's really paying for all this" thread
+        # arc_5's own quest clues (and Chapter 1's Vrakk) already
+        # planted. See the_paymasters_shadow_confrontation_script's own
+        # docstring for why it's deliberately left unresolved.
+        climax_narration = f"{the_paymasters_shadow_defeat_line()}\n\n"
         await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest.get("weight") == "climactic":
         climax_text = await asyncio.to_thread(

@@ -7916,6 +7916,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         prompt_arg = mock_image.await_args.args[1]
         self.assertIn("What the Light Was Reaching For", prompt_arg)
 
+    # -- Chapter 5's real finale (2026-09-09, story completion pass,
+    #    6/7): the real payoff of the "whoever's really paying" thread
+    #    this whole arc (and Chapter 1's Vrakk) already planted --------
+    def test_the_paymasters_shadow_scripts_are_hand_written(self):
+        import ai.dm_agent as dm_agent_module
+        confrontation = dm_agent_module.the_paymasters_shadow_confrontation_script("Ravenloft")
+        self.assertIn("Ravenloft", confrontation)
+        self.assertIn("Paymaster's Shadow:", confrontation)
+        defeat = dm_agent_module.the_paymasters_shadow_defeat_line()
+        self.assertIn("Paymaster's Shadow:", defeat)
+
+    async def test_starting_combat_with_the_paymasters_shadow_fires_the_real_confrontation(self):
+        """
+        End-to-end: starting a fight with the_paymasters_shadow must
+        route through the hand-written confrontation, not the generic
+        narrate_boss_intro AI path -- confirmed by NOT patching
+        narrate_boss_intro at all.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 900970
+        make_basic_character(
+            user_id, "ShadowWitness", chat_id=-997, char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -997, level=48, hp_current=2500, hp_max=2500)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the paymasters shadow", sink, chat_id=-997),
+                                        monster_key="the_paymasters_shadow", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("Paymaster's Shadow:", combined)
+        self.assertIn("ShadowWitness", combined)
+        sessions.end_session(-997)
+
+    async def test_completing_the_true_paymasters_reckoning_fires_the_real_ending(self):
+        """
+        End-to-end: completing the_true_paymasters_reckoning must route
+        through the hand-written defeat line, not the generic
+        narrate_chapter_climax AI path. Also confirms the climax image
+        fires with the real quest's own title grounding it.
+        """
+        from unittest.mock import patch, AsyncMock
+        user_id = 900971
+        make_basic_character(user_id, "PaymasterWitness", current_location="goblin_warrens_the_true_paymaster")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_true_paymasters_reckoning")
+        combined = "\n".join(sink)
+        self.assertIn("Paymaster's Shadow:", combined)
+        mock_image.assert_awaited_once()
+        prompt_arg = mock_image.await_args.args[1]
+        self.assertIn("The True Paymaster", prompt_arg)
+
     def test_sunken_root_caverns_lockable_chests_grant_real_loot(self):
         for loc_id in ("sunken_root_caverns_the_hidden_cache", "sunken_root_caverns_the_second_pool"):
             loc = cl.get_location(bot.CAMPAIGN, loc_id)
