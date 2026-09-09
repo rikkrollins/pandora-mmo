@@ -26537,6 +26537,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_fast_travel(update, "fast travel to market row")  # must not raise
         combined = "\n".join(update.effective_chat._sink)
         self.assertIn("fast-travels to", combined)
+
+    async def test_do_move_survives_a_flood_control_blip_instead_of_crashing(self):
+        """
+        Real live crash (2026-09-08, error log: real RetryAfter hits on
+        real travel button taps traced into _do_move). Every one of
+        _do_move's rejection/gate messages (unreachable destination,
+        gated combat room, missing required item, locked door, story
+        gate) used a raw update.effective_chat.send_message with none
+        of _safe_send's real retry handling -- same recurring bug class
+        already fixed the same way in _do_fast_travel above. Simulates
+        the same blip on the "can't get there" rejection.
+        """
+        from telegram.error import RetryAfter
+        user_id = 900900
+        make_basic_character(user_id, "MoveFloodBlipTester", current_location="crossroads_tavern")
+        update = FakeUpdate(user_id, "", [])
+        real_send = update.effective_chat.send_message
+        calls = {"n": 0}
+
+        async def flaky_send(text, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RetryAfter(1)
+            return await real_send(text, **kwargs)
+
+        update.effective_chat.send_message = flaky_send
+        await bot._do_move(update, "go to a place that does not exist at all")  # must not raise
+        combined = "\n".join(update.effective_chat._sink)
+        self.assertIn("can't get there directly", combined)
+
+    async def test_do_switch_character_survives_a_flood_control_blip_instead_of_crashing(self):
+        """Same recurring bug class -- _do_switch_character/_do_delete_character's own not-found/mid-combat rejections used a raw send too."""
+        from telegram.error import RetryAfter
+        user_id = 900901
+        make_basic_character(user_id, "SwitchFloodBlipTester", current_location="crossroads_tavern")
+        update = FakeUpdate(user_id, "", [])
+        real_send = update.effective_chat.send_message
+        calls = {"n": 0}
+
+        async def flaky_send(text, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RetryAfter(1)
+            return await real_send(text, **kwargs)
+
+        update.effective_chat.send_message = flaky_send
+        await bot._do_switch_character(update, "switch to a character named nobody at all")  # must not raise
+        combined = "\n".join(update.effective_chat._sink)
+        self.assertIn("Couldn't find one of your characters", combined)
         self.assertGreaterEqual(calls["n"], 2, "the send must have actually been retried, not just swallowed")
 
     async def test_use_item_survives_a_flood_control_blip_instead_of_crashing(self):

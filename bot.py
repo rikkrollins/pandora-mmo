@@ -26358,13 +26358,14 @@ async def _send_layer_map(update: Update, character: dict, layer_name: str) -> N
         )
     except Exception as e:
         logger.warning(f"[map_render] layer map failed: {e!r}")
-        await update.effective_chat.send_message(
-            "Couldn't render the map right now.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "Couldn't render the map right now.")
         return
-    await update.effective_chat.send_photo(
-        photo=png_bytes, caption="🗺️ Your explored world, so far.",
-        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+    # Real live crash (2026-09-08, error log): a raw send_photo with no
+    # RetryAfter retry -- same recurring bug class already fixed
+    # reactively elsewhere (_do_show_labyrinth_map and siblings, see
+    # _safe_send_photo's own docstring).
+    await _safe_send_photo(
+        update, png_bytes, caption="🗺️ Your explored world, so far.",
         reply_markup=_map_layer_keyboard(character, layer_name),
     )
 
@@ -28024,9 +28025,7 @@ def _reveal_dungeon_teaser(telegram_user_id: int, chat_id: int, teaser_location_
 async def _do_move(update: Update, text: str) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
-        await update.effective_chat.send_message(
-            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-        )
+        await _safe_send(update, "You don't have a character yet!")
         return
 
     current = cl.get_location(CAMPAIGN, character["current_location"])
@@ -28157,15 +28156,13 @@ async def _do_move(update: Update, text: str) -> None:
         # in Adventure (it kept trying to "head to" its own current
         # location). Worth its own clearer reply for human players too.
         if character["current_location"].replace("_", " ") in lowered or current["name"].lower() in lowered:
-            await update.effective_chat.send_message(
-                f"You're already at {current['name']}.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
-            )
+            await _safe_send(update, f"You're already at {current['name']}.")
             return
         reachable_names = ", ".join(cl.get_location(CAMPAIGN, r)["name"] for r in reachable)
-        await update.effective_chat.send_message(
+        await _safe_send(
+            update,
             f"**{character['name']}** can't get there directly from {current['name']}. "
             f"From here you can reach: {reachable_names}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
@@ -28205,16 +28202,10 @@ async def _do_move(update: Update, text: str) -> None:
         and destination_id not in (character.get("visited_locations") or [])
         and character["current_location"] not in (character.get("cleared_locations") or [])
     ):
-        await update.effective_chat.send_message(
-            "Enemies bar the other paths — deal with them first, or retreat the way you came.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, "Enemies bar the other paths — deal with them first, or retreat the way you came.")
         return
     if destination.get("requires_item") and destination["requires_item"] not in character["inventory"]:
-        await update.effective_chat.send_message(
-            f"Something stops **{character['name']}** from going any further — missing something needed first.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, f"Something stops **{character['name']}** from going any further — missing something needed first.")
         return
 
     if not _meets_location_level(character, destination):
@@ -28230,14 +28221,12 @@ async def _do_move(update: Update, text: str) -> None:
     if lockable_id:
         block_message = _lockable_block_message(current, destination["name"], lockable_id, update.effective_chat.id)
         if block_message:
-            await update.effective_chat.send_message(
-                block_message, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-            )
+            await _safe_send(update, block_message)
             return
 
     story_gate_message = _check_story_gate(character, current, destination_id)
     if story_gate_message:
-        await update.effective_chat.send_message(story_gate_message, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"))
+        await _safe_send(update, story_gate_message)
         return
 
     destination_already_visited = destination_id in (character.get("visited_locations") or [])
@@ -33593,18 +33582,12 @@ async def _do_switch_character(update: Update, text: str) -> None:
     if match is None:
         roster = db.list_characters(update.effective_user.id, update.effective_chat.id)
         names = ", ".join(c["name"] for c in roster) if roster else "none yet"
-        await update.effective_chat.send_message(
-            f"Couldn't find one of your characters by that name. Your characters: {names}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, f"Couldn't find one of your characters by that name. Your characters: {names}")
         return
 
     active_session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if active_session is not None and update.effective_user.id in active_session.turn_order:
-        await update.effective_chat.send_message(
-            "You can't switch characters in the middle of combat.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, "You can't switch characters in the middle of combat.")
         return
 
     previously_active = db.get_character(update.effective_user.id, update.effective_chat.id)
@@ -33623,18 +33606,12 @@ async def _do_delete_character(update: Update, text: str) -> None:
     if match is None:
         roster = db.list_characters(update.effective_user.id, update.effective_chat.id)
         names = ", ".join(c["name"] for c in roster) if roster else "none yet"
-        await update.effective_chat.send_message(
-            f"Couldn't find one of your characters by that name. Your characters: {names}",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, f"Couldn't find one of your characters by that name. Your characters: {names}")
         return
 
     active_session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
     if active_session is not None and update.effective_user.id in active_session.turn_order:
-        await update.effective_chat.send_message(
-            "You can't delete a character in the middle of combat.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
+        await _safe_send(update, "You can't delete a character in the middle of combat.")
         return
 
     db.delete_character(update.effective_user.id, update.effective_chat.id, match["character_id"])
@@ -33643,10 +33620,7 @@ async def _do_delete_character(update: Update, text: str) -> None:
         f" **{remaining['name']}** is now your active character."
         if remaining else " You have no characters left — say 'I want to create a character' to start fresh."
     )
-    await update.effective_chat.send_message(
-        f"🗑️ Deleted **{match['name']}**.{note}",
-        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-    )
+    await _safe_send(update, f"🗑️ Deleted **{match['name']}**.{note}")
 
 
 # ---------------------------------------------------------------------

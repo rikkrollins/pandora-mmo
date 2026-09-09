@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.553] — fix: real flood-control crashes found in the error log (`_do_move`, `_do_switch_character`, `_do_delete_character`, `_send_layer_map`)
+
+Found via `scripts/check_error_log.py` while checking dev-bridge
+reports: 4 real `telegram.error.RetryAfter` tracebacks, including
+Coffee's own real travel-button tap during heavy send traffic. Same
+recurring "raw `send_message`/`send_photo` with no retry" bug class
+already fixed reactively in `_do_fast_travel` and siblings —
+`_do_move`'s 7 rejection/gate messages (unreachable destination,
+gated combat room, missing required item, locked door, story gate),
+`_do_switch_character`/`_do_delete_character`'s not-found/mid-combat
+rejections (byte-identical blocks, fixed the same way in both), and
+`_send_layer_map`'s error-fallback text + its own raw `send_photo`
+(now `_safe_send_photo`) are all routed through the retry-safe
+helpers. 3 new regression tests simulate the exact same blip (first
+send raises `RetryAfter`, confirms the real reply still lands instead
+of crashing).
+
 ## [1.27.552] — fix: 4 real dev-bridge reports (quest bug, item naming, spell image, narration length)
 
 **Quest accept mismatch** (screenshot: Elduinn's board button tap for
