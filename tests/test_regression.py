@@ -8025,6 +8025,91 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         prompt_arg = mock_image.await_args.args[1]
         self.assertIn("The Source", prompt_arg)
 
+    # -- Arc_7's OTHER real finale (2026-09-10, Kess-threading + gap
+    #    pass): the original story completion pass only noticed
+    #    arc_7's Kess-tied quest and missed that arc_7 actually carries
+    #    TWO climactic quests -- this closes the missed one -----------
+    def test_the_keeps_warden_scripts_are_hand_written(self):
+        import ai.dm_agent as dm_agent_module
+        confrontation = dm_agent_module.the_keeps_warden_confrontation_script()
+        self.assertIn("Keep's Warden:", confrontation)
+        defeat = dm_agent_module.the_keeps_warden_defeat_line()
+        self.assertIn("Keep's Warden:", defeat)
+
+    async def test_starting_combat_with_the_keeps_warden_fires_the_real_confrontation(self):
+        """
+        End-to-end: starting a fight with the_keeps_warden must route
+        through the hand-written confrontation, not the generic
+        narrate_boss_intro AI path -- confirmed by NOT patching
+        narrate_boss_intro at all.
+        """
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 900974
+        make_basic_character(
+            user_id, "WardenWitness", chat_id=-997, char_class="Fighter", current_location="crossroads_tavern",
+        )
+        db.update_character(user_id, -997, level=70, hp_current=4500, hp_max=4500)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the keeps warden", sink, chat_id=-997),
+                                        monster_key="the_keeps_warden", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("Keep's Warden:", combined)
+        sessions.end_session(-997)
+
+    async def test_completing_the_old_keeps_warden_fires_the_real_ending(self):
+        """
+        End-to-end: completing the_old_keeps_warden must route through
+        the hand-written defeat line, not the generic narrate_chapter_
+        climax AI path. Also confirms the climax image fires with the
+        real quest's own title grounding it.
+        """
+        from unittest.mock import patch, AsyncMock
+        user_id = 900975
+        make_basic_character(user_id, "OldKeepWitness", current_location="stonearch_bridge_the_old_keep")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_old_keeps_warden")
+        combined = "\n".join(sink)
+        self.assertIn("Keep's Warden:", combined)
+        mock_image.assert_awaited_once()
+        prompt_arg = mock_image.await_args.args[1]
+        self.assertIn("The Old Keep", prompt_arg)
+
+    # -- Kess-threading + narrative gap pass (2026-09-10): The Silent
+    #    Bookkeeper was registered at a disconnected room (Buried
+    #    Threshold) unrelated to the ledger-vault quest that names her
+    #    -- moved her to the Ledger Vault itself, matching both the
+    #    quest text and that room's own "kept for records" description.
+    def test_silent_bookkeeper_now_registered_at_the_ledger_vault(self):
+        ledger_vault = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_ledger_vault")
+        self.assertIn("the_silent_bookkeeper", ledger_vault.get("npcs", []))
+        buried_threshold = cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_buried_threshold")
+        self.assertNotIn("the_silent_bookkeeper", buried_threshold.get("npcs", []))
+
+    # -- Kess foreshadowing threaded through Chapters 1-6 (2026-09-10,
+    #    per Coffee: "make sure kess is written throughout the whole
+    #    game... so the culmination and encounters make sense") -- text
+    #    edits to already-existing quest clues / dm_agent lines, using
+    #    only vocabulary the blackthorn_raiders/kess_the_bandit data
+    #    already establishes (tolls, coin, a network), never revealing
+    #    her by name before her real Chapter 7-8 arc.
+    def test_kess_foreshadowing_threaded_through_early_touchpoints(self):
+        quests = bot.CAMPAIGN["quests"]
+        self.assertIn("tolls", quests["welcome_to_the_crossroads"]["clue"].lower())
+        self.assertIn("coin", quests["borins_vouching_task"]["clue"].lower())
+        self.assertIn("lead", quests["borins_resolution"]["clue"].lower())
+        self.assertIn("tolls", quests["wrens_root_worry"]["clue"].lower())
+
+    def test_vrakk_and_paymasters_shadow_lines_now_name_tolls_and_the_network(self):
+        import ai.dm_agent as dm_agent_module
+        self.assertIn("toll", dm_agent_module.goblin_boss_confrontation_script().lower())
+        self.assertIn("toll", dm_agent_module.goblin_boss_defeat_line().lower())
+        self.assertIn("network", dm_agent_module.the_paymasters_shadow_defeat_line().lower())
+
     def test_sunken_root_caverns_lockable_chests_grant_real_loot(self):
         for loc_id in ("sunken_root_caverns_the_hidden_cache", "sunken_root_caverns_the_second_pool"):
             loc = cl.get_location(bot.CAMPAIGN, loc_id)

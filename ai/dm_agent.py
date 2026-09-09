@@ -1939,7 +1939,8 @@ def goblin_boss_confrontation_script() -> str:
         "used to being obeyed -- he doesn't flinch when the party arrives, just looks mildly "
         "put out, like this was scheduled to happen eventually and he'd hoped for later.*\n\n"
         "**Vrakk:** \"You've got the wrong idea if you think this ends with me. I just run the "
-        "floor. Whoever's actually paying for all this doesn't come up this far.\"\n\n"
+        "floor. Whoever's actually paying for all this doesn't come up this far -- the same "
+        "coin the toll-takers up top hand over, just further down the chain.\"\n\n"
         "*He hefts his weapon anyway, resigned rather than eager.*\n\n"
         "**Vrakk:** \"Still. Can't exactly let you past for free.\""
     )
@@ -1949,7 +1950,8 @@ def goblin_boss_defeat_line() -> str:
     """Companion piece to goblin_boss_confrontation_script -- his real dying line, fired as the Chapter 1 ending's opening beat."""
     return (
         "*Vrakk goes down still muttering, more annoyed than afraid.*\n\n"
-        "**Vrakk:** \"...told you. Wrong idea. Ask the coin where it's really going, next time...\"\n\n"
+        "**Vrakk:** \"...told you. Wrong idea. Ask the coin -- the tolls -- where it's really "
+        "going, next time...\"\n\n"
         "*Whatever he meant by it, there's no one left down here to ask -- just a warren that's "
         "finally quiet, and a debt owed to someone who never showed his face.*"
     )
@@ -2092,7 +2094,9 @@ def the_paymasters_shadow_defeat_line() -> str:
         "**The Paymaster's Shadow:** \"...he'll just send another one down. He always does.\"\n\n"
         "*The ledger's still sitting there, untouched, the real name at the top of it smudged "
         "past reading -- whoever the actual Paymaster is, they were never planning to be found "
-        "here at all.*"
+        "here at all. One line is still legible, though: a running tally of tolls collected off "
+        "a dozen different roads, all of it flowing to the same place. Vrakk's warning wasn't "
+        "about one warren. It was about a network.*"
     )
 
 
@@ -2128,6 +2132,45 @@ def the_keeping_current_defeat_line() -> str:
         "**The Keeping Current:** \"...oh. That's -- that's not unpleasant, actually.\"\n\n"
         "*Whatever kept it moving all this time lets go without a fight, and the whole cavern "
         "system goes still around it -- not dead, just finally, genuinely at rest.*"
+    )
+
+
+def the_keeps_warden_confrontation_script() -> str:
+    """
+    Arc_7's OTHER real finale ("The Old Keep" / the_old_keeps_warden) --
+    missed entirely by the original Chapter 1-8 story completion pass,
+    which only treated this arc's Kess-tied quest
+    (the_scouting_grounds_warning) as "Chapter 7's finale" and never
+    noticed arc_7 actually carries two climactic quests. Built on its
+    own real mechanical identity (counters_sneak_attack +
+    extra_attack_when_enraged, lightning damage) -- a disciplined,
+    rule-bound guardian that punishes cheap tactics and desperation
+    alike, standing in the same "duty over malice" lane as Chapter 4's
+    Sentinel but drawn from a martial rather than devotional angle: a
+    warden enforcing a fair fight, not a threshold-keeper apologizing
+    for one. Hand-written, zero Ollama calls.
+    """
+    return (
+        "*Lightning doesn't strike so much as gather, arcing between the old keep's stones like "
+        "it's been waiting here as long as the fortification itself. Whatever holds this hall "
+        "doesn't bother hiding -- it simply steps into the light, unhurried.*\n\n"
+        "**The Keep's Warden:** \"Good. You came the front way. I was starting to think this "
+        "generation had forgotten how.\"\n\n"
+        "*It doesn't raise a weapon yet -- just watches, the way something watches for the first "
+        "wrong move so it can answer it.*\n\n"
+        "**The Keep's Warden:** \"Try anything clever and I'll treat it exactly like every other "
+        "clever thing that's tried this hall before me. Fair fight, or no fight at all.\""
+    )
+
+
+def the_keeps_warden_defeat_line() -> str:
+    """Companion piece to the_keeps_warden_confrontation_script -- fired as the Old Keep ending's opening beat."""
+    return (
+        "*The lightning finally grounds itself out, and the Warden goes still the way a held "
+        "storm does -- all at once, with nothing left to arc between.*\n\n"
+        "**The Keep's Warden:** \"...fair fight. Can't ask for better than that.\"\n\n"
+        "*The old keep goes quiet around it for the first time in longer than anyone's kept "
+        "count -- not defeated so much as finally, honestly relieved of the post.*"
     )
 
 

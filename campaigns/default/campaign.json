@@ -4671,9 +4671,6 @@
           "up": "goblin_warrens_the_ancient_shaft",
           "down": "goblin_warrens_the_reverent_hollow"
         },
-        "npcs": [
-          "the_silent_bookkeeper"
-        ],
         "grid_position": {
           "x": -6,
           "y": -1
@@ -4975,6 +4972,9 @@
           "south": "goblin_warrens_the_grasping_hollow",
           "north": "goblin_warrens_the_toll_masters_den"
         },
+        "npcs": [
+          "the_silent_bookkeeper"
+        ],
         "grid_position": {
           "x": -2,
           "y": 7
@@ -8775,7 +8775,7 @@
         "type": "reach_location",
         "location": "whispering_wood"
       },
-      "clue": "Grimsby says the wrongness he's felt seems to trail off toward the treeline west of the tavern."
+      "clue": "Grimsby says the wrongness he's felt seems to trail off toward the treeline west of the tavern -- and while you're at it, he's overheard travelers grumbling that the tolls on the road feel like they're funding something worse than the bandits collecting them."
     },
     "seras_safer_crossing": {
       "title": "Sarah's Safer Crossing",
@@ -8815,7 +8815,7 @@
         "type": "reach_location",
         "location": "goblin_warrens"
       },
-      "clue": "Borin says a name means nothing until it's been tested somewhere that actually matters."
+      "clue": "Borin says a name means nothing until it's been tested somewhere that actually matters -- and adds, quieter, that he's got his own name to settle with someone who deals in coin that funds worse than the men carrying it."
     },
     "borins_resolution": {
       "title": "The Watch He Keeps",
@@ -8828,7 +8828,7 @@
         "type": "reach_location",
         "location": "market_row"
       },
-      "clue": "Borin still takes up the same spot on Market Row every morning, like he hasn't decided anything yet.",
+      "clue": "Borin still takes up the same spot on Market Row every morning, like he hasn't decided anything yet -- except the one lead he keeps chasing on his own time, which he still won't name.",
       "weight": "climactic"
     },
     "borins_blackthorn_warning": {
@@ -8889,7 +8889,7 @@
         "type": "reach_location",
         "location": "sunken_root_caverns"
       },
-      "clue": "Wren says the shrine's garden has been restless the same way it was the last time something changed down below -- and that whatever's disturbing it smells faintly of coin, of all things."
+      "clue": "Wren says the shrine's garden has been restless the same way it was the last time something changed down below -- and that whatever's disturbing it smells faintly of coin, of all things, the same way the road tolls do."
     },
     "wrens_resolution": {
       "title": "Roots Worth Trusting",

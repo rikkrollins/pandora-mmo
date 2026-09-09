@@ -2,6 +2,73 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.574] — feat: thread Kess through Chapters 1-6, close arc_7's missed second boss, fix a real quest/NPC location bug
+
+Follow-up to the Chapter 1-8 story completion pass, after Coffee asked
+whether Kess is "written throughout the whole game" and whether the
+story flows "beginning to end... like an RPG." Research confirmed she
+had zero foreshadowing before Chapter 7 — her reveal landed cold
+instead of paying off a planted thread — and that arc_7 actually
+carries TWO climactic quests, not one; the original pass only noticed
+the Kess-tied one.
+
+**Kess foreshadowing, Chapters 1-6** — small text edits to existing
+dialogue/quest fields, using only vocabulary the game's own
+`blackthorn_raiders`/`kess_the_bandit`/`torn_ledger_page` data already
+establishes (tolls, coin, a funding network), never naming her before
+her real Chapter 7-8 arc:
+- Borin Ironjaw's own recruitment chain (`borins_vouching_task`/
+  `borins_resolution`, playable from the very start of the game, no
+  arc gating) now hints he's chasing his own lead on someone who deals
+  in "coin that funds worse than the men carrying it" — so his
+  Chapter 8 Kess quests read as a payoff, not a cold introduction.
+- Grimsby's welcome quest (`welcome_to_the_crossroads`) surfaces the
+  `blackthorn_raiders` faction's own long-unsurfaced hook as overheard
+  tavern rumor.
+- Vrakk's (`goblin_boss`) already-shipped Chapter 1 lines now name
+  tolls specifically, and `the_paymasters_shadow`'s Chapter 5 ending
+  now makes explicit that the ledger it guards is one node in a wider
+  network, not a self-contained villain.
+- Wren's existing `wrens_root_worry` clue gets a tighter coin/toll tie.
+
+**Arc_7's missed second finale boss** — `the_old_keeps_warden` ("The
+Old Keep") was completely un-storied; the original pass only treated
+`the_scouting_grounds_warning` (Kess's third form) as "Chapter 7."
+Added `the_keeps_warden_confrontation_script`/`..._defeat_line`
+(`ai/dm_agent.py`), built on its real mechanical identity
+(`counters_sneak_attack` + `extra_attack_when_enraged`, lightning
+damage) — a disciplined martial warden that punishes cheap tactics and
+desperation alike. Wired at the same two checkpoints (`_do_start_
+combat`'s `monster_key` dispatch, `_complete_quest_and_announce`'s
+`quest_id` dispatch) every prior chapter in this pass used, plus the
+existing `_maybe_send_chapter_climax_image` helper. Kept as a plain
+`monsters`-dict entry, same regression-avoidance reasoning as every
+other boss in this pass.
+
+**Real bug fix**: The Silent Bookkeeper (`the_silent_bookkeeper`) was
+registered at `goblin_warrens_the_buried_threshold`, a disconnected
+room unrelated to the ledger-vault puzzle quest that names her — moved
+her to `goblin_warrens_the_ledger_vault` itself, which both the
+quest's own text and that room's own "kept for records... every debt
+this warren's paymaster is owed" description already meant her to be
+in. (Checked the analogous Kess/Scout's-Camp case too — that one turned
+out to be intentional breadcrumb design, not a bug, and was left
+untouched.)
+
+Rewriting the ~27 other arc_5-7 quests with new named quest-givers was
+deliberately scoped out — every one already has real, atmospheric
+description/clue text, and the 4 puzzle quests already have named
+guardians with personality. Forcing a speaking character onto every
+trash-mob fight would contradict this pass's own precedent (one
+bespoke antagonist per arc finale) and dilute the sparse, human voice
+those antagonists were written with.
+
+8 new regression tests (both new scripts, the real fight-start/
+quest-completion dispatch + image for `the_keeps_warden`, the
+corrected Bookkeeper location, and the foreshadowing text itself), all
+passing. Re-ran all 55 existing tests touching every chapter-pass boss
+and the full Kess arc — zero regressions.
+
 ## [1.27.573] — feat: Chapter 6's real finale closes the full Chapter 1-8 story completion pass (7/7)
 
 The last chapter of the pass Coffee's audit question started ("is the
