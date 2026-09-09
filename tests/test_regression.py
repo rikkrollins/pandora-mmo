@@ -3000,8 +3000,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_use_item_restores_spell_slots_and_consumes_the_tonic(self):
         """
         Real feature request (2026-08-10, per Coffee: "make an item to
-        replenish spell slots... Like Final Fantasy games, they have
-        Ethers"), built right after fixing Support's answer that spell
+        replenish spell slots... like classic JRPGs have Ethers"), built right after fixing Support's answer that spell
         slots have NO in-battle recovery option at all -- these tonics
         actually give players one for real, not just a wiki correction.
         """
@@ -4320,7 +4319,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Mage Hand, with no real description of what that actually means
         in this game (a +2 bonus to the caster's own next skill check,
         per bot.py's _do_cast_spell), so the model filled the gap from
-        general D&D knowledge instead. The catalog text itself must name
+        general tabletop-RPG knowledge instead. The catalog text itself must name
         the real mechanic for all four cantrips that share it, and must
         not just say the bare word "buff" for them anymore.
         """
@@ -6060,7 +6059,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["level"], 30)
         self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["hp_max"], 18000)
 
-    # -- Dungeon redesign Phase 1 (2026-08-30, per Coffee's own Zelda
+    # -- Dungeon redesign Phase 1 (2026-08-30, per Coffee's own classic action-adventure
     #    reference material + the Wrathflame Vault complaint screenshot):
     #    the vault is now a real hub-and-spoke with a key-item gate, a
     #    puzzle-gated secret room, a shortcut lever, and a DEX-lockpick
@@ -6239,7 +6238,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("labyrinth_rune", character_after["inventory"], "exactly 3 of 3 held runes must be consumed, leaving none")
 
     async def test_wrathflame_vault_shortcut_lever_only_works_from_the_far_room_and_opens_a_quick_way_back(self):
-        """The genuine Zelda beat: pull the lever at the FAR end of the branch and gain a quick way straight back to the hub -- not the hub reaching into the branch."""
+        """The genuine action-adventure beat: pull the lever at the FAR end of the branch and gain a quick way straight back to the hub -- not the hub reaching into the branch."""
         alcove = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")
         lever = alcove["lockables"][0]
         self.assertEqual(lever["kind"], "lever")
@@ -12651,7 +12650,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mythic_hit, 20)
 
     # -- Symmetric exponential rebirth scaling (2026-08-20, Coffee's
-    #    Noita NG+ reference): "keep in mind when the player evolves the
+    #    a roguelike New-Game-Plus reference): "keep in mind when the player evolves the
     #    same thing happens for the players, eventually causing
     #    exponential growth" / "make sure all modifiers are included,
     #    damage types, attacks, abilities, spells, magic, summons,
@@ -28540,7 +28539,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         explicit "no creature" exclusion. Root cause: the old flavor
         phrase "a {damage_type} elemental magical effect" is genuinely
         ambiguous -- "Earth Elemental"/"Fire Elemental" are also real,
-        classic D&D monster names, so the image model read it as
+        classic tabletop-RPG monster names, so the image model read it as
         depicting the CREATURE, not the element. The word "elemental"
         must never appear in a damage-type spell's image prompt again.
         """
@@ -30517,7 +30516,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         geometrically consistent.
 
         Extended 2026-08-27 (map-coordinate overhaul, per Coffee:
-        "make it feel like Zelda dungeons... string paths") to also
+        "make it feel like classic action-adventure dungeons... string paths") to also
         validate up/down -- previously skipped entirely, on the
         assumption every vertical edge shared its parent's exact
         (x, y). That assumption only actually holds for
@@ -33889,7 +33888,7 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("requires_key_item", lockable)
 
     def test_evolve_dungeon_places_a_real_bonus_room_with_no_gate(self):
-        """ALTTP research: reward exploration off the critical path. The bonus room is a real, named room with a real chest, reachable via a plain connection (no lockable gating it), so check_boss_gated/reachability never has to know about it."""
+        """a classic action-adventure game research: reward exploration off the critical path. The bonus room is a real, named room with a real chest, reachable via a plain connection (no lockable gating it), so check_boss_gated/reachability never has to know about it."""
         import copy
         campaign = copy.deepcopy(bot.CAMPAIGN)
         rng = random.Random(4)
@@ -33904,7 +33903,7 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(summary["bonus_room_id"] in r.get("connections", []) for r in rooms.values()))
 
     def test_evolve_dungeon_places_a_miniboss_distinct_from_the_real_boss(self):
-        """ALTTP research: dungeons almost always have a mid-tier 'not ready yet' encounter distinct from both trash and the real climax."""
+        """a classic action-adventure game research: dungeons almost always have a mid-tier 'not ready yet' encounter distinct from both trash and the real climax."""
         import copy
         campaign = copy.deepcopy(bot.CAMPAIGN)
         rng = random.Random(6)
@@ -34048,7 +34047,7 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
 
     def test_evolve_dungeon_sometimes_places_a_real_key_cavern_mesh_solvable_either_order(self):
         """
-        Real Phase L5 "Advanced Dungeons" Key Cavern redundant key
+        Real Phase L5 "Advanced Dungeons" key-mesh redundant key
         mesh, ported from rules/labyrinth.py's identical mechanic
         (2026-09-06, per Coffee: "work on the lower-priority and
         unscheduled stuff"). Same pure-data shape as the mid-branch
@@ -34100,14 +34099,14 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
                         frontier.append(nb)
             for gate_id, switch_room_id in switch_rooms.items():
                 self.assertIn(switch_room_id, visited, f"seed {seed}: {gate_id}'s own switch room must be reachable with BOTH mesh gates locked at once")
-        self.assertGreater(hits, 0, "expected at least one real Key Cavern mesh across 40 seeds")
+        self.assertGreater(hits, 0, "expected at least one real key-mesh across 40 seeds")
         self.assertLess(hits, 40, "expected at least one evolve WITHOUT a mesh across 40 seeds -- it should be a real fraction")
 
     def test_evolve_dungeon_sometimes_places_a_real_repeated_miniboss_gate(self):
         """
         Real "Advanced Dungeons" repeated gate, ported to evolved
         overworld dungeons (2026-09-06, per Coffee: "keep going" --
-        Catfish's Maw's own real pattern, already shipped for the
+        a reference repeat-encounter dungeon's own real pattern, already shipped for the
         Labyrinth in v1.27.534). Statistical: fires as a real fraction
         on top of an already-placed mini-boss, always a real 2-3 count.
         """
@@ -34129,8 +34128,8 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
     def test_evolve_dungeon_boss_defeat_reveals_a_real_shortcut_data_shape(self):
         """
         Real event-gated live edge, ported to evolved overworld
-        dungeons (2026-09-06, per Coffee: "keep going" -- Bottle
-        Grotto's own real "portal opens after mini-boss defeat"
+        dungeons (2026-09-06, per Coffee: "keep going" -- a reference
+        water dungeon's own real "portal opens after mini-boss defeat"
         pattern, already shipped for the Labyrinth in v1.27.529). Two
         earlier approaches were rejected for real reasons (see
         [[project_advanced_interconnected_dungeons_research]]): a live
@@ -34185,7 +34184,7 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
     def test_evolve_dungeon_never_places_two_switch_lockables_in_one_room(self):
         """
         Real regression found and fixed shipping the mid-branch gate/
-        Key Cavern mesh mechanics (2026-09-06): a branch root can
+        key-mesh mechanics (2026-09-06): a branch root can
         independently be chosen as a switch's home by more than one
         mechanic (the pre-existing collapse-puzzle switch, the
         mid-branch gate's own source switch, and the mesh's own two
@@ -34442,7 +34441,7 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         """
         Real "Advanced Dungeons" repeated gate, ported to evolved
         overworld dungeons (2026-09-06, per Coffee: "keep going" --
-        Catfish's Maw's own real pattern, already shipped for the
+        a reference repeat-encounter dungeon's own real pattern, already shipped for the
         Labyrinth in v1.27.534). No monster-respawn logic needed here:
         an evolved-dungeon room's own `monsters` list is shared,
         campaign-wide state that's never cleared on a real victory in
@@ -35473,7 +35472,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generate_floor_produces_a_real_hub_connector_and_reachable_side_rooms(self):
         """
-        Real branching topology (2026-09-03, per Coffee's own Zelda-
+        Real branching topology (2026-09-03, per Coffee's own classic action-adventure-
         dungeon research request): the connector/stairs room sits at
         the end of the floor's real main path now, not necessarily
         hub-adjacent, and a side branch can run several rooms deep --
@@ -37190,8 +37189,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
     def test_generate_floor_sometimes_places_a_real_repeated_miniboss_gate(self):
         """
         Real Phase L5 "Advanced Dungeons" v7 (2026-09-06, per Coffee:
-        "work on the lower-priority and unscheduled stuff" -- Catfish's
-        Maw's own real pattern: the SAME encounter must be beaten
+        "work on the lower-priority and unscheduled stuff" -- a
+        reference repeat-encounter dungeon's own real pattern: the SAME encounter must be beaten
         several separate times before its real reward is granted).
         Statistical: across many non-checkpoint-floor seeds, this
         fires sometimes, always with a real 2-3 repeat count and the
@@ -37268,7 +37267,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
     async def test_labyrinth_miniboss_defeat_grants_a_real_guaranteed_item_once_only(self):
         """
         Real, guaranteed mini-boss reward (2026-09-03, Phase L4, item
-        6, per Link's Awakening research: a mini-boss fight always pays
+        6, per classic action-adventure dungeon research: a mini-boss fight always pays
         off with something real). Reuses the exact same floor-scaled
         item-band pool the checkpoint vault already uses -- never an
         invented item. One-time only, same convention as every other
@@ -37753,8 +37752,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generate_floor_produces_real_branching_depth_across_seeds(self):
         """
-        Real Zelda-dungeon research request (2026-09-03, Coffee: 3 real
-        Link's Awakening dungeon maps -- "I want the levels to be more
+        Real classic action-adventure-dungeon research request (2026-09-03, Coffee: 3 real
+        classic action-adventure dungeon maps -- "I want the levels to be more
         explorable, travelable with paths... make an algorithm to
         accomplish this"). Confirmed by direct code read before this
         fix: generate_floor was pure hub-and-spoke, every room one hop
@@ -37875,7 +37874,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(lever_seen, "expected at least one real shortcut lever across 60 real seeds")
 
     async def test_labyrinth_shortcut_lever_opens_a_quick_way_back_to_the_hub_end_to_end(self):
-        """Real end-to-end, same "genuine Zelda beat" shape as the evolved-dungeon version: pull the lever at the FAR end of a long branch and gain a quick way straight back to the hub."""
+        """Real end-to-end, same "genuine action-adventure beat" shape as the evolved-dungeon version: pull the lever at the FAR end of a long branch and gain a quick way straight back to the hub."""
         lever_tail_id = lever_id = hub_id = None
         floor_data = None
         for seed in range(60):
@@ -38025,7 +38024,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generate_floor_branch_gate_is_solvable_by_construction(self):
         """
-        Real Metazelda-style guarantee (see rules/labyrinth.py's own
+        Real graph-based-dungeon-generation guarantee (see rules/labyrinth.py's own
         research note): when a branch gate fires, its switch must
         always live in an ALREADY-reachable, unlocked room -- never
         behind the very gate it opens, and never in a room that's
@@ -38218,7 +38217,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generate_floor_places_a_real_pressure_plate_gate_kept_local_to_the_hub(self):
         """
-        Real gap found while confirming Bottle Grotto coverage
+        Real gap found while confirming a reference water dungeon coverage
         (2026-09-03, per Coffee: "are you sure everything is included
         to make a dungeon like the bottle grotto..."): pressure plates
         have had real, generic bot.py dispatch since v1.27.452 but were
@@ -38356,7 +38355,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         should not be able to walk from one floor to the next we should
         be having to clear the paths and the different gates... It
         should feel like a maze or a labyrinth" -- backed by a real
-        "Zelda Dungeon Path & Gateway System" reference he shared).
+        the researched dungeon-path-and-gateway reference reference he shared).
         Every OTHER gate mechanic only ever targets an optional side
         branch -- main_chain (the one guaranteed path to the stairs)
         was structurally never gated at all, so a floor could roll zero
@@ -38677,7 +38676,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generate_floor_places_a_real_carry_puzzle_solvable_by_construction(self):
         """
-        Real, more literal Eagle's Tower mechanic (2026-09-03, per
+        Real, more literal the reference tower dungeon mechanic (2026-09-03, per
         Coffee's own live screenshot re-ask: "multiple levels floors
         and basements to get to the other end of the dungeon"), a real
         object carried between rooms and struck against 2 scattered
@@ -38723,7 +38722,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generate_floor_hint_statue_only_appears_with_something_real_to_hint_at(self):
         """
-        Real owl-statue-style hint (2026-09-03, Link's Awakening
+        Real owl-statue-style hint (2026-09-03, classic action-adventure
         research). Statistical: a hint statue only ever appears in the
         hub when the floor genuinely has a miniboss/gate/collapse/warp
         to hint at, and its real hint_lines never name a room or exact
@@ -38997,8 +38996,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generate_floor_warps_and_collapse_puzzle_never_break_reachability_across_seeds(self):
         """
-        Real Zelda-dungeon research request (2026-09-03, Coffee: "do all
-        of them" -- warps + a real Eagle's Tower-style floor-altering
+        Real classic action-adventure-dungeon research request (2026-09-03, Coffee: "do all
+        of them" -- warps + a real carry-and-collapse-style floor-altering
         puzzle, after Level 6/7's own reference maps both showed one).
         Both were drafted directly in generate_floor but never covered
         by a real statistical sweep before now -- this is that sweep.
@@ -39213,7 +39212,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
     def test_render_labyrinth_map_draws_a_real_door_gap_not_just_a_closed_box(self):
         """
-        Real live request (2026-09-03, Coffee, dev-bridge: 3 real Zelda
+        Real live request (2026-09-03, Coffee, dev-bridge: 3 real classic action-adventure
         dungeon maps -- "I want our dungeons and labyrinth to have maps
         like this"). The map previously drew every room as an identical
         closed rectangle regardless of which neighbors it actually
@@ -40737,7 +40736,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         """
         Real Phase L5 "Advanced Dungeons" event-gated live edge
         (2026-09-06, per Coffee: "keep going... generate dungeons like
-        the samples and references on the fly" -- Bottle Grotto's own
+        the samples and references on the fly" -- a reference water dungeon's own
         real signature move, see [[project_advanced_interconnected_
         dungeons_research]]: "After Hinox defeat, a portal between this
         room and entrance is now usable, creating a shortcut"). Using a
@@ -40785,7 +40784,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
     def test_generate_floor_gates_the_checkpoint_boss_behind_a_real_multi_branch_convergence(self):
         """
         Real Phase L5 "Advanced Dungeons" v1 (2026-09-05, per Coffee,
-        citing Bottle Grotto/Eagle's Tower/Turtle Rock: "the player
+        citing a reference water dungeon/the reference tower dungeon/a reference elemental dungeon: "the player
         must go from path one, and work thier way through the other
         paths until unlocking the final rooms" -- see
         [[project_advanced_interconnected_dungeons_research]]).
@@ -40978,9 +40977,9 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         """
         Real Phase L5 "Advanced Dungeons" v6 (2026-09-06, per Coffee,
         the last real "still missing" pattern from
-        [[project_advanced_interconnected_dungeons_research]]): Key
-        Cavern's own real pattern, "each locked door has a key hidden
-        in the area it bars... Link is always able to access at least
+        [[project_advanced_interconnected_dungeons_research]]): the
+        key-mesh's own real pattern, "each locked door has a key hidden
+        in the area it bars... the player is always able to access at least
         one key and progress" -- two branches gate EACH OTHER's own
         interior, with each branch's own switch sitting in the OTHER
         branch's ROOT room. Statistical: when it fires, BOTH mesh
@@ -41034,7 +41033,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                         frontier.append(nb)
             for gate_id, switch_room_id in switch_rooms.items():
                 self.assertIn(switch_room_id, visited, f"seed {seed}: {gate_id}'s own switch room must be reachable with BOTH mesh gates locked at once")
-        self.assertTrue(mesh_seen, "expected at least one real Key Cavern mesh across 80 checkpoint-floor seeds")
+        self.assertTrue(mesh_seen, "expected at least one real key-mesh across 80 checkpoint-floor seeds")
 
     async def test_labyrinth_key_cavern_mesh_can_be_solved_starting_from_either_branch(self):
         """
@@ -41059,7 +41058,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             ):
                 floor_data = fd
                 break
-        self.assertIsNotNone(floor_data, "expected a real Key Cavern mesh within 80 seeds")
+        self.assertIsNotNone(floor_data, "expected a real key-mesh within 80 seeds")
 
         rooms = floor_data["rooms"]
         gate1_room_id = next(rid for rid, r in rooms.items() for lid in r.get("locked_connections", {}).values() if lid == "f5_mesh_gate_1")
@@ -41270,11 +41269,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
 
         db.delete_labyrinth_run(chat_id, party_key)
 
-    def test_generate_floor_can_merge_two_branch_tails_bottle_grotto_style(self):
+    def test_generate_floor_can_merge_two_branch_tails_reference_water_dungeon_style(self):
         """
         Real Phase L5 "Advanced Dungeons" v3 (2026-09-05, per Coffee:
-        "keep going... generate dungeons like the samples" -- Bottle
-        Grotto's own literal "two wings rejoin before the mini-boss"
+        "keep going... generate dungeons like the samples" -- a reference
+        water dungeon's own literal "two wings rejoin before the mini-boss"
         shape, see [[project_advanced_interconnected_dungeons_
         research]]). Statistical: when two branch tails get merged,
         the new edge must be real and bidirectional, must never touch

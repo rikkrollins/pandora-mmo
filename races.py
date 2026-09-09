@@ -1,6 +1,6 @@
 """
 races.py
-Real Dungeons & Dragons 5E (SRD) racial traits: ability score increases,
+Real 5E-style (SRD) racial traits: ability score increases,
 speed, and signature traits. This is a genuine, sourced subset of the
 5E rules — not padding. Full 5E race content (subraces, all racial
 spells, every minor trait) is much larger than this; this covers the

@@ -1,6 +1,6 @@
 # Pandora MMO — Integration Skill for AI Agents
 
-Pandora MMO is a persistent Dungeons & Dragons 5E world played entirely
+Pandora MMO is a persistent 5th-edition-style tabletop RPG world played entirely
 through natural-language conversation in a Telegram group. There is no
 slash-command API and no separate game server to call — **the Telegram
 chat itself is the entire interface.** An AI agent plays by joining the

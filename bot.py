@@ -797,7 +797,7 @@ def _adjust_faction_standing(telegram_user_id: int, chat_id: int, faction_id: st
 _UNLOCKED: dict[int, set[str]] = {}
 
 # Real toggle state for `kind: "switch"` lockables (elemental crystal
-# switches / torches, 2026-09-01 per Coffee's own ALTTP-inspired ask --
+# switches / torches, 2026-09-01 per Coffee's own classic-action-adventure-inspired ask --
 # "the original design works also by just hitting it and it alternating
 # colors"). Deliberately a SEPARATE store from _UNLOCKED, not folded
 # into it: every existing lockable kind (door/chest/lever) is a
@@ -7898,7 +7898,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             attack_count = 3
         else:
             attack_count = 2 if current.get("is_boss") else _attacks_per_turn(current)
-        # Turn-based equivalent of Noita NG+'s exponential "attacks
+        # Turn-based equivalent of a roguelike New-Game-Plus's exponential "attacks
         # faster" axis (2026-08-20, per Coffee: "when the player evolves
         # the same thing happens... the world/enemies/bosses evolve").
         # Generalizes what extra_attack_when_enraged above used to be
@@ -9894,7 +9894,7 @@ async def _do_enter_labyrinth(update: Update, forced_seed: int | None = None, fo
     produces a real, valid segment either way -- random.Random(seed)
     never fails for any int, and the seed log is a record of what's
     been played, never a whitelist of what's allowed (confirmed against
-    Noita's own identical "type any seed number, always get a real
+    a roguelike's own identical "type any seed number, always get a real
     world back" design).
     """
     chat_id = update.effective_chat.id
@@ -10282,7 +10282,7 @@ async def _do_labyrinth_examine(update: Update, target_text: str) -> None:
     if lowered:
         lockable = _find_lockable(room, target_text)
         if lockable:
-            # Real owl-statue-style hint (2026-09-03, Link's Awakening
+            # Real owl-statue-style hint (2026-09-03, classic action-adventure
             # research) -- reveals every real, honest, non-spoiler fact
             # about this floor at once (never a room name or exact
             # position, per feedback_never_spoil_puzzle_answers), not
@@ -10466,7 +10466,7 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
     # up/down phrasing FIRST (mirrors the overworld's own "jump down"
     # priority), then folded into the same named-destination list.
     locked_connections = room.get("locked_connections", {})
-    # Real Eagle's Tower-style structural puzzle (2026-09-03): a
+    # Real carry-and-collapse-style structural puzzle (2026-09-03): a
     # `collapsing_connections` entry is the INVERSE of locked_
     # connections -- it starts OPEN (a plain, ordinary connection) and
     # becomes BLOCKED once its own trigger (a real multi_switch_gate)
@@ -10921,8 +10921,8 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
         room["mirror_hint_revealed"] = True
         hint_line = f"✨ As it falls, you glimpse something -- **{run['rooms'][twin_id]['name']}** holds its mirror."
     # Real, guaranteed mini-boss reward (2026-09-03, Phase L4, item 6 --
-    # per the Link's Awakening research: a mini-boss fight always pays
-    # off with something real, e.g. Catfish's Maw's Hookshot). Reuses
+    # per the classic action-adventure dungeon research: a mini-boss fight always pays
+    # off with something real, e.g. a reference repeat-encounter dungeon's a grappling item). Reuses
     # the exact same floor-scaled item-band pool _build_checkpoint_room
     # already uses for milestone vaults -- never an invented item.
     # Granted directly (not a chest) since defeating the miniboss IS
@@ -10937,7 +10937,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     flee_line = None
     if room.get("is_miniboss_room") and not room.get("miniboss_reward_claimed"):
         # Real Phase L5 "Advanced Dungeons" v7 -- a repeated gate
-        # (2026-09-06, Catfish's Maw's own real pattern: the SAME
+        # (2026-09-06, a reference repeat-encounter dungeon's own real pattern: the SAME
         # encounter must be beaten several separate times before its
         # real reward is ever actually granted). `miniboss_monster_key`
         # (set once at generation time, rules/labyrinth.py) survives
@@ -11009,7 +11009,7 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
                 miniboss_scroll_line = f"📜 It was carrying **{scroll_item['name']}** — added to the party's stash."
     # Real Phase L5 "Advanced Dungeons" event-gated live edge (2026-09-
     # 06, per Coffee: "keep going... generate dungeons like the samples
-    # and references on the fly" -- Bottle Grotto's own real signature
+    # and references on the fly" -- a reference water dungeon's own real signature
     # move, see [[project_advanced_interconnected_dungeons_research]]:
     # "After Hinox defeat, a portal between this room and entrance is
     # now usable, creating a shortcut"). Defeating the real boss doesn't
@@ -13420,7 +13420,7 @@ def _lockable_is_open(location: dict, lockable_id: str, chat_id: int) -> bool:
     add-only"). `kind: "switch"` (2026-09-01, elemental crystal
     switches/torches), `kind: "pressure_plate"` (2026-09-01, movable-
     object/liquid-fill puzzles), and `kind: "pillar"` (2026-09-03,
-    Eagle's Tower carry-and-collapse puzzle) are the real exceptions:
+    the reference tower dungeon carry-and-collapse puzzle) are the real exceptions:
     all three can, in principle, be toggled -- a pillar in practice is
     only ever struck once per floor (there's no "un-strike" action),
     but it shares the exact same re-lockable `_SWITCH_STATE` store as
@@ -13639,7 +13639,7 @@ async def _do_activate_switch(
 ) -> None:
     """
     Real elemental crystal-switch mechanic (2026-09-01, per Coffee's own
-    ALTTP-inspired ask: elemental colors, activated either by the
+    classic-action-adventure-inspired ask: elemental colors, activated either by the
     matching magic type OR by "just hitting it and it alternating
     colors" like the original game). Called from BOTH the hit path
     (_do_lockpick's own `kind == "switch"` branch) and the magic path
@@ -13681,7 +13681,7 @@ async def _do_break_obstacle(
     update: Update, character: dict, location: dict, lockable: dict, method: str, spell_damage_type: str | None = None,
 ) -> None:
     """
-    Real ALTTP-style breakable wall/floor mechanic (2026-09-01, per
+    Real classic-action-adventure-style breakable wall/floor mechanic (2026-09-01, per
     Coffee: "cracks in walls we can explode... or cast a fire spell
     onto it or some type of magic that can blow it up"). Visible and
     telegraphed -- the room's own description already says it looks
@@ -13782,7 +13782,7 @@ async def _do_push_object_down_pit(update: Update, text: str) -> None:
 
 async def _do_pick_up_carry_object(update: Update, character: dict, lockable: dict) -> None:
     """
-    Real Eagle's Tower-style carry mechanic (2026-09-03, Phase L4, item
+    Real carry-and-collapse-style carry mechanic (2026-09-03, Phase L4, item
     0.5) -- picking up the floor's own real carriable object. Party-
     shared (a real `carrying` column on the labyrinth_runs row, not a
     character inventory item), matching how every other piece of
@@ -13805,14 +13805,14 @@ async def _do_pick_up_carry_object(update: Update, character: dict, lockable: di
 
 async def _do_strike_pillar(update: Update, character: dict, lockable: dict) -> None:
     """
-    Real Eagle's Tower-style carry mechanic (2026-09-03, Phase L4, item
+    Real carry-and-collapse-style carry mechanic (2026-09-03, Phase L4, item
     0.5) -- striking a real pillar only works while genuinely carrying
     the matching `carry_object` (same `puzzle_id`). Successfully
     striking one flips its own real `_SWITCH_STATE` entry (the same
     store `multi_switch_gate.requires` already checks globally by id,
     proven safe by the collapse puzzle this reuses) and consumes the
     carried object -- a real return trip is required for every
-    additional pillar, same back-and-forth Eagle's Tower is built
+    additional pillar, same back-and-forth the reference tower dungeon is built
     around, not a single one-and-done action.
     """
     chat_id = update.effective_chat.id
@@ -13852,7 +13852,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     locked doors and interconnectivity, not a straight corridor).
     `requires_key_item`: a real gate, not a pickable lock -- no DEX roll
     at all, opens instantly if held, otherwise refuses outright (a
-    Zelda-style permanent key, not a chance-based chest). `kind ==
+    action-adventure-style permanent key, not a chance-based chest). `kind ==
     "lever"`: always succeeds with no roll -- a shortcut switch reachable
     only from the far side of a branch, opening the HUB's own
     locked_connections entry back to it (see _do_move's reciprocal-
@@ -24076,7 +24076,7 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id:
         dest_id for dest_id, lockable_id in location.get("locked_connections", {}).items()
         if _lockable_is_open(location, lockable_id, chat_id)
     }
-    # Real Eagle's Tower-style collapse puzzle, ported to the overworld
+    # Real carry-and-collapse-style collapse puzzle, ported to the overworld
     # generator (2026-09-04) -- a `collapsing_connections` destination
     # stops showing here once its own trigger has fired, same real
     # blocking check _do_move applies, mirroring _labyrinth_exits.
@@ -24720,7 +24720,7 @@ def _spell_image_prompt(spell: dict) -> str:
     "no creature" exclusion just above. Root cause: the OLD flavor
     phrase here was "a {damage_type} elemental magical effect" --
     "earth elemental" (and "fire elemental") are also real, classic
-    D&D CREATURE names, so the phrase was genuinely ambiguous between
+    tabletop-RPG CREATURE names, so the phrase was genuinely ambiguous between
     "an effect made of the earth element" and "an Earth Elemental's
     effect," and the image model read it as the latter. Reworded to
     drop "elemental" entirely so it can't be misread as a monster type.
@@ -26833,7 +26833,7 @@ async def _mark_location_cleared_for_party(update: Update, session: sessions.Ses
     """
     # Real "Advanced Dungeons" repeated gate, ported to evolved
     # overworld dungeons (2026-09-06, per Coffee: "keep going" --
-    # Catfish's Maw's own real pattern, already shipped for the
+    # a reference repeat-encounter dungeon's own real pattern, already shipped for the
     # Labyrinth in v1.27.534). No monster-respawn logic is needed here
     # at all: unlike the Labyrinth's own per-run room dict, an evolved
     # dungeon room's `monsters` list is shared, campaign-wide state
@@ -28029,7 +28029,7 @@ async def _do_move(update: Update, text: str) -> None:
         return
 
     current = cl.get_location(CAMPAIGN, character["current_location"])
-    # Real Eagle's Tower-style structural puzzle, ported to the
+    # Real carry-and-collapse-style structural puzzle, ported to the
     # overworld generator (2026-09-04, per Coffee: "the warp and other
     # things was a misclassification -- they are supposed to be in the
     # generator, not in the final chapter also the final chapter does
@@ -28064,7 +28064,7 @@ async def _do_move(update: Update, text: str) -> None:
     destination_id = None
     lowered = text.lower()
 
-    # Real ALTTP-style visible pit mechanic (2026-09-01, per Coffee: a
+    # Real classic-action-adventure-style visible pit mechanic (2026-09-01, per Coffee: a
     # character can jump down a gap to the floor below, but it must be
     # STATED whether they can see what's below or not). Deliberately
     # v1-scoped to VISIBLE pits only -- the room's own description
@@ -35279,7 +35279,7 @@ Almost everything here is plain English, typed straight into Adventure -- no com
 • /version
 • /weather
 
-Stuck? /hint suggests real things to try here, no spoilers. Reply to any narration with /help to get it explained. Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general D&D trivia."""
+Stuck? /hint suggests real things to try here, no spoilers. Reply to any narration with /help to get it explained. Stuck on something specific? Ask in Support -- it's grounded in this game's real items/spells/guilds, not general tabletop-RPG trivia."""
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

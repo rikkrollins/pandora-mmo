@@ -66,8 +66,8 @@ from rules.dungeon_evolve import _candidate_monsters
 # repetition) per floor.
 _SIDE_ROOM_COUNT_RANGE = (2, 4)
 
-# Real Zelda-style branching topology (2026-09-03, per Coffee, dev-
-# bridge: 3 real Link's Awakening dungeon maps -- "I want the levels to
+# Real action-adventure-style branching topology (2026-09-03, per Coffee, dev-
+# bridge: 3 real classic action-adventure dungeon maps -- "I want the levels to
 # be more explorable, travelable with paths, puzzles, mini bosses...
 # make an algorithm to accomplish this"). Confirmed by direct code read
 # before this: generate_floor was PURE hub-and-spoke (every side room
@@ -75,8 +75,8 @@ _SIDE_ROOM_COUNT_RANGE = (2, 4)
 # to the stairs in one hop, engaging zero real content, the opposite of
 # every real reference map studied (all three showed genuine branching,
 # key-gated side areas, and a mini-boss standing between the entrance
-# and the exit). Real external research (Metazelda, github.com/tcoxon/
-# metazelda, and the academic graph-based lock-and-key literature it's
+# and the exit). Real external research (an open-source graph-based
+# dungeon-generation project, and the academic graph-based lock-and-key literature it's
 # cited in) confirms the actual technique: rooms are graph nodes, keys/
 # switches are placed in an order that's solvable BY CONSTRUCTION (a
 # lock is only ever wired to a switch that already exists in an
@@ -86,7 +86,7 @@ _SIDE_ROOM_COUNT_RANGE = (2, 4)
 # full research writeup.
 # Real live request (2026-09-05, per Coffee: "make longer
 # interconnectable pathways like the samples i gave the other day" --
-# following up on the same "Zelda Dungeon Path & Gateway System"
+# following up on the same the researched dungeon-path-and-gateway reference
 # reference research above). Confirmed by direct code read before this
 # change: a branch topped out at 2 extra rooms (3 total, root
 # included), so main_chain -- the one guaranteed hub-to-stairs path --
@@ -105,8 +105,9 @@ _MINIBOSS_CHANCE = 0.3
 # Real Phase L5 "Advanced Dungeons" v7 -- a repeated gate (2026-09-06,
 # per Coffee: "work on the lower-priority and unscheduled stuff" --
 # see [[project_advanced_interconnected_dungeons_research]]'s own
-# "still missing" table: Catfish's Maw's Master Stalfos, defeated FOUR
-# separate times before the real Hookshot reward is ever actually
+# "still missing" table: a reference repeat-encounter dungeon's own
+# recurring miniboss, defeated FOUR
+# separate times before the real grappling-item reward is ever actually
 # obtainable). Independent of _MINIBOSS_CHANCE above -- rolled only
 # once a real mini-boss has already been placed, so this never changes
 # WHETHER a floor gets a mini-boss, only whether that one mini-boss
@@ -119,7 +120,7 @@ _MINIBOSS_REPEAT_CHANCE = 0.25
 # more complex like dungeons in the samples too" -- direct measurement
 # showed ordinary, non-checkpoint floors averaging 11-15 rooms with
 # ZERO Advanced Dungeons mechanics ever, at ANY depth, since the
-# mid-branch gate and Key Cavern mesh were both hard-gated to
+# mid-branch gate and key-mesh were both hard-gated to
 # `checkpoint and boss_pool`). Both mechanics are pure data operations
 # with no real dependency on a boss existing (unlike the convergence
 # gate and sequential chain, which genuinely do gate the boss/stairs
@@ -132,9 +133,9 @@ _MINIBOSS_REPEAT_CHANCE = 0.25
 _MID_BRANCH_ORDINARY_CHANCE = 0.1
 _KEY_MESH_ORDINARY_CHANCE = 0.08
 
-# Real gap found while confirming Bottle Grotto coverage (2026-09-03,
+# Real gap found while confirming a reference water dungeon coverage (2026-09-03,
 # per Coffee: "are you sure everything is included to make a dungeon
-# like the bottle grotto or face shrine or the Eagle's Tower?"):
+# like the bottle grotto or face shrine or the the reference tower dungeon?"):
 # pressure plates and breakable walls/floors have had real, generic,
 # already-shipped bot.py dispatch since v1.27.450/452 (_do_activate_
 # pressure_plate, _do_break_obstacle -- both confirmed CAMPAIGN-
@@ -142,7 +143,7 @@ _KEY_MESH_ORDINARY_CHANCE = 0.08
 # anywhere in the live game -- not by dungeon_evolve.py's own
 # generator, not by hand in campaign.json, and not here. Bottle
 # Grotto's own real signature is "grab a nearby pot and step on the
-# lift to make it fall" (a pressure plate) plus general ALTTP secret-
+# lift to make it fall" (a pressure plate) plus general a classic action-adventure game secret-
 # wall/floor puzzles -- this closes that gap for the Labyrinth.
 _PRESSURE_PLATE_CHANCE = 0.3
 _BREAKABLE_CHANCE = 0.3
@@ -171,7 +172,7 @@ _RUNE_GATE_CHANCE = 0.2
 
 # Real live follow-up (2026-09-03, Coffee: "do all of them" -- warps,
 # a floor-altering puzzle, and an owl-statue-style hint, after the same
-# 3 Link's Awakening maps). Warps are a real, one-way-declared-but-
+# 3 classic action-adventure dungeon maps). Warps are a real, one-way-declared-but-
 # mutually-added shortcut between two rooms that AREN'T already
 # adjacent in the branch graph -- stored as `room["warps"]` (a
 # separate field from `connections`, since a warp's own map line is
@@ -179,14 +180,14 @@ _RUNE_GATE_CHANCE = 0.2
 # doorway gap between grid-adjacent cells) rather than pretending it's
 # an ordinary lateral connection.
 _WARP_CHANCE = 0.25
-# Real Eagle's Tower-style structural puzzle: solving it doesn't just
+# Real carry-and-collapse-style structural puzzle: solving it doesn't just
 # open one new door, it also SEALS a previously-open one elsewhere on
 # the same floor -- "the floor's structure shifts," same spirit as the
 # reference's pillar-triggered floor collapse, without needing a
 # genuinely separate before/after floor copy.
 _COLLAPSE_PUZZLE_CHANCE = 0.2
 
-# Real, more literal Eagle's Tower carry-and-collapse puzzle -- see this
+# Real, more literal the reference tower dungeon carry-and-collapse puzzle -- see this
 # constant's own usage site in generate_floor for the full research and
 # design writeup. Mutually exclusive with _COLLAPSE_PUZZLE_CHANCE above
 # (never both on one floor).
@@ -525,7 +526,7 @@ _THEME_HAZARD_CHANCE = 0.12
 _MULTI_SWITCH_CHANCE = 0.25
 _SWITCH_ELEMENTS = ("fire", "cold", "lightning", "force", "radiant", "psychic", "poison", "necrotic", "earth", "physical")
 
-# L2f. Mirror pairs -- a real, Labyrinth-scoped reading of ALTTP's
+# L2f. Mirror pairs -- a real, Labyrinth-scoped reading of the reference game's
 # Light/Dark World idea: two rooms on the SAME floor, same connection
 # shape, deliberately inverted contents.
 _MIRROR_PAIR_CHANCE = 0.2
@@ -1066,7 +1067,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         branch_chains.append(chain)
 
     # The main path: the single longest branch leads to the real stairs
-    # (Metazelda/every reference map's own shape -- real content sits
+    # (the researched technique's/every reference map's own shape -- real content sits
     # BETWEEN the entrance and the exit, never a direct hop). Ties break
     # on the first-generated branch, so the same seed always reproduces
     # the same layout.
@@ -1124,7 +1125,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             rooms[miniboss_room_id]["is_miniboss_room"] = True
             rooms[miniboss_room_id]["description"] += " Something far stronger than the rest of this floor is waiting here."
             # Real Phase L5 "Advanced Dungeons" v7 -- a repeated gate
-            # (Catfish's Maw's own real pattern: the SAME encounter must
+            # (a reference repeat-encounter dungeon's own real pattern: the SAME encounter must
             # be beaten several separate times before its real reward is
             # ever actually granted). `miniboss_monster_key` survives
             # bot._check_labyrinth_progress's own unconditional
@@ -1138,8 +1139,8 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 rooms[miniboss_room_id]["miniboss_repeat_progress"] = 0
                 rooms[miniboss_room_id]["description"] += " It looks like the kind of thing that won't go down for good on the first real blow."
 
-    # Real branch-gating, guaranteed solvable BY CONSTRUCTION (Metazelda's
-    # own real technique, see the module-level research note above): a
+    # Real branch-gating, guaranteed solvable BY CONSTRUCTION (the
+    # researched technique's own real approach, see the module-level research note above): a
     # non-main branch can be sealed behind a switch placed in a
     # DIFFERENT, already-generated, unlocked branch. Reuses the exact
     # `multi_switch_gate` mechanism L2e already ships (a single required
@@ -1158,7 +1159,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # "we should not be able to walk from one floor to the next we
     # should be having to clear the paths and the different gates...
     # It should feel like a maze or a labyrinth" -- backed by a real
-    # "Zelda Dungeon Path & Gateway System" reference he shared: the
+    # the researched dungeon-path-and-gateway reference reference he shared: the
     # player's own critical path should run through real gateways, not
     # just optional side rooms). Every OTHER gate below only ever
     # targets `other_chains` -- main_chain (the one guaranteed path to
@@ -1263,7 +1264,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     ]
 
     # Real Phase L5 "Advanced Dungeons" v1 (2026-09-05, per Coffee,
-    # citing Bottle Grotto/Eagle's Tower/Turtle Rock: "the player must
+    # citing a reference water dungeon/the reference tower dungeon/a reference elemental dungeon: "the player must
     # go from path one, and work thier way through the other paths
     # until unlocking the final rooms" -- see [[project_advanced_
     # interconnected_dungeons_research]] for the full sourced research
@@ -1325,8 +1326,8 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # "keep going... generate dungeons like the samples" -- see
     # [[project_advanced_interconnected_dungeons_research]]'s own
     # "still missing" table). The single MOST common real pattern
-    # across all 30+ dungeons researched (Link's Awakening, NES Zelda
-    # 1, ALTTP): a resource from one branch is needed to progress
+    # across all 30+ dungeons researched (classic action-adventure, NES classic action-adventure
+    # 1, a classic action-adventure game): a resource from one branch is needed to progress
     # DEEPER INSIDE a different branch, not just to open that branch's
     # own hub-adjacent root door (v1.27.526's convergence gate only
     # ever locks the final approach to the boss; every OTHER existing
@@ -1335,7 +1336,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # branch). A target branch of real length (>= 3 rooms, so there's
     # a genuine interior edge past its own root) gets one of its own
     # internal connections locked, sourced from a DIFFERENT branch's
-    # own tail -- Angler's Tunnel's own "you can't reach the chest on
+    # own tail -- a reference tunnel dungeon's own "you can't reach the chest on
     # your left just yet" shape, generalized to a real movement gate
     # instead of a single static chest. Same reused multi_switch_gate
     # plumbing, same solvability guarantee (the source branch is
@@ -1410,11 +1411,11 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 })
                 convergence_gate_lockable["requires"].append(chain_switch_id)
 
-    # Real Phase L5 "Advanced Dungeons" v6 -- a Key Cavern-style
-    # redundant key MESH (2026-09-06, per Coffee, the last real "still
+    # Real Phase L5 "Advanced Dungeons" v6 -- a real redundant key
+    # MESH (2026-09-06, per Coffee, the last real "still
     # missing" pattern from [[project_advanced_interconnected_dungeons_
     # research]]: "each locked door has a key hidden in the area it
-    # bars... Link is always able to access at least one key and
+    # bars... the player is always able to access at least one key and
     # progress" -- a real ALTERNATIVE to v5's own STRICT A->B->final
     # chain above, not a replacement for it: two DIFFERENT branches
     # each gate the OTHER'S own interior, with each branch's own
@@ -1422,7 +1423,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # always open straight off the hub, never itself gated by this
     # mechanic) -- so there is no single required first branch. A
     # player who finds either branch first immediately gets the
-    # OTHER's own key with zero prerequisites, matching Key Cavern's
+    # OTHER's own key with zero prerequisites, matching key-mesh's
     # real "always able to access at least one key" solvability
     # guarantee -- distinct from every existing gate in this generator,
     # which either locks a branch's own ROOT edge (never an interior
@@ -1482,7 +1483,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
 
     # Real pressure-plate gate (2026-09-03, per Coffee: "look at the
     # dead ends... a grid style map with multiple paths" -- confirmed
-    # via follow-up research to be Bottle Grotto's own real signature
+    # via follow-up research to be a reference water dungeon's own real signature
     # mechanic: "grab a nearby pot and step on the lift to make it
     # fall"). A second, independent kind of branch gate -- deliberately
     # never the same branch as the elemental-switch gate above, so both
@@ -1621,7 +1622,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             room_ids = [rid for rid in room_ids if rid != rune_gate_room_id and rid not in rune_room_ids]
 
     # Real breakable-wall/floor secret (2026-09-03, per Coffee's same
-    # research request): a genuine ALTTP/Bottle-Grotto-style optional
+    # research request): a genuine a classic action-adventure water-dungeon-style optional
     # secret off an already-reachable branch LEAF -- never gates the
     # critical path, purely adds a bonus room, so it needs no
     # solvability check at all. Reuses bot.py's already-generic,
@@ -1733,7 +1734,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         })
 
     # Real warp shortcut (2026-09-03, per Coffee: "do all of them" --
-    # warps, a real Zelda reference mechanic, after Level 6/Level 7's
+    # warps, a real action-adventure reference mechanic, after Level 6/Level 7's
     # own maps both showed one linking two distant rooms directly).
     # Picked from two DIFFERENT branches' own deepest room (the most
     # "interesting" real content to shortcut between) -- never the hub
@@ -1765,7 +1766,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         rooms[warp_b]["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else on this floor."
         warp_endpoint_ids = {warp_a, warp_b}
 
-    # Real Eagle's Tower-style structural puzzle (2026-09-03): solving
+    # Real carry-and-collapse-style structural puzzle (2026-09-03): solving
     # it doesn't just open one new door, it ALSO seals a previously-open
     # dead-end branch elsewhere on the floor -- "the floor's structure
     # shifts beneath you." Only ever targets a genuine LEAF of a non-
@@ -1856,12 +1857,12 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
                 # around once.
                 rooms[shortcut_a]["locked_connections"][shortcut_b] = f"{trigger_id}_echo_{shortcut_a}"
 
-    # Real Eagle's Tower-style carry-and-collapse puzzle (2026-09-03,
+    # Real carry-and-collapse-style carry-and-collapse puzzle (2026-09-03,
     # per Coffee's own live screenshot re-ask, comparing his actual
     # in-game floor to a reference map: "multiple levels floors and
     # basements to get to the other end of the dungeon" -- confirmed
     # via real research (zeldadungeon.net's own level-design writeup)
-    # to be Eagle's Tower's literal mechanic: carry a heavy object
+    # to be the reference mechanic: carry a heavy object
     # between rooms, strike 2+ real pillars scattered across the floor
     # with it (one trip at a time -- the object is dropped/consumed the
     # instant it strikes a pillar, forcing a genuine return trip for
@@ -1897,7 +1898,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             carry_id = f"{puzzle_id}_object"
             pillar_ids = [f"{puzzle_id}_pillar_0", f"{puzzle_id}_pillar_1"]
             # The real, carriable object always starts in the hub --
-            # found immediately, same as Eagle's Tower's own wrecking
+            # found immediately, same as the reference carry-and-collapse mechanic's own wrecking
             # ball -- so it never depends on a branch a player hasn't
             # reached yet.
             hub.setdefault("lockables", []).append({
@@ -1948,7 +1949,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         gated_room["is_gated_encounter"] = True
         gated_room["description"] += " Something about this space feels sealed -- like the way beyond won't truly open until whatever's here is dealt with."
 
-    # Real owl-statue-style hint (2026-09-03, Link's Awakening research
+    # Real owl-statue-style hint (2026-09-03, classic action-adventure dungeon research
     # -- an optional, non-spoiler ambient warning before committing to
     # a room). Strictly honest and vague, matching this project's own
     # hard `feedback_never_spoil_puzzle_answers` rule: real facts about
@@ -1980,7 +1981,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     # edge per floor on average even with today's widened chance/cap).
     # A deliberate shortcut lever is the same real, proven mechanic
     # dungeon_evolve.py's own evolved dungeons already use for exactly
-    # this ("the genuine Zelda beat: pull the lever at the FAR end of
+    # this ("the genuine action-adventure beat: pull the lever at the FAR end of
     # the branch and gain a quick way straight back to the hub -- not
     # the hub reaching into the branch") -- ported here so a branch that
     # got genuinely LONG under the widened _BRANCH_DEPTH_WEIGHTS above
@@ -2078,7 +2079,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             rooms[tail_b]["description"] += " A real passage leads on from here, deeper into the floor."
 
     # Real, general fix (2026-09-08, found running the full suite right
-    # after enabling the mid-branch gate/Key Cavern mesh on ordinary
+    # after enabling the mid-branch gate/key-mesh on ordinary
     # floors too): every mechanic below the warp block already excludes
     # `warp_endpoint_ids` from ITS OWN new edges, but nothing has ever
     # protected a warp from a shortcut landing ELSEWHERE in the graph

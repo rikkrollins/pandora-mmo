@@ -1,6 +1,6 @@
 """
 models.py
-Character/NPC/Session data structures and D&D 5E starting-equipment
+Character/NPC/Session data structures and 5E-style starting-equipment
 and starting-gold tables used at character creation.
 """
 from dataclasses import dataclass, field

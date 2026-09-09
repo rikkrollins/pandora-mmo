@@ -1,6 +1,6 @@
 """
 class_features.py
-Real Dungeons & Dragons 5E (SRD) class features available at character
+Real 5E-style (SRD) class features available at character
 level 1, shown on the character sheet as real, accurate information.
 
 2026-07-11/12: nine of these are now genuinely mechanical, not just

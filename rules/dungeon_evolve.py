@@ -67,7 +67,7 @@ from scripts import build_location_grid
 # locked_connections-only and never counts as a lateral neighbor),
 # blowing that budget so several branches were reachable by text but
 # invisible on the map. 3 non-boss branches + 1 entrance edge = 4,
-# exactly the real limit -- matches real ALTTP hub design too, which
+# exactly the real limit -- matches real a classic action-adventure game hub design too, which
 # rarely fans out past 3-4 real branches. Room-count growth now comes
 # from LONGER branches, not more of them (see _generate_once below).
 _HUB_NON_BOSS_BRANCHES = 3
@@ -98,14 +98,14 @@ _GATED_ENCOUNTER_CHANCE = 0.3
 # silently made that other test's own "not every time" assumption false.
 _MID_BRANCH_GATE_CHANCE = 0.4
 
-# Real Phase L5 "Advanced Dungeons" Key Cavern redundant key mesh
+# Real Phase L5 "Advanced Dungeons" key-mesh redundant key mesh
 # chance (2026-09-06), ported from rules/labyrinth.py's identical
 # mechanic -- same "roll for it" discipline as every sibling gate.
 _KEY_MESH_CHANCE = 0.3
 
 # Real Phase L5 "Advanced Dungeons" repeated mini-boss gate chance
 # (2026-09-06), ported from rules/labyrinth.py's identical mechanic
-# (Catfish's Maw's own real pattern). Independent of the mini-boss's
+# (a reference repeat-encounter dungeon's own real pattern). Independent of the mini-boss's
 # own placement above -- only rolled once a mini-boss already exists.
 _MINIBOSS_REPEAT_CHANCE = 0.25
 
@@ -386,7 +386,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     branch_idx = num_branches  # the last branch generated is always the boss branch, same convention as before
     branch_leaf_ids = [b["tail_id"] for b in branches]
 
-    # Elemental switch gate (2026-09-01, per Coffee's own ALTTP-inspired
+    # Elemental switch gate (2026-09-01, per Coffee's own classic-action-adventure-inspired
     # ask). Roughly half the time, one non-boss branch's own hub edge
     # gets gated behind a real elemental switch instead of staying a
     # freely open corridor -- real variety beyond every branch always
@@ -634,7 +634,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
             })
             from_room["description"] += " A real inner seal blocks the way deeper in -- something elsewhere in this dungeon must open it."
 
-    # Real Phase L5 "Advanced Dungeons" Key Cavern redundant key mesh,
+    # Real Phase L5 "Advanced Dungeons" key-mesh redundant key mesh,
     # ported from rules/labyrinth.py's identical mechanic (2026-09-06,
     # per Coffee: "work on the lower-priority and unscheduled stuff").
     # Same pure-data shape as the mid-branch gate above, so it ports
@@ -739,7 +739,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     boss_room["is_boss_room"] = True
 
     # Real event-gated live edge, ported to evolved overworld dungeons
-    # (2026-09-06, per Coffee: "keep going" -- Bottle Grotto's own real
+    # (2026-09-06, per Coffee: "keep going" -- a reference water dungeon's own real
     # "After Hinox defeat, a portal between this room and entrance is
     # now usable, creating a shortcut," already shipped for the
     # Labyrinth in v1.27.529). Two earlier approaches were rejected for
@@ -765,7 +765,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         boss_room.setdefault("story_gates", {})[hub_id] = {"requires_cleared_location": boss_room_id}
         boss_room["description"] += " Something here looks like it could open a much shorter way back, if it were ever truly dealt with."
 
-    # Miniboss (2026-09-01, per the ALTTP research: dungeons almost
+    # Miniboss (2026-09-01, per the a classic action-adventure game research: dungeons almost
     # always have one "you're not ready yet" encounter partway through,
     # distinct from both trash and the real climax). A non-boss
     # branch's own leaf gets one monster from the UPPER half of
@@ -787,7 +787,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                 miniboss_room["monsters"].append(miniboss)
             miniboss_room["is_miniboss_room"] = True
             # Real "Advanced Dungeons" repeated gate (2026-09-06, per
-            # Coffee: "keep going" -- Catfish's Maw's own real pattern,
+            # Coffee: "keep going" -- a reference repeat-encounter dungeon's own real pattern,
             # already shipped for the Labyrinth in v1.27.534). A rare,
             # independent roll on top of an already-placed mini-boss.
             # No monster-respawn logic is needed here (unlike the
@@ -861,7 +861,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         warp_a_room["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else in this dungeon."
         warp_b_room["description"] += " A warp shimmers faintly in the corner -- it leads somewhere else in this dungeon."
 
-    # Real Eagle's Tower-style single-switch collapse puzzle (2026-09-04,
+    # Real carry-and-collapse-style single-switch collapse puzzle (2026-09-04,
     # same port). Solving it seals a previously-open dead-end branch
     # (the inverse of locked_connections -- starts open, becomes
     # blocked once its own multi_switch_gate trigger is thrown) while
@@ -937,7 +937,7 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                 })
                 shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = echo_id
 
-    # Bonus/optional room (2026-09-01, ALTTP research: reward exploration
+    # Bonus/optional room (2026-09-01, a classic action-adventure game research: reward exploration
     # off the critical path). Extends a random NON-BOSS branch one room
     # further, in that branch's own already-established direction (so
     # it can't introduce a new cross-branch grid collision) -- no gate

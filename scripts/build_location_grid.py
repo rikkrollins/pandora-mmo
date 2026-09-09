@@ -61,8 +61,8 @@ VERTICAL_OVERRIDES: dict[str, dict[str, str]] = {
     "crossroads_tavern": {"tavern_upstairs": "up", "tavern_cellar": "down"},
 }
 
-# Real live request (2026-08-27, per Coffee: "make it feel like Zelda
-# dungeons... string paths onto longer pathways" -- after finding that
+# Real live request (2026-08-27, per Coffee: "make it feel like a
+# classic action-adventure dungeon... string paths onto longer pathways" -- after finding that
 # EVERY up/down-connected neighbor used to share its parent's exact
 # (x, y), piling entire multi-room dungeon delves (Wordless Choir's 8
 # rooms, Sunken Root Caverns' branches, etc.) onto ONE map cell,
@@ -144,7 +144,7 @@ def _bfs_from_root(
                 queue.append(neighbor)
 
         # Real dungeon delves (2026-08-27, per Coffee: "make it feel
-        # like Zelda dungeons... string paths, not everything piled on
+        # like a classic action-adventure dungeon... string paths, not everything piled on
         # one square"). Any up/down edge NOT in SAME_CELL_VERTICAL_PAIRS
         # is a real, separate room -- placed one real cell over, so
         # it's visible on the map as part of a real path instead of

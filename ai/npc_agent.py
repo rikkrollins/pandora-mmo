@@ -28,7 +28,7 @@ def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
     player asking Grimsby "do you have items to sell" or "how can I
     heal" got a different, invented answer each time — the model has no
     way to know what a shopkeeper NPC really sells, so it hallucinated
-    plausible-sounding items/prices from general D&D knowledge, same
+    plausible-sounding items/prices from general tabletop-RPG knowledge, same
     failure mode support_agent.py was already grounded against (see
     CRITICAL_GROUNDING_RULE there). NPC dialogue needs the same fix.
 
@@ -42,7 +42,7 @@ def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
     that doesn't set one, same as every other optional field here.
     """
     persona = (
-        f"You are {name}, an NPC in a Dungeons & Dragons 5E game. "
+        f"You are {name}, an NPC in a 5th-edition-style tabletop RPG. "
         f"Personality: {personality}. "
         + (f"Your pronouns are {pronouns}. " if pronouns else "")
         + (f"Alignment: {alignment}. " if alignment else "")

@@ -1,6 +1,6 @@
 """
 rules/leveling.py
-Standard D&D 5E XP-to-level thresholds and proficiency bonus table.
+Standard 5E-style XP-to-level thresholds and proficiency bonus table.
 """
 
 # Level -> minimum XP required to reach that level (5E core rules,
@@ -149,8 +149,8 @@ def magic_penetration_pct(rebirth_count: int) -> float:
 # character sees zero change from either constant below, so this never
 # touches or contradicts the separate, deliberately one-directional
 # level-based scaling in overtuned_monster_stat_multiplier above.
-# Real live instruction (2026-08-20, Coffee, Noita NG+ reference --
-# enemy HP/attack-rate/player-damage-multipliers all COMPOUND per NG+
+# Real live instruction (2026-08-20, Coffee, citing a roguelike New-
+# Game-Plus reference -- enemy HP/attack-rate/player-damage-multipliers all COMPOUND per NG+
 # level, never a flat linear add): "keep in mind when the player
 # evolves the same thing happens for the players, eventually causing
 # exponential growth." Both sides of this arms race now share ONE real
@@ -227,8 +227,8 @@ def labyrinth_depth_resistance_pct(floor: int) -> float:
     return (LABYRINTH_FLOOR_GROWTH_RATE ** max(floor - 1, 0) - 1.0) * 100
 
 
-# Turn-based equivalent of Noita's exponential "attacks faster" NG+
-# axis (real-time attack-rate scaling has no direct analog in turn-
+# Turn-based equivalent of a roguelike's exponential "attacks faster"
+# New-Game-Plus axis (real-time attack-rate scaling has no direct analog in turn-
 # based combat) -- generalizes the existing extra_attack_when_enraged
 # boss-only flag (bot.py) into a real, universal, rebirth-scaled bonus
 # any monster's turn can read. Deliberately CAPPED, unlike the damage

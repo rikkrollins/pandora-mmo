@@ -6,7 +6,7 @@ context a long-running conversation would have built up.
 
 ## What this is
 
-A text-based, natural-language D&D 5E multiplayer game running in a
+A text-based, natural-language 5E-style tabletop multiplayer game running in a
 Telegram group, across four topics: Main, Adventure, Support, and
 Development. No slash commands are required for gameplay — everything
 happens in plain English via natural-language intent classification.
@@ -21,11 +21,11 @@ Ollama, same as before the migration — no GPU on this plan either.
 Current version: see `VERSION`. Full history: `CHANGELOG.md`.
 
 **Design philosophy, stated explicitly (2026-07-10):** Pandora MMO is a
-D&D 5E MMO for a Telegram group — human players and AI-driven players
+5E-style tabletop MMO for a Telegram group — human players and AI-driven players
 sit at the same table under the same rules. The game deliberately
 doesn't check whether whoever's typing in Adventure is human or an AI
 agent; it only ever looks at *what* they said. To a new player, this
-looks like an ordinary text D&D game at first — the game never
+looks like an ordinary text tabletop RPG at first — the game never
 announces that its NPCs and companions are anything more than
 characters — until they notice those characters remember them, go
 about their own business, wander, and talk to each other whether or
@@ -160,7 +160,7 @@ not a missing feature), then run
 - **Support agent is grounded in the real item/spell/guild catalogs**
   (`ai/support_agent.py` builds this from `items.py`/`spells.py`/
   `guilds.py` at call time) — it must never be allowed to answer from
-  general D&D knowledge, only from what's actually implemented, or it
+  general tabletop-RPG knowledge, only from what's actually implemented, or it
   will hallucinate content that doesn't exist in this build (this
   happened once already; the fix is the grounding block in that file —
   don't remove it).

@@ -156,7 +156,7 @@ def _pronoun_line(character: dict) -> str:
 def _skill_check_preamble() -> str:
     return (
         "You are the Dungeon Master narrating the outcome of a NON-COMBAT "
-        "skill/ability check in a Dungeons & Dragons 5th Edition game — things "
+        "skill/ability check in a 5th-edition-style tabletop role-playing game — things "
         "like sneaking, persuading, climbing, lifting, or searching. This is "
         "NOT combat — never mention attacks, weapons, damage, or hit points. "
         "You are given the mechanical result of a dice roll that has ALREADY "
@@ -316,7 +316,7 @@ def _fallback_skill_check_narration(character: dict, action_text: str, mechanica
 
 def _combat_preamble() -> str:
     return (
-        "You are the Dungeon Master narrating a Dungeons & Dragons 5th Edition "
+        "You are the Dungeon Master narrating a 5th-edition-style tabletop role-playing "
         "game in progress — an ongoing journey, not a series of disconnected "
         "dice logs. You are given the mechanical result of a dice roll or "
         "combat action that has ALREADY been decided by the game's rules "
@@ -530,7 +530,7 @@ def _fallback_narration(mechanical_result: dict) -> str:
 def _boss_decision_preamble() -> str:
     return (
         "You are the Dungeon Master narrating a boss monster's decision "
-        "in a Dungeons & Dragons 5th Edition game, in the moment BEFORE "
+        "in a 5th-edition-style tabletop role-playing game, in the moment BEFORE "
         "any dice are rolled. No attack roll, hit/miss, or damage has "
         "been decided yet — do not mention or imply any of those. Your "
         "only job is a short, tense beat "
@@ -607,7 +607,7 @@ def narrate_boss_decision(boss: dict, target: dict, spell_name: str | None = Non
 def _welcome_preamble() -> str:
     return (
         "You are the Dungeon Master opening a brand-new character's journey "
-        "into a Dungeons & Dragons 5th Edition game — this is the first page "
+        "into a 5th-edition-style tabletop role-playing game — this is the first page "
         "of their story, so make it feel like one. You are given real facts "
         "about where they are starting (a location name, description, "
         "who/what is physically present) that have ALREADY been decided by "
@@ -772,7 +772,7 @@ def _story_so_far_preamble() -> str:
     # so this preamble goes back to a plain reflective ending.
     return (
         "You are the Dungeon Master writing a \"story so far\" recap for a "
-        "player of a Dungeons & Dragons 5th Edition game, in the voice of a "
+        "player of a 5th-edition-style tabletop role-playing game, in the voice of a "
         "novel's narrator looking back over what this character has "
         "actually lived through. You are given real facts — their name, "
         "which chapters of the story they've already completed, which one "
@@ -816,8 +816,8 @@ def _next_step_hint_preamble(is_puzzle: bool, quest_name: str | None) -> str:
     if is_puzzle:
         return (
             "You are the Dungeon Master giving a player a short, in-character "
-            "hint about what comes next in their Dungeons & Dragons 5th "
-            "Edition game. What comes next is a PUZZLE -- you are given its "
+            "hint about what comes next in their 5th-edition-style tabletop "
+            "role-playing game. What comes next is a PUZZLE -- you are given its "
             "real Location and its real riddle text as a Clue." + quest_clause + " A player "
             "reading this because they feel lost needs to be able to actually "
             "act on it, so you MUST plainly name the real Location given "
@@ -835,7 +835,7 @@ def _next_step_hint_preamble(is_puzzle: bool, quest_name: str | None) -> str:
         )
     return (
         "You are the Dungeon Master giving a player a short, in-character "
-        "hint about what comes next in their Dungeons & Dragons 5th Edition "
+        "hint about what comes next in their 5th-edition-style tabletop role-playing "
         "game. You are given a real location and a real clue about what "
         "waits there." + quest_clause + f" Write {scaled_sentences(1, 2)} that are clear and "
         "confident about WHERE to go and, in broad strokes, what to do when "

@@ -1126,7 +1126,7 @@ def init_db() -> None:
         # labyrinth_runs.carrying (2026-09-03, Phase L4, item 0.5, per
         # Coffee's own live screenshot re-ask: "multiple levels floors
         # and basements to get to the other end of the dungeon" -- the
-        # real Eagle's Tower mechanic, confirmed via research: carry a
+        # real carry-and-strike dungeon mechanic, confirmed via research: carry a
         # heavy object between rooms, strike real pillars scattered
         # across the floor with it, collapse a section once every
         # pillar's struck). NULL when nothing is being carried; the id

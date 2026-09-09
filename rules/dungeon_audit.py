@@ -7,7 +7,7 @@ operating on one dungeon_id's room subset from a loaded campaign dict
 "pure rules" convention as rules/dice.py/rules/combat.py.
 
 Built 2026-08-31 per Coffee's own stated purpose: as he playtests the
-8 Zelda-style redesigned dungeons, Claude Code needs a fast way to
+8 action-adventure-style redesigned dungeons, Claude Code needs a fast way to
 diagnose whether a reported problem is a known category of design
 flaw, and a reusable authoring layer so future dungeon edits are calls
 against tested code instead of raw campaign.json surgery (the exact
@@ -266,7 +266,7 @@ def check_boss_gated(campaign: dict, dungeon_id: str) -> list[str]:
        monster at different tiers -- an early, deliberately-ungated
        "front door" named threat (e.g. Goblin Warrens' own goblin_boss,
        tied to the much-earlier clear_the_warrens quest, pre-dating
-       this dungeon's own Zelda redesign) alongside the dungeon's real,
+       this dungeon's own action-adventure-style redesign) alongside the dungeon's real,
        properly-gated climax deeper in (the_paymasters_shadow). Two
        other dungeons' real climax boss sits AT the dungeon's own
        front door by original design (the_first_city/the_unmoored_isle
@@ -339,7 +339,7 @@ def check_reciprocity(campaign: dict, dungeon_id: str) -> list[str]:
         (src_id, dest_id) for src_id, room in rooms.items() for dest_id in room.get("locked_connections", {})
     }
     # Real event-gated live edge, ported to evolved overworld dungeons
-    # (2026-09-06, per Coffee: "keep going" -- Bottle Grotto's own real
+    # (2026-09-06, per Coffee: "keep going" -- a reference water dungeon's own real
     # "portal opens after mini-boss defeat" pattern, already shipped
     # for the Labyrinth in v1.27.529). A story_gates-gated connection
     # (requires_cleared_location) is the exact same kind of real,
@@ -660,7 +660,7 @@ def add_lever_shortcut(campaign: dict, far_room_id: str, hub_id: str, lockable_i
 
 
 def add_key_gate(campaign: dict, room_id: str, dest_id: str, lockable_id: str, name: str, key_item: str) -> None:
-    """Same idea as add_lever_shortcut, for the requires_key_item pattern -- a permanent Zelda-style key, no DEX roll involved."""
+    """Same idea as add_lever_shortcut, for the requires_key_item pattern -- a permanent dungeon key, no DEX roll involved."""
     found = _find_room(campaign, room_id)
     if not found:
         raise KeyError(f"add_key_gate: no existing room {room_id!r} -- add_room it first")

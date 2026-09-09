@@ -74,7 +74,7 @@ _ABILITY_ABBREV = {
 }
 
 SUPPORT_SYSTEM_PROMPT_HEADER = """You are the support guide for Pandora MMO, a \
-Dungeons & Dragons 5E game played entirely through natural language in a \
+5th-edition-style tabletop RPG played entirely through natural language in a \
 Telegram group's Adventure topic. Players never need slash commands — they \
 just say what they mean. Here is the REAL, ACCURATE list of things a player \
 can do (do not invent anything beyond this list):
@@ -136,8 +136,8 @@ CRITICAL_GROUNDING_RULE = """
 CRITICAL RULE: The lists below (items, spells, guilds) are the COMPLETE and \
 ONLY real content that exists in this game. If a player asks about an item, \
 spell, or guild NOT on these lists, you MUST say it does not exist in this \
-game — never invent a plausible-sounding D&D item/spell/guild name that \
-isn't actually listed here, even if it's a real thing from D&D lore in \
+game — never invent a plausible-sounding item/spell/guild name that \
+isn't actually listed here, even if it's a real thing from tabletop-RPG lore in \
 general. Only describe mechanics for things that appear below, using \
 exactly the facts given for them."""
 
@@ -165,7 +165,7 @@ def _items_catalog_text() -> str:
 # got back "lets you cast spells without mana cost", a pure
 # hallucination). "effect": "buff" alone gives the model zero real
 # information about what a buff cantrip actually DOES, so it filled the
-# gap from general D&D knowledge (Mage Hand's real-5E floating-hand
+# gap from general tabletop-RPG knowledge (Mage Hand's real-5E floating-hand
 # effect, not even that correctly) instead of this game's actual
 # mechanic -- exactly the grounding gap CLAUDE.md's rule exists to
 # prevent. These four cantrips share one real, deterministic mechanic
@@ -369,7 +369,7 @@ def _race_bonus_catalog_text() -> str:
     # because this game's real per-race ability bonuses were never in its
     # prompt at all, so it had nothing concrete to reason from. These are
     # this project's own real bonuses (some 5E subraces/variants are
-    # simplified here), not to be confused with generic D&D lore.
+    # simplified here), not to be confused with generic tabletop-RPG lore.
     lines = ["\nREAL RACE ABILITY SCORE BONUSES IN THIS GAME:"]
     for race_name, race_data in races_module.RACES.items():
         bonus_text = ", ".join(
@@ -744,7 +744,7 @@ def _deterministic_enchant_item_answer() -> str:
     ai/support_agent.py's catalog grounding (_crafting_catalog_text)
     only ever built from RECIPES, never ENCHANT_RECIPES, so the model
     had ZERO real grounding for this question at all and fell back to
-    general D&D knowledge -- exactly what CLAUDE.md's "never answer
+    general tabletop-RPG knowledge -- exactly what CLAUDE.md's "never answer
     ungrounded" rule exists to prevent. Coffee's own follow-up asked
     for "a step by step guide... tell the user what to type or
     examples," so this is answered directly and completely from the

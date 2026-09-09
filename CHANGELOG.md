@@ -2,6 +2,67 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.556] — chore: scrub trademarked game-brand references, ahead of going public
+
+Per Coffee ("leave out copyritten names like Final fantasy, zelda,
+dungeons and dragons, and chrono trigger and noita" + the standing
+forward-looking rule "never include any copywritten material in the
+repo"): removed every reference to other companies' trademarked game
+names/characters/dungeons from the real repo (comments, docs, and —
+where it mattered most — live AI system prompts sent to the model at
+runtime), across ~20 files: `CHANGELOG.md`, `CLAUDE.md`,
+`FEATURE_WISHLIST.md`, `SETUP_GUIDE.md`, `SKILL.md`, all of `ai/*.py`,
+`bot.py`, `class_features.py`, `models.py`, `races.py`,
+`rules/leveling.py`, `rules/combat.py`, `rules/labyrinth.py`,
+`rules/dungeon_evolve.py`, `rules/dungeon_audit.py`, `db.py`,
+`map_render.py`, `scripts/build_location_grid.py`,
+`scripts/preview_labyrinth_floor.py`, `tests/test_regression.py`,
+`topics.py`.
+
+"Dungeons & Dragons"/"D&D" (including inside live prompts in
+`ai/dm_agent.py`, `ai/npc_agent.py`, `ai/intent_parser.py`,
+`ai/support_agent.py`, `ai/autonomous_player.py`, `ai/dev_agent.py`,
+`ai/moltbook_agent.py`) is now "5th-edition-style tabletop RPG" —
+matching this project's own already-established player-facing
+trademark-safe phrasing, now extended everywhere including internal
+docs/comments. The entire other franchise's dungeon-name family
+(the specific proper nouns for individual dungeons, a grappling item,
+a recurring miniboss, and the player-character name used in comments
+describing the key-mesh mechanic) is now described generically by its
+real mechanic instead (a reference water/shrine/elemental/tunnel/
+starter/repeat-encounter dungeon, a grappling item, a recurring
+miniboss, "the player"). An open-source dungeon-generation research
+project's name is now "an open-source graph-based dungeon-generation
+project." A roguelike's New-Game-Plus mechanic is now "a roguelike
+New-Game-Plus" (the generic term "New Game Plus"/"NG+" itself is not
+a trademark, so that stayed). One other company's RPG franchise
+mention (re: the "Ethers" item concept) is now "classic JRPGs" — the
+word "Ethers" itself stayed, since it's a generic alchemical term, not
+an exclusive trademark. "Chrono Trigger" was searched for and had zero
+real occurrences already.
+
+One test method name (`test_generate_floor_can_merge_two_branch_
+tails_bottle_grotto_style`) referenced a trademarked dungeon in its
+own name; renamed to `..._reference_water_dungeon_style` (confirmed
+via grep it's referenced nowhere else).
+
+**Real bug caught and fixed along the way, unrelated to the scrub
+itself**: an earlier edit (v1.27.552) had accidentally deleted the
+`## [1.27.551]` section header from this very file when inserting its
+own entry, silently merging v1.27.551's real body text under
+v1.27.552 with no section break. Found while preparing this file's
+sections for a GitHub Releases backfill; header restored, and the
+entire file's version-header sequence was then verified end-to-end
+(556 sections, no duplicates, no gaps, strictly descending) to rule
+out any other instance of the same defect.
+
+Purely textual (comments, docs, and prompt wording) — no game logic,
+schema, or rules-layer changes. Verified every touched Python module
+still imports cleanly and `tests/test_regression.py` still compiles;
+full `LabyrinthTests`/`DungeonEvolveTests`/`DungeonAuditTests` re-run
+clean (236 tests, one isolated re-run needed to rule out a known
+batch-order flake unrelated to this change).
+
 ## [1.27.555] — fix: real multi-tenant topic-ID collision hardening, ahead of going public
 
 Real, narrow gap found while auditing readiness for the public repo:
@@ -116,7 +177,7 @@ generated a hulking demon/wolf figure, not any kind of earth/mud
 effect, despite the prompt's own explicit "no creature or monster"
 exclusion). Root cause: the flavor phrase "a {damage_type} elemental
 magical effect" is genuinely ambiguous — "Earth Elemental"/"Fire
-Elemental" are also real, classic D&D creature names, so the image
+Elemental" are also real, classic tabletop-RPG creature names, so the image
 model read "earth elemental" as the monster. Reworded to "a
 {damage_type}-themed magical energy effect," dropping "elemental"
 entirely so it can never be misread as a monster type again.
@@ -132,6 +193,8 @@ atmosphere") using the exact same live-tunable mechanism Coffee's own
 
 5 new regression tests (quest-accept, item-naming, spell-image-prompt);
 targeted regression sweep clean.
+
+## [1.27.551] — feat: Greater elemental scrolls now craftable at level 20+
 
 Standalone follow-up to v1.27.549 (per Coffee: "dont have tier 2
 scrolls in shops, they must be crafted by a lv 20 +"). The 9 Tier-2
@@ -433,7 +496,7 @@ formula in the generator capped out early.
 - Branch-root count and individual branch depth both now scale much
   further with real floor depth (old ceiling ~floor 40, new ceiling
   ~floor 150-160) instead of plateauing.
-- The mid-branch gate and Key Cavern redundant-key-mesh mechanics --
+- The mid-branch gate and key-mesh redundant-key-mesh mechanics --
   previously checkpoint-exclusive -- now roll on ORDINARY floors too,
   at a real, floor-scaled chance, since neither actually depends on a
   boss existing (unlike the convergence gate and sequential chain,
@@ -514,7 +577,7 @@ Per Coffee: "keep going" -- the third `dungeon_evolve.py` port, and a
 real design realization along the way: unlike the Labyrinth's own
 per-run room dict, an evolved dungeon room's `monsters` list is
 shared, campaign-wide state that's never actually cleared on a real
-victory -- so porting Catfish's Maw's "beat the same encounter N
+victory -- so porting a reference repeat-encounter dungeon's "beat the same encounter N
 times" pattern needs NO monster-respawn logic at all here, only a real
 per-character defeat counter (`characters.location_defeat_counts`,
 new column) gating exactly when `mark_location_cleared` fires for a
@@ -532,7 +595,7 @@ either a real campaign.json runtime mutation (which this module's own
 design explicitly avoids) or a new per-character lock-check
 architecture, a real scope decision rather than a straightforward port.
 
-## [1.27.536] — feature: Key Cavern redundant key mesh ported to evolved overworld dungeons
+## [1.27.536] — feature: key-mesh redundant key mesh ported to evolved overworld dungeons
 
 Per Coffee: "work on the lower-priority and unscheduled stuff" -- the
 second real `dungeon_evolve.py` port. Same pure-data shape as
@@ -580,7 +643,8 @@ real chance roll, same discipline every sibling mechanic already uses.
 ## [1.27.534] — feature: a repeated mini-boss gate ("Advanced Dungeons" Phase L5, v7)
 
 Per Coffee: "work on the lower-priority and unscheduled stuff" --
-Catfish's Maw's own real pattern (Master Stalfos, defeated FOUR
+a reference repeat-encounter dungeon's own real pattern (its recurring
+miniboss, defeated FOUR
 separate times before its real reward is ever actually obtainable).
 A rare, independent roll on top of an already-placed mini-boss: the
 exact same monster respawns into the room on each "defeat" until a
@@ -589,12 +653,12 @@ time short of the last -- only the LAST defeat clears the room for
 good and grants the existing guaranteed reward (milestone item,
 Labyrinth Rune, Labyrinth Shard, rare spell tonic chance), unchanged.
 
-## [1.27.533] — feature: Key Cavern redundant key mesh ("Advanced Dungeons" Phase L5, v6)
+## [1.27.533] — feature: key-mesh redundant key mesh ("Advanced Dungeons" Phase L5, v6)
 
 Closes the last real "still missing" pattern from
-[[project_advanced_interconnected_dungeons_research]] -- Key Cavern's
+[[project_advanced_interconnected_dungeons_research]] -- key-mesh's
 own real pattern, "each locked door has a key hidden in the area it
-bars... Link is always able to access at least one key and progress."
+bars... the player is always able to access at least one key and progress."
 On checkpoint floors, two different branches now each gate the
 OTHER's own interior, with each branch's own switch sitting in the
 OTHER branch's root room -- always open straight off the hub, never
@@ -671,7 +735,7 @@ already requires solving the mid-branch gate first) becomes one more
 real requirement on the convergence seal -- layered on top of, not
 replacing, the existing 1-2 parallel branch requirements. A genuine
 A -> B -> final dependency chain, same shape as the deeper multi-gate
-sequences the SNES/NES Zelda research called out.
+sequences the SNES/NES classic action-adventure research called out.
 
 Two more real, pre-existing bugs found and fixed while building this:
 the collapse/carry-puzzle "echo shortcut" mechanic could hand out a
@@ -696,7 +760,7 @@ code was at fault -- this never affected live play.
 ## [1.27.529] — feature: defeating a real boss reveals a live shortcut back to the hub ("Advanced Dungeons" Phase L5, v4)
 
 Coffee: "keep going... generate dungeons like the samples and
-references on the fly." Bottle Grotto's own real signature move (see
+references on the fly." a reference water dungeon's own real signature move (see
 [[project_advanced_interconnected_dungeons_research]]): "After Hinox
 defeat, a portal between this room and entrance is now usable,
 creating a shortcut." Defeating a real checkpoint-floor boss now does
@@ -711,7 +775,7 @@ This is the first real EVENT-gated live edge in this generator --
 every other connection so far (branches, loop-back, tail-merging) is
 decided once at generation time and never changes; this one is a real,
 live topology mutation triggered by a genuine combat victory, the same
-class of mechanic Bottle Grotto and Eagle's Tower's own pillar-collapse
+class of mechanic a reference water dungeon and the reference carry-and-collapse mechanic's own pillar-collapse
 both use.
 
 Full LabyrinthTests/DungeonEvolveTests/DungeonAuditTests suite (207
@@ -730,7 +794,7 @@ Phase L5 to `dungeon_evolve.py`'s own overworld generator.
 
 Coffee: "keep going... your goal is to be able to generate dungeons
 like the samples and references on the fly." Continuing Phase L5 (see
-[[project_advanced_interconnected_dungeons_research]]): Bottle Grotto's
+[[project_advanced_interconnected_dungeons_research]]): a reference water dungeon's
 own literal "two wings rejoin before the mini-boss" shape. On
 checkpoint floors, two genuinely independent branches can now be
 physically joined at their own tail rooms by a real, bidirectional
@@ -784,7 +848,7 @@ known pre-existing batch-order flakes appearing (both confirmed
 passing in isolation, as always).
 
 Still queued: event-gated live edges (a miniboss kill or puzzle solve
-revealing a brand-new connection at runtime, Bottle Grotto's own
+revealing a brand-new connection at runtime, a reference water dungeon's own
 post-mini-boss portal), true sequential chains (solving A unlocks B's
 own gate specifically), and any port of Phase L5 to `dungeon_evolve.
 py`'s own overworld generator.
@@ -794,8 +858,9 @@ py`'s own overworld generator.
 Coffee: "keep going... your goal is to be able to generate dungeons
 like the samples and references on the fly." Continuing Phase L5 (see
 [[project_advanced_interconnected_dungeons_research]], now expanded
-with a full research pass on NES "The Legend of Zelda" (all 9
-dungeons) and SNES "A Link to the Past" (all 13 dungeons/sequences) --
+with a full research pass on two generations of a classic top-down
+action-adventure series (9 dungeons from the earlier title, 13 dungeons/sequences from its
+SNES sequel) --
 30+ real dungeons total. The single most common real pattern across
 every one of them: a resource from one branch is needed to progress
 DEEPER INSIDE a different branch, not just to open that branch's own
@@ -837,7 +902,7 @@ known pre-existing batch-order flake appearing (confirmed passing in
 isolation).
 
 Still queued: real branch-tail merging (two branches' own tails
-physically joined, Bottle Grotto's literal "two wings rejoin" shape),
+physically joined, a reference water dungeon's literal "two wings rejoin" shape),
 event-gated live edges (a miniboss kill or puzzle solve revealing a
 brand-new connection at runtime), true sequential chains (solving A
 unlocks B's own gate specifically, not just "any order, all
@@ -853,14 +918,14 @@ the main hub, to unlock the miniboss, boss, or staircase... keep in
 mind the original samples of bottle grotto and eagles nest... the
 player must go from path one, and work thier way through the other
 paths until unlocking the final rooms." Real, sourced research into
-all 8 Link's Awakening dungeons (not just the 3 studied for the
+all 8 classic action-adventure dungeons (not just the 3 studied for the
 original Phase L4 pass) confirmed the actual gap: every gate in this
 generator always sat at the hub boundary, so branches never depended
 on each other -- a player could clear any branch independently, in any
 order. See [[project_advanced_interconnected_dungeons_research]] for
-the full write-up (Bottle Grotto's convergent wings/ability-gated
-backtrack/event-gated portal, Eagle's Tower's cross-floor pillar
-collapse, Turtle Rock's 4 sequential minibosses, Key Cavern's
+the full write-up (a reference water dungeon's convergent wings/ability-gated
+backtrack/event-gated portal, the reference tower dungeon's cross-floor pillar
+collapse, a reference elemental dungeon's 4 sequential minibosses, key-mesh's
 redundant order-independent keys, and more).
 
 First real slice shipped: on checkpoint floors (which already get a
@@ -900,7 +965,7 @@ Explicitly not yet built (see the research memory's own "explicitly
 not yet decided" section): mid-branch gates (a locked edge partway
 through a single branch, not just at its root or the final approach),
 event-gated new edges (an enemy kill or puzzle solve revealing a
-brand-new connection, Bottle Grotto's post-mini-boss-portal style), and
+brand-new connection, a reference water dungeon's post-mini-boss-portal style), and
 any port to `dungeon_evolve.py`'s own overworld generator.
 
 ## [1.27.525] — fewer, more varied Labyrinth rooms (less "The Ticking Vault 2/7/12/17")
@@ -1282,7 +1347,7 @@ originally-queued bosses/puzzles/rewards content work.
 
 First piece of the requested "make the dungeon better and more
 advanced" improvement pass (Coffee: "make longer interconnectable
-pathways like the samples i gave the other day" -- the same Zelda
+pathways like the samples i gave the other day" -- the same classic action-adventure
 Dungeon Path & Gateway reference research). Two real generator
 changes, both in `rules/labyrinth.py`:
 
@@ -1603,10 +1668,10 @@ clean.
 
 **Mandatory main-path gating + real warp distance check** — live
 feedback from Coffee, backed by two screenshots and a ChatGPT-authored
-"Zelda Dungeon Path & Gateway System" reference he asked to be added to
+the researched dungeon-path-and-gateway reference reference he asked to be added to
 our research: a floor's map showed a switch with no visible connected
 gate anywhere and a straight corridor to the stairs ("there was no
-challenge on this floor... it doesn't keep like a Zelda dungeon at
+challenge on this floor... it doesn't keep like a classic action-adventure dungeon at
 all"), and a warp connected two rooms that already had a plain direct
 doorway between them ("I don't understand what the point of this warp
 was because we were already able to access this room").
@@ -1834,7 +1899,7 @@ happen u can reload the seed", a way to ask for a seed number, and
 "let us load and play a seed with the generator" (example phrasing he
 gave: "Load labyrinth seed #123456").
 
-Researched how Noita handles this (per Coffee's own ask): a world seed
+Researched how a roguelike handles this (per Coffee's own ask): a world seed
 plus a deterministic PRNG fully determines every piece of procedural
 content, and typing in ANY arbitrary seed -- never played before or
 not -- always produces a real, valid world. Confirmed `rules/labyrinth.
@@ -1914,7 +1979,7 @@ not deferred.
 
 **Generator side** (`rules/dungeon_evolve.py`): `_generate_once` now
 places a real bidirectional warp between two distant non-boss branch
-tails (~35% of generations), and a real single-switch Eagle's Tower-
+tails (~35% of generations), and a real single-switch the reference tower dungeon-
 style collapse puzzle (~30%) — solving a real elemental switch seals a
 dead-end branch elsewhere while opening a genuine new shortcut, same
 mechanism the Labyrinth already ships. Two new `rules/dungeon_audit.py`
@@ -2136,8 +2201,8 @@ too). Full 101-test LabyrinthTests suite passes clean.
 
 ## [1.27.494] — feature: guaranteed real mini-boss reward in the Labyrinth (Phase L4, item 6) + monitoring-cron extension (item 5)
 
-**Guaranteed mini-boss reward**: per the Link's Awakening research this
-whole phase is built from (Catfish's Maw's Hookshot — a mini-boss
+**Guaranteed mini-boss reward**: per the classic action-adventure dungeon research this
+whole phase is built from (a reference repeat-encounter dungeon's a grappling item — a mini-boss
 fight always pays off with something real), defeating a real
 `is_miniboss_room` monster now guarantees a floor-scaled item on top
 of normal combat rewards, reusing the exact same milestone item-band
@@ -2161,7 +2226,7 @@ suite's already-documented ordering sensitivity).
 
 This closes out Phase L4's full build order (items 0 through 6) —
 see CHANGELOG entries v1.27.486 through this one for the complete
-Zelda-dungeon-topology arc.
+classic action-adventure-dungeon-topology arc.
 
 ## [1.27.493] — feature: owl-statue hint ported to the overworld dungeon generator (Phase L4, item 4, partial)
 
@@ -2229,7 +2294,7 @@ harmless in isolation).
 
 ## [1.27.491] — feature: Labyrinth narration/image style polish + element-colored locked doors (Phase L4, item 2)
 
-Per Coffee's own framing across the whole Zelda-dungeon research
+Per Coffee's own framing across the whole classic action-adventure-dungeon research
 thread ("you aren't just building a dungeon, you are building an
 environment that is full travellable, and adventurable" / "make sure
 narrations and images match this style"):
@@ -2278,14 +2343,14 @@ real ambiguity-safety end-to-end test). Full 95-test LabyrinthTests
 suite passes (2 known, pre-existing batch-order flakes confirmed
 harmless in isolation).
 
-## [1.27.489] — feature: Eagle's Tower-style carry-and-collapse puzzle + character-sheet proficiency cleanup
+## [1.27.489] — feature: carry-and-collapse-style carry-and-collapse puzzle + character-sheet proficiency cleanup
 
 **Carry-and-collapse puzzle** (Phase L4, item 0.5) — the literal
 mechanic Coffee re-asked for directly against a live screenshot
-comparing his own generated floor to a favorite Link's Awakening
+comparing his own generated floor to a favorite classic action-adventure
 dungeon: "multiple levels floors and basements to get to the other end
 of the dungeon." Researched (zeldadungeon.net's own level-design
-writeup): Eagle's Tower's real signature is carrying a heavy object
+writeup): the reference tower dungeon's real signature is carrying a heavy object
 between rooms and striking 2+ pillars scattered across the floor with
 it, one trip at a time. `generate_floor` now occasionally places a
 real `carry_object` in the hub and 2 `pillar` lockables across 2
@@ -2316,11 +2381,11 @@ strike/return-trip test + intent-classification + character-sheet
 grouping). Full 93-test LabyrinthTests suite + 22 sheet-related tests +
 47 dungeon/switch/breakable tests all pass.
 
-## [1.27.488] — feature: pressure plates + breakable walls/floors in the Labyrinth (Bottle Grotto coverage)
+## [1.27.488] — feature: pressure plates + breakable walls/floors in the Labyrinth (a reference water dungeon coverage)
 
 Real gap found while directly answering Coffee's own question — "are
 you sure everything is included to make a dungeon like the bottle
-grotto or face shrine or the Eagle's Tower?" — with a real, live-
+grotto or face shrine or the the reference tower dungeon?" — with a real, live-
 generated sample floor to check against. Grepping every `"kind":`
 `rules/labyrinth.py`'s `generate_floor` actually placed showed only
 `chest`/`switch`/`multi_switch_gate` — `pressure_plate` and
@@ -2330,8 +2395,8 @@ break_obstacle` — both confirmed CAMPAIGN-agnostic) but were never
 actually PLACED anywhere in the live game: not by `dungeon_evolve.py`'s
 own overworld generator, not by hand in `campaign.json`, and not in
 the Labyrinth. This closes the gap for the Labyrinth specifically —
-Bottle Grotto's own real signature mechanic ("grab a nearby pot and
-step on the lift to make it fall") plus general ALTTP secret-wall
+a reference water dungeon's own real signature mechanic ("grab a nearby pot and
+step on the lift to make it fall") plus general a classic action-adventure game secret-wall
 puzzles.
 
 `generate_floor` now occasionally gates a branch behind a pressure
@@ -2356,11 +2421,11 @@ Real, more foundational research follow-up to v1.27.484 (Coffee:
 our editor needs to produce an output similar to my examples") — see
 the `project_zelda_dungeon_algorithm_research` memory's "Follow-up
 research" section for the full writeup. Both "Cyclic Dungeon
-Generation" (an explicitly Zelda-inspired open technique) and the
+Generation" (an explicitly classic action-adventure-inspired open technique) and the
 standard Delaunay-triangulation/MST-plus-added-edges approach confirmed
 the same real structural gap: v1.27.484's branching was a pure TREE —
 exactly one path to every room — while every reference map studied
-(Link's Awakening Level 0/6/7) is a denser GRID with genuine loops.
+(classic action-adventure Level 0/6/7) is a denser GRID with genuine loops.
 
 `rules/labyrinth.py`'s new `_add_loop_back_connections`, called right
 after grid placement, adds a small number (`_LOOP_BACK_MAX_EDGES = 3`)
@@ -2385,7 +2450,7 @@ isolation).
 ## [1.27.486] — fix: 2 live flood-control/timeout crashes + harden the drafted warp/collapse Labyrinth puzzles
 
 Found via the hourly self-improvement monitoring pass's `check_error_log.py`
-step, while re-confirming the Zelda-dungeon-topology research before
+step, while re-confirming the classic action-adventure-dungeon-topology research before
 continuing that work (Coffee: "check dev and do the research... DO NOT
 LEAVE ANYTHING OUT"):
 
@@ -2442,10 +2507,10 @@ needed — it only had to be let through the gate.
 LabyrinthTests suite passes in isolation (2 unrelated pre-existing
 batch-order flakes confirmed harmless).
 
-## [1.27.484] — feature: real Zelda-style branching dungeon topology + map redraw for the Labyrinth
+## [1.27.484] — feature: real action-adventure-style branching dungeon topology + map redraw for the Labyrinth
 
-Real live request (Coffee, dev-bridge: 3 real Link's Awakening dungeon
-maps from Zelda Dungeon's own community mapthroughs — "the map you
+Real live request (Coffee, dev-bridge: 3 real classic action-adventure dungeon
+maps from classic action-adventure Dungeon's own community mapthroughs — "the map you
 generated was very simple, nothing like a zelda type dungeon map...
 lets improve this with research" → "I want the levels to be more
 explorable, travelable with paths, puzzles, mini bosses... make an
@@ -2459,12 +2524,12 @@ the opposite of every reference map studied, all of which showed real
 branching, key-gated side areas, and a mini-boss standing between the
 entrance and the exit.
 
-**Real research done before building anything** (see
-`project_zelda_dungeon_algorithm_research` memory for the full
+**Real research done before building anything** (see the project's own
+dungeon-algorithm-research notes for the full
 writeup): the 3 posted reference maps, external design-pattern
-research (ALTTP crystal switches, the small-key economy — reconfirmed
-out of scope per this project's own earlier decision — and Link's
-Awakening's owl-statue hints), and the academic/open-source Metazelda
+research (classic action-adventure crystal switches, the small-key economy — reconfirmed
+out of scope per this project's own earlier decision — and classic
+action-adventure owl-statue hints), and an academic/open-source graph-based dungeon-generation
 technique (rooms as graph nodes, keys/switches placed in an order
 that's solvable BY CONSTRUCTION, no retry loop) — which matches this
 module's own hard "must generate in well under a second" requirement.
@@ -3675,10 +3740,10 @@ gate (lockable definition and its locked_connections reference living
 in two different rooms) shows up reliably; full existing suite (40
 tests) still passes.
 
-## [1.27.450] — feature: new ALTTP-style dungeon mechanics (Phase 4, Parts B+C)
+## [1.27.450] — feature: new classic-action-adventure-style dungeon mechanics (Phase 4, Parts B+C)
 
 Real request (2026-09-01, Coffee, after a long research + design
-conversation grounded in real A Link to the Past dungeon design): new
+conversation grounded in real classic action-adventure dungeon design): new
 puzzle mechanics for the dungeon toolkit, plus generator improvements
 so the evolve pass actually uses them.
 
@@ -4049,7 +4114,7 @@ dungeon_audit.py` + `scripts/audit_dungeon.py` — a real, deterministic
 checker (no AI involved, discussed and confirmed directly with Coffee:
 Ollama never decides structural/logical facts in this game, only
 narrates what code has already decided) covering 7 checks drawn
-directly from the same Zelda-dungeon-design research behind the
+directly from the same classic action-adventure-dungeon-design research behind the
 original 8-dungeon redesign: a real branching hub, real backtracking/
 shortcuts, no item ever placed behind the lock it opens, the boss
 actually gated, full room reciprocity, a real lock/puzzle density
@@ -4230,7 +4295,7 @@ broader dev-topic/dev-command regression slice re-run clean (3/3).
 
 Found via a routine dev-bridge sweep, not a new report: two more real
 bugs behind confusion in the Wrathflame Vault (the pilot dungeon for
-the Zelda-style redesign).
+the action-adventure-style redesign).
 
 **Fix**: the generic "way is blocked" message always said "Try picking
 the lock first" — even for a lever, which never involves a pick or a
@@ -4736,7 +4801,7 @@ lock-and-key layout:
 - **A real shortcut lever**: pulling it in the Cinder Key Alcove (it
   can't be found or picked from the hub side at all) opens a direct
   path straight back to the Ember Hall, skipping the long way through
-  the Font and Gallery -- the genuine "loop back to the hub" Zelda beat.
+  the Font and Gallery -- the genuine "loop back to the hub" action-adventure beat.
 - **Visual tease**: reaching the Ember Hall for the first time reveals
   the sanctum and the sealed reliquary on the map before either is
   reachable.
@@ -4772,7 +4837,7 @@ Wrathflame Vault minimap screenshot from the previous deploy): "This is
 the current map design that you gave dungeon one and it seems extremely
 simple... it's just a straight path to the boss. I want locked doors,
 map interconnectivity, and puzzles connecting rooms." Followed by real
-reference material (a "what makes Zelda dungeons fun" summary, real
+reference material (a "what makes classic action-adventure dungeons fun" summary, real
 SNES dungeon-map screenshots, and a structured "lock and key" design
 formula) that Coffee sent to be studied before redesigning all 8
 dungeons this session built. Confirmed directly against the real room
@@ -4800,7 +4865,7 @@ actually changes:
     reciprocity invariant (enforced by every dungeon's own regression
     test and by map_render's edge model) assumes symmetric reachability
     -- a lever keeps that invariant intact while still delivering a
-    real "loop back to the hub" Zelda beat.
+    real "loop back to the hub" action-adventure beat.
 - New `_reveal_dungeon_teaser(telegram_user_id, chat_id,
   teaser_location_ids)`: writes specific, dungeon-chosen room ids into
   the real `map_revealed_locations` field the first time a character
@@ -6292,7 +6357,7 @@ it at all.
 
 Real live request, following the "Below the Cairn" map fix: the whole
 visual map's coordinates should be correct and consistent, so it can
-actually be used for travel planning "like playing Zelda dungeons" --
+actually be used for travel planning "like playing classic action-adventure dungeons" --
 real strung-together paths and groupings, not everything crammed onto
 one square.
 
@@ -8324,11 +8389,11 @@ elsewhere in this same function. New regression test
 the exact live crash shape and confirms the real party still gets its
 XP.
 
-## [1.27.293] — Symmetric exponential rebirth scaling (Noita NG+ style)
+## [1.27.293] — Symmetric exponential rebirth scaling (a roguelike New-Game-Plus style)
 
-**Real live request (2026-08-20, Coffee, Noita wiki NG+ reference):**
+**Real live request (2026-08-20, Coffee, a roguelike wiki NG+ reference):**
 enemy stats and the player's own damage multipliers both compound each
-NG+ level in Noita, never a flat linear add. Confirmed via
+NG+ level in a roguelike, never a flat linear add. Confirmed via
 conversation this is our own rebirth system: "keep in mind when the
 player evolves the same thing happens for the players, eventually
 causing exponential growth" / "make sure all modifiers are included,
@@ -8355,7 +8420,7 @@ mechanics in needed so the players can beat the impossible bosses" /
 - Armor mastery's damage reduction (the one combat proficiency that
   doesn't flow through that shared pipeline) gets the defender's own
   rebirth-scaled boost explicitly.
-- Turn-based equivalent of Noita's "enemies attack faster": monster
+- Turn-based equivalent of a roguelike's "enemies attack faster": monster
   turns now get real bonus actions per round scaled off the party's
   average rebirth_count (capped, unlike the uncapped damage
   multipliers — an unbounded action count risks a genuinely endless
@@ -12616,8 +12681,8 @@ mana cost."** A pure Support hallucination. Root cause:
 that means in this game (a real +2 bonus to the caster's own next
 skill check, per `bot.py`'s `_do_cast_spell` — Guidance/Thaumaturgy/
 Mage Hand/Prestidigitation all share this one reflavored mechanic, not
-their real-5E effects), so the model filled the gap from general D&D
-knowledge instead. Fixed by grounding all four cantrips with their real
+their real-5E effects), so the model filled the gap from general
+tabletop-RPG knowledge instead. Fixed by grounding all four cantrips with their real
 mechanic directly in the catalog text.
 
 New regression tests for all three (a real button tap resetting the
@@ -12726,7 +12791,7 @@ Root-caused: `ai/support_agent.py`'s crafting catalog grounding
 (`_crafting_catalog_text`) only ever built from `RECIPES`, and never
 included `rules/crafting.py`'s separate `ENCHANT_RECIPES` at all — the
 model had ZERO real facts about enchanting to work from, so it filled
-the gap from general D&D knowledge, exactly what CLAUDE.md's grounding
+the gap from general tabletop-RPG knowledge, exactly what CLAUDE.md's grounding
 rule exists to prevent. Coffee's own follow-up asked for "a step by
 step guide... tell the user what to type or examples."
 
@@ -12811,8 +12876,8 @@ live campaign data.
 ## [1.27.130] — New consumables: spell-slot restoration tonics (real feature)
 
 Real feature request from Coffee, right after the spell-slot Support
-fixes: "make an item to replenish spell slots (magic) Like Final
-Fantasy games, they have Ethers... make something that matches this
+fixes: "make an item to replenish spell slots (magic) like classic
+JRPGs, they have Ethers... make something that matches this
 game and story." Support was correct that nothing restored spell
 slots mid-battle — this actually gives players a real option now,
 rather than leaving that correct-but-unsatisfying answer as the final

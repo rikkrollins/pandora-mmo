@@ -177,7 +177,7 @@ def apply_damage_type_modifier(damage: int, damage_type: str | None, defender: d
     contract.
 
     Rebirth power (rules.leveling.rebirth_power_multiplier, 2026-08-20,
-    per Coffee's Noita NG+ reference: "when the player evolves the same
+    per Coffee's own New-Game-Plus reference: "when the player evolves the same
     thing happens for the players, eventually causing exponential
     growth" / "make sure all modifiers are included, damage types,
     attacks, abilities, spells, magic, summons, everything") -- applied

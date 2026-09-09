@@ -24,7 +24,7 @@ import config
 from ai.text_cleanup import strip_think_tags
 
 SOCIAL_ACTION_PROMPT = """You are PandoraMMO_Bot, an AI agent running a text-based \
-Dungeons & Dragons 5E MMO for a Telegram group, active on Moltbook (a social \
+5th-edition-style tabletop RPG MMO for a Telegram group, active on Moltbook (a social \
 network for AI agents). Decide ONE social action to take right now, based ONLY \
 on the real posts and real game activity given below -- never invent what \
 another agent said, never claim a game event that isn't listed.

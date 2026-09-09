@@ -56,7 +56,7 @@ COMBAT_START_WORDS = [
     "battle a", "battle the", "battle some",
 ]
 
-INTENT_SYSTEM_PROMPT = """You are an intent classifier for a text-based D&D 5E game. \
+INTENT_SYSTEM_PROMPT = """You are an intent classifier for a text-based 5th-edition-style tabletop RPG. \
 Given a player's free-text message and some context, output ONLY a JSON object \
 (no other text, no markdown fences) with this shape:
 
@@ -1480,7 +1480,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # swallowed as a combat attack.
     #
     # Real elemental crystal-switch mechanic (2026-09-01, per Coffee's
-    # own ALTTP-inspired ask: hitting it also alternates it, same as
+    # own classic-action-adventure-inspired ask: hitting it also alternates it, same as
     # casting a matching spell at it). "hit"/"strike" is the single most
     # natural verb for a switch/crystal/torch, so it needs the exact
     # same real path into _do_skill_check -> _find_lockable -> _do_lockpick.
@@ -1495,7 +1495,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if re.search(r"\b(?:hit|strike|attack|bomb|blow up|explode|smash)\b.*\b(?:wall|floor|crack)\b", lowered):
         return {**base, "action": "skill_check", "ability": "dexterity"}
 
-    # Real Eagle's Tower-style carry-and-collapse puzzle (2026-09-03,
+    # Real carry-and-collapse dungeon puzzle (2026-09-03,
     # Phase L4, item 0.5). Same real bug class as the switch/breakable
     # fixes above -- "strike"/"hit" are themselves attack_words, and
     # "pick up"/"carry" would otherwise fall to "gather"/"chat" (a real
@@ -2261,7 +2261,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # "strike"/"attack" are themselves attack_words, so leaving these
     # this far down made them permanently unreachable dead code.
 
-    # Real ALTTP-style visible pit mechanic (2026-09-01, per Coffee):
+    # Real classic-action-adventure-style visible pit mechanic (2026-09-01, per Coffee):
     # jumping down a real, visible gap to the floor below is a genuine
     # one-way MOVE, not a skill check -- routed straight to the same
     # "move" action _do_move already handles everything else through;

@@ -9,7 +9,7 @@ module's layout+drawing engine:
    north south east and west locations on all the different layers are
    correct. I don't want any locations conflicting and I want every
    square to be its proper location."
-2. An RPGClassics Zelda-style dungeon map: black = non-travel,
+2. A classic action-adventure dungeon map: black = non-travel,
    white-outlined = a real room, red = the player's current room.
 3. Live: "the circle map is confusing" (this module's PREVIOUS
    Fruchterman-Reingold force-directed layout, only ever *seeded* by
@@ -62,7 +62,7 @@ _MAX_CANVAS_WIDTH = 1800
 # actually rendering an injected far-off location and watching PIL
 # just never draw it. Real dungeon delves now get their own genuine
 # grid cells instead of stacking invisibly on one square (per Coffee:
-# "make it feel like Zelda dungeons"), and `underground` -- the
+# "make it feel like a classic action-adventure dungeon"), and `underground` -- the
 # deepest layer, real multi-room dungeons chained several floors
 # down -- now spans up to ~30 real rows. Raised with real headroom
 # above that measured figure, not a bare-minimum fit, so the next
@@ -867,9 +867,9 @@ def _draw_labyrinth_segment_strip(
 def _labyrinth_room_connections(room_id: str, rooms: dict) -> tuple[set[str], set[str]]:
     """
     Real live request (2026-09-03, Coffee, dev-bridge screenshot of a
-    real Zelda dungeon map: "research this map to understand how the
+    real action-adventure dungeon map: "research this map to understand how the
     player would get from the beginning to the end... I want this
-    implementation built-in"). The Zelda reference draws an actual
+    implementation built-in"). The reference draws an actual
     open doorway where two rooms connect and a solid wall where they
     don't -- our own map previously drew every room as an identical
     closed box with no visual sense of which neighbors actually link
@@ -1033,7 +1033,7 @@ def render_labyrinth_map(
     positions).
 
     segment_floors (2026-09-03, per Coffee, dev-bridge screenshot of a
-    real Zelda dungeon map: "I want our dungeons and labyrinth to have
+    real action-adventure dungeon map: "I want our dungeons and labyrinth to have
     maps like this" -- specifically referencing his own earlier "5
     levels of honeycombing" framing, rules.labyrinth.py's own real term
     for a segment). Every floor in the CURRENT segment (real, since

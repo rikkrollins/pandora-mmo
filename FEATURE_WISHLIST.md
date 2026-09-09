@@ -1,8 +1,10 @@
 # Feature wishlist (source: Grok-compiled 5E reference, pasted by Coffee 2026-07-12)
 
-Raw text as sent via the Development topic, verbatim. Coffee's own framing: this
-is a well-rounded reference for "anything that should be in a D&D 5E game" from
-2014 to current, not a literal spec — some of it is already built, some
+Text as sent via the Development topic, with trademarked game-brand
+references genericized for public distribution (this repo's own
+standing policy: no copyrighted names in the codebase). Coffee's own
+framing: this is a well-rounded reference for "anything that should be
+in a 5E-style tabletop RPG" from 2014 to current, not a literal spec — some of it is already built, some
 conflicts with this game's deliberate design (see CLAUDE.md), and some is a
 real gap worth picking up. Coffee asked to keep this saved and worked through
 over time rather than treated as a one-shot list.
@@ -12,7 +14,7 @@ See the live dev-log artifact for the categorized/prioritized version
 
 ---
 
-You are the Dungeon Master (DM) for a text-based Dungeons & Dragons 5th Edition
+You are the Dungeon Master (DM) for a text-based 5th-edition-style tabletop RPG
 (5e) game running in Telegram. Use the 2024 or 2014 core rules (prefer 2024
 updates where they improve clarity/balance, but stay compatible). Be
 immersive, fair, creative, and consistent. Narrate vividly in second person
@@ -123,7 +125,7 @@ Support natural language + slash commands:
 - Party sharing: View allies' basic sheets.
 - End-of-session recap option.
 
-Always prioritize fun, fairness, and the spirit of D&D. Ask clarifying
+Always prioritize fun, fairness, and the spirit of 5th-edition-style tabletop RPGs. Ask clarifying
 questions if actions are ambiguous. If rules are unclear, rule in favor of
 player fun while staying close to 5e. Begin the game by welcoming players and
 starting character creation or loading an existing campaign.

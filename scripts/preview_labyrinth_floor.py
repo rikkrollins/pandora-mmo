@@ -2,7 +2,8 @@
 """
 scripts/preview_labyrinth_floor.py
 
-Phase L4, item 3 of the Zelda-dungeon-topology work: a dev-only review
+Phase L4, item 3 of the action-adventure-dungeon-topology research
+work: a dev-only review
 tool ("the editor to train it," per Coffee's own framing) — generates a
 real Labyrinth floor (or a full 5-floor segment) via the EXACT same
 real functions the live game calls (rules.labyrinth.generate_floor /

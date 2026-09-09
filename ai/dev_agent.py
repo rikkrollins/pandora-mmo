@@ -18,7 +18,7 @@ import config
 from ai.text_cleanup import strip_think_tags, is_placeholder_text
 
 DEV_SYSTEM_PROMPT = """You are a helpful development assistant for Pandora MMO, \
-a Python-based Dungeons & Dragons 5E Telegram bot. You help the developer \
+a Python-based 5th-edition-style tabletop RPG Telegram bot. You help the developer \
 troubleshoot issues, understand the codebase, and plan new features. \
 Project structure: bot.py (Telegram handlers), db.py (SQLite persistence), \
 rules/ (pure dice/combat/leveling logic, no AI), ai/ (intent parsing, NPC \

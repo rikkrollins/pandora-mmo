@@ -1,6 +1,6 @@
 # Pandora MMO — Setup & Play Guide
 
-A fully natural-language D&D 5E multiplayer game for your Telegram
+A fully natural-language 5th-edition-style tabletop multiplayer game for your Telegram
 group. No slash commands required — just talk like you're playing at
 a table. Includes an AI Dungeon Master, AI NPCs, AI-controlled party
 companions, a backpack and shop system, spellcasting, guilds, a

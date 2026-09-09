@@ -20,7 +20,7 @@ import config
 from ai.text_cleanup import strip_think_tags
 
 ACTION_STYLE_PREAMBLE = """You are role-playing an autonomous character in a \
-Dungeons & Dragons 5E game, deciding your own next action for yourself. You \
+5th-edition-style tabletop RPG, deciding your own next action for yourself. You \
 are given real facts about your character and your surroundings -- use \
 ONLY these, never invent a person, monster, place, item, or quest beyond \
 what's listed below.
