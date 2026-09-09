@@ -77,6 +77,7 @@ from ai.dm_agent import (
     kess_first_confrontation_script, kess_unbound_confrontation_script, kess_flees_line,
     kess_shrine_vigil_script, kess_scouting_confrontation_script, kess_scouting_flees_line,
     narrate_scouting_grounds_ending,
+    goblin_boss_confrontation_script, goblin_boss_defeat_line,
     grask_supply_tunnels_reaction, grask_deep_larders_reaction,
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
@@ -9098,10 +9099,24 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # description.
         fight_location = cl.get_location(CAMPAIGN, requester["current_location"])
         if template.get("is_boss"):
-            intro = await asyncio.to_thread(
-                narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"],
-                _boss_ability_facts(template),
-            )
+            # Chapter 1-8 story completion pass (2026-09-09, per Coffee:
+            # "is the story done from chapter 1-8, no gaps"): a bounded
+            # set of real story-finale bosses get a real, hand-written
+            # confrontation instead of the generic AI narrate_boss_intro
+            # -- same "monster_key check before the generic AI path"
+            # dispatch shape _announce_defeats already uses for Kess's
+            # own flee line, just at the fight-START checkpoint instead.
+            # Kept as plain monsters (not migrated to the npcs-dict
+            # is_boss+requires_active_quest shape Kess herself uses) so
+            # every existing test/bestiary/defeated-tracking reference
+            # to these already-shipped bosses stays completely untouched.
+            if monster_key == "goblin_boss":
+                intro = goblin_boss_confrontation_script()
+            else:
+                intro = await asyncio.to_thread(
+                    narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"],
+                    _boss_ability_facts(template),
+                )
             await _safe_send(update, f"🎬 {intro}")
         header = (
             f"⚔️ **Combat Begins!**\n"
@@ -17130,6 +17145,17 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # real gap in an otherwise-complete beat. Hand-written, zero
         # Ollama calls, same discipline as every other Kess beat.
         climax_narration = f"{narrate_scouting_grounds_ending(character['name'])}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
+    elif quest_id == "clear_the_warrens":
+        # Chapter 1-8 story completion pass (2026-09-09, per Coffee:
+        # "is the story done from chapter 1-8, no gaps"): Chapter 1's
+        # own finale gets the game's very first named speaking
+        # antagonist (Vrakk) instead of the generic AI climactic
+        # flourish -- his dying line plants the exact seed the quest's
+        # own clue already promises ("something bigger among them") for
+        # Chapter 5's real payoff much later. Hand-written, zero Ollama
+        # calls, same discipline as every Kess beat.
+        climax_narration = f"{goblin_boss_defeat_line()}\n\n"
         await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest.get("weight") == "climactic":
         climax_text = await asyncio.to_thread(

@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.568] — feat: Chapter 1's real finale gets the game's first named speaking antagonist (story completion pass, 2/7)
+
+Chapter 1's finale (`clear_the_warrens`, "Clear the Goblin Warrens")
+was a plain, silent monster fight — `goblin_boss` had zero personality,
+and completion fell through to generic AI narration despite already
+being tagged `"weight": "climactic"`.
+
+Added `goblin_boss_confrontation_script`/`goblin_boss_defeat_line`
+(`ai/dm_agent.py`) — hand-written, zero Ollama calls. Gives the boss a
+real spoken name (Vrakk) purely in dialogue text — his campaign.json
+`name` field stays exactly "Goblin Boss" for combat/bestiary display,
+untouched, so every one of the 13 existing references to that display
+name stays completely unaffected. His dying line plants the exact seed
+the quest's own clue already promised ("something bigger among
+them") — real foreshadowing for Chapter 5's own finale
+(`the_paymasters_shadow`) much later, not an invented new thread.
+
+Wired at two real checkpoints: `_do_start_combat`'s existing boss-intro
+hook (`bot.py`, checks `monster_key == "goblin_boss"` before falling
+back to the generic `narrate_boss_intro`, same "monster_key dispatch"
+shape already proven for Kess's own flee line) for the confrontation,
+and `_complete_quest_and_announce`'s dispatch chain for the ending —
+now also sending the real climax image (v1.27.567) grounded in the
+quest's own title. Deliberately kept `goblin_boss` as a plain
+`monsters`-dict entry rather than migrating it to Kess's `npcs`-dict
+shape, avoiding any regression risk to already-shipped defeat-
+tracking/bestiary behavior.
+
+4 new regression tests (both scripts, the real fight-start dispatch,
+the real quest-completion dispatch + image). Re-ran the existing
+`goblin_boss`-specific test plus 6 other boss-intro/scaling tests —
+all clean, confirming the new dispatch branch doesn't disturb any
+other boss's existing generic-AI-intro path.
+
 ## [1.27.567] — feat: real generated images for chapter finale endings
 
 Coffee asked directly: "can u add pictures to the story? is that

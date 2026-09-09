@@ -1922,6 +1922,39 @@ def kess_scouting_flees_line() -> str:
     )
 
 
+def goblin_boss_confrontation_script() -> str:
+    """
+    Chapter 1's real finale ("Clear the Goblin Warrens") -- the game's
+    very first named speaking antagonist, deliberately small and
+    human-scaled next to Kess/the Chapter 5-6 reveals coming later. His
+    real name (Vrakk) is spoken here, never in his own campaign.json
+    `name` field (still "Goblin Boss" for combat/bestiary display,
+    untouched, zero regression risk to any existing reference). Plants
+    the exact seed the quest's own clue already promises ("something
+    bigger among them") for Chapter 5's real payoff (the_paymasters_
+    shadow) much later -- hand-written, zero Ollama calls.
+    """
+    return (
+        "*The goblin holding the warren's hub isn't the biggest thing here, but he's clearly "
+        "used to being obeyed -- he doesn't flinch when the party arrives, just looks mildly "
+        "put out, like this was scheduled to happen eventually and he'd hoped for later.*\n\n"
+        "**Vrakk:** \"You've got the wrong idea if you think this ends with me. I just run the "
+        "floor. Whoever's actually paying for all this doesn't come up this far.\"\n\n"
+        "*He hefts his weapon anyway, resigned rather than eager.*\n\n"
+        "**Vrakk:** \"Still. Can't exactly let you past for free.\""
+    )
+
+
+def goblin_boss_defeat_line() -> str:
+    """Companion piece to goblin_boss_confrontation_script -- his real dying line, fired as the Chapter 1 ending's opening beat."""
+    return (
+        "*Vrakk goes down still muttering, more annoyed than afraid.*\n\n"
+        "**Vrakk:** \"...told you. Wrong idea. Ask the coin where it's really going, next time...\"\n\n"
+        "*Whatever he meant by it, there's no one left down here to ask -- just a warren that's "
+        "finally quiet, and a debt owed to someone who never showed his face.*"
+    )
+
+
 def narrate_scouting_grounds_ending(character_name: str) -> str:
     """
     Chapter 7's real finale beat, closing "Fresh Tracks"
