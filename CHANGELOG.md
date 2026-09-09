@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.567] — feat: real generated images for chapter finale endings
+
+Coffee asked directly: "can u add pictures to the story? is that
+possible?" It already was, half of the way — every finale quest
+already gets a real generated image the moment it's OFFERED
+(`_maybe_push_quest_offer`'s `_quest_offer_image_prompt`) — but nothing
+generated one at the other real story beat, the ending.
+
+Added `_maybe_send_chapter_climax_image`/`_chapter_climax_image_prompt`
+(`bot.py`), same deterministic-seed-per-quest convention as every other
+generated image in this game (grounded only in the finale quest's own
+real title/description, never invented scene detail). Wired into
+Chapter 7's new bespoke ending (v1.27.566) as the first real use; the
+remaining Chapter 1-8 story completion pass will call this same shared
+helper as each chapter's own bespoke ending lands, rather than each
+one inventing its own image logic.
+
+Test updated to verify the image call actually fires with the real
+quest's own title in its prompt (not just that nothing crashed).
+
 ## [1.27.566] — feat: Chapter 7's real finale gets a bespoke ending (story completion pass, 1/7)
 
 First of 7 planned chapters closing the "is the story done from

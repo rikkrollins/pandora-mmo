@@ -16656,6 +16656,35 @@ def _chapter_complete_note(telegram_user_id: int, chat_id: int, quest_id: str) -
     return f"\n\n🌟 **Chapter complete: \"{arc['title']}\"** — {arc['description']}"
 
 
+def _chapter_climax_image_prompt(quest: dict) -> str:
+    """
+    Grounded only in the finale quest's own real title/description --
+    no invented scene detail. Same shape as _arc_opening_image_prompt,
+    for the climax/ending image instead of the opening one.
+    """
+    return (
+        f"{quest['title']}, {quest['description']}, fantasy RPG climactic story finale, "
+        f"epic cinematic moment, digital painting, dramatic lighting, no text or labels"
+    )
+
+
+async def _maybe_send_chapter_climax_image(update_like, quest_id: str, quest: dict) -> None:
+    """
+    Chapter 1-8 story completion pass (2026-09-09, per Coffee: "can u
+    add pictures to the story"). Every finale quest already gets a real
+    generated image when OFFERED (_maybe_push_quest_offer's own
+    _quest_offer_image_prompt) -- this is the missing other half, fired
+    once a bespoke chapter-ending narration actually lands, same
+    deterministic-per-quest convention as every other generated image
+    here (never a second, independently-invented scene).
+    """
+    prompt = _chapter_climax_image_prompt(quest)
+    await _send_generated_image(
+        update_like, prompt, f"🎬 {quest['title']}",
+        seed=_deterministic_image_seed(f"climax:{quest_id}"), log_key=quest_id,
+    )
+
+
 def _arc_opening_image_prompt(arc: dict) -> str:
     """Grounded only in the story arc's own real title/description -- no invented scene detail."""
     return (
@@ -17101,6 +17130,7 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # real gap in an otherwise-complete beat. Hand-written, zero
         # Ollama calls, same discipline as every other Kess beat.
         climax_narration = f"{narrate_scouting_grounds_ending(character['name'])}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest.get("weight") == "climactic":
         climax_text = await asyncio.to_thread(
             narrate_chapter_climax, quest["title"], quest["description"], reward_text,

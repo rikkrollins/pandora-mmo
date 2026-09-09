@@ -7676,14 +7676,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         through the hand-written bridging ending, not the generic
         narrate_chapter_climax AI path -- confirmed by NOT patching
         narrate_chapter_climax at all (if the code ever fell through to
-        it, this test would hang/fail on a real network call).
+        it, this test would hang/fail on a real network call). Also
+        confirms the new climax image fires with the real quest's own
+        title/description grounding it (2026-09-09, per Coffee: "can u
+        add pictures to the story").
         """
+        from unittest.mock import patch, AsyncMock
         user_id = 900961
         make_basic_character(user_id, "ScoutingWitness2", current_location="stonearch_bridge_the_scouting_ground")
         sink = []
-        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_scouting_grounds_warning")
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_scouting_grounds_warning")
         combined = "\n".join(sink)
         self.assertIn("GREYMOOR", combined)
+        mock_image.assert_awaited_once()
+        prompt_arg = mock_image.await_args.args[1]
+        self.assertIn("Fresh Tracks", prompt_arg)
 
     def test_sunken_root_caverns_lockable_chests_grant_real_loot(self):
         for loc_id in ("sunken_root_caverns_the_hidden_cache", "sunken_root_caverns_the_second_pool"):
