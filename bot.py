@@ -21945,7 +21945,17 @@ async def _do_read_recipe_book(update: Update, item: dict) -> None:
     recipe_lines = [
         f"- **{items_module.get_item(r['result_item'])['name']}** (DC {r['dc']} {r['ability']}): needs "
         + ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in r["materials"].items())
-        for r in RECIPES.values() if r.get("profession", "crafting") == profession
+        for r in RECIPES.values()
+        # Real gap caught before shipping (2026-09-08): the new
+        # greater_scroll_* RECIPES entries carry a real min_level (see
+        # recipe_requirement_gate) and share the "alchemy" profession
+        # with the Herbalism Guide -- without this filter they'd leak
+        # straight into the SAME basic, Lv-1-only book this function's
+        # own docstring says can "never leak guild-ladder content."
+        # Any recipe carrying a real gate field belongs in the
+        # advanced book (_do_read_advanced_recipe_book) only.
+        if r.get("profession", "crafting") == profession
+        and not (r.get("min_level") or r.get("requires_guild") or r.get("min_rebirth"))
     ]
     if not recipe_lines:
         await _safe_send(update, f"The {item['name']} is oddly blank — there's nothing written in it yet.")

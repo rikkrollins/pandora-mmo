@@ -13204,6 +13204,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(950921, -999)
         self.assertIsNone(recipe_requirement_gate(character, ENCHANT_RECIPES["enchant_godsforged_ward"]))
 
+    def test_greater_scroll_recipes_require_level_20_but_no_guild(self):
+        """
+        Real gap fix (2026-09-08, standalone follow-up to task #3, per
+        Coffee: "dont have tier 2 scrolls in shops, they must be crafted
+        by a lv 20 +"). The 9 Tier-2 "Greater" scroll recipes are plain
+        RECIPES entries (never sold in any shop, confirmed via
+        campaign.json), gated on level 20+ only -- no guild requirement,
+        unlike the Forge/Enchanters' Guild ladders.
+        """
+        from rules.crafting import recipe_requirement_gate, RECIPES
+        make_basic_character(950945, "TooLowLevelScribe", current_location="crossroads_tavern")
+        character = db.get_character(950945, -999)
+        rejection = recipe_requirement_gate(character, RECIPES["greater_scroll_fire"])
+        self.assertIsNotNone(rejection)
+        self.assertIn("level 20", rejection)
+
+        db.update_character(950945, -999, level=20)
+        character = db.get_character(950945, -999)
+        for recipe_id in ["greater_scroll_fire", "greater_scroll_lightning", "greater_scroll_cold",
+                           "greater_scroll_earth", "greater_scroll_force", "greater_scroll_necrotic",
+                           "greater_scroll_poison", "greater_scroll_psychic", "greater_scroll_radiant"]:
+            self.assertIsNone(recipe_requirement_gate(character, RECIPES[recipe_id]), recipe_id)
+
+    async def test_greater_scroll_is_actually_craftable_by_a_qualified_level_20_character(self):
+        """End-to-end: bot._do_craft actually produces a real Greater Scroll once a character is level 20+ and has the materials."""
+        make_basic_character(950946, "QualifiedScribe", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(950946, -999, level=20)
+        db.add_item(950946, -999, "glimmerdeep_moss", 3)
+        db.add_item(950946, -999, "moonpetal", 3)
+        db.add_item(950946, -999, "sulfur_dust", 2)
+        from unittest.mock import patch
+        craft_text = "craft a Greater Scroll of Flame Strike"
+        update = FakeUpdate(950946, craft_text, [])
+        with patch("bot.narrate_skill_check", return_value="You scribe it carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_craft(update, craft_text)
+        updated = db.get_character(950946, -999)
+        self.assertGreater(updated["inventory"].get("greater_scroll_fire", 0), 0)
+
     async def test_forge_guild_journeyman_blade_rejects_a_non_member_via_the_real_handler(self):
         """
         End-to-end: bot._do_craft actually enforces the gate (not just
@@ -13662,6 +13701,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Not consumed -- still carrying it after reading.
         updated = db.get_character(950936, -999)
         self.assertEqual(updated["inventory"].get("cook_book_basic", 0), 1)
+
+    async def test_herbalism_guide_never_leaks_the_level_gated_greater_scroll_recipes(self):
+        """
+        Real gap caught before shipping (2026-09-08, standalone follow-
+        up to task #3): the new greater_scroll_* RECIPES entries share
+        the Herbalism Guide's own "alchemy" profession -- without a real
+        gate-field filter, they'd leak straight into this same basic,
+        Lv-1-only book, exactly the "never leak guild-ladder content"
+        rule _do_read_recipe_book's own docstring already establishes
+        for ADVANCED_RECIPES/ENCHANT_RECIPES.
+        """
+        make_basic_character(950947, "HerbalismReader", current_location="crossroads_tavern")
+        db.add_item(950947, -999, "herbalism_guide_basic", 1)
+        sink = []
+        update = FakeUpdate(950947, "use my herbalism guide", sink)
+        await bot._do_use_item(update, "use my herbalism guide")
+        self.assertNotIn("Greater Scroll", sink[-1])
+        self.assertIn("Healing Potion", sink[-1])
 
     async def test_advanced_recipe_book_sealed_under_level_20(self):
         """Real gap (2026-09-08, task #7): the new Grandmaster's Forge Tome refuses to teach anything below level 20, regardless of guild."""

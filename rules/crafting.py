@@ -92,6 +92,65 @@ RECIPES = {
         "result_item": "supreme_spell_tonic", "result_qty": 1,
         "ability": "intelligence", "dc": 25, "profession": "alchemy",
     },
+    # Tier-2 "Greater" elemental scrolls, real craft path (2026-09-08,
+    # per Coffee, standalone follow-up to task #3: "dont have tier 2
+    # scrolls in shops, they must be crafted by a lv 20 +"). Additive to
+    # the existing find/steal/loot channels (rules/labyrinth.py's
+    # checkpoint vault, bot.py's miniboss drop and steal-fallback), not
+    # a replacement -- still genuinely never sold in any shop. min_level
+    # (recipe_requirement_gate's own new field, added for task #6's
+    # forge_magic_upgrade) is the real gate here; `_do_craft` already
+    # calls recipe_requirement_gate for every plain RECIPES entry
+    # (unconditionally, same call as ADVANCED_RECIPES), so this needed
+    # no new plumbing at all, just these 9 data entries. Same DC/
+    # material shape as supreme_spell_tonic just above -- the previous
+    # real ceiling in this whole file -- since these are meant to be
+    # genuinely the hardest thing an alchemist can scribe.
+    "greater_scroll_fire": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_fire", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_lightning": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_lightning", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_cold": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_cold", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_earth": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_earth", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_force": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_force", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_necrotic": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_necrotic", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_poison": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_poison", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_psychic": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_psychic", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_scroll_radiant": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "greater_scroll_radiant", "result_qty": 1,
+        "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
+    },
     # Cooking (2026-07-15): raw_fish was gatherable but no recipe used
     # it at all -- uses wood too (cooking over a fire), producing an
     # actually usable food item now that _do_use_item exists.

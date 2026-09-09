@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.551] — feat: Greater elemental scrolls now craftable at level 20+
+
+Standalone follow-up to v1.27.549 (per Coffee: "dont have tier 2
+scrolls in shops, they must be crafted by a lv 20 +"). The 9 Tier-2
+"Greater" scrolls were already never sold in any shop (confirmed) —
+added a real, additional channel on top of the existing find/steal/
+loot ones: 9 new `RECIPES` entries (alchemy, DC 24 — matching
+`supreme_spell_tonic`'s own previous ceiling — gated by a real
+`min_level: 20`, no guild required). `_do_craft` already called
+`recipe_requirement_gate` unconditionally for every plain `RECIPES`
+entry, so this needed zero new plumbing beyond the data itself.
+
+**Real gap caught and fixed before shipping**: the new recipes share
+the Herbalism Guide's own "alchemy" profession, and `_do_read_recipe_
+book` filtered only by profession — without a fix, the level-gated
+scrolls would have leaked straight into that same basic, Lv-1-only
+book, violating the exact "never leak guild-ladder content" rule the
+book system was built around. Now excludes any `RECIPES` entry
+carrying `min_level`/`requires_guild`/`min_rebirth` from the basic
+book listing. 3 new regression tests (gate check, real end-to-end
+craft, book-leak guard).
+
 ## [1.27.550] — feat: RNG rest stops per Labyrinth segment, guaranteed on the middle floor
 
 Real deliverable, the last of a 7-task burst (per Coffee: "in harder
