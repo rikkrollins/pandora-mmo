@@ -121,6 +121,24 @@ _MINIBOSS_REPEAT_CHANCE = 0.25
 # violate this project's own "never claim something works without
 # running it" rule. Revisit if this generator's branch-extension logic
 # ever grows real direction changes (jogs/turns) mid-branch.
+#
+# RE-CONFIRMED STILL TRUE (2026-09-10, "fill all gaps" pass, per
+# Coffee: "do 1 and 2"): before touching this file, checked whether
+# warps and the collapse puzzle (this comment's own neighbors below)
+# were really still unported, as an earlier memory claimed. Warps and
+# the single-switch collapse puzzle had ALREADY been shipped 2026-09-04,
+# just never reflected back into that memory -- confirmed real, left
+# untouched. The TWO-PILLAR carry-and-collapse variant (a real, distinct
+# mechanic in rules/labyrinth.py -- carry an object, strike 2 separate
+# pillars, one trip at a time) genuinely is still missing here (no
+# `kind == "pillar"`/`carry_object` anywhere in this file) -- ported
+# below, right after the single-switch version it shares its
+# `collapsing_connections`/`multi_switch_gate` plumbing with.
+#
+# Loop-back is the other real, still-open item -- reworking branch
+# geometry to fix it risks reintroducing the several real grid-collision
+# bugs already fixed one at a time in this file's own history, for a
+# purely cosmetic interconnectivity gain. Not attempted this pass.
 
 
 def _harder_target_band(campaign: dict, source_dungeon_id: str, explicit_band: tuple[int, int] | None = None) -> tuple[int, int]:
@@ -936,6 +954,81 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                     "requires": [trigger_switch_id],
                 })
                 shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = echo_id
+
+    # Real carry-and-collapse-style TWO-PILLAR puzzle (2026-09-10, "fill
+    # all gaps" pass, per Coffee: "do 1 and 2") -- rules/labyrinth.py's
+    # own distinct "carry a real object between rooms, strike 2
+    # separate pillars, one trip at a time" mechanic, genuinely missing
+    # from this file until now (only the single-switch version above
+    # existed -- confirmed via grep for `kind == "pillar"`/
+    # `carry_object` before writing this, not assumed). Mutually
+    # exclusive with the single-switch version above (never both on the
+    # same generated dungeon, matching rules/labyrinth.py's own
+    # `already_has_collapse` discipline) -- reuses the EXACT same
+    # collapsing_connections/multi_switch_gate plumbing that version
+    # already proved safe (including check_collapse_never_orphans_a_
+    # room's own real BFS-based retry-loop guard, which is generic to
+    # ANY collapsing_connections entry regardless of which mechanic
+    # created it), just fed by 2 pillars instead of 1 switch. The
+    # carriable object always starts at the hub, same as rules/
+    # labyrinth.py's own placement, so it never depends on a branch not
+    # yet reached.
+    already_has_collapse = any(_find_room(campaign, rid)[1].get("collapsing_connections") for rid in room_ids)
+    carry_eligible = [b for b in branches if b["idx"] not in (branch_idx, switch_branch_idx, plate_branch_idx, key_branch_idx)]
+    if not already_has_collapse and len(carry_eligible) >= 1 and len(non_boss_branches) >= 3 and rng.random() < 0.25:
+        carry_seal_branch = rng.choice(carry_eligible)
+        carry_seal_leaf = carry_seal_branch["tail_id"]
+        carry_seal_parent = (
+            hub_id if carry_seal_branch["next_step"] <= 1
+            else f"{new_dungeon_id}_b{carry_seal_branch['idx']}_r{carry_seal_branch['next_step'] - 2}"
+        )
+        # Same permissive reuse rules/labyrinth.py's own pillar_source_
+        # chains/shortcut_pair use -- a pillar's own branch (or the
+        # eventual shortcut's own branch) is a perfectly valid choice
+        # for the OTHER role too, same "excluding it leaves too few
+        # candidates" lesson the switch variant above already learned.
+        carry_other_branches = [b for b in non_boss_branches if b["idx"] != carry_seal_branch["idx"]]
+        if len(carry_other_branches) >= 2:
+            pillar_branch_a, pillar_branch_b = rng.sample(carry_other_branches, 2)
+            puzzle_id = f"{new_dungeon_id}_carry"
+            carry_id = f"{puzzle_id}_object"
+            pillar_ids = [f"{puzzle_id}_pillar_0", f"{puzzle_id}_pillar_1"]
+            _, hub_room_for_carry = _find_room(campaign, hub_id)
+            hub_room_for_carry.setdefault("lockables", []).append({
+                "id": carry_id, "kind": "carry_object", "name": "a real, half-buried stone weight", "puzzle_id": puzzle_id,
+            })
+            pillar_a_room_id = f"{new_dungeon_id}_b{pillar_branch_a['idx']}_r0"
+            pillar_b_room_id = f"{new_dungeon_id}_b{pillar_branch_b['idx']}_r0"
+            _, pillar_a_room = _find_room(campaign, pillar_a_room_id)
+            _, pillar_b_room = _find_room(campaign, pillar_b_room_id)
+            pillar_a_room.setdefault("lockables", []).append({
+                "id": pillar_ids[0], "kind": "pillar", "name": "a real weathered support pillar", "puzzle_id": puzzle_id,
+            })
+            pillar_b_room.setdefault("lockables", []).append({
+                "id": pillar_ids[1], "kind": "pillar", "name": "a real weathered support pillar", "puzzle_id": puzzle_id,
+            })
+            pillar_a_room["description"] += " A real, weathered stone pillar stands here, cracked with age."
+            pillar_b_room["description"] += " A real, weathered stone pillar stands here, cracked with age."
+            carry_trigger_id = f"{puzzle_id}_trigger"
+            _, carry_seal_parent_room = _find_room(campaign, carry_seal_parent)
+            carry_seal_parent_room.setdefault("lockables", []).append({
+                "id": carry_trigger_id, "kind": "multi_switch_gate", "name": "a real structural trigger",
+                "requires": pillar_ids,
+            })
+            carry_seal_parent_room.setdefault("collapsing_connections", {})[carry_seal_leaf] = carry_trigger_id
+            carry_seal_parent_room["description"] += (
+                " Something here feels structurally unstable -- like a well-placed blow, twice over, could bring it down."
+            )
+            if len(carry_other_branches) >= 2:
+                shortcut_a_branch, shortcut_b_branch = rng.sample(carry_other_branches, 2)
+                shortcut_a, shortcut_b = shortcut_a_branch["tail_id"], shortcut_b_branch["tail_id"]
+                _, shortcut_a_room = _find_room(campaign, shortcut_a)
+                carry_echo_id = f"{carry_trigger_id}_echo_{shortcut_a}"
+                shortcut_a_room.setdefault("lockables", []).append({
+                    "id": carry_echo_id, "kind": "multi_switch_gate", "name": "a newly-opened shortcut",
+                    "requires": pillar_ids,
+                })
+                shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = carry_echo_id
 
     # Bonus/optional room (2026-09-01, a classic action-adventure game research: reward exploration
     # off the critical path). Extends a random NON-BOSS branch one room

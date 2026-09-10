@@ -35815,6 +35815,56 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(hits, 0, "expected at least one collapse-puzzle evolve across 60 real seeds")
         self.assertLess(hits, 60, "expected at least one evolve WITHOUT a collapse puzzle across 60 real seeds -- it should be a real fraction, not every time")
 
+    def test_evolve_dungeon_sometimes_places_a_real_carry_puzzle_that_stays_solvable(self):
+        """
+        Real two-pillar carry-and-collapse port (2026-09-10, "fill all
+        gaps" pass, per Coffee: "do 1 and 2") -- rules/labyrinth.py's
+        own distinct "carry a real object, strike 2 separate pillars"
+        mechanic was genuinely missing from this generator until now
+        (confirmed via grep for `kind == "pillar"`/`carry_object`
+        before writing the port, not assumed -- unlike warps and the
+        single-switch collapse puzzle above, both of which turned out
+        to already be shipped 2026-09-04 despite an earlier memory
+        claiming otherwise). Confirms, across real seeds: a real
+        carry_object + exactly 2 pillars appear together, both pillars
+        stay outside the branch they seal (must remain reachable to
+        ever be struck), check_collapse_never_orphans_a_room (generic
+        to ANY collapsing_connections entry, not single-switch-specific)
+        never fails, and it's mutually exclusive with the single-switch
+        variant -- never both on the same generated dungeon.
+        """
+        import copy
+        hits = 0
+        for seed in range(80):
+            campaign = copy.deepcopy(bot.CAMPAIGN)
+            rng = random.Random(seed)
+            new_id = f"goblin_warrens_evolved_carry_stat_{seed}"
+            dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+            failures = dungeon_audit.audit_dungeon(campaign, new_id)
+            self.assertFalse(failures["collapse_never_orphans_a_room"], failures["collapse_never_orphans_a_room"])
+            rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+            carry_rooms = [rid for rid, r in rooms.items() if any(lk.get("kind") == "carry_object" for lk in r.get("lockables", []))]
+            pillar_rooms = [rid for rid, r in rooms.items() if any(lk.get("kind") == "pillar" for lk in r.get("lockables", []))]
+            switch_collapse_rooms = [
+                rid for rid, r in rooms.items()
+                if any(lk.get("kind") == "switch" and lk["id"].endswith("_collapse_switch") for lk in r.get("lockables", []))
+            ]
+            if not carry_rooms and not pillar_rooms:
+                continue
+            hits += 1
+            self.assertEqual(len(carry_rooms), 1, "expected exactly one carry_object per dungeon")
+            self.assertEqual(len(pillar_rooms), 2, "expected exactly 2 real pillars")
+            self.assertFalse(switch_collapse_rooms, "carry puzzle and single-switch collapse must be mutually exclusive on the same dungeon")
+            for rid, room in rooms.items():
+                for dest_id, trigger_id in room.get("collapsing_connections", {}).items():
+                    trigger_lockable = next(lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("id") == trigger_id)
+                    if trigger_lockable.get("kind") != "multi_switch_gate" or len(trigger_lockable.get("requires", [])) != 2:
+                        continue  # this seed's own trigger isn't the 2-pillar one
+                    for pillar_room_id in pillar_rooms:
+                        self.assertNotIn(pillar_room_id, (rid, dest_id), "a pillar must not live inside the branch it helps seal")
+        self.assertGreater(hits, 0, "expected at least one carry-puzzle evolve across 80 real seeds")
+        self.assertLess(hits, 80, "expected at least one evolve WITHOUT a carry puzzle across 80 real seeds -- it should be a real fraction, not every time")
+
     async def test_evolve_dungeon_warp_is_a_real_nameable_move_destination_end_to_end(self):
         """Real end-to-end: a generated warp shows up in bot._do_move's own reachable set, not just as inert generator data (the confirmed real gap this port had to close, unlike the Labyrinth's own separate _do_labyrinth_move code path)."""
         import copy
@@ -36040,7 +36090,23 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(db.get_character(user_id, -999)["current_location"], "fx_trash_far")
 
     async def test_evolve_dungeon_collapse_trigger_blocks_then_opens_the_shortcut_end_to_end(self):
-        """Real end-to-end: solving the collapse trigger's own switch (via bot._do_lockpick, the exact same real dispatch a player's own hit action already uses) blocks the sealed connection and opens the new shortcut through bot._do_move -- not just inert generator data."""
+        """
+        Real end-to-end: solving the collapse trigger's own switch (via
+        bot._do_lockpick, the exact same real dispatch a player's own
+        hit action already uses) blocks the sealed connection and opens
+        the new shortcut through bot._do_move -- not just inert
+        generator data.
+
+        Real test-fragility fix (2026-09-10, found shipping the 2-pillar
+        carry-puzzle port): this test's own "first seed with ANY
+        collapsing_connections entry" search used to only ever find the
+        single-switch variant, since that was the only mechanic that
+        could produce one. Now that the carry puzzle can too (a real,
+        DIFFERENT mechanic -- 2 pillars, not 1 switch), a seed's first
+        hit could be either one; skip a carry-puzzle hit here (its own
+        real end-to-end coverage lives in the carry-puzzle test) rather
+        than wrongly treating a pillar's own id as if it were a switch.
+        """
         import copy
         from unittest.mock import patch
         for seed in range(60):
@@ -36049,7 +36115,16 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             new_id = f"goblin_warrens_evolved_collapse_move_{seed}"
             dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
             rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
-            seal_room_id = next((rid for rid, r in rooms.items() if r.get("collapsing_connections")), None)
+
+            def _is_single_switch_trigger(trigger_id: str) -> bool:
+                trigger_lockable = next(lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("id") == trigger_id)
+                return len(trigger_lockable.get("requires", [])) == 1
+
+            seal_room_id = next(
+                (rid for rid, r in rooms.items()
+                 if r.get("collapsing_connections") and _is_single_switch_trigger(next(iter(r["collapsing_connections"].values())))),
+                None,
+            )
             if seal_room_id is None:
                 continue
             seal_room = rooms[seal_room_id]

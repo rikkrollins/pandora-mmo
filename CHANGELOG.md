@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.579] — feat: port the 2-pillar carry-and-collapse puzzle to the overworld dungeon generator
+
+Follow-up to v1.27.578's guild audit, applying the same methodology to
+`rules/dungeon_evolve.py` (per Coffee: "do 1 and 2"). A 2026-09-03
+memory claimed warps and the collapse/carry puzzles were never ported
+here — checked directly before touching anything: **warps and the
+single-switch collapse puzzle were already shipped 2026-09-04**, just
+never reflected back into that memory. Only the two-pillar
+carry-and-collapse variant (carry a real object, strike 2 separate
+pillars, one trip at a time — a genuinely different mechanic from the
+single-switch version, per `rules/labyrinth.py`) was actually still
+missing (confirmed via grep for `kind == "pillar"`/`carry_object`
+before writing anything).
+
+Ported it, reusing the exact `collapsing_connections`/`multi_switch_
+gate` plumbing the single-switch version already proved safe —
+including `check_collapse_never_orphans_a_room`'s own real BFS-based
+retry-loop guard, which is generic to any `collapsing_connections`
+entry regardless of which mechanic created it. Mutually exclusive with
+the single-switch variant, matching `rules/labyrinth.py`'s own
+discipline (never both on the same generated dungeon).
+
+Verified for real before shipping: 120 real generations across 3
+source dungeons × 40 seeds each — 0 failed to converge, 0 audit
+failures, the carry puzzle fired 18 times, existing warps fired 43
+times (both real, non-zero fractions, never every time). Loop-back
+connections remain the one genuinely unfixed item from that memory —
+still real, still needs branch-geometry work (jogs/turns mid-branch)
+this pass deliberately didn't attempt, given the real risk of
+reintroducing this file's own hard-won grid-collision fixes for a
+purely cosmetic gain.
+
+Along the way, found and fixed one real pre-existing test-fragility
+issue: `test_evolve_dungeon_collapse_trigger_blocks_then_opens_the_
+shortcut_end_to_end` assumed the first seed producing ANY
+`collapsing_connections` entry was always the single-switch variant —
+no longer true now that the carry puzzle can produce one too. Fixed to
+skip a carry-puzzle hit (its own coverage lives in the new carry test).
+
+1 new statistical test (80 real seeds), 1 pre-existing test fixed, 43
+existing DungeonEvolveTests + 16 related Labyrinth/collapse/carry
+tests re-run clean.
+
 ## [1.27.578] — feat: give 4 guilds real growth past the early game
 
 Real audit (2026-09-10, per Coffee: "do guilds all have content for
