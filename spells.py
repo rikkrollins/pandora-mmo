@@ -9,7 +9,7 @@ from rules.leveling import (
     is_proficient_in_save, LIFE_SUBCLASS_HEAL_BONUS, power_scale_ratio,
     COMBAT_SUBCLASS_NAMES, COMBAT_SUBCLASS_DAMAGE_BONUS_PCT, world_damage_multiplier,
 )
-from guilds import FAITH_CIRCLE_HEAL_BONUS, held_guild_ids
+from guilds import held_guild_ids, guild_growth_tier_bonus
 import hybrid_features
 
 # Which ability a class casts spells with — needed to calculate a real
@@ -414,6 +414,19 @@ SPELLS = {
     "voidcall": {
         "name": "Voidcall", "level": 5, "school": "necromancy",
         "effect": "damage", "damage_dice": "10d8", "save_ability": "constitution", "damage_type": "necrotic",
+    },
+    # One more Arcane Circle exclusive, evolution-gated (2026-09-10,
+    # "fill all gaps" -- the original 2 above dead-ended the moment both
+    # were learned; this opens once the caster has evolved at least
+    # once, a genuine step past Voidcall's previous 10d8 ceiling, same
+    # "not in any CLASS_SPELL_LISTS entry" pattern, gated in guilds.
+    # ARCANE_CIRCLE_EXCLUSIVE_SPELLS/bot._do_learn_guild_spell, never
+    # auto-unlocked. A second, deeper tier is real future scope for the
+    # post-arc-8 content pass (per Coffee: "leave anything after 1
+    # Evolution for later, when we plan the 9-14 chapters"), not built yet.
+    "starless_reckoning": {
+        "name": "Starless Reckoning", "level": 5, "school": "evocation",
+        "effect": "damage", "damage_dice": "12d8", "save_ability": "wisdom", "damage_type": "psychic",
     },
 
     # Elemental scroll expansion (2026-09-08, task #3, per Coffee: "We
@@ -835,7 +848,7 @@ def resolve_heal_spell(spell_id: str, caster: dict, target: dict) -> dict:
     # held_guild_ids) -- a character holding Faith Circle as a SECONDARY
     # (Promotion) guild got zero bonus despite genuinely holding it.
     if "faith_circle" in held_guild_ids(caster):
-        total_healed += FAITH_CIRCLE_HEAL_BONUS
+        total_healed += guild_growth_tier_bonus("faith_circle_heal", caster)
     # Cleric's Life subclass hook (2026-07-25): actually CHOOSING Life
     # (rather than War) over the unconditional Disciple of Life above
     # now means something real -- a further, distinct flat bonus on

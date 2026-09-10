@@ -1067,11 +1067,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         earned SECONDARY guild membership must unlock its quest too, not
         just a primary one -- covered by _meets_quest_guild_requirement
         using held_guild_ids(character), not character["guild"] alone.
+
+        Real stale-test fix (2026-09-10, found chasing this test's own
+        real failure -- unexpectedly None): a_wardens_vigil's own
+        `location` moved from greymoor_downs_sunken_barrow (where this
+        test still checked) to hollow_verge_sealed_cairn at some later
+        point (its trigger monster was also renamed young_cairn_watcher
+        -> cairn_watcher) -- a real, legitimate content move this test
+        never got updated for. The actual guild-requirement logic being
+        tested here was never broken; confirmed directly against the
+        real location before changing anything.
         """
-        make_basic_character(960102, "PromotedWarden", current_location="greymoor_downs_sunken_barrow")
+        make_basic_character(960102, "PromotedWarden", current_location="hollow_verge_sealed_cairn")
         db.update_character(960102, -999, guild="forge_guild", secondary_guilds=["silver_wardens"])
         character = db.get_character(960102, -999)
-        offer = bot._offerable_quest_at_location(character, "greymoor_downs_sunken_barrow")
+        offer = bot._offerable_quest_at_location(character, "hollow_verge_sealed_cairn")
         self.assertIsNotNone(offer)
         self.assertEqual(offer[0], "a_wardens_vigil")
 
@@ -1300,7 +1310,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # membership + bot.py's _do_learn_guild_spell. This test predates
         # that real reachability path, same stale-assumption shape as the
         # 3 tests fixed in 822e728.
-        referenced.update(guilds.ARCANE_CIRCLE_EXCLUSIVE_SPELLS)
+        referenced.update(sid for sid, _min_rebirth in guilds.ARCANE_CIRCLE_EXCLUSIVE_SPELLS)
         # Scroll-only spells (2026-09-09, same stale-assumption shape
         # again -- found via a real, confirmed dev-bridge-adjacent
         # investigation, not just re-run and ignored): a real find/buy/
@@ -1330,6 +1340,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         target = {"name": "Ally", "hp_current": 1, "hp_max": 100}
         result = spells.resolve_heal_spell("cure_wounds", wizard, target)
         self.assertLessEqual(result["healing_done"], 11)  # 1d8+2 max, no bonus
+
+    def test_faith_circle_heal_bonus_scales_with_growth_tier(self):
+        """
+        "Fill all gaps" pass (2026-09-10): the old flat +3 heal bonus
+        never grew past day-one membership -- now a real level/
+        evolution-tiered +3/+5/+8/+12/+15. Mocks spells.guild_growth_
+        tier_bonus directly (both members otherwise identical, level 1,
+        rebirth 0) to isolate this one addend from the SEPARATE, real
+        power_scale_ratio(level, rebirth_count) multiplier every heal
+        already goes through -- varying level/rebirth here would
+        confound both effects together. The tier table's own real
+        level/rebirth thresholds are covered by
+        test_guild_growth_tier_bonus_table_scales_correctly instead.
+        """
+        from unittest.mock import patch
+        target_template = {"name": "Ally", "hp_current": 1, "hp_max": 1000}
+        base_member = {"char_class": "Fighter", "name": "BaseMember", "guild": "faith_circle"}
+        higher_tier_member = {"char_class": "Fighter", "name": "HigherTierMember", "guild": "faith_circle"}
+        with patch("rules.dice.random.randint", return_value=4), \
+             patch("spells.guild_growth_tier_bonus", return_value=3):
+            base_result = spells.resolve_heal_spell("cure_wounds", base_member, dict(target_template))
+        with patch("rules.dice.random.randint", return_value=4), \
+             patch("spells.guild_growth_tier_bonus", return_value=15):
+            higher_tier_result = spells.resolve_heal_spell("cure_wounds", higher_tier_member, dict(target_template))
+        # Non-Cleric (no Disciple of Life) + forced die value 4 + no
+        # power_scale_ratio growth (level 1, rebirth 0, identical for
+        # both): base heal is identical (1d8+2 -> 6) for both, so the
+        # delta isolates the mocked guild bonus itself: 15 - 3 = 12.
+        self.assertEqual(higher_tier_result["healing_done"] - base_result["healing_done"], 12)
 
     # -- Guild membership benefits were data-only; bonus_spell_scroll and
     #    bonus_damage_vs_undead had nothing checking them (v1.10.4) ------
@@ -14128,6 +14167,114 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(gold_after - gold_before, 60)  # 50 base + 20% (10) guild bonus
         self.assertIn("Adventurers' Guild bonus", sink[0])
 
+    # -- "Fill all gaps" pass (2026-09-10, per Coffee): a real audit
+    #    found Forge/Enchanters already had a genuine 4-tier rebirth-
+    #    gated crafting ladder and Silver Wardens already had the
+    #    uncapped echo_trial_tier grind, but Adventurers'/Thieves'/
+    #    Faith Circle/Arcane Circle's own membership benefits were each
+    #    a single flat number that never grew again after joining. A
+    #    first cut gated purely on rebirth_count was revised per
+    #    Coffee's own correction ("do the content for lv40+, 60+, 80+
+    #    and the 100+/1 Evolution") -- pure rebirth-gating would have
+    #    given these 4 guilds nothing new for the entire 1-99 first
+    #    playthrough, since rebirth only happens at MAX_LEVEL. Tiers
+    #    1-3 now land at levels 40/60/80 (arc_5/arc_7/deep-arc_8 entry
+    #    points); tier 4 is "evolved at least once," same real
+    #    milestone Forge/Enchanters' own capstone uses. --------------
+    def test_guild_growth_tier_bonus_table_scales_correctly(self):
+        from guilds import guild_growth_tier_bonus
+        for key, expected in (
+            ("thieves_guild_steal", [3, 5, 8, 12, 15]),
+            ("thieves_guild_lockpick", [3, 5, 8, 12, 15]),
+            ("faith_circle_heal", [3, 5, 8, 12, 15]),
+            ("adventurers_guild_board_quest_gold_pct", [20, 25, 32, 40, 50]),
+            ("arcane_circle_spell_damage_pct", [15, 18, 22, 27, 30]),
+        ):
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 1}), expected[0])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 39}), expected[0])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 40}), expected[1])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 59}), expected[1])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 60}), expected[2])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 79}), expected[2])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 80}), expected[3])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 99}), expected[3])
+            # Evolving overrides the level tiers entirely, even at level
+            # 1 right after a fresh rebirth reset -- the milestone is
+            # "have you ever evolved," not current post-rebirth level.
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 1, "rebirth_count": 1}), expected[4])
+            self.assertEqual(guild_growth_tier_bonus(key, {"level": 80, "rebirth_count": 3}), expected[4])
+            # Missing level/rebirth_count both default safely to tier 0.
+            self.assertEqual(guild_growth_tier_bonus(key, {}), expected[0])
+
+    async def test_arcane_circle_spell_damage_bonus_scales_with_rebirth(self):
+        """
+        "Fill all gaps" pass (2026-09-10): the old flat +15% spell
+        damage bonus never grew past day-one membership. End-to-end
+        through the real _do_cast_spell path (same shape as the
+        existing mastery-tracking fireball tests). Mocks bot.guild_
+        growth_tier_bonus itself (rather than varying level/rebirth on
+        the character) to isolate this one multiplier from the
+        SEPARATE, real power_scale_ratio(level, rebirth_count) scaling
+        every spell already goes through -- varying level/rebirth here
+        would confound both effects together. The tier table's own
+        real level/rebirth thresholds are covered by
+        test_guild_growth_tier_bonus_table_scales_correctly instead.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+
+        async def cast_and_measure(user_id: int, mocked_pct: float) -> int:
+            sessions.end_session(-999)
+            make_basic_character(
+                user_id, f"ArcaneCaster{user_id}", char_class="Wizard", current_location="crossroads_tavern",
+                known_spells=["fireball"], spell_slots_max=1,
+            )
+            db.update_character(user_id, -999, spell_slots_current=1, guild="arcane_circle")
+            character = db.get_character(user_id, -999)
+            character["telegram_user_id"] = user_id
+            enemy_id = -(10_000_000 + user_id)
+            enemy = {"telegram_user_id": enemy_id, "name": "ArcaneDummy", "dexterity": 10, "strength": 10,
+                     "hp_current": 100000, "hp_max": 100000, "conditions": [], "resistances": [], "vulnerabilities": [],
+                     "is_ai": 1, "monster_key": "goblin"}
+            session = sessions.start_session(-999, [character, enemy], {user_id: "party", enemy_id: "enemy"})
+            session.turn_order = [user_id, enemy_id]
+            with patch("bot.narrate_action", return_value="Flames erupt."), \
+                 patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()), \
+                 patch("bot.guild_growth_tier_bonus", return_value=mocked_pct), \
+                 patch("rules.dice.random.randint", return_value=4):
+                await bot._do_cast_spell(FakeUpdate(user_id, "cast fireball", []), "cast fireball")
+            sessions.end_session(-999)
+            return 100000 - enemy["hp_current"]
+
+        base_damage = await cast_and_measure(950980, 15.0)
+        higher_tier_damage = await cast_and_measure(950981, 30.0)
+        self.assertGreater(higher_tier_damage, base_damage)
+        self.assertAlmostEqual(higher_tier_damage / base_damage, 1.30 / 1.15, delta=0.03)
+
+    def test_adventurers_guild_board_quest_bonus_scales_with_growth_tier(self):
+        """End-to-end companion to the base-tier test above: a level-60 member gets the bigger tiered bonus (32%), and an evolved member gets the top tier (50%), not the original flat 20%."""
+        import board_quests as board_quests_module
+        import asyncio
+        location_id = "stonearch_bridge"
+
+        def run_turnin(user_id: int, level: int, rebirth_count: int) -> int:
+            make_basic_character(user_id, f"BountyHunter{user_id}", current_location=location_id)
+            db.update_character(user_id, -999, guild="adventurers_guild", rebirth_count=rebirth_count, level=level)
+            quest = db.create_board_quest(
+                location_id, -999, board_quests_module._day_key(), f"Test Bounty {user_id}", "...", None,
+                "gather_material", "silverleaf_herb", 1, 20, 50,
+            )
+            db.accept_board_quest(quest["board_quest_id"], user_id, -999)
+            db.add_item(user_id, -999, "silverleaf_herb", 1)
+            db.record_board_quest_progress(quest["board_quest_id"], 1)
+            gold_before = db.get_character(user_id, -999)["gold"]
+            update = FakeUpdate(user_id, "", [], chat_id=-999)
+            asyncio.get_event_loop().run_until_complete(bot._check_board_quest_turnin(update, user_id, location_id))
+            return db.get_character(user_id, -999)["gold"] - gold_before
+
+        self.assertEqual(run_turnin(950942, level=60, rebirth_count=0), 66)  # 50 base + 32% (16)
+        self.assertEqual(run_turnin(950943, level=1, rebirth_count=1), 75)  # 50 base + 50% (25), evolved overrides level
+
     def test_non_guild_member_board_quest_turnin_gets_no_bonus(self):
         import board_quests as board_quests_module
         import asyncio
@@ -14926,6 +15073,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         member = db.get_character(960005, -999)
         with patch("bot.narrate_skill_check", return_value="The lock clicks open."):
             await bot._do_lockpick(FakeUpdate(960005, "pick the lock", []), member, dict(lockable), "pick the lock", forced_roll=9)
+        self.assertIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
+
+    async def test_lockpick_thieves_guild_bonus_scales_with_evolution(self):
+        """
+        "Fill all gaps" pass (2026-09-10): the old flat +3 lockpick
+        bonus never grew past day-one membership. End-to-end proof: the
+        SAME forced roll that fails an unevolved member (9 total vs
+        DC 13, only the base +3 available) succeeds once evolved
+        (21 total, the new top-tier +15 bonus tips it over). Uses a
+        synthetic, uniquely-IDed lockable (same pattern as the key-item
+        tests above) so it can't collide with bot._UNLOCKED state any
+        other test in this file has already touched.
+        """
+        from unittest.mock import patch
+        ability_scores = {"strength": 10, "dexterity": 12, "constitution": 10,
+                           "intelligence": 10, "wisdom": 10, "charisma": 10}
+        lockable = {"id": "test_rebirth_lockpick_door", "kind": "door", "name": "a stubborn iron door"}
+
+        base_member = make_basic_character(960007, "BaseRebirthPicker", current_location="crossroads_tavern", ability_scores=ability_scores)
+        db.update_character(960007, -999, guild="thieves_guild", rebirth_count=0)
+        base_member = db.get_character(960007, -999)
+        with patch("bot.narrate_skill_check", return_value="The pick slips."):
+            await bot._do_lockpick(FakeUpdate(960007, "pick the lock", []), base_member, dict(lockable), "pick the lock", forced_roll=5)
+        self.assertNotIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
+
+        reborn_member = make_basic_character(960008, "RebornPicker", current_location="crossroads_tavern", ability_scores=ability_scores)
+        db.update_character(960008, -999, guild="thieves_guild", rebirth_count=2)
+        reborn_member = db.get_character(960008, -999)
+        with patch("bot.narrate_skill_check", return_value="The lock clicks open."):
+            await bot._do_lockpick(FakeUpdate(960008, "pick the lock", []), reborn_member, dict(lockable), "pick the lock", forced_roll=5)
         self.assertIn(lockable["id"], bot._UNLOCKED.get(-999, set()))
 
     async def test_lockpick_thieves_guild_bonus_applies_via_a_secondary_promotion_guild(self):
@@ -32437,6 +32614,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             DummyContext(), "adventurers_guild",
         )
         self.assertTrue(any("Lay of the Land" in s for s in sink), sink)
+
+    async def test_arcane_circle_new_tier_spells_are_rebirth_gated(self):
+        """
+        "Fill all gaps" pass (2026-09-10): the original 2 exclusive
+        spells dead-ended the moment both were learned ("you already
+        know every secret the Circle has to teach") -- a real member
+        who's learned both, but hasn't rebirthed, now gets an honest
+        answer naming what's next and what it takes, instead of the
+        same generic line that used to be literally true forever.
+        """
+        user_id = 700320
+        make_basic_character(user_id, "SecretSeeker", char_class="Wizard")
+        db.update_character(
+            user_id, -999, guild="arcane_circle", known_spells=["starfall_lance", "voidcall"], rebirth_count=0, level=20,
+        )
+        sink = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "teach me a secret", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+            DummyContext(), "arcane_circle",
+        )
+        self.assertTrue(any("Starless Reckoning" in s and "rebirth #1" in s for s in sink), sink)
+
+        db.update_character(user_id, -999, rebirth_count=1)
+        sink2 = []
+        await bot.guild_topic_handler(
+            FakeUpdate(user_id, "teach me starless reckoning", sink2, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+            DummyContext(), "arcane_circle",
+        )
+        self.assertTrue(any("Starless Reckoning" in s for s in sink2), sink2)
+        self.assertIn("starless_reckoning", db.get_character(user_id, -999)["known_spells"])
 
     async def test_secondary_arcane_circle_member_can_learn_a_guild_spell(self):
         """_do_learn_guild_spell had the same primary-only bug, reachable only from guild_topic_handler."""

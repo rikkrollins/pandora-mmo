@@ -95,8 +95,7 @@ from ai.text_cleanup import to_speakable_text
 from ai import tts_piper, stt_groq
 from guilds import (
     GUILDS, eligible_for_guild, GUILD_QUESTS,
-    ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT, THIEVES_GUILD_STEAL_BONUS, ARCANE_CIRCLE_EXCLUSIVE_SPELLS,
-    ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT, THIEVES_GUILD_LOCKPICK_BONUS,
+    ARCANE_CIRCLE_EXCLUSIVE_SPELLS, guild_growth_tier_bonus,
     held_guild_ids, guild_title, GUILD_STAT_BONUS_LEVELS,
     GUILD_PERMANENT_PROFESSION, GUILD_PERMANENT_SCALAR_PROFICIENCY, GUILD_PROMOTION_PCT_BONUS,
     permanent_stat_for,
@@ -14167,7 +14166,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     # bug (2026-08-13, synergy pass): checked primary guild only --
     # held_guild_ids also covers a Promotion-earned secondary guild.
     if "thieves_guild" in held_guild_ids(character):
-        bonus += THIEVES_GUILD_LOCKPICK_BONUS
+        bonus += guild_growth_tier_bonus("thieves_guild_lockpick", character)
     bonus += _lockpick_proficiency_bonus(character)
     bonus += _effective_ability_check_bonus(character, "dexterity")
     result["total"] += bonus
@@ -17475,7 +17474,9 @@ async def _check_board_quest_turnin(update_like, telegram_user_id: int, location
         # only -- held_guild_ids also covers a Promotion-earned secondary.
         reward_gold = board_quest["reward_gold"]
         guild_bonus_gold = (
-            round(reward_gold * ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT / 100)
+            round(reward_gold * guild_growth_tier_bonus(
+                "adventurers_guild_board_quest_gold_pct", character,
+            ) / 100)
             if "adventurers_guild" in held_guild_ids(character) else 0
         )
         total_gold = reward_gold + guild_bonus_gold
@@ -28052,10 +28053,27 @@ async def _do_learn_guild_spell(update: Update, text: str) -> None:
         )
         return
     known = character.get("known_spells", [])
-    candidates = [sid for sid in ARCANE_CIRCLE_EXCLUSIVE_SPELLS if sid not in known]
-    if not candidates:
+    rebirth_count = character.get("rebirth_count", 0)
+    # Real, rebirth-gated tier list now (2026-09-10, "fill all gaps") --
+    # the original 2 spells dead-ended the moment both were known; 2
+    # more, stronger secrets now open at rebirth #1 and #2. A player
+    # who's learned everything CURRENTLY open still deserves a real
+    # answer naming what's next and what it takes, not the same generic
+    # "you know everything" line that used to be literally true.
+    unlearned = [(sid, tier) for sid, tier in ARCANE_CIRCLE_EXCLUSIVE_SPELLS if sid not in known]
+    if not unlearned:
         await update.effective_chat.send_message(
             "You already know every secret the Circle has to teach.",
+            message_thread_id=reply_thread_id,
+        )
+        return
+    candidates = [sid for sid, tier in unlearned if rebirth_count >= tier]
+    if not candidates:
+        next_sid, next_tier = min(unlearned, key=lambda pair: pair[1])
+        next_name = spells_module.get_spell(next_sid)["name"]
+        await update.effective_chat.send_message(
+            f"You've learned every secret currently open to you — **{next_name}** demands rebirth "
+            f"#{next_tier} or higher, and you're not there yet.",
             message_thread_id=reply_thread_id,
         )
         return
@@ -30962,7 +30980,7 @@ async def _do_steal(update: Update, text: str, forced_roll: int | None = None) -
     # synergy pass): checked primary guild only -- held_guild_ids also
     # covers a Promotion-earned secondary guild.
     if "thieves_guild" in held_guild_ids(character):
-        bonus += THIEVES_GUILD_STEAL_BONUS
+        bonus += guild_growth_tier_bonus("thieves_guild_steal", character)
     # Rogue's Thief subclass hook (2026-07-25): the same real +3, this
     # time for actually having chosen the archetype named for exactly
     # this -- stacks with the guild bonus above (different sources,
@@ -31095,7 +31113,7 @@ async def _do_steal_from_enemy(
     # Real live bug (2026-08-13, synergy pass): checked primary guild
     # only -- held_guild_ids also covers a Promotion-earned secondary.
     if "thieves_guild" in held_guild_ids(character):
-        bonus += THIEVES_GUILD_STEAL_BONUS
+        bonus += guild_growth_tier_bonus("thieves_guild_steal", character)
     if character.get("subclass") == "Thief":
         bonus += THIEF_SUBCLASS_STEAL_BONUS
     bonus += _steal_proficiency_bonus(character)
@@ -32331,7 +32349,10 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 # also covers a Promotion-earned secondary guild.
                 if "arcane_circle" in held_guild_ids(character):
                     pre_arcane_bonus_damage = result["damage_dealt"]
-                    result["damage_dealt"] = int(result["damage_dealt"] * (1 + ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT / 100))
+                    arcane_circle_bonus_pct = guild_growth_tier_bonus(
+                        "arcane_circle_spell_damage_pct", character,
+                    )
+                    result["damage_dealt"] = int(result["damage_dealt"] * (1 + arcane_circle_bonus_pct / 100))
                     # Synergy Phase 10 resists_arcane_circle (2026-08-14, The
                     # Hollow Bell -- "it rang once... the sound never finished
                     # arriving," a real spell-side counterpart to v1.27.214's

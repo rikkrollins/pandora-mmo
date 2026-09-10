@@ -2,6 +2,53 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.578] — feat: give 4 guilds real growth past the early game
+
+Real audit (2026-09-10, per Coffee: "do guilds all have content for
+lv20+?"): Forge/Enchanters already had a genuine 4-tier rebirth-gated
+crafting ladder and Silver Wardens already had the uncapped
+`echo_trial_tier` grind, but Adventurers'/Thieves'/Faith Circle/Arcane
+Circle's own membership benefits were each a single flat number that
+never grew again after the day you joined — every guild's curriculum
+finishes by level ~8, so these 4 guilds had genuinely nothing left to
+offer for the rest of the game.
+
+First cut gated the fix purely on `rebirth_count` (0/1/2/3, matching
+the crafting ladder) — Coffee caught the real flaw: rebirth only
+happens at `MAX_LEVEL` (99), so that design would have given these 4
+guilds nothing new for the ENTIRE 1-99 first playthrough. Revised per
+his own framing ("do the content for lv40+, 60+, 80+ and the 100+/1
+Evolution... leave anything after 1 Evolution for later, when we plan
+the 9-14 chapters"):
+
+- New `guilds.guild_growth_tier_bonus(key, character)`: tier 0 is each
+  guild's own original value; tiers 1-3 unlock at level 40/60/80 (the
+  real arc_5/arc_7/deep-arc_8 entry points); tier 4 unlocks the moment
+  the character has evolved at least once, overriding the level tiers
+  (a freshly-reborn character's level resets, but not that milestone).
+- **Thieves' Guild**: steal/lockpick bonus 3 → 5 → 8 → 12 → 15.
+- **Faith Circle**: heal bonus 3 → 5 → 8 → 12 → 15.
+- **Adventurers' Guild**: board-quest gold bonus 20% → 25% → 32% →
+  40% → 50%.
+- **Arcane Circle**: spell damage bonus 15% → 18% → 22% → 27% → 30%,
+  plus one new exclusive spell, Starless Reckoning (12d8 psychic,
+  stronger than Voidcall's previous 10d8 ceiling), unlocking at the
+  same "evolved once" milestone. `_do_learn_guild_spell` no longer
+  says the flatly-false "you already know every secret" once a member
+  has learned both original spells but hasn't evolved yet — it now
+  names what's next and what it takes.
+
+Along the way, found and fixed one real pre-existing stale test:
+`test_guild_quest_offered_via_a_secondary_promotion_guild` asserted
+against `a_wardens_vigil`'s OLD location (`greymoor_downs_
+sunken_barrow`) — the quest legitimately moved to `hollow_verge_
+sealed_cairn` at some later point and this test was never updated. The
+actual guild-requirement logic being tested was never broken.
+
+8 new regression tests (the tier table itself, plus real end-to-end
+proof for each of the 4 guilds' scaling and the new spell's gating),
+78 existing guild/steal/lockpick/spell tests re-run clean.
+
 ## [1.27.577] — fix: stale flat damage-ceiling test, real content had moved past it
 
 `test_chapters_1_through_8_level_bands_and_non_boss_damage_floor`

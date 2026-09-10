@@ -265,17 +265,54 @@ GUILD_QUESTS = {
 # spells.py's resolve_heal_spell (Faith Circle). Silver Wardens' and
 # Adventurers' Guild's existing benefits (bonus_damage_vs_undead,
 # shop_discount) were already real before this pass.
-ARCANE_CIRCLE_SPELL_DAMAGE_BONUS_PCT = 15
-THIEVES_GUILD_STEAL_BONUS = 3
-FAITH_CIRCLE_HEAL_BONUS = 3
 FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT = 10
-ADVENTURERS_GUILD_BOARD_QUEST_GOLD_BONUS_PCT = 20
-# 2026-08-11, per Coffee: "do locked treasures need keys... if not
-# let[s] work it in for the thieves guild" -- lockpicking (bot._do_
-# lockpick) already exists (a real DC-13 dexterity check, no keys
-# needed) but had zero guild tie-in, unlike stealing just above. Same
-# real +3 shape, same real trade-secrets flavor.
-THIEVES_GUILD_LOCKPICK_BONUS = 3
+
+# Level/evolution-tiered scaling (2026-09-10, per Coffee: "fill all
+# gaps" -- a real audit found Forge/Enchanters already had a genuine
+# 4-tier rebirth-gated crafting ladder and Silver Wardens already had
+# the uncapped echo_trial_tier grind, but Adventurers'/Thieves'/Faith
+# Circle/Arcane Circle's own membership benefits were each a single
+# flat number that never grew again after the day you joined). First
+# cut gated purely on rebirth_count (0/1/2/3, matching the crafting
+# ladder) -- Coffee caught the real flaw: rebirth only happens at
+# MAX_LEVEL (99), so that design gave these 4 guilds literally nothing
+# new for the entire 1-99 first playthrough. Revised per his own
+# framing ("do the content for lv40+, 60+, 80+ and the 100+/1
+# Evolution... leave anything after 1 evolution for later") -- tiers 1-3
+# now land at levels 40/60/80 (arc_5/arc_7/deep-arc_8 entry points),
+# matching real content players actually reach during leveling; tier 4
+# is the same real "evolved at least once" milestone Forge/Enchanters'
+# own capstone tier uses, and OVERRIDES the level tiers once true (a
+# freshly-reborn character's level resets, but their evolved status
+# doesn't). Tier 0 is each guild's own original, unchanged value, so
+# nothing gets weaker for an already-live character.
+GUILD_GROWTH_TIER_BONUSES = {
+    "thieves_guild_steal": [3, 5, 8, 12, 15],
+    "thieves_guild_lockpick": [3, 5, 8, 12, 15],
+    "faith_circle_heal": [3, 5, 8, 12, 15],
+    "adventurers_guild_board_quest_gold_pct": [20, 25, 32, 40, 50],
+    "arcane_circle_spell_damage_pct": [15, 18, 22, 27, 30],
+}
+
+GUILD_GROWTH_TIER_LEVELS = (40, 60, 80)
+
+
+def guild_growth_tier_bonus(key: str, character: dict) -> float:
+    """
+    Real value for one of GUILD_GROWTH_TIER_BONUSES' scaling guild
+    benefits at this character's own level/evolution progress -- tier 0
+    is the original flat value; tiers 1-3 unlock at level 40/60/80;
+    tier 4 (the highest) unlocks the moment the character has evolved
+    at least once (rebirth_count >= 1), regardless of their post-
+    rebirth level, since evolving resets level but not that milestone.
+    """
+    tiers = GUILD_GROWTH_TIER_BONUSES[key]
+    if character.get("rebirth_count", 0) >= 1:
+        return tiers[4]
+    level = character.get("level", 1)
+    tier_index = sum(1 for threshold in GUILD_GROWTH_TIER_LEVELS if level >= threshold)
+    return tiers[tier_index]
+
 
 # Arcane Circle exclusive spells (2026-07-25, per Coffee: "let them
 # learn new spells not otherwise available unless in the guilds") --
@@ -283,7 +320,22 @@ THIEVES_GUILD_LOCKPICK_BONUS = 3
 # from any class's normal CLASS_SPELL_LISTS entry so they can never
 # auto-unlock the ordinary way. bot.py's _do_learn_guild_spell is the
 # only path to ever know one, gated on real Arcane Circle membership.
-ARCANE_CIRCLE_EXCLUSIVE_SPELLS = ["starfall_lance", "voidcall"]
+#
+# Extended with one real evolution-gated secret (2026-09-10, "fill all
+# gaps"): the original 2 spells were a one-time unlock that dead-ended
+# ("you already know every secret the Circle has to teach") the moment
+# both were learned. Per Coffee's own scoping ("leave anything after 1
+# Evolution for later, when we plan the 9-14 chapters"), only ONE more
+# opens for now, at the same real "evolved at least once" milestone
+# guild_growth_tier_bonus's own top tier uses -- a second, even deeper
+# tier is real future scope for the post-arc-8 content pass, not built
+# yet. Each entry is (spell_id, min_rebirth); bot._do_learn_guild_spell
+# filters by both "not already known" and "rebirth requirement met."
+ARCANE_CIRCLE_EXCLUSIVE_SPELLS = [
+    ("starfall_lance", 0),
+    ("voidcall", 0),
+    ("starless_reckoning", 1),
+]
 
 def get_guild_quest(guild_id: str) -> dict | None:
     return GUILD_QUESTS.get(guild_id)
