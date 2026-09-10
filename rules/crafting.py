@@ -151,6 +151,42 @@ RECIPES = {
         "result_item": "greater_scroll_radiant", "result_qty": 1,
         "ability": "intelligence", "dc": 24, "profession": "alchemy", "min_level": 20,
     },
+    # Alchemy's own rebirth-gated capstone ladder (2026-09-10, per
+    # Coffee: give Alchemy the same real endgame growth the 4 guilds got
+    # in v1.27.578 -- Alchemy's real gap, per that audit, was capping at
+    # min_level 20 with no rebirth tier at all, unlike Blacksmithing's
+    # forge_guild+rebirth journeyman/master/grandmaster/godsforged ladder
+    # just below (in ADVANCED_RECIPES). Same requires_guild/min_rebirth
+    # gate shape, on the Arcane Circle (alchemy's own guild, see
+    # guilds.GUILD_PERMANENT_PROFESSION) instead of the Forge Guild, DCs
+    # pushed past the existing greater_scroll_* ceiling (24) the same way
+    # each Forge tier pushes past chain_mail's. See items.py's own entries
+    # for why these are new RECIPES (fixed-effect consumables), not
+    # ADVANCED_RECIPES (generated gear).
+    "tonic_of_ascension": {
+        "materials": {"glimmerdeep_moss": 3, "moonpetal": 3, "silverleaf_herb": 2},
+        "result_item": "tonic_of_ascension", "result_qty": 1,
+        "ability": "intelligence", "dc": 26, "profession": "alchemy",
+        "requires_guild": "arcane_circle",
+    },
+    "grand_tonic_of_ascension": {
+        "materials": {"glimmerdeep_moss": 5, "moonpetal": 5, "silverleaf_herb": 3},
+        "result_item": "grand_tonic_of_ascension", "result_qty": 1,
+        "ability": "intelligence", "dc": 29, "profession": "alchemy",
+        "requires_guild": "arcane_circle", "min_rebirth": 1,
+    },
+    "sublime_tonic_of_ascension": {
+        "materials": {"glimmerdeep_moss": 7, "moonpetal": 7, "silverleaf_herb": 4},
+        "result_item": "sublime_tonic_of_ascension", "result_qty": 1,
+        "ability": "intelligence", "dc": 32, "profession": "alchemy",
+        "requires_guild": "arcane_circle", "min_rebirth": 2,
+    },
+    "godsbrew_of_ascension": {
+        "materials": {"glimmerdeep_moss": 10, "moonpetal": 10, "silverleaf_herb": 6, "godshard": 1},
+        "result_item": "godsbrew_of_ascension", "result_qty": 1,
+        "ability": "intelligence", "dc": 35, "profession": "alchemy",
+        "requires_guild": "arcane_circle", "min_rebirth": 3,
+    },
     # Cooking (2026-07-15): raw_fish was gatherable but no recipe used
     # it at all -- uses wood too (cooking over a fire), producing an
     # actually usable food item now that _do_use_item exists.
@@ -168,6 +204,27 @@ RECIPES = {
         "materials": {"raw_fish": 2},
         "result_item": "rations", "result_qty": 1,
         "ability": "wisdom", "dc": 8, "profession": "cooking",
+    },
+    # Cooking's own scaling ladder (2026-09-10) -- see items.py's
+    # hearty_stew/travelers_feast/banquet_of_the_reborn for the full
+    # rationale. Same magnitude jump per tier as Alchemy's own capstone
+    # ladder just above (roughly +3 DC per step, ending gated on
+    # cooking's real home guild + a real rebirth).
+    "hearty_stew": {
+        "materials": {"raw_fish": 2, "wood": 1, "silverleaf_herb": 1},
+        "result_item": "hearty_stew", "result_qty": 1,
+        "ability": "wisdom", "dc": 12, "profession": "cooking",
+    },
+    "travelers_feast": {
+        "materials": {"raw_fish": 4, "wood": 2, "silverleaf_herb": 2},
+        "result_item": "travelers_feast", "result_qty": 1,
+        "ability": "wisdom", "dc": 18, "profession": "cooking", "min_level": 10,
+    },
+    "banquet_of_the_reborn": {
+        "materials": {"raw_fish": 6, "wood": 3, "silverleaf_herb": 3, "moonpetal": 1},
+        "result_item": "banquet_of_the_reborn", "result_qty": 1,
+        "ability": "wisdom", "dc": 24, "profession": "cooking",
+        "requires_guild": "adventurers_guild", "min_rebirth": 1,
     },
     # Blacksmithing (2026-07-24): the first recipe that actually forges
     # a real weapon rather than a consumable, giving iron_ore (already

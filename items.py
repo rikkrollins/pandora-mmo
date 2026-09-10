@@ -215,6 +215,53 @@ ITEMS = {
         "note": "Fully restores every spell slot in a single swallow.",
         "description": "Fully restores every spell slot in a single swallow. The Arcane Circle brews vanishingly little of it, and never explains why.",
     },
+    # Alchemy's own rebirth-gated capstone ladder (2026-09-10, per Coffee:
+    # give the profession the same real "flatlines early -> real endgame
+    # growth" fix the 4 guilds already got in v1.27.578 -- Alchemy's own
+    # real gap, per that audit, was capping at min_level 20 with no
+    # rebirth tier at all, unlike Blacksmithing's forge_guild+rebirth
+    # journeyman/master/grandmaster/godsforged ladder (rules/crafting.py's
+    # ADVANCED_RECIPES). That ladder produces GENERATED gear via
+    # rules/item_generator.py, which doesn't fit a fixed-effect
+    # consumable -- so this ladder is real RECIPES entries instead, same
+    # shape recipe_requirement_gate already supports for either (it takes
+    # a plain recipe dict, not an ADVANCED_RECIPES-specific one).
+    # Deliberately a NEW effect (permanent_stat_increase) rather than
+    # reusing elixir_of_the_arcane_circle's restore_all=True -- that
+    # elixir is intentionally kept uncraftable (see scroll_cure_wounds's
+    # RECIPES comment for the "left as a real find only" convention this
+    # already follows), so a craftable ladder needed its own real payoff
+    # instead of a backdoor to that one. permanent_stat_guild (not a
+    # hardcoded ability score) reuses guilds.permanent_stat_for at
+    # use-time -- the exact per-class lookup the 2026-08-14 guild audit
+    # added after catching Sorcerer/Warlock wrongly granted Wizard's
+    # Intelligence -- so this correctly grants Charisma to a Sorcerer/
+    # Warlock and Intelligence to a Wizard, never one flat stat for all
+    # three Arcane Circle classes.
+    "tonic_of_ascension": {
+        "name": "Tonic of Ascension", "type": "consumable", "rarity": "epic",
+        "price": 900, "weight": 0.5, "effect": "permanent_stat_increase",
+        "permanent_stat_guild": "arcane_circle", "permanent_stat_amount": 1,
+        "description": "A single, real, permanent point of arcane mastery, brewed and bound into the body. The Arcane Circle guards this recipe closely.",
+    },
+    "grand_tonic_of_ascension": {
+        "name": "Grand Tonic of Ascension", "type": "consumable", "rarity": "legendary",
+        "price": 2200, "weight": 0.5, "effect": "permanent_stat_increase",
+        "permanent_stat_guild": "arcane_circle", "permanent_stat_amount": 1,
+        "description": "A stronger brew of the same rite, reserved for a caster who has already died and been reborn at least once.",
+    },
+    "sublime_tonic_of_ascension": {
+        "name": "Sublime Tonic of Ascension", "type": "consumable", "rarity": "legendary",
+        "price": 4500, "weight": 0.5, "effect": "permanent_stat_increase",
+        "permanent_stat_guild": "arcane_circle", "permanent_stat_amount": 1,
+        "description": "Twice-reborn mastery, distilled. Vanishingly few Arcane Circle members ever brew this one for themselves.",
+    },
+    "godsbrew_of_ascension": {
+        "name": "Godsbrew of Ascension", "type": "consumable", "rarity": "mythic",
+        "price": 9000, "weight": 0.5, "effect": "permanent_stat_increase",
+        "permanent_stat_guild": "arcane_circle", "permanent_stat_amount": 2,
+        "description": "The last real rite the Arcane Circle has left to teach — a shard of something that shouldn't still exist, folded into the brew. Whatever drinks this stops being entirely human.",
+    },
     # Per Coffee (2026-07-24): "add items like tents and cabins and
     # houses to reviving and healing characters to full" -- a stronger
     # alternative to Revivify (which only restores 1 HP): these fully
@@ -245,6 +292,34 @@ ITEMS = {
         "name": "Rations (1 day)", "type": "consumable", "rarity": "common",
         "price": 2, "weight": 2, "effect": "none",
         "description": "Hardtack, dried meat, a little salt. Filling in the way that word technically means.",
+    },
+    # Cooking's own real scaling ladder (2026-09-10, per Coffee: the same
+    # "flatlines early" audit that found Alchemy's rebirth gap above also
+    # found Cooking's -- only cooked_fish/rations existed (both DC <=10,
+    # neither heals), nothing to ever grind toward. Reuses the fully-wired
+    # generic "heal"/"heal_dice" effect (zero new bot.py code needed,
+    # unlike Alchemy's new permanent_stat_increase) at the same flat-HP
+    # magnitudes healing_potion/greater_healing_potion/
+    # supreme_healing_potion already established for HP scaling into the
+    # thousands with rebirths (100/1,000/10,000) -- own cooking-flavored
+    # items, not the same ids, so the two professions stay distinct.
+    # banquet_of_the_reborn's gate mirrors Blacksmithing/Alchemy's own
+    # ladder shape, on cooking's real home guild (guilds.
+    # GUILD_PERMANENT_PROFESSION's adventurers_guild: ["fishing", "cooking"]).
+    "hearty_stew": {
+        "name": "Hearty Stew", "type": "consumable", "rarity": "common",
+        "price": 20, "weight": 1, "effect": "heal", "heal_dice": "1d1+99",
+        "description": "Heals 1d1+99 HP (100 flat). Whatever's in the pot, it's enough to put real color back in your face.",
+    },
+    "travelers_feast": {
+        "name": "Traveler's Feast", "type": "consumable", "rarity": "uncommon",
+        "price": 90, "weight": 2, "effect": "heal", "heal_dice": "1d1+999",
+        "description": "Heals 1d1+999 HP (1,000 flat). A real spread, cooked properly over a real fire — worth the extra time it takes.",
+    },
+    "banquet_of_the_reborn": {
+        "name": "Banquet of the Reborn", "type": "consumable", "rarity": "rare",
+        "price": 400, "weight": 3, "effect": "heal", "heal_dice": "1d1+9999",
+        "description": "Heals 1d1+9999 HP (10,000 flat). Cooked the way the Adventurers' Guild teaches only its own who've already died once and come back.",
     },
     "torch": {"name": "Torch", "type": "consumable", "rarity": "common", "price": 1, "weight": 1, "effect": "light", "description": "Pitch-wrapped wood, ready to catch. Burns longer than it has any right to."},
     "ale": {

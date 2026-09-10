@@ -29799,6 +29799,26 @@ async def _do_use_item(update: Update, text: str) -> None:
             f"{restored} spell slot{'s' if restored != 1 else ''} ({new_slots}/{slots_max})."
         )
 
+    elif effect == "permanent_stat_increase":
+        # Alchemy's rebirth-gated capstone ladder (2026-09-10, see
+        # items.py's tonic_of_ascension/etc. and rules/crafting.py's
+        # matching RECIPES entries). Reuses guilds.permanent_stat_for
+        # (item's own permanent_stat_guild, arcane_circle for all 4
+        # tonics) instead of a hardcoded ability score, same per-class
+        # Wizard=Intelligence/Sorcerer+Warlock=Charisma resolution the
+        # 2026-08-14 guild audit already fixed for guild-level growth --
+        # a real, permanent character stat change, so it always targets
+        # the drinker (self), never a party target, and applies straight
+        # to the DB the same way db.add_xp's own guild-growth block does.
+        stat = permanent_stat_for(item["permanent_stat_guild"], character)
+        amount = item.get("permanent_stat_amount", 1)
+        new_value = character.get(stat, 10) + amount
+        db.update_character_by_id(character["character_id"], **{stat: new_value})
+        message = (
+            f"🧪 **{character['name']}** drinks the {item['name']} — a real, permanent surge of power. "
+            f"**{stat.capitalize()}** rises by {amount} (now {new_value})."
+        )
+
     elif effect == "cure_poison":
         cured = False
         if session is not None:

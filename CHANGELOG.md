@@ -2,6 +2,57 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.580] — feat: give Alchemy and Cooking real scaling ladders past the early game
+
+Follow-up to v1.27.579's 3-way system audit, which found Alchemy and
+Cooking both had the same "flatlines early" shape the 4 guilds got
+fixed in v1.27.578. Alchemy: real content up to `min_level: 20`/DC 24,
+but no rebirth tier at all — unlike Blacksmithing's Forge Guild ladder
+(journeyman/master/grandmaster/godsforged, gated on
+`requires_guild`+`min_rebirth`). Cooking: only `cooked_fish`/`rations`
+existed (DC 8/10), neither healing anything — nothing to ever grind
+toward.
+
+Four new craftable tiers (`rules/crafting.py` RECIPES + `items.py`),
+same guild+rebirth gate shape as Blacksmithing's ladder but on the
+Arcane Circle (Alchemy's own guild): Tonic of Ascension (guild only,
+DC 26) → Grand (rebirth 1, DC 29) → Sublime (rebirth 2, DC 32) →
+Godsbrew (rebirth 3 + a real Godshard material, DC 35, grants +2
+instead of +1). Deliberately new RECIPES entries, not ADVANCED_RECIPES
+— that system generates procedural gear, the wrong shape for a
+fixed-effect consumable — and deliberately a NEW effect
+(`permanent_stat_increase`) rather than reusing
+`elixir_of_the_arcane_circle`'s restore-all effect, which stays
+intentionally uncraftable (find-only, unchanged).
+
+Each tonic grants a real, permanent +1 (+2 for Godsbrew) to the
+drinker's own casting stat, resolved via `guilds.permanent_stat_for`
+rather than a hardcoded ability score — the same per-class Wizard=
+Intelligence/Sorcerer+Warlock=Charisma lookup the 2026-08-14 guild
+audit added, so a Sorcerer correctly gains Charisma and not Wizard's
+Intelligence. Verified end-to-end through the real handlers
+(`bot._do_craft`, `bot._do_use_item`) — gate rejections, a full craft,
+and drinking one to confirm the exact per-class stat and DB update —
+plus fixed one real stale test in the process
+(`test_spell_tonic_recipes_are_harder_than_the_previous_dc_ceiling`,
+which hardcoded "no recipe outside spell tonics exceeds DC 18" and
+needed the same "exclude by real gate trait" fix its own 2026-09-09
+history already used once for the min_level-gated Greater scrolls,
+extended to also exclude `requires_guild`/`min_rebirth`).
+
+Cooking gets its own real 3-tier ladder — Hearty Stew (ungated) →
+Traveler's Feast (level 10) → Banquet of the Reborn (Adventurers'
+Guild + rebirth 1) — reusing the already fully-wired generic
+`heal`/`heal_dice` effect (zero new bot.py code) at the same flat-HP
+magnitudes `healing_potion`/`greater_healing_potion`/
+`supreme_healing_potion` already established for HP scaling into the
+thousands with rebirths (100/1,000/10,000 flat) — its own
+cooking-flavored items, not the same ids, so the two professions stay
+distinct. Verified end-to-end the same way (gate rejections, a real
+craft, and eating one to confirm the exact flat heal amount).
+
+The overworld loop-back gap is still open, tracked separately.
+
 ## [1.27.579] — feat: port the 2-pillar carry-and-collapse puzzle to the overworld dungeon generator
 
 Follow-up to v1.27.578's guild audit, applying the same methodology to

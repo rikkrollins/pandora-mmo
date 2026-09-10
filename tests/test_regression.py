@@ -3312,9 +3312,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # that makes a recipe belong to this later, harder-gated
         # generation) rather than hardcoding 9 more literal ids keeps this
         # from going stale the same way a third time.
+        #
+        # Extended again (2026-09-10, same stale-test shape -- 35 != 18):
+        # v1.27.580's Alchemy rebirth-gated ladder (tonic_of_ascension and
+        # friends) added recipes even harder than the Greater scrolls,
+        # gated by requires_guild/min_rebirth rather than min_level --
+        # same "exclude by real gate trait" fix, extended to cover those
+        # two fields too instead of a 4th hardcoded id list.
         prior_ceiling = max(
             r["dc"] for rid, r in RECIPES.items()
-            if rid not in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic") and not r.get("min_level")
+            if rid not in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic")
+            and not r.get("min_level") and not r.get("requires_guild") and not r.get("min_rebirth")
         )
         self.assertEqual(prior_ceiling, 18)
         for recipe_id in ("spell_tonic", "greater_spell_tonic", "supreme_spell_tonic"):
@@ -14021,6 +14029,164 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_craft(update, craft_text)
         updated = db.get_character(950946, -999)
         self.assertGreater(updated["inventory"].get("greater_scroll_fire", 0), 0)
+
+    def test_alchemy_ascension_ladder_requires_arcane_circle_and_successive_rebirths(self):
+        """
+        Real feature (2026-09-10): Alchemy's own rebirth-gated capstone
+        ladder (see items.py's tonic_of_ascension and friends), giving
+        the profession the same real endgame growth the 4 guilds got in
+        v1.27.578 -- previously Alchemy capped at min_level 20 with no
+        rebirth tier at all, unlike Blacksmithing's forge_guild ladder.
+        """
+        from rules.crafting import recipe_requirement_gate, RECIPES
+        make_basic_character(950990, "GateTesterAlchemy", char_class="Wizard", current_location="crossroads_tavern")
+        character = db.get_character(950990, -999)
+
+        no_guild = recipe_requirement_gate(character, RECIPES["tonic_of_ascension"])
+        self.assertIsNotNone(no_guild)
+        self.assertIn("Arcane Circle", no_guild)
+
+        db.update_character(950990, -999, guild="arcane_circle")
+        character = db.get_character(950990, -999)
+        self.assertIsNone(recipe_requirement_gate(character, RECIPES["tonic_of_ascension"]))
+
+        wrong_rebirth = recipe_requirement_gate(character, RECIPES["grand_tonic_of_ascension"])
+        self.assertIsNotNone(wrong_rebirth)
+        self.assertIn("rebirth", wrong_rebirth.lower())
+
+        db.update_character(950990, -999, rebirth_count=3)
+        character = db.get_character(950990, -999)
+        for recipe_id in ["tonic_of_ascension", "grand_tonic_of_ascension",
+                           "sublime_tonic_of_ascension", "godsbrew_of_ascension"]:
+            self.assertIsNone(recipe_requirement_gate(character, RECIPES[recipe_id]), recipe_id)
+
+    async def test_tonic_of_ascension_is_actually_craftable_by_a_qualified_arcane_circle_member(self):
+        """End-to-end: bot._do_craft actually produces the real item once guild-gated and materials are held."""
+        make_basic_character(950991, "QualifiedAlchemist", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(950991, -999, guild="arcane_circle")
+        db.add_item(950991, -999, "glimmerdeep_moss", 3)
+        db.add_item(950991, -999, "moonpetal", 3)
+        db.add_item(950991, -999, "silverleaf_herb", 2)
+        from unittest.mock import patch
+        craft_text = "craft a Tonic of Ascension"
+        update = FakeUpdate(950991, craft_text, [])
+        with patch("bot.narrate_skill_check", return_value="You brew it carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_craft(update, craft_text)
+        updated = db.get_character(950991, -999)
+        self.assertGreater(updated["inventory"].get("tonic_of_ascension", 0), 0)
+
+    async def test_drinking_tonic_of_ascension_grants_the_real_per_class_casting_stat(self):
+        """
+        End-to-end: bot._do_use_item applies a real, permanent stat gain
+        via guilds.permanent_stat_for -- a Sorcerer must gain Charisma,
+        NOT a hardcoded Intelligence, same per-class resolution the
+        2026-08-14 guild audit added after catching Sorcerer/Warlock
+        wrongly granted Wizard's own stat.
+        """
+        make_basic_character(
+            950992, "AscendingSorcerer", char_class="Sorcerer", current_location="crossroads_tavern",
+            ability_scores={
+                "strength": 10, "dexterity": 10, "constitution": 10,
+                "intelligence": 10, "wisdom": 10, "charisma": 16,
+            },
+        )
+        db.add_item(950992, -999, "tonic_of_ascension", 1)
+        sink = []
+        update = FakeUpdate(950992, "use tonic of ascension", sink)
+        await bot._do_use_item(update, "use tonic of ascension")
+        updated = db.get_character(950992, -999)
+        self.assertEqual(updated["charisma"], 17)
+        self.assertEqual(updated["intelligence"], 10)
+        self.assertEqual(updated["inventory"].get("tonic_of_ascension", 0), 0)
+        self.assertIn("Charisma", sink[-1])
+
+    async def test_godsbrew_of_ascension_grants_plus_two_and_needs_a_godshard(self):
+        """The real Godsforged-equivalent capstone: min_rebirth 3, needs a Godshard, grants +2 not +1."""
+        make_basic_character(950993, "GodsbrewAlchemist", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(950993, -999, guild="arcane_circle", rebirth_count=3)
+        db.add_item(950993, -999, "glimmerdeep_moss", 10)
+        db.add_item(950993, -999, "moonpetal", 10)
+        db.add_item(950993, -999, "silverleaf_herb", 6)
+        from unittest.mock import patch
+        craft_text = "craft a Godsbrew of Ascension"
+        update = FakeUpdate(950993, craft_text, [])
+        with patch("bot.narrate_skill_check", return_value="You brew it carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_craft(update, craft_text)
+        no_godshard = db.get_character(950993, -999)
+        self.assertEqual(no_godshard["inventory"].get("godsbrew_of_ascension", 0), 0, "must still need the Godshard")
+
+        db.add_item(950993, -999, "godshard", 1)
+        with patch("bot.narrate_skill_check", return_value="You brew it carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_craft(update, craft_text)
+        crafted = db.get_character(950993, -999)
+        self.assertGreater(crafted["inventory"].get("godsbrew_of_ascension", 0), 0)
+
+        sink = []
+        update2 = FakeUpdate(950993, "use godsbrew of ascension", sink)
+        await bot._do_use_item(update2, "use godsbrew of ascension")
+        drunk = db.get_character(950993, -999)
+        self.assertEqual(drunk["intelligence"], 12)
+
+    def test_cooking_ladder_gates_travelers_feast_and_banquet_correctly(self):
+        """
+        Real feature (2026-09-10): Cooking's own scaling ladder, the same
+        audit-found "flatlines early" fix as the Alchemy ladder above --
+        previously only cooked_fish/rations existed, neither healing
+        anything. hearty_stew stays ungated; travelers_feast needs level
+        10; banquet_of_the_reborn needs the Adventurers' Guild + rebirth 1.
+        """
+        from rules.crafting import recipe_requirement_gate, RECIPES
+        make_basic_character(950994, "GateTesterCook", current_location="crossroads_tavern")
+        character = db.get_character(950994, -999)
+        self.assertIsNone(recipe_requirement_gate(character, RECIPES["hearty_stew"]))
+
+        too_low_level = recipe_requirement_gate(character, RECIPES["travelers_feast"])
+        self.assertIsNotNone(too_low_level)
+        self.assertIn("level 10", too_low_level)
+
+        no_guild = recipe_requirement_gate(character, RECIPES["banquet_of_the_reborn"])
+        self.assertIsNotNone(no_guild)
+        self.assertIn("Adventurers", no_guild)
+
+        db.update_character(950994, -999, level=10, guild="adventurers_guild")
+        character = db.get_character(950994, -999)
+        self.assertIsNone(recipe_requirement_gate(character, RECIPES["travelers_feast"]))
+        wrong_rebirth = recipe_requirement_gate(character, RECIPES["banquet_of_the_reborn"])
+        self.assertIsNotNone(wrong_rebirth)
+        self.assertIn("rebirth", wrong_rebirth.lower())
+
+        db.update_character(950994, -999, rebirth_count=1)
+        character = db.get_character(950994, -999)
+        self.assertIsNone(recipe_requirement_gate(character, RECIPES["banquet_of_the_reborn"]))
+
+    async def test_banquet_of_the_reborn_is_craftable_and_heals_the_full_flat_amount(self):
+        """End-to-end: bot._do_craft produces it once gated correctly, and bot._do_use_item heals the real flat 10,000."""
+        make_basic_character(
+            950995, "QualifiedCook", current_location="crossroads_tavern", hp_max=50000,
+        )
+        db.update_character(950995, -999, guild="adventurers_guild", rebirth_count=1, hp_current=1)
+        db.add_item(950995, -999, "raw_fish", 6)
+        db.add_item(950995, -999, "wood", 3)
+        db.add_item(950995, -999, "silverleaf_herb", 3)
+        db.add_item(950995, -999, "moonpetal", 1)
+        from unittest.mock import patch
+        craft_text = "craft a Banquet of the Reborn"
+        update = FakeUpdate(950995, craft_text, [])
+        with patch("bot.narrate_skill_check", return_value="You cook it carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_craft(update, craft_text)
+        crafted = db.get_character(950995, -999)
+        self.assertGreater(crafted["inventory"].get("banquet_of_the_reborn", 0), 0)
+
+        sink = []
+        update2 = FakeUpdate(950995, "use banquet of the reborn", sink)
+        await bot._do_use_item(update2, "use banquet of the reborn")
+        healed = db.get_character(950995, -999)
+        self.assertEqual(healed["hp_current"], 10001)
+        self.assertEqual(healed["inventory"].get("banquet_of_the_reborn", 0), 0)
 
     async def test_forge_guild_journeyman_blade_rejects_a_non_member_via_the_real_handler(self):
         """
