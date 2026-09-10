@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.577] — fix: stale flat damage-ceiling test, real content had moved past it
+
+`test_chapters_1_through_8_level_bands_and_non_boss_damage_floor`
+(written 2026-08-19) was failing on 34 non-boss monsters exceeding its
+flat `damage_bonus <= 50` assumption. Investigated properly rather
+than relaxed blindly: traced every one back to real, hand-authored
+content added after that ceiling was written — about half are the
+specific `defeat_monster` target of a real numbered quest within
+arc_5/6/7/8's own 10-quest escalating difficulty chains (e.g.
+`warren_toll_collector` → `the_paymasters_route`), the rest are
+uniquely-named ambient encounters in specific deep rooms of those same
+dungeons (e.g. `rampart_guardian` at `stonearch_bridge_the_high_guard`).
+
+Confirmed deliberate, not accidental: computing damage_bonus/level for
+all 34 produces a smooth, monotonic 2.0x-3.91x curve (level 27 → 2.0x,
+level 93 → 3.87x) — never erratic, which a genuine typo or accidental
+over-tuning would not produce. This is a real "notable encounter" tier
+distinct from generic shared-species roaming trash (wolf/goblin/spider
+variants, which stay hard-capped at exactly 50 across dozens of
+templates regardless of level).
+
+Test now checks `damage_bonus <= max(50, 4 * level)` instead of a flat
+50 — the floor still fully protects low-level trash (where 4×level <
+50), and every monster that already passed still trivially passes
+(the new ceiling is never lower than 50). Verified a genuinely absurd
+value is still caught (500 damage_bonus at level 10 correctly flags).
+
+No game-balance change — monster stats are untouched, only the test's
+own stale assumption was corrected.
+
 ## [1.27.576] — fix: a plain Labyrinth crystal switch could be un-targetable by name
 
 Real dev-bridge report (2026-09-10, Coffee, screenshot): "It doesn't
