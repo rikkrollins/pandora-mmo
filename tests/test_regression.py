@@ -37676,6 +37676,47 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # "Pick the lock" here unambiguously means the real cache.
         self.assertEqual(bot._find_lockable(room, "Pick the lock")["id"], "f1_gate_cache")
 
+    async def test_find_lockable_resolves_a_plain_crystal_whose_name_is_a_subset_of_another(self):
+        """
+        Real live bug (2026-09-10, dev-bridge screenshot, Coffee: "It
+        doesn't seem to recognize that we're actually typing the proper
+        crystal's name") -- a real Labyrinth room (Floor 10, "A Room
+        That Shouldn't Fit 1") held both a plain "a physical crystal"
+        (f10_branchswitch, the real branch-opening switch the player
+        needed) and "a shuddering physical crystal" (f10_collapse_
+        switch, an unrelated collapse-puzzle trigger), both rolling the
+        SAME element by chance. The plain crystal's entire name is a
+        strict subset of the shuddering one's, so it had zero words of
+        its own the distinctive-word check could ever key on -- every
+        natural phrase for it ("hit the physical crystal", "hit the
+        plain physical crystal") fell through as merely ambiguous, with
+        no phrasing that could ever single it out. Confirmed against
+        the exact real room data pulled from the live labyrinth_runs
+        row before this fix (id f10_r0, seed 1229253006).
+        """
+        room = {
+            "lockables": [
+                {"id": "f10_branchswitch", "kind": "switch", "name": "a physical crystal", "element": "physical"},
+                {"id": "f10_collapse_switch", "kind": "switch", "name": "a shuddering physical crystal", "element": "physical"},
+            ]
+        }
+        self.assertEqual(bot._find_lockable(room, "Hit the physical crystal")["id"], "f10_branchswitch")
+        self.assertEqual(bot._find_lockable(room, "Hit physical crystal")["id"], "f10_branchswitch")
+        self.assertEqual(bot._find_lockable(room, "strike the plain physical crystal")["id"], "f10_branchswitch")
+        self.assertEqual(bot._find_lockable(room, "hit the shuddering crystal")["id"], "f10_collapse_switch")
+        self.assertEqual(bot._find_lockable(room, "hit the shuddering physical crystal")["id"], "f10_collapse_switch")
+        # Regression guard: two IDENTICALLY-named switches (the earlier
+        # 2026-09-05 "two unlabeled necrotic crystals" bug) must still
+        # correctly refuse to guess -- neither is a proper subset of
+        # the other, so this new check must never fire for them.
+        identical_room = {
+            "lockables": [
+                {"id": "necA", "kind": "switch", "name": "a necrotic crystal", "element": "necrotic"},
+                {"id": "necB", "kind": "switch", "name": "a necrotic crystal", "element": "necrotic"},
+            ]
+        }
+        self.assertIsNone(bot._find_lockable(identical_room, "hit the necrotic crystal"))
+
     async def test_find_lockable_disambiguates_the_mandatory_and_optional_key_gate_doors(self):
         """
         Real live bug found and fixed (2026-09-05, exposed by an RNG-

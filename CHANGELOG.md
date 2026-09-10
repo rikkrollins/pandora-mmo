@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.576] — fix: a plain Labyrinth crystal switch could be un-targetable by name
+
+Real dev-bridge report (2026-09-10, Coffee, screenshot): "It doesn't
+seem to recognize that we're actually typing the proper crystal's
+name." A real Floor 10 room ("A Room That Shouldn't Fit 1") held both
+a plain `a physical crystal` (the real branch-opening switch the
+player needed) and `a shuddering physical crystal` (an unrelated
+collapse-puzzle trigger), which had rolled the same element by chance.
+
+**Root cause**: the plain crystal's entire name is a strict word
+subset of the shuddering one's ("physical"/"crystal" vs. "shuddering"/
+"physical"/"crystal"), so `_find_lockable`'s distinctive-word check
+(bot.py) had zero words of its own to key on — every natural phrase
+("hit the physical crystal", "hit the plain physical crystal") fell
+through as merely ambiguous. There was no way to type this crystal's
+name that could ever single it out, live-reproduced against the exact
+real room pulled from the live `labyrinth_runs` row.
+
+Added one more disambiguation pass to `_find_lockable`: if exactly one
+candidate's ENTIRE name is present in the player's text, and no other
+candidate whose name is a proper superset of it is ALSO entirely
+present, that candidate is what's meant. Deliberately narrow — only
+fires when the existing distinctive-word check finds nothing, so the
+earlier "two identically-named necrotic crystals" fix (2026-09-05)
+still correctly refuses to guess (neither name is a proper subset of
+the other there).
+
+1 new regression test (plus the identical-name case as an explicit
+regression guard); 46 existing `_find_lockable`/switch/lockpick tests
+re-run clean.
+
 ## [1.27.575] — feat: extend Kess foreshadowing to Chapters 2-4
 
 Follow-up to v1.27.574, after Coffee asked "what's left to fill in

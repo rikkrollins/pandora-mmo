@@ -13695,6 +13695,37 @@ def _find_lockable(location: dict, action_text: str, ambiguous_out: list | None 
     if len(name_word_matches) == 1:
         return name_word_matches[0]
 
+    # Real live bug (2026-09-10, dev-bridge screenshot, Coffee: "It
+    # doesn't seem to recognize that we're actually typing the proper
+    # crystal's name" -- a real Labyrinth room with both "a physical
+    # crystal" and "a shuddering physical crystal", same element by
+    # random chance). The plain crystal's entire name is a strict
+    # SUBSET of the shuddering one's ("physical"/"crystal" vs
+    # "shuddering"/"physical"/"crystal"), so it has zero words of its
+    # own the distinctive-word check above can ever key on -- every
+    # natural phrase for it ("hit the physical crystal", "the plain
+    # physical crystal") falls through as merely ambiguous, and there
+    # was no phrasing that could ever single it out. If a candidate's
+    # ENTIRE name is present in the text, and no OTHER candidate whose
+    # name is a proper superset of it is ALSO entirely present (i.e.
+    # the player didn't also say the extra word that would point at
+    # the more specific one instead), that candidate is what's meant --
+    # this only ever adds a match when the simpler check above found
+    # none, so an identically-named pair (the earlier "two unlabeled
+    # necrotic crystals" bug) still correctly stays ambiguous (neither
+    # is a proper subset of the other).
+    text_words = set(re.findall(r"[a-z']+", lowered))
+    full_name_matches = [lk for lk in lockables if word_sets[id(lk)] and word_sets[id(lk)].issubset(text_words)]
+    subset_matches = [
+        lk for lk in full_name_matches
+        if not any(
+            other is not lk and word_sets[id(lk)] < word_sets[id(other)] and other in full_name_matches
+            for other in full_name_matches
+        )
+    ]
+    if len(subset_matches) == 1:
+        return subset_matches[0]
+
     # Kind-specific fallback words — a room holding a chest must not
     # match generic "door" phrasing (and vice versa), or a player
     # mentioning the wrong kind of lockable gets silently routed to the
