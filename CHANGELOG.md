@@ -2,6 +2,55 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.581] — fix: overworld loop-back connections now actually fire
+
+The last genuinely open item from v1.27.579's "fill all gaps" pass
+(warps and the carry puzzle were already shipped by then; loop-back
+was the one real gap left). A 2026-09-03 attempt at porting
+rules/labyrinth.py's "densify the branching tree into a real grid"
+loop-back mechanic to the overworld dungeon generator
+(`rules/dungeon_evolve.py`) fired 0/120 real test generations and was
+deliberately not shipped — root cause: every branch there extended in
+ONE fixed compass direction in a straight line for its whole length,
+so two different branches could never end up grid-adjacent, and
+loop-back's own "share an adjacent cell" search never found anything.
+
+Real fix: `_maybe_jog` lets a branch turn 90 degrees at most once
+(never a zig-zag, only once it already has 2+ rooms in its original
+direction), so branches can now actually become grid-adjacent to each
+other. `_add_loop_back_connections` (ported from `rules/labyrinth.py`'s
+identical function, same safe-by-construction invariant — a new edge
+between two already-reachable rooms only ever adds a redundant path,
+never removes one) then adds real edges between grid-adjacent,
+not-yet-connected rooms, excluding the hub/entrance and anything only
+reachable by crossing a real lock (computed the same way as the
+Labyrinth's own exclusion: BFS from the hub using ONLY plain
+`connections`, since every gate here only ever removes the forward
+edge and deliberately keeps the reverse one) or that a collapse-puzzle
+can later seal. Runs inside `evolve_dungeon`'s existing retry loop,
+after grid placement and before the final audit, so the same safety
+net every other optional mechanic here relies on absorbs the rare case
+a jog produces an unplaceable collision.
+
+One real porting bug caught before shipping: unlike a self-contained
+Labyrinth floor, this generator's entrance room has a real bidirectional
+edge back to the SOURCE dungeon's own hub, so a naive reachability BFS
+starting from the new hub walked straight back through the entrance
+buffer corridor into the unrelated source dungeon and crashed with a
+KeyError on a source-dungeon room id — fixed by bounding the BFS to
+this dungeon's own room set.
+
+Re-verified with the exact methodology the original 2026-09-03 attempt
+used before declaring it dead (3 source dungeons x 40 seeds each, real
+generated output): 0/120 generations failed to converge, loop-back now
+fires on a real, non-zero, non-always fraction (38/206 real attempts
+added at least one edge). Two new permanent regression tests cover the
+statistical firing rate and the structural safety invariant (loop-back
+never touches the hub/entrance or a room only reachable through a real
+gate), both verified via a real spy on the actual function rather than
+inferring it from final-state edges (which would misfire on the
+dungeon's own ordinary, legitimate entrance corridor).
+
 ## [1.27.580] — feat: give Alchemy and Cooking real scaling ladders past the early game
 
 Follow-up to v1.27.579's 3-way system audit, which found Alchemy and

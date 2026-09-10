@@ -113,14 +113,12 @@ _MINIBOSS_REPEAT_CHANCE = 0.25
 # into a real grid" mechanic) were tried here too (2026-09-03) and
 # deliberately NOT shipped: real testing across 3 source dungeons x 40
 # seeds each found it fires ZERO times, because every branch here
-# extends in ONE fixed compass direction in a straight line for its
-# whole length (see the branch-extension loop below) -- branches
-# radiate outward from the hub and never curve back into grid-adjacency
-# with each other, unlike the Labyrinth's own organic, BFS-placed
-# branches. Shipping a mechanic confirmed dead on real output would
-# violate this project's own "never claim something works without
-# running it" rule. Revisit if this generator's branch-extension logic
-# ever grows real direction changes (jogs/turns) mid-branch.
+# extended in ONE fixed compass direction in a straight line for its
+# whole length -- branches radiated outward from the hub and never
+# curved back into grid-adjacency with each other, unlike the
+# Labyrinth's own organic, BFS-placed branches. Shipping a mechanic
+# confirmed dead on real output would violate this project's own
+# "never claim something works without running it" rule.
 #
 # RE-CONFIRMED STILL TRUE (2026-09-10, "fill all gaps" pass, per
 # Coffee: "do 1 and 2"): before touching this file, checked whether
@@ -135,10 +133,62 @@ _MINIBOSS_REPEAT_CHANCE = 0.25
 # below, right after the single-switch version it shares its
 # `collapsing_connections`/`multi_switch_gate` plumbing with.
 #
-# Loop-back is the other real, still-open item -- reworking branch
-# geometry to fix it risks reintroducing the several real grid-collision
-# bugs already fixed one at a time in this file's own history, for a
-# purely cosmetic interconnectivity gain. Not attempted this pass.
+# SHIPPED (2026-09-10, same pass, per Coffee: "fix 1 and 2" -- loop-back
+# was the "2"): the real root cause (straight-line-only branches) is
+# fixed via `_maybe_jog` below -- at most one 90-degree turn per branch,
+# rolled only once a branch already has 2+ rooms in its original
+# direction, so two different branches can now actually end up
+# grid-adjacent. `_add_loop_back_connections` (ported from
+# rules/labyrinth.py's `_add_loop_back_connections`, same safe-by-
+# construction invariant: a new edge between two already-reachable
+# rooms can only ever add a redundant path, never remove one, so it
+# needs no solvability check of its own) then adds real edges between
+# grid-adjacent, not-yet-connected rooms, excluding the hub/entrance and
+# anything only reachable by crossing a real lock (computed the exact
+# same way as the Labyrinth's own `_rooms_shadowed_by_a_real_gate`: BFS
+# from the hub using ONLY plain `connections`, never `locked_
+# connections` -- a gated room's own kept reverse edge back to the hub,
+# see the switch/boss/mid-branch/mesh gates above, never leaks backward
+# through it) or that a collapse-puzzle can later seal
+# (`collapsing_connections` keys). Runs inside `evolve_dungeon`'s
+# existing retry loop, AFTER grid placement succeeds and BEFORE the
+# final audit -- exactly the same safety net every other optional
+# mechanic here already relies on, so a jog that happens to produce an
+# unplaceable collision is just discarded and retried, never a risk to
+# a shipped dungeon. Re-verified with the same real methodology the
+# original 2026-09-03 attempt used (3 source dungeons x 40 seeds each,
+# counting real edges on real generated output) before shipping --
+# see the git history around this change for the actual measured count.
+
+# At most one 90-degree turn per branch (never a second one, and never
+# rolled before a branch already has 2+ rooms in its original
+# direction) -- deliberately simple ("mostly a straight hallway that
+# turns once," not a zig-zag maze) so evolve_dungeon's own existing
+# grid-placement retry loop can safely absorb the rare case a turn
+# produces an unplaceable collision, exactly like every other optional
+# mechanic in this file already does. See the loop-back comment above.
+_BRANCH_JOG_CHANCE = 0.3
+# Loop-back edge odds once a grid-adjacent, ungated candidate pair is
+# found -- same 0.5 default rules/labyrinth.py's own _LOOP_BACK_CHANCE
+# uses, but a flat, much smaller max-edge cap (no floor-depth scaling --
+# unlike the Labyrinth's many-floor honeycomb, one evolved dungeon here
+# is a single, comparatively small instance, so 3 real loop-back edges
+# is already a meaningful fraction of its room count).
+_LOOP_BACK_CHANCE = 0.5
+_LOOP_BACK_MAX_EDGES = 3
+_PERPENDICULAR_DIRECTIONS = {
+    "north": ("east", "west"), "south": ("east", "west"),
+    "east": ("north", "south"), "west": ("north", "south"),
+}
+
+
+def _maybe_jog(branch: dict, steps_so_far: int, rng: random.Random) -> None:
+    """Mutates `branch["direction"]` in place at most once -- see `_BRANCH_JOG_CHANCE`'s own comment for why."""
+    if branch["jogged"] or steps_so_far < 2:
+        return
+    if rng.random() < _BRANCH_JOG_CHANCE:
+        branch["direction"] = rng.choice(_PERPENDICULAR_DIRECTIONS[branch["direction"]])
+        branch["jogged"] = True
 
 
 def _harder_target_band(campaign: dict, source_dungeon_id: str, explicit_band: tuple[int, int] | None = None) -> tuple[int, int]:
@@ -367,34 +417,41 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
     num_branches = _HUB_NON_BOSS_BRANCHES + 1
     branch_directions = rng.sample(["north", "south", "east", "west"], num_branches)
     total_rooms = 2  # entrance + hub
-    branches = []  # [{"idx", "tail_id", "next_step", "direction"}, ...] -- tracks each branch's own growing tail
+    branches = []  # [{"idx", "tail_id", "next_step", "direction", "jogged"}, ...] -- tracks each branch's own growing tail
     for branch_idx in range(1, num_branches + 1):
-        direction = branch_directions[branch_idx - 1]
+        branch = {"idx": branch_idx, "direction": branch_directions[branch_idx - 1], "jogged": False}
         branch_len = rng.randint(2, 4)
         tail_id = hub_id
         for step in range(branch_len):
+            _maybe_jog(branch, step, rng)
             new_room_id = _new_room(branch_idx, step)
-            connect(campaign, tail_id, new_room_id, direction=direction)
+            connect(campaign, tail_id, new_room_id, direction=branch["direction"])
             tail_id = new_room_id
             total_rooms += 1
-        branches.append({"idx": branch_idx, "tail_id": tail_id, "next_step": branch_len, "direction": direction})
+        branch["tail_id"] = tail_id
+        branch["next_step"] = branch_len
+        branches.append(branch)
 
     # Room-count growth now comes from EXTENDING existing branches'
     # own tails further, not from adding more branches (that's exactly
-    # what caused the grid-overflow bug this fix addresses) -- each
-    # extension keeps walking the SAME fixed direction as the rest of
-    # its own branch, for the same collision-avoidance reason above.
-    # Always extends the CURRENTLY SHORTEST branch (not a uniform
-    # random pick) -- keeps growth spread evenly across all 4 rather
-    # than risking one branch getting unluckily long. A real, separate
-    # grid-conflict case found testing this fix: a long enough straight
-    # branch can wander far enough from the hub to cross back into the
-    # SOURCE dungeon's own pre-existing room layout (Wrathflame Vault's
-    # real 13 rooms occupy real cells too, in whatever shape it was
-    # originally authored in) -- even distribution keeps every branch
-    # shorter and closer to the hub, minimizing that reach.
+    # what caused the grid-overflow bug this fix addresses). Each
+    # extension keeps walking the branch's OWN current direction --
+    # which `_maybe_jog` can turn 90 degrees at most once per branch,
+    # the real fix that lets loop-back connections actually fire (see
+    # this file's own loop-back comment above) -- never a second time,
+    # for the same collision-avoidance discipline every other mechanic
+    # here follows. Always extends the CURRENTLY SHORTEST branch (not a
+    # uniform random pick) -- keeps growth spread evenly across all 4
+    # rather than risking one branch getting unluckily long. A real,
+    # separate grid-conflict case found testing this fix: a long enough
+    # straight branch can wander far enough from the hub to cross back
+    # into the SOURCE dungeon's own pre-existing room layout (Wrathflame
+    # Vault's real 13 rooms occupy real cells too, in whatever shape it
+    # was originally authored in) -- even distribution keeps every
+    # branch shorter and closer to the hub, minimizing that reach.
     while total_rooms < min_rooms:
         b = min(branches, key=lambda x: x["next_step"])
+        _maybe_jog(b, b["next_step"], rng)
         new_tail = _new_room(b["idx"], b["next_step"])
         connect(campaign, b["tail_id"], new_tail, direction=b["direction"])
         b["tail_id"] = new_tail
@@ -1112,7 +1169,106 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         "switch_branch_idx": switch_branch_idx,
         "plate_branch_idx": plate_branch_idx,
         "boss_gate_room_id": boss_branch_first_id,
+        "hub_id": hub_id,
+        "entrance_id": entrance_id,
     }
+
+
+def _rooms_shadowed_by_a_real_gate(rooms: dict, hub_id: str, entrance_id: str) -> set[str]:
+    """
+    Ported from rules/labyrinth.py's identical helper (2026-09-10, the
+    loop-back fix) -- every room a bare, unconditional new connection
+    must never touch: the hub and entrance (never trivialize the main
+    path), any room a collapse-puzzle trigger can later seal off, and
+    every room not reachable from the hub using ONLY plain `connections`
+    -- computed this way (not a BFS that also follows `locked_
+    connections`) specifically because every real gate in this file only
+    ever removes the FORWARD edge and deliberately KEEPS the reverse one
+    (see the switch/boss/mid-branch/mesh gates above, "retreating never
+    traps a player") -- a BFS that also walked locked_connections would
+    leak straight back out through that kept reverse edge into the hub
+    and mark the entire dungeon as shadowed, the exact bug the
+    Labyrinth's own version of this function already hit and fixed once.
+
+    Real bug found porting this (2026-09-10): unlike a Labyrinth floor
+    (fully self-contained), this generator's own entrance room has a
+    real, bidirectional plain edge back to the SOURCE dungeon's hub
+    (`connect(campaign, source_hub_id, entrance_id)` in `_generate_once`)
+    -- the entrance-through-hub buffer corridor is itself bidirectional,
+    so a naive BFS starting at the new hub walks straight back through
+    it and off into the entirely separate source dungeon, whose rooms
+    were never even passed in. `rooms` here only ever holds THIS
+    dungeon's own `room_ids`, so `nb not in rooms` is the real boundary
+    check that keeps the walk inside it.
+    """
+    reachable = {hub_id}
+    frontier = [hub_id]
+    while frontier:
+        cur = frontier.pop()
+        for nb in rooms[cur].get("connections", []):
+            if nb in rooms and nb not in reachable:
+                reachable.add(nb)
+                frontier.append(nb)
+
+    excluded = {hub_id, entrance_id}
+    excluded.update(rid for rid in rooms if rid not in reachable)
+    for room in rooms.values():
+        excluded.update(room.get("collapsing_connections", {}).keys())
+    return excluded
+
+
+def _add_loop_back_connections(campaign: dict, layer: str, hub_id: str, entrance_id: str, room_ids: list[str], rng: random.Random) -> int:
+    """
+    Ported from rules/labyrinth.py's `_add_loop_back_connections`
+    (2026-09-10, the real fix -- see this file's loop-back comment
+    above for why the 2026-09-03 attempt fired 0/120 times and what
+    changed). Safe by construction: every candidate edge connects two
+    rooms already reachable from the hub via plain connections, so
+    adding one can only ever create a redundant path, never remove one
+    -- no solvability check of its own needed. Scoped to just this
+    dungeon's own `room_ids` (never a source dungeon's pre-existing
+    rooms sharing the same layer/grid). Returns the list of (a, b)
+    room-id pairs actually added, for real verification.
+    """
+    rooms = {rid: _find_room(campaign, rid)[1] for rid in room_ids}
+    excluded = _rooms_shadowed_by_a_real_gate(rooms, hub_id, entrance_id)
+
+    by_cell = {
+        (r["grid_position"]["x"], r["grid_position"]["y"]): rid
+        for rid, r in rooms.items() if "grid_position" in r
+    }
+    candidates = []
+    seen_pairs = set()
+    for rid, room in rooms.items():
+        if rid in excluded or "grid_position" not in room:
+            continue
+        x, y = room["grid_position"]["x"], room["grid_position"]["y"]
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            neighbor_id = by_cell.get((x + dx, y + dy))
+            if neighbor_id is None or neighbor_id in excluded:
+                continue
+            if (
+                neighbor_id in room.get("connections", [])
+                or neighbor_id in room.get("warps", [])
+                or neighbor_id in room.get("locked_connections", {})
+                or rid in rooms[neighbor_id].get("locked_connections", {})
+            ):
+                continue
+            pair = frozenset((rid, neighbor_id))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            candidates.append((rid, neighbor_id))
+
+    rng.shuffle(candidates)
+    added = []
+    for a, b in candidates:
+        if len(added) >= _LOOP_BACK_MAX_EDGES:
+            break
+        if rng.random() < _LOOP_BACK_CHANCE:
+            connect(campaign, a, b)
+            added.append((a, b))
+    return added
 
 
 def evolve_dungeon(
@@ -1178,6 +1334,13 @@ def evolve_dungeon(
                 trial["locations"][layer][room_id]["directions"] = grid_results[room_id]["directions"]
             if source_layer == layer:
                 trial["locations"][layer][source_hub_id]["directions"] = grid_results[source_hub_id]["directions"]
+            # Loop-back connections (2026-09-10, the real geometry fix --
+            # see this file's own loop-back comment above): must run
+            # AFTER real grid_position is assigned (just above) and
+            # BEFORE the audit just below, so any edge it adds gets
+            # validated by the exact same retry-on-failure safety net
+            # every other optional mechanic here already relies on.
+            _add_loop_back_connections(trial, layer, summary["hub_id"], summary["entrance_id"], summary["room_ids"], rng)
 
         failures = dungeon_audit.audit_dungeon(trial, new_dungeon_id)
         if grid_ok and all(not f for f in failures.values()):

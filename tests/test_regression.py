@@ -35941,6 +35941,99 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(hits, 0, "expected at least one warp-bearing evolve across 40 real seeds")
         self.assertLess(hits, 40, "expected at least one evolve WITHOUT a warp across 40 real seeds -- it should be a real fraction, not every time")
 
+    def test_evolve_dungeon_loop_back_sometimes_adds_a_real_grid_adjacent_shortcut(self):
+        """
+        Real fix (2026-09-10, per Coffee: "fix 1 and 2" -- loop-back was
+        the "2"). Loop-back connections were tried once already
+        (2026-09-03) and fired 0/120 real generations, because every
+        branch extended in one fixed compass direction and two branches
+        could never end up grid-adjacent -- see
+        [[project_overworld_loopback_dead_on_arrival]]. `_maybe_jog` now
+        lets a branch turn 90 degrees at most once, making real
+        adjacency possible; `_add_loop_back_connections` (ported from
+        rules/labyrinth.py's identical mechanic) then adds a real edge
+        between two grid-adjacent, ungated rooms. Statistical across
+        real seeds, same discipline as every other optional mechanic
+        above -- confirmed via a real spy on the actual function (not a
+        structural inference), same directness as this file's other
+        "sometimes places a real X" tests.
+        """
+        import copy
+        from unittest.mock import patch
+        real_add = dungeon_evolve._add_loop_back_connections
+        edge_lists = []
+
+        def _spy(*args, **kwargs):
+            pairs = real_add(*args, **kwargs)
+            edge_lists.append(pairs)
+            return pairs
+
+        with patch("rules.dungeon_evolve._add_loop_back_connections", side_effect=_spy):
+            for seed in range(40):
+                campaign = copy.deepcopy(bot.CAMPAIGN)
+                rng = random.Random(seed)
+                new_id = f"goblin_warrens_evolved_loopback_stat_{seed}"
+                dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+        hits = sum(1 for pairs in edge_lists if pairs)
+        self.assertGreater(hits, 0, "expected at least one real loop-back edge across 40 real seeds -- the 2026-09-03 attempt fired 0/120")
+        self.assertLess(hits, len(edge_lists), "expected at least one attempt with zero loop-back edges too -- a real fraction, not every time")
+
+    def test_evolve_dungeon_loop_back_never_touches_the_hub_entrance_or_a_gated_room(self):
+        """
+        Structural companion to the statistical test above -- whenever
+        loop-back actually adds an edge, neither endpoint may be the hub
+        or entrance (never trivialize the main path), and both endpoints
+        must already be reachable from the hub using only plain
+        `connections` (never a room only reachable by crossing a real
+        switch/plate/mid-branch/mesh/boss lock, or a room a collapse
+        trigger can later seal) -- a bare edge into any of those would
+        silently let a player bypass whatever real gate protects them.
+        Spies on the actual added pairs (not just final-state edges) --
+        the dungeon's own ordinary buffer corridor already has a real,
+        legitimate plain edge into the entrance, so inspecting all
+        final-state edges indiscriminately would misfire on that.
+        """
+        import copy
+        from unittest.mock import patch
+        real_add = dungeon_evolve._add_loop_back_connections
+        edge_lists = []
+
+        def _spy(*args, **kwargs):
+            pairs = real_add(*args, **kwargs)
+            edge_lists.append(pairs)
+            return pairs
+
+        checked_any = False
+        with patch("rules.dungeon_evolve._add_loop_back_connections", side_effect=_spy):
+            for seed in range(40):
+                campaign = copy.deepcopy(bot.CAMPAIGN)
+                rng = random.Random(seed)
+                new_id = f"goblin_warrens_evolved_loopback_safety_{seed}"
+                summary = dungeon_evolve.evolve_dungeon(campaign, "goblin_warrens", new_id, "underground", rebirth_gate=1, rng=rng)
+                pairs = edge_lists[-1]
+                if not pairs:
+                    continue
+                rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+                hub_id, entrance_id = summary["hub_id"], summary["entrance_id"]
+                reachable = {hub_id}
+                frontier = [hub_id]
+                while frontier:
+                    cur = frontier.pop()
+                    for nb in rooms[cur].get("connections", []):
+                        if nb in rooms and nb not in reachable:
+                            reachable.add(nb)
+                            frontier.append(nb)
+                sealable = {rid for r in rooms.values() for rid in r.get("collapsing_connections", {})}
+                for a, b in pairs:
+                    checked_any = True
+                    self.assertNotIn(a, (hub_id, entrance_id), f"seed {seed}: loop-back touched the hub/entrance")
+                    self.assertNotIn(b, (hub_id, entrance_id), f"seed {seed}: loop-back touched the hub/entrance")
+                    self.assertNotIn(a, sealable, f"seed {seed}: loop-back touched a collapse-sealable room")
+                    self.assertNotIn(b, sealable, f"seed {seed}: loop-back touched a collapse-sealable room")
+                    self.assertIn(a, reachable, f"seed {seed}: loop-back touched a genuinely gated room ({a})")
+                    self.assertIn(b, reachable, f"seed {seed}: loop-back touched a genuinely gated room ({b})")
+        self.assertTrue(checked_any, "expected at least one real loop-back edge to actually check across 40 real seeds")
+
     def test_evolve_dungeon_sometimes_places_a_real_collapse_puzzle_that_stays_solvable(self):
         """
         Real single-switch collapse-puzzle port (2026-09-04, same
