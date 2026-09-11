@@ -14055,6 +14055,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         wrong_guild_enchant = recipe_requirement_gate(character, ENCHANT_RECIPES["enchant_greater_ward"])
         self.assertIsNotNone(wrong_guild_enchant)
         self.assertIn("Enchanters' Guild", wrong_guild_enchant)
+        # Real grammar bug (2026-09-11, found building the Blacksmith/
+        # Alchemy category screens -- this text is now actually shown
+        # to players as a locked-recipe explanation): 6 of 7 real guild
+        # names already start with "The " (guilds.GUILDS), so this used
+        # to read "the The Forge Guild" -- same "the The X" bug class
+        # already fixed once for quest titles and key items elsewhere.
+        self.assertNotIn("the The", no_guild)
+        self.assertIn("the Forge Guild", no_guild)
+        self.assertNotIn("the The", wrong_guild_enchant)
+        self.assertIn("the Enchanters' Guild", wrong_guild_enchant)
 
     def test_recipe_requirement_gate_allows_a_fully_qualified_character(self):
         from rules.crafting import recipe_requirement_gate, ENCHANT_RECIPES
@@ -14967,54 +14977,80 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated = db.get_character(user_id, -999)
         self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in updated["inventory"]))
 
-    def test_blacksmith_menu_rows_shows_base_advanced_and_forge_options_when_eligible(self):
+    async def _render_category(self, user_id, coro):
+        """Shared spy: calls a _do_show_*_category coroutine and returns (text, callback_data list) actually sent."""
+        from unittest.mock import patch
+        real_safe_send = bot._safe_send
+        captured = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured.append((text, kwargs.get("reply_markup")))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await coro
+        text, markup = captured[-1]
+        callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row] if markup else []
+        return text, callback_data
+
+    async def test_blacksmith_category_craft_and_advanced_show_eligible_buttons_and_locked_reasons(self):
         """
         Real feature (2026-09-11, per Coffee: "Shud we have a Blacksmith
-        menu for forging guild"). A qualified Forge Guild member sees a
-        base craftable recipe, an eligible advanced-ladder recipe, and a
-        real forge-eligible plain item to promote to magic -- all three
-        real categories this one focused menu is meant to cover.
+        menu for forging guild" then "give a little explanation, and
+        push buttons with options... more interactive"). A qualified
+        Forge Guild member sees a base craftable recipe as a real
+        button, an eligible advanced-ladder recipe as a real button
+        (Journeyman's Blade), and a still-ineligible one (Godsforged
+        Blade, needs rebirth 3) as a locked, explained text line --
+        both eligible and locked recipes are always listed now, never
+        silently hidden.
         """
         make_basic_character(951020, "BlacksmithMenuTester", char_class="Fighter", current_location="crossroads_tavern")
         db.update_character(951020, -999, guild="forge_guild", level=20)
-        db.add_item(951020, -999, "iron_ore", 20)
-        db.add_item(951020, -999, "moonpetal", 5)
-        db.add_item(951020, -999, "longsword", 1)
-        character = db.get_character(951020, -999)
-        rows = bot._blacksmith_menu_rows(character)
-        callback_data = [btn.callback_data for row in rows for btn in row]
-        self.assertIn("craft|make|longsword", callback_data)  # base RECIPES
-        self.assertIn("craft|make|journeyman_blade", callback_data)  # eligible ADVANCED_RECIPES
-        self.assertIn("forge|make|longsword", callback_data)  # forge-eligible plain owned item
+        update = FakeUpdate(951020, "", [])
 
-    def test_blacksmith_menu_excludes_advanced_recipes_when_not_guild_eligible(self):
-        """A non-guild, low-level character sees only ungated base recipes -- no journeyman_blade, no forge option."""
+        text, callback_data = await self._render_category(951020, bot._do_show_blacksmith_category(update, "craft"))
+        self.assertIn("craft|preview|longsword", callback_data)
+
+        text, callback_data = await self._render_category(951020, bot._do_show_blacksmith_category(update, "advanced"))
+        self.assertIn("craft|preview|journeyman_blade", callback_data)
+        self.assertNotIn("craft|preview|godsforged_blade", callback_data)
+        self.assertIn("Godsforged Blade", text)
+        self.assertIn("🔒", text)
+        self.assertIn("rebirth", text.lower())
+
+    async def test_blacksmith_category_advanced_excludes_guild_ladder_when_not_a_member(self):
+        """A non-guild character sees ungated masterwork recipes as buttons but the whole guild ladder as locked text."""
         make_basic_character(951021, "UngatedBlacksmithMenuTester", char_class="Fighter", current_location="crossroads_tavern")
-        db.add_item(951021, -999, "iron_ore", 20)
-        db.add_item(951021, -999, "moonpetal", 5)
-        db.add_item(951021, -999, "longsword", 1)
-        character = db.get_character(951021, -999)
-        rows = bot._blacksmith_menu_rows(character)
-        callback_data = [btn.callback_data for row in rows for btn in row]
-        self.assertIn("craft|make|longsword", callback_data)
-        self.assertNotIn("craft|make|journeyman_blade", callback_data)
-        self.assertNotIn("forge|make|longsword", callback_data)
+        update = FakeUpdate(951021, "", [])
+        text, callback_data = await self._render_category(951021, bot._do_show_blacksmith_category(update, "advanced"))
+        self.assertIn("craft|preview|masterwork_dagger", callback_data)
+        self.assertNotIn("craft|preview|journeyman_blade", callback_data)
+        self.assertIn("Forge Guild", text)
 
-    def test_blacksmith_menu_never_offers_to_forge_an_already_magic_item(self):
-        """forge_magic_upgrade is scoped to PLAIN items only in this menu -- an already-generated item belongs to the Alchemy menu's own Enchant section instead."""
+    async def test_blacksmith_category_forge_shows_owned_plain_items_but_never_an_already_magic_one(self):
+        """forge_magic_upgrade is scoped to PLAIN items only -- an already-generated item belongs to the Alchemy menu's own Enchant category instead."""
         make_basic_character(951022, "GeneratedItemForgeTester", char_class="Fighter", current_location="crossroads_tavern")
         db.update_character(951022, -999, guild="forge_guild", level=20)
-        db.add_item(951022, -999, "iron_ore", 20)
-        db.add_item(951022, -999, "moonpetal", 5)
+        db.add_item(951022, -999, "longsword", 1)
         gen_item_id = db.create_item_instance(
             item_type="weapon", name="Test Blade", rarity="rare", price=0,
             base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
         )
         db.add_item(951022, -999, gen_item_id, 1)
-        character = db.get_character(951022, -999)
-        rows = bot._blacksmith_menu_rows(character)
-        callback_data = [btn.callback_data for row in rows for btn in row]
-        self.assertNotIn(f"forge|make|{gen_item_id}", callback_data)
+        update = FakeUpdate(951022, "", [])
+        text, callback_data = await self._render_category(951022, bot._do_show_blacksmith_category(update, "forge"))
+        self.assertIn(f"forge|preview|longsword", callback_data)
+        self.assertNotIn(f"forge|preview|{gen_item_id}", callback_data)
+
+    async def test_blacksmith_category_forge_shows_locked_reason_when_not_guild_eligible(self):
+        make_basic_character(951029, "UngatedForgeTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(951029, -999, "longsword", 1)
+        update = FakeUpdate(951029, "", [])
+        text, callback_data = await self._render_category(951029, bot._do_show_blacksmith_category(update, "forge"))
+        self.assertFalse([cd for cd in callback_data if cd.startswith("forge|preview|")])
+        self.assertIn("Forge Guild", text)
+        self.assertNotIn("the The", text)
 
     async def test_forge_menu_callback_actually_forges_a_plain_item_end_to_end(self):
         """End-to-end: tapping a Blacksmith menu Forge button actually promotes the plain item to a real magic item."""
@@ -15032,33 +15068,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated = db.get_character(user_id, -999)
         self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in updated["inventory"]))
 
-    def test_alchemy_menu_rows_shows_craft_and_enchant_options_when_eligible(self):
+    async def test_alchemy_category_brew_and_enchant_show_eligible_buttons_and_locked_reasons(self):
         """
         Real feature (2026-09-11, per Coffee: "shud we have the same
-        thing for Alchemy"). Covers both of alchemy's real crafting
-        surfaces in one menu: brewing (RECIPES) and enchanting an
-        already-owned magic item (ENCHANT_RECIPES) -- an enchant button
-        is per (item, recipe) pair since a bare recipe name alone would
-        be ambiguous once a player owns more than one eligible item.
+        thing for Alchemy" then "give a little explanation, and push
+        buttons with options... more interactive"). Covers both of
+        alchemy's real crafting surfaces: brewing (RECIPES, including
+        the level/guild/rebirth-gated ladder, shown locked-and-explained
+        rather than hidden) and enchanting an already-owned magic item
+        (ENCHANT_RECIPES) -- an enchant button is per (item, recipe)
+        pair since a bare recipe name alone would be ambiguous once a
+        player owns more than one eligible item; a recipe the player
+        knows but has no matching item for is called out by name too,
+        not silently omitted.
         """
         make_basic_character(
             951024, "AlchemyMenuTester", char_class="Wizard", current_location="crossroads_tavern",
             known_spells=["fire_bolt"],
         )
-        db.add_item(951024, -999, "silverleaf_herb", 5)
-        db.add_item(951024, -999, "moonpetal", 5)
-        db.add_item(951024, -999, "sulfur_dust", 5)
-        db.add_item(951024, -999, "iron_ore", 5)
         gen_item_id = db.create_item_instance(
             item_type="weapon", name="Test Blade", rarity="rare", price=0,
             base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
         )
         db.add_item(951024, -999, gen_item_id, 1)
-        character = db.get_character(951024, -999)
-        rows = bot._alchemy_menu_rows(character)
-        callback_data = [btn.callback_data for row in rows for btn in row]
-        self.assertIn("craft|make|healing_potion", callback_data)  # base RECIPES
-        self.assertIn(f"enchant|make|enchant_flame|{gen_item_id}", callback_data)  # eligible ENCHANT_RECIPES on an owned item
+        update = FakeUpdate(951024, "", [])
+
+        text, callback_data = await self._render_category(951024, bot._do_show_alchemy_category(update, "brew"))
+        self.assertIn("craft|preview|healing_potion", callback_data)  # base RECIPES
+        self.assertNotIn("craft|preview|greater_scroll_fire", callback_data)  # min_level 20 gate
+        self.assertIn("Greater Scroll of Flame Strike", text)
+        self.assertIn("🔒", text)
+
+        text, callback_data = await self._render_category(951024, bot._do_show_alchemy_category(update, "enchant"))
+        self.assertIn(f"enchant|preview|enchant_flame|{gen_item_id}", callback_data)  # known fire spell + owned weapon
+        self.assertIn("🔒", text)
+        self.assertIn("spell", text.lower())  # e.g. enchant_lightning: no known lightning spell yet
 
     async def test_enchant_menu_callback_actually_enchants_end_to_end(self):
         """End-to-end: tapping an Alchemy menu Enchant button actually applies the real affix."""
@@ -15078,6 +15122,147 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot.enchant_menu_callback(FakeCallbackUpdate(user_id, f"enchant|make|enchant_flame|{gen_item_id}", sink), DummyContext())
         item = items_module.get_item(gen_item_id)
         self.assertEqual(item["damage_type"], "fire")
+
+    async def test_craft_preview_shows_a_real_computed_success_chance_and_materials_checklist(self):
+        """
+        Real feature (2026-09-11, per Coffee: "give a little
+        explanation... maybe give a little explaination" -- more
+        interactive for "the new player/advanced player"). Tapping a
+        recipe now opens a preview instead of crafting instantly: a
+        REAL computed success percentage (not invented -- same d20 +
+        modifier + bonus formula the actual roll uses) and a real have/
+        need line per material.
+        """
+        user_id = 951040
+        make_basic_character(
+            user_id, "PreviewTester", char_class="Fighter", current_location="crossroads_tavern",
+            ability_scores={"strength": 20, "dexterity": 10, "constitution": 14,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        db.add_item(user_id, -999, "iron_ore", 1)  # short of the 3 longsword needs
+        sink = []
+        await bot._do_show_craft_preview(FakeUpdate(user_id, "", sink), "longsword")
+        text = sink[-1]
+        self.assertIn("Craft: Longsword", text)
+        self.assertIn("your odds:", text)
+        self.assertIn("%", text)
+        self.assertIn("❌ Iron Ore 1/3", text)
+
+        # A character with plenty of the material sees a real ✅ instead.
+        db.add_item(user_id, -999, "iron_ore", 5)
+        sink2 = []
+        await bot._do_show_craft_preview(FakeUpdate(user_id, "", sink2), "longsword")
+        self.assertIn("✅ Iron Ore 6/3", sink2[-1])
+
+    async def test_craft_preview_confirm_button_dispatches_through_the_real_craft_and_locked_recipe_never_shows_a_preview(self):
+        """The preview's own Confirm button is the exact same craft|make callback_data the old instant-craft flow used; a still-locked recipe short-circuits to a plain explanation instead of a fake preview."""
+        user_id = 951041
+        make_basic_character(user_id, "PreviewConfirmTester", char_class="Fighter", current_location="crossroads_tavern")
+        from unittest.mock import patch
+        real_safe_send = bot._safe_send
+        captured = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured.append((text, kwargs.get("reply_markup")))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_show_craft_preview(FakeUpdate(user_id, "", []), "longsword")
+        _, markup = captured[-1]
+        callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertIn("craft|make|longsword", callback_data)
+
+        db.update_character(user_id, -999, level=1)
+        sink = []
+        await bot._do_show_craft_preview(FakeUpdate(user_id, "", sink), "greater_scroll_fire")
+        self.assertIn("🔒", sink[-1])
+        self.assertIn("level 20", sink[-1])
+
+    async def test_forge_and_enchant_previews_show_real_computed_odds_too(self):
+        """The Forge and Enchant preview screens use the exact same real formula, including their own real ability-check bonus stack (_effective_ability_check_bonus, which base craft never adds)."""
+        user_id = 951042
+        make_basic_character(user_id, "ForgeEnchantPreviewTester", char_class="Wizard", current_location="crossroads_tavern", known_spells=["fire_bolt"])
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "longsword", 1)
+        sink = []
+        await bot._do_show_forge_preview(FakeUpdate(user_id, "", sink), "longsword")
+        self.assertIn("Forge Longsword into a Magic Item", sink[-1])
+        self.assertIn("your odds:", sink[-1])
+
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        sink2 = []
+        await bot._do_show_enchant_preview(FakeUpdate(user_id, "", sink2), "enchant_flame", gen_item_id)
+        self.assertIn("Enchant Test Blade + Flame", sink2[-1])
+        self.assertIn("your odds:", sink2[-1])
+
+    async def test_blacksmith_and_alchemy_landing_screens_show_category_buttons_and_mastery_status(self):
+        """The new landing screens carry the real mastery status line (same one _do_check_professions shows) and route into the 3/2 real category screens."""
+        user_id = 951043
+        make_basic_character(user_id, "LandingScreenTester", current_location="crossroads_tavern")
+        from unittest.mock import patch
+        real_safe_send = bot._safe_send
+        captured = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured.append((text, kwargs.get("reply_markup")))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_show_blacksmith_menu(FakeUpdate(user_id, "", []))
+        text, markup = captured[-1]
+        self.assertIn("Blacksmithing: Novice (+0, 0 uses)", text)
+        callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertEqual(set(callback_data) & {"bsmenu|craft", "bsmenu|advanced", "bsmenu|forge"}, {"bsmenu|craft", "bsmenu|advanced", "bsmenu|forge"})
+
+        captured.clear()
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_show_alchemy_menu(FakeUpdate(user_id, "", []))
+        text, markup = captured[-1]
+        self.assertIn("Alchemy: Novice (+0, 0 uses)", text)
+        callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertEqual(set(callback_data) & {"almenu|brew", "almenu|enchant"}, {"almenu|brew", "almenu|enchant"})
+
+    async def test_bsmenu_and_almenu_callbacks_dispatch_root_and_categories_correctly(self):
+        """End-to-end button routing: bsmenu|root/craft/advanced/forge and almenu|root/brew/enchant all reach the real, distinct screens."""
+        user_id = 951044
+        make_basic_character(user_id, "MenuNavTester", char_class="Fighter", current_location="crossroads_tavern")
+        for data, expected in [
+            ("bsmenu|root", "The Forge"),
+            ("bsmenu|craft", "The Forge — Craft"),
+            ("bsmenu|advanced", "The Forge — Advanced Ladder"),
+            ("bsmenu|forge", "The Forge — Forge Magic Item"),
+        ]:
+            sink = []
+            await bot.bsmenu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            self.assertIn(expected, sink[-1], data)
+        for data, expected in [
+            ("almenu|root", "The Alchemy Lab"),
+            ("almenu|brew", "The Alchemy Lab — Brew"),
+            ("almenu|enchant", "The Alchemy Lab — Enchant"),
+        ]:
+            sink = []
+            await bot.almenu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            self.assertIn(expected, sink[-1], data)
+
+    async def test_full_button_chain_landing_to_category_to_preview_to_confirm_actually_crafts(self):
+        """Real end-to-end walk of the whole new flow: landing -> category -> preview -> Confirm actually crafts, exactly as if a player tapped through all four screens."""
+        user_id = 951045
+        make_basic_character(user_id, "FullChainTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "wood", 3)
+        from unittest.mock import patch
+        sink = []
+        await bot.bsmenu_callback(FakeCallbackUpdate(user_id, "bsmenu|craft", sink), DummyContext())
+        await bot.craft_menu_callback(FakeCallbackUpdate(user_id, "craft|preview|wooden_shield", sink), DummyContext())
+        self.assertIn("Craft: Wooden Shield", sink[-1])
+        with patch("bot.narrate_skill_check", return_value="You craft it carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot.craft_menu_callback(FakeCallbackUpdate(user_id, "craft|make|wooden_shield", sink), DummyContext())
+        updated = db.get_character(user_id, -999)
+        self.assertGreater(updated["inventory"].get("wooden_shield", 0), 0)
 
     def test_find_enchant_recipe_in_text_prefers_the_longer_more_specific_label(self):
         """

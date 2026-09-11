@@ -336,7 +336,18 @@ def recipe_requirement_gate(character: dict, recipe: dict) -> str | None:
         from guilds import GUILDS, held_guild_ids
         if requires_guild not in held_guild_ids(character):
             guild_name = GUILDS.get(requires_guild, {}).get("name", requires_guild)
-            return f"That recipe is reserved for members of the {guild_name}."
+            # Real text bug (2026-09-11, found building the Blacksmith/
+            # Alchemy category screens -- this rejection text is now
+            # actually shown to players as a locked-recipe explanation,
+            # not silently swallowed the way it always was before those
+            # screens existed): 6 of 7 real guild names already start
+            # with "The " (guilds.GUILDS), so prepending another lower-
+            # case "the" read as "the The Forge Guild". Stripping a
+            # leading "The " before interpolating fixes it for every
+            # guild uniformly, including the one ("Adventurers' Guild")
+            # that never had the word at all.
+            display_name = guild_name.removeprefix("The ")
+            return f"That recipe is reserved for members of the {display_name}."
     min_rebirth = recipe.get("min_rebirth")
     if min_rebirth and character.get("rebirth_count", 0) < min_rebirth:
         return f"That recipe demands the mastery of rebirth #{min_rebirth} or higher — you're not there yet."

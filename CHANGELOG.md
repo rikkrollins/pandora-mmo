@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.584] — feat: make the Blacksmith/Alchemy menus genuinely interactive
+
+Follow-up to v1.27.582/583, per Coffee: "is there a way you can make
+the alchemy and blacksmith menues more interactive, maybe give a
+little explaination, and push buttons with options... something more
+interactive, for the 'new player/advanced player'." Rebuilt both from
+a single flat button list into a real 3-screen flow:
+
+- **Landing screen** — a plain-language explainer plus the real
+  mastery rank/bonus/uses line (the same one `_do_check_professions`
+  already shows), and category buttons instead of one long list.
+- **Category screens** (Craft / Advanced Ladder / Forge Magic Item for
+  Blacksmith; Brew / Enchant for Alchemy) — every recipe you're
+  eligible for is now ALWAYS a real button, even when you're short on
+  materials (the old version silently hid it instead); every recipe
+  you're NOT yet eligible for is shown too, as plain text with the
+  real reason (`recipe_requirement_gate`'s own rejection message) — a
+  genuine "what to work toward" view instead of recipes just vanishing.
+- **Preview screens** — tapping a recipe/item no longer crafts
+  instantly. It shows the real DC, a computed success percentage (the
+  same d20 + modifier + bonus formula the actual roll uses, counted
+  across all 20 faces — never invented), and a real have/need line per
+  material, with Confirm/Back buttons. Confirm dispatches through the
+  exact same craft/forge/enchant handlers the instant-tap flow always
+  used.
+
+**Real bug fixed along the way**: `recipe_requirement_gate`'s guild
+rejection text read "reserved for members of the The Forge Guild" —
+6 of 7 real guild names already start with "The ", so prepending
+another "the" doubled the article. This was always wrong but never
+visible before, since a locked recipe used to just disappear from the
+menu instead of being shown with its reason. Same "the The X" bug
+class already fixed once for quest titles and key items elsewhere in
+this codebase.
+
+201 tests run across every touched area; all green except the same
+one pre-existing, unrelated battle-menu concurrency failure already
+confirmed in the two prior deploys.
+
 ## [1.27.583] — feat: Professions menu links + bare-word triggers for the new crafting menus
 
 Follow-up to v1.27.582's Blacksmith/Alchemy menus, per Coffee: "include

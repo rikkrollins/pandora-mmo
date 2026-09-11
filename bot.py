@@ -21686,9 +21686,9 @@ def _craft_keyboard(character: dict) -> InlineKeyboardMarkup | None:
 
 async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Handles taps on _craft_keyboard/_blacksmith_menu_keyboard/
-    _alchemy_menu_keyboard -- dispatches through the exact same
-    _do_craft free text already uses.
+    Handles taps on _craft_keyboard and the Blacksmith/Alchemy category
+    screens -- dispatches through the exact same _do_craft free text
+    already uses.
 
     Real gap fix (2026-09-11, per Coffee: "i dont want to have to type
     'journeyman, or Masterwork'"): this only ever resolved a static
@@ -21702,11 +21702,22 @@ async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     static recipes -- _do_craft already tries an advanced-recipe name
     match FIRST (see its own docstring), so `craft {recipe['name']}`
     round-trips correctly.
+
+    "preview" (2026-09-11, per Coffee: "give a little explanation, and
+    push buttons with options... more interactive, for the new player/
+    advanced player") -- a category screen's own recipe buttons open
+    _do_show_craft_preview instead of crafting instantly, so a player
+    sees the real DC/odds/materials before committing. "make" (the
+    preview's own Confirm button, and the generic backpack's _craft_
+    keyboard, unchanged) still crafts immediately.
     """
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+    if action == "preview" and len(parts) >= 3:
+        await _do_show_craft_preview(update, parts[2])
+        return
     if action != "make" or len(parts) < 3:
         return
     item = items_module.get_item(parts[2])
@@ -21718,49 +21729,89 @@ async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await _do_craft(update, f"craft {recipe['name']}")
 
 
+# Real, computed helpers shared by every Blacksmith/Alchemy screen below
+# (2026-09-11, per Coffee: "give a little explanation, and push buttons
+# with options... more interactive, for the new player/advanced
+# player"). Never invented -- same "compute it in rules/, hand the
+# narrator ground truth" discipline this whole codebase already follows
+# for combat; here the "narrator" is the menu screen itself.
+def _profession_status_line(character: dict, profession: str) -> str:
+    """The exact same rank/bonus/uses line _do_check_professions already shows, reused so a crafting menu never has to send a player elsewhere to see where they stand."""
+    uses = (character.get("skill_uses") or {}).get(profession, 0)
+    bonus = practiced_bonus(uses)
+    rank = _profession_rank_title(uses)
+    return f"{profession.capitalize()}: {rank} (+{bonus}, {uses} uses)"
+
+
+def _materials_checklist_lines(inventory: dict, materials: dict) -> list[str]:
+    """A real have/need line per material -- ✅ once you carry enough, ❌ otherwise -- instead of a bare list with no indication of what's actually missing."""
+    lines = []
+    for item_id, qty in materials.items():
+        have = inventory.get(item_id, 0)
+        mark = "✅" if have >= qty else "❌"
+        lines.append(f"{mark} {items_module.get_item(item_id)['name']} {have}/{qty}")
+    return lines
+
+
+def _crafting_check_bonus(
+    character: dict, telegram_user_id: int, chat_id: int, recipe: dict, include_ability_check_bonus: bool = False,
+) -> int:
+    """
+    The exact same external bonus stack _do_craft/_do_enchant_item/
+    _do_forge_magic_item already add on top of the raw roll -- shared
+    here so a preview's own odds can never drift from what the real
+    check actually rolls. `include_ability_check_bonus` mirrors the one
+    real difference between them: _do_craft never adds _effective_
+    ability_check_bonus, _do_enchant_item/_do_forge_magic_item both do.
+    """
+    profession = recipe.get("profession", "crafting")
+    bonus = _practiced_bonus_for(telegram_user_id, chat_id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    bonus += _equipped_profession_bonus(character, profession)
+    bonus += _skill_points(character, f"prof_{profession}")
+    if include_ability_check_bonus:
+        bonus += _effective_ability_check_bonus(character, recipe["ability"])
+    return bonus
+
+
+def _success_chance_pct(character: dict, ability: str, dc: int, extra_bonus: int) -> int:
+    """
+    Real, computed odds for a preview screen -- the exact same d20 +
+    ability modifier (+ the utility-subclass ability-check hook
+    rules.dice.roll_ability_check itself applies) formula every real
+    craft/enchant/forge check already rolls with (always proficient=
+    False), folded with the same external bonus stack _crafting_check_
+    bonus above computes. Counts real outcomes across all 20 faces
+    rather than estimating, same "compute it, never invent it" rule.
+    """
+    mod = ability_modifier(character.get(ability, 10))
+    subclass_bonus = (
+        UTILITY_SUBCLASS_CHECK_BONUS_VALUE
+        if UTILITY_SUBCLASS_ABILITY_CHECK_BONUS.get(character.get("subclass")) == ability
+        else 0
+    )
+    effective = mod + subclass_bonus + extra_bonus
+    successes = sum(1 for raw in range(1, 21) if raw + effective >= dc)
+    return round(successes / 20 * 100)
+
+
 # Blacksmith menu (2026-09-11, per Coffee: "i dont want to have to type
 # 'journeyman, or Masterwork' ... how can we improve the Forging system
-# so i can open a menu and see what i can craft and build, upgrade").
-# A real, focused screen scoped to ONE profession (blacksmithing) --
-# unlike the generic backpack's own _craft_keyboard (which shows every
-# affordable base RECIPES entry regardless of profession or eligibility,
-# and can't show ADVANCED_RECIPES/forge_magic_upgrade at all), this one
-# only shows what the reader can ACTUALLY use right now: base recipes
-# they can afford, advanced-ladder recipes they're both eligible for
-# (recipe_requirement_gate) and can afford, and any owned PLAIN (not
-# already-generated) weapon/armor/shield/ring/amulet/wondrous item
-# they're eligible to promote into a real magic item. Every button
-# dispatches through the exact same real handlers (_do_craft/_do_forge_
-# magic_item) free text already uses -- this is a UX layer, not a new
-# game-rule path.
-def _blacksmith_menu_rows(character: dict) -> list[list[InlineKeyboardButton]]:
-    inventory = character.get("inventory", {})
-    rows = [
-        [InlineKeyboardButton(f"🔨 Craft {items_module.get_item(rid)['name']}", callback_data=f"craft|make|{rid}")]
-        for rid, recipe in RECIPES.items()
-        if recipe.get("profession") == "blacksmithing" and has_materials(inventory, recipe)
-        and not recipe_requirement_gate(character, recipe)
-    ]
-    rows += [
-        [InlineKeyboardButton(f"⚒️ Craft {recipe['name']}", callback_data=f"craft|make|{rid}")]
-        for rid, recipe in ADVANCED_RECIPES.items()
-        if recipe.get("profession") == "blacksmithing" and not recipe_requirement_gate(character, recipe)
-        and has_materials(inventory, recipe)
-    ]
-    forge_recipe = get_enchant_recipe("forge_magic_upgrade")
-    if forge_recipe and not recipe_requirement_gate(character, forge_recipe) and has_materials(inventory, forge_recipe):
-        seen_names = set()
-        for item_id in inventory:
-            if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
-                continue  # already magic -- that's the Alchemy menu's Enchant section, not this one
-            item = items_module.get_item(item_id)
-            if item is None or item["type"] not in forge_recipe["applies_to"] or item["name"] in seen_names:
-                continue
-            seen_names.add(item["name"])
-            rows.append([InlineKeyboardButton(f"✨ Forge {item['name']} into a Magic Item", callback_data=f"forge|make|{item_id}")])
-    return rows
-
-
+# so i can open a menu"; then, on making it "more interactive... give a
+# little explanation" for "the new player/advanced player": a real
+# 3-screen flow -- a landing screen (explainer + real mastery status +
+# 3 category buttons), a category screen per real crafting surface
+# (base recipes / the Forge Guild's advanced ladder / forge_magic_
+# upgrade), and a preview screen per recipe (real DC/odds/materials,
+# Confirm or Back) instead of crafting the instant a button is tapped.
+# Every eligible recipe/item is ALWAYS shown as a real button now, even
+# when short on materials -- the preview screen is exactly where that
+# gap becomes visible (a ❌ line), rather than the recipe silently
+# vanishing from the menu the way the original flat-list version did.
+# Ineligible (recipe_requirement_gate-failed) recipes are listed too,
+# as plain text with the real rejection reason, not buttons -- a
+# genuine "what to work toward" view for an advanced player, per
+# Coffee's own "show locked recipes too" ask.
 async def _do_show_blacksmith_menu(update: Update) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -21768,20 +21819,125 @@ async def _do_show_blacksmith_menu(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    rows = _blacksmith_menu_rows(character)
-    text = "🔨 **The Forge**\nTap below to craft, build, or upgrade a weapon or piece of armor."
-    if not rows:
-        text += "\n\nNothing to show yet — you're missing materials, level, or Forge Guild standing for everything below level 1."
-    keyboard = InlineKeyboardMarkup(rows) if rows else None
+    text = (
+        "🔨 **The Forge**\n"
+        f"{_profession_status_line(character, 'blacksmithing')}\n\n"
+        "Turn raw ore and materials into real weapons and armor. Craft a base recipe outright, work up through "
+        "the Forge Guild's own advanced ladder, or promote something you already own into a real magic item."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔨 Craft", callback_data="bsmenu|craft")],
+        [InlineKeyboardButton("⚒️ Advanced Ladder", callback_data="bsmenu|advanced")],
+        [InlineKeyboardButton("✨ Forge Magic Item", callback_data="bsmenu|forge")],
+    ])
+    await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
+
+
+async def _do_show_blacksmith_category(update: Update, category: str) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    inventory = character.get("inventory", {})
+    button_rows: list[list[InlineKeyboardButton]] = []
+    locked_lines: list[str] = []
+
+    if category == "craft":
+        title = "🔨 **The Forge — Craft**"
+        intro = "Turn raw materials straight into a real weapon or piece of armor. Tap one to see the odds and what it needs."
+        for rid, recipe in RECIPES.items():
+            if recipe.get("profession") != "blacksmithing":
+                continue
+            name = items_module.get_item(rid)["name"]
+            gate = recipe_requirement_gate(character, recipe)
+            if gate:
+                locked_lines.append(f"🔒 {name} — {gate}")
+            else:
+                button_rows.append([InlineKeyboardButton(f"🔨 {name}", callback_data=f"craft|preview|{rid}")])
+    elif category == "advanced":
+        title = "⚒️ **The Forge — Advanced Ladder**"
+        intro = "The Forge Guild's own real progression — masterwork gear first, then the guild-and-rebirth ladder up to a mythic Godsforged tier."
+        for rid, recipe in ADVANCED_RECIPES.items():
+            if recipe.get("profession") != "blacksmithing":
+                continue
+            gate = recipe_requirement_gate(character, recipe)
+            if gate:
+                locked_lines.append(f"🔒 {recipe['name']} ({recipe['tier']}) — {gate}")
+            else:
+                button_rows.append([InlineKeyboardButton(f"⚒️ {recipe['name']} ({recipe['tier']})", callback_data=f"craft|preview|{rid}")])
+    elif category == "forge":
+        title = "✨ **The Forge — Forge Magic Item**"
+        intro = "Promote a plain weapon, armor, shield, ring, amulet, or wondrous item you already own into a real magic item with a random stat bonus."
+        forge_recipe = get_enchant_recipe("forge_magic_upgrade")
+        gate = recipe_requirement_gate(character, forge_recipe)
+        if gate:
+            locked_lines.append(f"🔒 Forge Magic Item — {gate}")
+        else:
+            seen_names = set()
+            for item_id in inventory:
+                if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+                    continue  # already magic -- that's the Alchemy menu's Enchant category, not this one
+                item = items_module.get_item(item_id)
+                if item is None or item["type"] not in forge_recipe["applies_to"] or item["name"] in seen_names:
+                    continue
+                seen_names.add(item["name"])
+                button_rows.append([InlineKeyboardButton(f"✨ {item['name']}", callback_data=f"forge|preview|{item_id}")])
+            if not button_rows:
+                locked_lines.append("You don't own a plain weapon, armor, shield, ring, amulet, or wondrous item to forge yet.")
+    else:
+        return
+
+    text = f"{title}\n{_profession_status_line(character, 'blacksmithing')}\n\n{intro}"
+    if locked_lines:
+        text += "\n\n" + "\n".join(locked_lines)
+    keyboard_rows = button_rows + [[InlineKeyboardButton("🔙 Back", callback_data="bsmenu|root")]]
+    await _safe_send(update, text, reply_markup=_with_menu_button(InlineKeyboardMarkup(keyboard_rows)), speak=False)
+
+
+async def _do_show_craft_preview(update: Update, recipe_id: str) -> None:
+    """Real DC/odds/materials before committing -- Confirm dispatches through the exact same craft|make that used to fire on the first tap."""
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    recipe = get_advanced_recipe(recipe_id) or get_recipe(recipe_id)
+    if recipe is None:
+        return
+    name = recipe.get("name") or items_module.get_item(recipe["result_item"])["name"]
+    gate = recipe_requirement_gate(character, recipe)
+    if gate:
+        await _safe_send(update, f"🔒 {name} — {gate}", speak=False)
+        return
+    bonus = _crafting_check_bonus(character, update.effective_user.id, update.effective_chat.id, recipe)
+    chance = _success_chance_pct(character, recipe["ability"], recipe["dc"], bonus)
+    checklist = "\n".join(_materials_checklist_lines(character.get("inventory", {}), recipe["materials"]))
+    tier_note = f" ({recipe['tier']})" if recipe.get("tier") else ""
+    text = (
+        f"🔨 **Craft: {name}**{tier_note}\n"
+        f"{recipe['ability'].capitalize()} check, DC {recipe['dc']} — your odds: {chance}%\n\n"
+        f"Materials:\n{checklist}"
+    )
+    back_target = "bsmenu|root" if recipe.get("profession") == "blacksmithing" else "almenu|root"
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirm", callback_data=f"craft|make|{recipe_id}")],
+        [InlineKeyboardButton("🔙 Back", callback_data=back_target)],
+    ])
     await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
 
 
 async def forge_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _blacksmith_menu_rows' Forge buttons -- dispatches through the exact same _do_forge_magic_item free text already uses."""
+    """Handles taps on the Forge category's buttons -- "preview" opens _do_show_forge_preview, "make" (the preview's own Confirm) dispatches through the exact same _do_forge_magic_item free text already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+    if action == "preview" and len(parts) >= 3:
+        await _do_show_forge_preview(update, parts[2])
+        return
     if action != "make" or len(parts) < 3:
         return
     item = items_module.get_item(parts[2])
@@ -21790,50 +21946,55 @@ async def forge_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await _do_forge_magic_item(update, f"forge my {item['name']} into a magic item")
 
 
+async def _do_show_forge_preview(update: Update, item_id: str) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    item = items_module.get_item(item_id)
+    if item is None:
+        return
+    forge_recipe = get_enchant_recipe("forge_magic_upgrade")
+    gate = recipe_requirement_gate(character, forge_recipe)
+    if gate:
+        await _safe_send(update, f"🔒 Forge {item['name']} — {gate}", speak=False)
+        return
+    bonus = _crafting_check_bonus(character, update.effective_user.id, update.effective_chat.id, forge_recipe, include_ability_check_bonus=True)
+    chance = _success_chance_pct(character, forge_recipe["ability"], forge_recipe["dc"], bonus)
+    checklist = "\n".join(_materials_checklist_lines(character.get("inventory", {}), forge_recipe["materials"]))
+    text = (
+        f"✨ **Forge {item['name']} into a Magic Item**\n"
+        f"{forge_recipe['ability'].capitalize()} check, DC {forge_recipe['dc']} — your odds: {chance}%\n\n"
+        f"Materials:\n{checklist}"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirm", callback_data=f"forge|make|{item_id}")],
+        [InlineKeyboardButton("🔙 Back", callback_data="bsmenu|root")],
+    ])
+    await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
+
+
+async def bsmenu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on the Blacksmith landing screen and its 3 category screens."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action == "root":
+        await _do_show_blacksmith_menu(update)
+    elif action in ("craft", "advanced", "forge"):
+        await _do_show_blacksmith_category(update, action)
+
+
 # Alchemy & Enchanting menu (2026-09-11, same real ask as the Blacksmith
 # menu above, applied to alchemy's own two real crafting surfaces:
-# brewing potions/scrolls (RECIPES) and enchanting an already-magic item
-# (ENCHANT_RECIPES) -- both stay tagged "alchemy" by design, see
-# [[feedback_enchanting_stays_alchemy_not_blacksmithing]], so this one
-# menu covers both rather than needing a separate "Enchanting" screen.
-# An enchant button is per (owned generated item, eligible recipe) PAIR
-# -- unlike craft, enchanting always needs a real target item, so a
-# bare recipe name alone would be ambiguous the moment a player owns
-# more than one eligible magic item.
-def _alchemy_menu_rows(character: dict) -> list[list[InlineKeyboardButton]]:
-    inventory = character.get("inventory", {})
-    rows = [
-        [InlineKeyboardButton(f"⚗️ Craft {items_module.get_item(rid)['name']}", callback_data=f"craft|make|{rid}")]
-        for rid, recipe in RECIPES.items()
-        if recipe.get("profession") == "alchemy" and has_materials(inventory, recipe)
-        and not recipe_requirement_gate(character, recipe)
-    ]
-    known_spell_damage_types = {
-        spells_module.get_spell(sid).get("damage_type")
-        for sid in character.get("known_spells", [])
-        if spells_module.get_spell(sid)
-    }
-    for item_id in inventory:
-        if not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
-            continue
-        item = items_module.get_item(item_id)
-        if item is None:
-            continue
-        for recipe_id, recipe in ENCHANT_RECIPES.items():
-            if recipe.get("profession") != "alchemy" or item["type"] not in recipe["applies_to"]:
-                continue
-            if recipe_requirement_gate(character, recipe) or not has_materials(inventory, recipe):
-                continue
-            affix_damage_type = recipe["affix"].get("damage_type")
-            if affix_damage_type and affix_damage_type not in known_spell_damage_types:
-                continue
-            label = recipe_id.replace("enchant_", "").replace("_", " ").title()
-            rows.append([
-                InlineKeyboardButton(f"✨ Enchant {item['name']} with {label}", callback_data=f"enchant|make|{recipe_id}|{item_id}")
-            ])
-    return rows
-
-
+# brewing potions/scrolls/tonics (RECIPES) and enchanting an already-
+# magic item (ENCHANT_RECIPES) -- both stay tagged "alchemy" by design,
+# see [[feedback_enchanting_stays_alchemy_not_blacksmithing]], so this
+# one menu covers both rather than needing a separate "Enchanting"
+# screen. Same landing/category/preview shape as the Blacksmith menu.
 async def _do_show_alchemy_menu(update: Update) -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -21841,20 +22002,91 @@ async def _do_show_alchemy_menu(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    rows = _alchemy_menu_rows(character)
-    text = "⚗️ **The Alchemy Lab**\nTap below to brew a potion or scroll, or enchant a magic item you're carrying."
-    if not rows:
-        text += "\n\nNothing to show yet — you're missing materials, a known matching spell, level, or Enchanters' Guild standing for everything below level 1."
-    keyboard = InlineKeyboardMarkup(rows) if rows else None
+    text = (
+        "⚗️ **The Alchemy Lab**\n"
+        f"{_profession_status_line(character, 'alchemy')}\n\n"
+        "Brew potions, tonics, and scrolls from gathered herbs and reagents, or bind a new magic effect into an "
+        "item you already own."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚗️ Brew", callback_data="almenu|brew")],
+        [InlineKeyboardButton("✨ Enchant", callback_data="almenu|enchant")],
+    ])
     await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
 
 
+async def _do_show_alchemy_category(update: Update, category: str) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    inventory = character.get("inventory", {})
+    button_rows: list[list[InlineKeyboardButton]] = []
+    locked_lines: list[str] = []
+
+    if category == "brew":
+        title = "⚗️ **The Alchemy Lab — Brew**"
+        intro = "Brew potions, tonics, and scrolls from gathered herbs and reagents. Tap one to see the odds and what it needs."
+        for rid, recipe in RECIPES.items():
+            if recipe.get("profession") != "alchemy":
+                continue
+            name = items_module.get_item(rid)["name"]
+            gate = recipe_requirement_gate(character, recipe)
+            if gate:
+                locked_lines.append(f"🔒 {name} — {gate}")
+            else:
+                button_rows.append([InlineKeyboardButton(f"⚗️ {name}", callback_data=f"craft|preview|{rid}")])
+    elif category == "enchant":
+        title = "✨ **The Alchemy Lab — Enchant**"
+        intro = "Bind a new magic effect into an item you already own — an elemental retype, a resistance ward, or one of the Enchanters' Guild's own ladder effects."
+        known_spell_damage_types = {
+            spells_module.get_spell(sid).get("damage_type")
+            for sid in character.get("known_spells", [])
+            if spells_module.get_spell(sid)
+        }
+        owned_generated = [
+            (item_id, items_module.get_item(item_id)) for item_id in inventory
+            if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX)
+        ]
+        for recipe_id, recipe in ENCHANT_RECIPES.items():
+            if recipe.get("profession") != "alchemy":
+                continue
+            label = recipe_id.replace("enchant_", "").replace("_", " ").title()
+            gate = recipe_requirement_gate(character, recipe)
+            if gate:
+                locked_lines.append(f"🔒 {label} — {gate}")
+                continue
+            affix_damage_type = recipe["affix"].get("damage_type")
+            if affix_damage_type and affix_damage_type not in known_spell_damage_types:
+                locked_lines.append(f"🔒 {label} — you need to know a {affix_damage_type} spell first")
+                continue
+            matching_items = [(iid, it) for iid, it in owned_generated if it and it["type"] in recipe["applies_to"]]
+            if not matching_items:
+                locked_lines.append(f"✅ {label} — unlocked, but you need a matching magic item to enchant")
+                continue
+            for item_id, item in matching_items:
+                button_rows.append([InlineKeyboardButton(f"✨ {item['name']} + {label}", callback_data=f"enchant|preview|{recipe_id}|{item_id}")])
+    else:
+        return
+
+    text = f"{title}\n{_profession_status_line(character, 'alchemy')}\n\n{intro}"
+    if locked_lines:
+        text += "\n\n" + "\n".join(locked_lines)
+    keyboard_rows = button_rows + [[InlineKeyboardButton("🔙 Back", callback_data="almenu|root")]]
+    await _safe_send(update, text, reply_markup=_with_menu_button(InlineKeyboardMarkup(keyboard_rows)), speak=False)
+
+
 async def enchant_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _alchemy_menu_rows' Enchant buttons -- dispatches through the exact same _do_enchant_item free text already uses."""
+    """Handles taps on the Enchant category's buttons -- "preview" opens _do_show_enchant_preview, "make" (the preview's own Confirm) dispatches through the exact same _do_enchant_item free text already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+    if action == "preview" and len(parts) >= 4:
+        await _do_show_enchant_preview(update, parts[2], parts[3])
+        return
     if action != "make" or len(parts) < 4:
         return
     recipe = get_enchant_recipe(parts[2])
@@ -21863,6 +22095,49 @@ async def enchant_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return
     label = parts[2].replace("enchant_", "").replace("_", " ")
     await _do_enchant_item(update, f"enchant my {item['name']} with {label}")
+
+
+async def _do_show_enchant_preview(update: Update, recipe_id: str, item_id: str) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    recipe = get_enchant_recipe(recipe_id)
+    item = items_module.get_item(item_id)
+    if recipe is None or item is None:
+        return
+    label = recipe_id.replace("enchant_", "").replace("_", " ").title()
+    gate = recipe_requirement_gate(character, recipe)
+    if gate:
+        await _safe_send(update, f"🔒 {item['name']} + {label} — {gate}", speak=False)
+        return
+    bonus = _crafting_check_bonus(character, update.effective_user.id, update.effective_chat.id, recipe, include_ability_check_bonus=True)
+    chance = _success_chance_pct(character, recipe["ability"], recipe["dc"], bonus)
+    checklist = "\n".join(_materials_checklist_lines(character.get("inventory", {}), recipe["materials"]))
+    text = (
+        f"✨ **Enchant {item['name']} + {label}**\n"
+        f"{recipe['ability'].capitalize()} check, DC {recipe['dc']} — your odds: {chance}%\n\n"
+        f"Materials:\n{checklist}"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirm", callback_data=f"enchant|make|{recipe_id}|{item_id}")],
+        [InlineKeyboardButton("🔙 Back", callback_data="almenu|root")],
+    ])
+    await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
+
+
+async def almenu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on the Alchemy landing screen and its 2 category screens."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action == "root":
+        await _do_show_alchemy_menu(update)
+    elif action in ("brew", "enchant"):
+        await _do_show_alchemy_category(update, action)
 
 
 def _item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
@@ -39182,6 +39457,8 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(craft_menu_callback, pattern=r"^craft\|"))
     application.add_handler(CallbackQueryHandler(forge_menu_callback, pattern=r"^forge\|"))
     application.add_handler(CallbackQueryHandler(enchant_menu_callback, pattern=r"^enchant\|"))
+    application.add_handler(CallbackQueryHandler(bsmenu_callback, pattern=r"^bsmenu\|"))
+    application.add_handler(CallbackQueryHandler(almenu_callback, pattern=r"^almenu\|"))
     application.add_handler(CallbackQueryHandler(give_menu_callback, pattern=r"^give\|"))
     application.add_handler(CallbackQueryHandler(member_level_callback, pattern=r"^memberlvl\|"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu\|"))
