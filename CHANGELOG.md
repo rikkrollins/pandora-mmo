@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.583] — feat: Professions menu links + bare-word triggers for the new crafting menus
+
+Follow-up to v1.27.582's Blacksmith/Alchemy menus, per Coffee: "include
+the blacksmith and Alchemy menus into the Professions menu in the main
+menu. Also open it if players say 'blacksmith' or 'alchemy'... include
+in the training/curriculum guides where they can find the menus and
+how they can open them."
+
+- The Professions screen (`menu|professions`, previously plain text
+  with no keyboard at all) now carries real "🔨 Blacksmith"/"⚗️ Alchemy"
+  buttons straight into the two focused menus, via new `menu|blacksmith`/
+  `menu|alchemy` sections in the existing `menu_callback` dispatch.
+- Bare `blacksmith`/`alchemy` (and `alchemist`) now open their menu
+  from anywhere — "Open Alchemy", "Perform Alchemy", "Do Alchemy",
+  "Use Alchemy", "Look at Alchemy" all just contain the word itself, so
+  one word-boundary regex covers every phrasing, same "distinctive noun
+  fires unconditionally" discipline this file already uses for menu/
+  formation/waypoints/skills. Deliberately NOT extended to bare "forge"
+  — that word is already claimed by the real forge_item/forge_magic_item
+  actions ("forge my X"), so making it unconditional would swallow those.
+- Both guilds' curriculum graduation messages (where the advanced book
+  is actually granted) now name the real menu that uses it — e.g.
+  "Say \"blacksmith menu\" anytime to craft, forge, or enchant with
+  everything you've learned" — derived generically from the granted
+  book's own `teaches_advanced_profession` field, so any future book
+  reward gets this for free.
+
+160 tests run across every touched area; all green except the same
+one pre-existing, unrelated battle-menu concurrency failure already
+confirmed in v1.27.582's own deploy.
+
 ## [1.27.582] — feat: real Blacksmith/Alchemy crafting menus, and the recipe-teaching gaps behind them
 
 Per Coffee: "i dont want to have to type 'journeyman, or Masterwork'

@@ -22370,7 +22370,17 @@ async def _do_check_professions(update: Update) -> None:
         rank = _profession_rank_title(uses)
         home_tag = " ⭐ *(favored trade)*" if prof == home_profession else ""
         lines.append(f"• {prof.capitalize()}: {rank} (+{bonus}, {uses} uses){home_tag}")
-    await _safe_send(update, "\n".join(lines), speak=False)
+    # Real feature (2026-09-11, per Coffee: "include the blacksmith and
+    # Alchemy menus into the Professions menu in the main menu") -- the
+    # two focused crafting menus (_do_show_blacksmith_menu/_do_show_
+    # alchemy_menu) get real one-tap entry points from here, on top of
+    # their own natural-language triggers, same "menu|<section>" shape
+    # menu_callback's own dispatch already uses for every other screen.
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔨 Blacksmith", callback_data="menu|blacksmith")],
+        [InlineKeyboardButton("⚗️ Alchemy", callback_data="menu|alchemy")],
+    ])
+    await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(keyboard), speak=False)
 
 
 _SUMMON_SECONDARY_DESCRIPTIONS = {
@@ -27919,11 +27929,26 @@ async def _complete_guild_curriculum_step(
         reward_parts.append(f"{reward_xp} XP")
     if reward_gold:
         reward_parts.append(f"{reward_gold} gold")
+    menu_hint = ""
     if reward_item_granted:
-        reward_parts.append(items_module.get_item(reward_item)["name"])
+        reward_item_data = items_module.get_item(reward_item)
+        reward_parts.append(reward_item_data["name"])
+        # Real feature (2026-09-11, per Coffee: "include in the
+        # training/curriculum guides where they can find the menus and
+        # how they can open them") -- the exact moment a player earns
+        # the advanced book is also the exact moment they need to know
+        # the real one-tap menu (_do_show_blacksmith_menu/_do_show_
+        # alchemy_menu) exists to actually USE what it teaches. Derived
+        # generically from the granted book's own teaches_advanced_
+        # profession field rather than hardcoded per guild, so any
+        # future book-granting curriculum step gets this for free.
+        menu_by_profession = {"blacksmithing": "blacksmith menu", "alchemy": "alchemy menu"}
+        menu_name = menu_by_profession.get(reward_item_data.get("teaches_advanced_profession"))
+        if menu_name:
+            menu_hint = f" Say \"{menu_name}\" anytime to craft, forge, or enchant with everything you've learned."
     reward_text = ", ".join(reward_parts) or "real progress"
     await _safe_send(
-        update_like, f"✅ **{updated_character['name']}** completes \"{step['title']}\" — {reward_text}.{extra_note}",
+        update_like, f"✅ **{updated_character['name']}** completes \"{step['title']}\" — {reward_text}.{extra_note}{menu_hint}",
         thread_id=reply_thread_id,
     )
 
@@ -31657,6 +31682,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_check_party(update)
     elif section == "professions":
         await _do_check_professions(update)
+    elif section == "blacksmith":
+        await _do_show_blacksmith_menu(update)
+    elif section == "alchemy":
+        await _do_show_alchemy_menu(update)
     elif section == "visualmap":
         await _do_show_visual_map(update)
     elif section == "rebirth":

@@ -333,6 +333,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("forge my longsword into a magic item", [])["action"], "forge_magic_item")
         self.assertEqual(_keyword_fallback("enchant my longsword with flame", [])["action"], "enchant_item")
 
+    def test_bare_blacksmith_and_alchemy_keywords_also_open_the_menu(self):
+        """
+        Real extension (2026-09-11, per Coffee: "open it if players say
+        'blacksmith' or 'alchemy' example, 'Open Alchemy' 'Perform
+        Alchemy' 'Do Alchemy' 'Use Alchemy' 'Look at Alchemy'"). One
+        bare word-boundary match covers every verb phrasing given, same
+        "distinctive noun fires unconditionally" discipline this file
+        already uses for menu/formation/waypoints/skills.
+        """
+        for text in ("blacksmith", "Open Blacksmith", "Perform Blacksmith", "Do Blacksmith", "Use Blacksmith", "Look at Blacksmith"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_blacksmith_menu", text)
+        for text in ("alchemy", "Open Alchemy", "Perform Alchemy", "Do Alchemy", "Use Alchemy", "Look at Alchemy", "alchemist"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_alchemy_menu", text)
+
+    async def test_professions_menu_has_real_blacksmith_and_alchemy_buttons(self):
+        """
+        Real feature (2026-09-11, per Coffee: "include the blacksmith
+        and Alchemy menus into the Professions menu in the main menu").
+        _do_check_professions previously sent plain text with no
+        keyboard at all -- now offers real one-tap buttons into both
+        focused crafting menus, dispatched via the same menu|<section>
+        shape menu_callback already uses for every other screen.
+        """
+        from unittest.mock import patch
+        user_id = 951030
+        make_basic_character(user_id, "ProfessionsMenuTester", current_location="crossroads_tavern")
+        update = FakeUpdate(user_id, "check my professions", [])
+        real_safe_send = bot._safe_send
+        captured_markups = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured_markups.append(kwargs.get("reply_markup"))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_check_professions(update)
+        self.assertEqual(len(captured_markups), 1)
+        callback_data = [btn.callback_data for row in captured_markups[0].inline_keyboard for btn in row]
+        self.assertIn("menu|blacksmith", callback_data)
+        self.assertIn("menu|alchemy", callback_data)
+
+    async def test_professions_menu_buttons_actually_open_the_real_menus(self):
+        """End-to-end: tapping the Professions screen's Blacksmith/Alchemy buttons reaches the exact same real menu screens their own natural-language triggers do."""
+        user_id = 951031
+        make_basic_character(user_id, "ProfessionsMenuButtonTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 20)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        sink = []
+        await bot.menu_callback(FakeCallbackUpdate(user_id, "menu|blacksmith", sink), DummyContext())
+        self.assertIn("The Forge", sink[-1])
+        sink2 = []
+        await bot.menu_callback(FakeCallbackUpdate(user_id, "menu|alchemy", sink2), DummyContext())
+        self.assertIn("The Alchemy Lab", sink2[-1])
+
     def test_view_prefixed_screen_names_reach_their_real_screen_not_examine(self):
         """
         Real dev-bridge report (2026-08-18, Coffee): "When I use open,
@@ -34386,7 +34441,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._complete_guild_curriculum_step(FakeUpdate(user_id, "", sink), user_id, -999, step)
         updated = db.get_character(user_id, -999)
         self.assertEqual(updated["inventory"].get("grandmasters_forge_tome", 0), 1)
-        self.assertIn("Grandmaster's Forge Tome", "\n".join(sink))
+        combined = "\n".join(sink)
+        self.assertIn("Grandmaster's Forge Tome", combined)
+        # Real feature (2026-09-11, per Coffee: "include in the training/
+        # curriculum guides where they can find the menus and how they
+        # can open them") -- the exact moment the book is earned also
+        # tells the player the real one-tap menu that uses it.
+        self.assertIn('"blacksmith menu"', combined)
 
     async def test_forge_guild_curriculum_reward_item_not_granted_twice(self):
         """A player who already bought their own copy still gets full curriculum credit, just no duplicate book."""
@@ -34416,6 +34477,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._complete_guild_curriculum_step(FakeUpdate(user_id, "", sink), user_id, -999, step)
         updated = db.get_character(user_id, -999)
         self.assertEqual(updated["inventory"].get("enchanters_grimoire", 0), 1)
+        self.assertIn('"alchemy menu"', "\n".join(sink))
 
     def test_guild_curriculum_alignment_choice_announcement_has_a_call_to_action(self):
         """

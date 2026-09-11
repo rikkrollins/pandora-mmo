@@ -372,15 +372,25 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # can collide with (those all require a possessive "forge my"/
     # "forge the X"/"enchant my", never bare "forge"/"blacksmith"/
     # "alchemy" + "menu").
-    if any(p in lowered for p in (
-        "blacksmith menu", "smithy menu", "forge menu", "forging menu",
-        "open the forge", "visit the forge", "blacksmith options",
-    )):
+    # Extended (2026-09-11, per Coffee: "open it if players say
+    # 'blacksmith' or 'alchemy' example, 'Open Alchemy' 'Perform
+    # Alchemy' 'Do Alchemy' 'Use Alchemy' 'Look at Alchemy'") -- rather
+    # than enumerate every verb phrasing individually, a bare `\balchemy\b`/
+    # `\bblacksmith\b` word-boundary match (same "one distinctive noun,
+    # fires unconditionally" discipline this file already uses for
+    # menu/formation/waypoints/skills just below/above) already covers
+    # every example given, since all of them contain the word itself.
+    # "smithy"/"forging"/etc. don't contain "blacksmith" as a substring,
+    # so the explicit phrase list stays alongside the regex rather than
+    # being replaced by it. Deliberately NOT extended to bare "forge" --
+    # that word is already meaningfully claimed by forge_item/forge_
+    # magic_item ("forge my X"/"forge the X" below), so making it
+    # unconditional here would swallow those real actions.
+    if any(p in lowered for p in ("smithy menu", "forge menu", "forging menu", "open the forge", "visit the forge")) \
+            or re.search(r"\bblacksmith\b", lowered):
         return {**base, "action": "check_blacksmith_menu"}
-    if any(p in lowered for p in (
-        "alchemy menu", "alchemist menu", "enchanting menu", "enchant menu",
-        "potion menu", "alchemy lab", "alchemy options",
-    )):
+    if any(p in lowered for p in ("enchanting menu", "enchant menu", "potion menu", "alchemist")) \
+            or re.search(r"\balchemy\b", lowered):
         return {**base, "action": "check_alchemy_menu"}
 
     if re.search(r"\bmenu\b", lowered):
