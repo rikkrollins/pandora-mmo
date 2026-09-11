@@ -22040,16 +22040,25 @@ async def _do_show_alchemy_category(update: Update, category: str) -> None:
                 button_rows.append([InlineKeyboardButton(f"⚗️ {name}", callback_data=f"craft|preview|{rid}")])
     elif category == "enchant":
         title = "✨ **The Alchemy Lab — Enchant**"
-        intro = "Bind a new magic effect into an item you already own — an elemental retype, a resistance ward, or one of the Enchanters' Guild's own ladder effects."
+        intro = "Bind a new magic effect into an item you already own — an elemental retype, a resistance ward, or one of the Enchanters' Guild's own ladder effects. Tap an item to see what it can be enchanted with."
+        # Real gap fix (2026-09-11, per Coffee, dev-topic screenshot: "I
+        # cant read the item names. Please make it legible") -- this
+        # used to render one button per (item, recipe) PAIR, with the
+        # button text concatenating the item's own (often long,
+        # generated) name onto the recipe's label -- Telegram truncates
+        # long button text illegibly, and a player owning several
+        # generated items times several eligible recipes produced a
+        # huge, repetitive wall of half-cut-off buttons. Item-first
+        # navigation fixes both at once: one short button per DISTINCT
+        # eligible item here (_do_show_enchant_item_recipes lists that
+        # item's own real eligible recipes on a second screen, by label
+        # alone, once the item is no longer part of the button text).
         known_spell_damage_types = {
             spells_module.get_spell(sid).get("damage_type")
             for sid in character.get("known_spells", [])
             if spells_module.get_spell(sid)
         }
-        owned_generated = [
-            (item_id, items_module.get_item(item_id)) for item_id in inventory
-            if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX)
-        ]
+        eligible_recipes = []
         for recipe_id, recipe in ENCHANT_RECIPES.items():
             if recipe.get("profession") != "alchemy":
                 continue
@@ -22062,12 +22071,20 @@ async def _do_show_alchemy_category(update: Update, category: str) -> None:
             if affix_damage_type and affix_damage_type not in known_spell_damage_types:
                 locked_lines.append(f"🔒 {label} — you need to know a {affix_damage_type} spell first")
                 continue
-            matching_items = [(iid, it) for iid, it in owned_generated if it and it["type"] in recipe["applies_to"]]
-            if not matching_items:
-                locked_lines.append(f"✅ {label} — unlocked, but you need a matching magic item to enchant")
+            eligible_recipes.append((recipe_id, recipe))
+
+        owned_generated = [
+            (item_id, items_module.get_item(item_id)) for item_id in inventory
+            if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX)
+        ]
+        any_matching_item = False
+        for item_id, item in owned_generated:
+            if item is None or not any(item["type"] in recipe["applies_to"] for _rid, recipe in eligible_recipes):
                 continue
-            for item_id, item in matching_items:
-                button_rows.append([InlineKeyboardButton(f"✨ {item['name']} + {label}", callback_data=f"enchant|preview|{recipe_id}|{item_id}")])
+            any_matching_item = True
+            button_rows.append([InlineKeyboardButton(f"✨ {item['name']}", callback_data=f"enchant|pickitem|{item_id}")])
+        if eligible_recipes and not any_matching_item:
+            locked_lines.append("✅ You know real enchantments, but need a matching magic item to enchant.")
     else:
         return
 
@@ -22078,12 +22095,124 @@ async def _do_show_alchemy_category(update: Update, category: str) -> None:
     await _safe_send(update, text, reply_markup=_with_menu_button(InlineKeyboardMarkup(keyboard_rows)), speak=False)
 
 
+async def _do_show_enchant_item_recipes(update: Update, item_id: str) -> None:
+    """
+    Real gap fix (2026-09-11, per Coffee, dev-topic screenshot: item
+    names were unreadably truncated). Second step of the Enchant
+    category's item-first flow -- once an item is picked, its own
+    name is the SCREEN HEADER, not part of any button's text, so every
+    recipe button below it can stay short (label only).
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    item = items_module.get_item(item_id)
+    if item is None:
+        return
+    known_spell_damage_types = {
+        spells_module.get_spell(sid).get("damage_type")
+        for sid in character.get("known_spells", [])
+        if spells_module.get_spell(sid)
+    }
+    rows = []
+    elemental_available = False
+    for recipe_id, recipe in ENCHANT_RECIPES.items():
+        if (
+            recipe.get("profession") != "alchemy" or item["type"] not in recipe["applies_to"]
+            or recipe_requirement_gate(character, recipe)
+        ):
+            continue
+        # Real mechanics change (2026-09-11, per Coffee: "use RNG to
+        # determine the spell that gets enchant onto the item... only
+        # have 1 enchant per item") -- the 9 real "elemental_damage"
+        # recipes are no longer individually pickable (see
+        # _do_enchant_item_elemental_roll's own docstring); collapsed
+        # into the single "Elemental Enchant" entry below instead of
+        # one button per element, which also directly fixes the
+        # original legibility complaint (fewer, shorter buttons).
+        if recipe["affix"].get("kind") == "elemental_damage":
+            if recipe["affix"]["damage_type"] in known_spell_damage_types:
+                elemental_available = True
+            continue
+        affix_damage_type = recipe["affix"].get("damage_type")
+        if affix_damage_type and affix_damage_type not in known_spell_damage_types:
+            continue
+        label = recipe_id.replace("enchant_", "").replace("_", " ").title()
+        rows.append([InlineKeyboardButton(f"✨ {label}", callback_data=f"enchant|preview|{recipe_id}|{item_id}")])
+    if elemental_available:
+        rows.insert(0, [InlineKeyboardButton("✨ Elemental Enchant (random)", callback_data=f"enchant|rollpreview|{item_id}")])
+    rows.append([InlineKeyboardButton("🔙 Back", callback_data="almenu|enchant")])
+    text = f"✨ **Enchant: {item['name']}**\nTap an enchantment to see its odds and materials."
+    await _safe_send(update, text, reply_markup=_with_menu_button(InlineKeyboardMarkup(rows)), speak=False)
+
+
+async def _do_show_enchant_roll_preview(update: Update, item_id: str) -> None:
+    """
+    Preview for the new randomized elemental enchant (2026-09-11) --
+    all 9 real "elemental_damage" recipes share the same DC/ability, so
+    the real odds shown here are accurate for whichever one actually
+    lands; materials genuinely can't be previewed (they differ per
+    element, and the element itself isn't decided until Confirm is
+    actually tapped, per Coffee's own confirmed "roll first, then
+    check materials" choice), so this says so plainly instead of
+    showing a checklist it can't honestly compute yet.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    item = items_module.get_item(item_id)
+    if item is None:
+        return
+    sample_recipe = next(r for r in ENCHANT_RECIPES.values() if r["affix"].get("kind") == "elemental_damage")
+    bonus = _crafting_check_bonus(character, update.effective_user.id, update.effective_chat.id, sample_recipe, include_ability_check_bonus=True)
+    chance = _success_chance_pct(character, sample_recipe["ability"], sample_recipe["dc"], bonus)
+    known_spell_damage_types = {
+        spells_module.get_spell(sid).get("damage_type")
+        for sid in character.get("known_spells", [])
+        if spells_module.get_spell(sid)
+    }
+    possible = sorted(
+        r["affix"]["damage_type"].capitalize() for r in ENCHANT_RECIPES.values()
+        if r["affix"].get("kind") == "elemental_damage" and r["affix"]["damage_type"] in known_spell_damage_types
+        and not recipe_requirement_gate(character, r)
+    )
+    text = (
+        f"✨ **Elemental Enchant: {item['name']}**\n"
+        f"{sample_recipe['ability'].capitalize()} check, DC {sample_recipe['dc']} — your odds: {chance}%\n\n"
+        f"Which element lands is rolled from what you actually know how to cast: {', '.join(possible) if possible else 'none yet'}. "
+        f"Materials depend on which one comes up, checked right after the roll. This replaces any elemental enchant already on this item."
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirm", callback_data=f"enchant|roll|{item_id}")],
+        [InlineKeyboardButton("🔙 Back", callback_data=f"enchant|pickitem|{item_id}")],
+    ])
+    await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
+
+
 async def enchant_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on the Enchant category's buttons -- "preview" opens _do_show_enchant_preview, "make" (the preview's own Confirm) dispatches through the exact same _do_enchant_item free text already uses."""
+    """Handles taps on the Enchant category's buttons -- "pickitem" opens _do_show_enchant_item_recipes, "preview" opens _do_show_enchant_preview, "make" (the preview's own Confirm) dispatches through the exact same _do_enchant_item free text already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+    if action == "pickitem" and len(parts) >= 3:
+        await _do_show_enchant_item_recipes(update, parts[2])
+        return
+    if action == "rollpreview" and len(parts) >= 3:
+        await _do_show_enchant_roll_preview(update, parts[2])
+        return
+    if action == "roll" and len(parts) >= 3:
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        item = items_module.get_item(parts[2])
+        if character is not None and item is not None:
+            await _do_enchant_item_elemental_roll(update, character, parts[2], item, f"enchant my {item['name']}")
+        return
     if action == "preview" and len(parts) >= 4:
         await _do_show_enchant_preview(update, parts[2], parts[3])
         return
@@ -23312,6 +23441,22 @@ async def _do_enchant_item(update: Update, text: str) -> None:
         await _safe_send(update, f"Not sure what enchantment you mean. Known enchantments: {recipe_names}.")
         return
     recipe = get_enchant_recipe(recipe_id)
+    # Real mechanics change (2026-09-11, per Coffee: "use RNG to
+    # determine the spell that gets enchant onto the item from the
+    # spells the user has available. also only have 1 enchant per item
+    # (recast rerolls the spell put onto the item)") -- naming a
+    # specific element in free text ("enchant my sword with flame")
+    # still works as a trigger, but the actual element that lands is
+    # now rolled from whichever damage-dealing spells the caster
+    # actually knows, never the one named -- see _do_enchant_item_
+    # elemental_roll's own docstring for the full mechanic. Scoped to
+    # exactly the 9 real "elemental_damage" kind recipes -- Warding/
+    # Sharpen/Arcana/the Enchanters' Guild ladder stay player-chosen
+    # and keep their existing stacking behavior, unchanged, per
+    # Coffee's own explicit scoping.
+    if recipe["affix"].get("kind") == "elemental_damage":
+        await _do_enchant_item_elemental_roll(update, character, item_id, item, text)
+        return
     if item["type"] not in recipe["applies_to"]:
         await _safe_send(update, f"That enchantment can't be applied to a {item['type']}.")
         return
@@ -23379,9 +23524,12 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     db.record_skill_use(update.effective_user.id, update.effective_chat.id, profession)
     _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
 
+    # affix["kind"] == "elemental_damage" never reaches here anymore --
+    # that whole family redirects to _do_enchant_item_elemental_roll
+    # above, before this point, so this masterwork branching no longer
+    # needs its own case for it.
     affix = dict(recipe["affix"])
     masterwork_note = ""
-    bonus_affix = None
     if masterwork:
         if "value" in affix:
             affix["value"] = round(affix["value"] * 1.5)
@@ -23389,16 +23537,115 @@ async def _do_enchant_item(update: Update, text: str) -> None:
         elif affix["kind"] == "grants_spell":
             affix["uses"] = affix.get("uses", 1) + 1
             masterwork_note = " — a masterwork working, one extra charge bound in!"
-        elif affix["kind"] == "elemental_damage":
-            bonus_affix = {"kind": "elemental_damage_bonus", "value": 20}
-            masterwork_note = " — a masterwork working, biting harder than a plain retype!"
         else:
             masterwork_note = " — a masterwork working!"
 
     _ok, enchant_msg, enchanted_item = db.enchant_item_instance(item_id, affix)
+    message += f"\n✨ {enchant_msg}{masterwork_note}"
+    await _safe_send(update, message)
+    if enchanted_item:
+        await _maybe_send_item_image(update, item_id, enchanted_item)
+
+
+async def _do_enchant_item_elemental_roll(update: Update, character: dict, item_id: str, item: dict, text: str) -> None:
+    """
+    Real mechanics change (2026-09-11, per Coffee: "use RNG to
+    determine the spell that gets enchant onto the item from the
+    spells the user has available. also only have 1 enchant per item
+    (recast rerolls the spell put onto the item)"). Scoped to exactly
+    the 9 real ENCHANT_RECIPES entries whose affix kind is
+    "elemental_damage" (Flame/Frost/Force/Psychic/Necrotic/Radiant/
+    Poison/Lightning/Earth) -- Warding/Sharpen/Arcana/the Enchanters'
+    Guild ladder are unaffected, stay player-chosen via _do_enchant_
+    item's own normal path, and keep their existing (still-stacking)
+    behavior, per Coffee's own explicit scoping.
+
+    Real design decisions confirmed before building this (2026-09-11):
+    the recipe is rolled FIRST, from whichever of these 9 the caster
+    actually has a matching known damage spell for (same real gate the
+    old player-chosen version already used, just no longer a choice);
+    THAT recipe's own real materials are checked only after the roll,
+    so a failed materials check is honest about what was actually
+    needed, not what was typed. The 1-per-item cap is scoped to this
+    elemental family alone (never forge_magic_upgrade's own ability_
+    bonus, a separate mechanic) -- re-enchanting replaces both the
+    prior elemental_damage retype AND any masterwork elemental_damage_
+    bonus it carried, via db.enchant_item_instance's new replace_kinds,
+    so a reroll can never leave a permanently-dead stacked entry behind
+    the way every other enchant kind in this game still can.
+    """
+    if item["type"] != "weapon":
+        await _safe_send(update, f"That enchantment can't be applied to a {item['type']}.")
+        return
+    known_spell_damage_types = {
+        spells_module.get_spell(sid).get("damage_type")
+        for sid in character["known_spells"]
+        if spells_module.get_spell(sid)
+    }
+    eligible = [
+        (rid, r) for rid, r in ENCHANT_RECIPES.items()
+        if r["affix"].get("kind") == "elemental_damage"
+        and r["affix"]["damage_type"] in known_spell_damage_types
+        and not recipe_requirement_gate(character, r)
+    ]
+    if not eligible:
+        await _safe_send(
+            update,
+            "You don't know any damage-dealing spell yet — an elemental enchant channels your own magic into "
+            "the work, and you have nothing of that element to draw on.",
+        )
+        return
+    recipe_id, recipe = random.choice(eligible)
+    if not has_materials(character["inventory"], recipe):
+        need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
+        await _safe_send(
+            update,
+            f"The working takes shape as a real **{recipe['affix']['damage_type']}** enchantment — but you don't "
+            f"have the materials for it. You need: {need}.",
+        )
+        return
+
+    profession = recipe.get("profession", "alchemy")
+    bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    bonus += _equipped_profession_bonus(character, profession)
+    bonus += _skill_points(character, f"prof_{profession}")
+    bonus += _effective_ability_check_bonus(character, recipe["ability"])
+    check = roll_ability_check(character, recipe["ability"], proficient=False)
+    check["total"] += bonus
+    check["practiced_bonus"] = bonus
+    dc = recipe["dc"]
+    success = check["total"] >= dc
+    masterwork = _roll_masterwork_quality(character, profession)
+
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, recipe["ability"],
+        {**check, "ability": recipe["ability"], "dc": dc, "success": success},
+    )
+    message = _format_skill_check_result(flavor, check, recipe["ability"], dc, success)
+    if not success:
+        message += f"\n✨ The enchantment fizzles — the {item['name']} is unharmed, and your materials aren't wasted."
+        await _safe_send(update, message)
+        return
+
+    for mid, qty in recipe["materials"].items():
+        db.remove_item(update.effective_user.id, update.effective_chat.id, mid, qty)
+    db.record_skill_use(update.effective_user.id, update.effective_chat.id, profession)
+    _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
+
+    affix = dict(recipe["affix"])
+    masterwork_note = ""
+    bonus_affix = None
+    if masterwork:
+        bonus_affix = {"kind": "elemental_damage_bonus", "value": 20}
+        masterwork_note = " — a masterwork working, biting harder than a plain retype!"
+
+    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(
+        item_id, affix, replace_kinds=["elemental_damage", "elemental_damage_bonus"],
+    )
     if bonus_affix:
         _ok, _bonus_msg, enchanted_item = db.enchant_item_instance(item_id, bonus_affix)
-    message += f"\n✨ {enchant_msg}{masterwork_note}"
+    message += f"\n✨ The magic settles as **{recipe['affix']['damage_type']}** — {enchant_msg}{masterwork_note}"
     await _safe_send(update, message)
     if enchanted_item:
         await _maybe_send_item_image(update, item_id, enchanted_item)

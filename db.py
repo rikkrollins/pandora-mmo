@@ -1687,7 +1687,7 @@ def forge_item_instance(item_id: str) -> tuple[bool, str, dict | None]:
     return True, f"The {forged_item['name']} is reforged into a real {next_tier.replace('_', ' ')}!", forged_item
 
 
-def enchant_item_instance(item_id: str, affix: dict) -> tuple[bool, str, dict | None]:
+def enchant_item_instance(item_id: str, affix: dict, replace_kinds: list[str] | None = None) -> tuple[bool, str, dict | None]:
     """
     Enchanting/imbuing (Phase 7): appends ONE new affix, from the exact
     same shared vocabulary _apply_affix already understands, to an
@@ -1696,6 +1696,16 @@ def enchant_item_instance(item_id: str, affix: dict) -> tuple[bool, str, dict | 
     grants_spell affix here works through bot._do_cast_spell's existing
     Phase 3 fallback with zero new cast-side code, since materialize_
     item_instance folds this new affix on exactly like every other one.
+
+    `replace_kinds` (2026-09-11, per Coffee: "only have 1 enchant per
+    item (recast rerolls the spell put onto the item)") -- when given,
+    any EXISTING stored affix whose own "kind" is in this list is
+    dropped before the new one is appended, so a reroll genuinely
+    replaces the old effect instead of piling a second, permanently-
+    dead entry into the item's own affix history forever (the general
+    append-only behavior below is otherwise unchanged and still used
+    by every other enchant/forge path, which deliberately still allows
+    stacking -- only the elemental retype family got this treatment).
     """
     if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
         return False, "Only a real generated magic item can be enchanted.", None
@@ -1711,6 +1721,8 @@ def enchant_item_instance(item_id: str, affix: dict) -> tuple[bool, str, dict | 
         if row is None:
             return False, "That item no longer exists.", None
         affixes = json.loads(row["affixes"])
+        if replace_kinds:
+            affixes = [a for a in affixes if a.get("kind") not in replace_kinds]
         affixes.append(affix)
         conn.execute(
             "UPDATE item_instances SET affixes = ? WHERE instance_id = ?",

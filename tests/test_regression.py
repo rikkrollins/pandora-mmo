@@ -14637,9 +14637,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         Real feature (2026-08-11, per Coffee: "enchanters shud be able
         to use thier own spells or abilities to enchant also") -- a
-        character with no fire spell known can't enchant fire onto a
-        weapon, even with materials and a passing roll; learning one
-        (fire_bolt) unlocks it.
+        character with no damage-dealing spell known can't enchant any
+        real element onto a weapon, even with materials and a passing
+        roll; learning one (fire_bolt) unlocks it.
+
+        Updated (2026-09-11, per Coffee: "use RNG to determine the
+        spell that gets enchant onto the item from the spells the user
+        has available") -- naming "flame" in free text is still a real
+        trigger, but the actual element that lands is now rolled from
+        known spells rather than the one named, so the rejection
+        message is correctly generic ("any damage-dealing spell"), not
+        fire-specific -- see _do_enchant_item_elemental_roll. Once
+        fire_bolt is the character's ONLY known damage spell, the roll
+        is still deterministically fire (nothing else is eligible).
         """
         from rules.item_generator import generate_weapon
         make_basic_character(950932, "FlameEnchanter", char_class="Wizard", current_location="crossroads_tavern")
@@ -14656,7 +14666,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         update = FakeUpdate(950932, f"enchant my {base_weapon['name']} with flame", sink)
         await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with flame")
-        self.assertIn("fire spell", sink[-1].lower())
+        self.assertIn("damage-dealing spell", sink[-1].lower())
         unchanged = db.get_character(950932, -999)
         self.assertEqual(unchanged["inventory"].get("sulfur_dust", 0), 4)  # materials untouched
 
@@ -15101,11 +15111,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         alchemy's real crafting surfaces: brewing (RECIPES, including
         the level/guild/rebirth-gated ladder, shown locked-and-explained
         rather than hidden) and enchanting an already-owned magic item
-        (ENCHANT_RECIPES) -- an enchant button is per (item, recipe)
-        pair since a bare recipe name alone would be ambiguous once a
-        player owns more than one eligible item; a recipe the player
-        knows but has no matching item for is called out by name too,
-        not silently omitted.
+        (ENCHANT_RECIPES) -- the Enchant category itself shows one
+        button per ELIGIBLE OWNED ITEM (real gap fix, 2026-09-11, per
+        Coffee's own dev-topic screenshot: item-name+label concatenated
+        into one button used to truncate illegibly), not one per
+        (item, recipe) pair; a recipe the player knows but has no
+        matching item for is called out by name too, not silently
+        omitted.
         """
         make_basic_character(
             951024, "AlchemyMenuTester", char_class="Wizard", current_location="crossroads_tavern",
@@ -15125,9 +15137,116 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🔒", text)
 
         text, callback_data = await self._render_category(951024, bot._do_show_alchemy_category(update, "enchant"))
-        self.assertIn(f"enchant|preview|enchant_flame|{gen_item_id}", callback_data)  # known fire spell + owned weapon
+        self.assertIn(f"enchant|pickitem|{gen_item_id}", callback_data)  # eligible item, at least one enchant it can take
         self.assertIn("🔒", text)
         self.assertIn("spell", text.lower())  # e.g. enchant_lightning: no known lightning spell yet
+
+    async def test_enchant_item_recipes_screen_shows_short_labels_not_the_full_item_name_per_button(self):
+        """
+        Real gap fix (2026-09-11, per Coffee, dev-topic screenshot: "I
+        cant read the item names. Please make it legible"). Tapping an
+        item on the Enchant category screen opens a second screen with
+        the item's name as the HEADER (once, not per button) and short,
+        real recipe labels as the actual button text.
+        """
+        user_id = 951046
+        make_basic_character(user_id, "EnchantItemScreenTester", char_class="Wizard", current_location="crossroads_tavern", known_spells=["fire_bolt"])
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="A Very Long Generated Weapon Name Indeed", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        from unittest.mock import patch
+        real_safe_send = bot._safe_send
+        captured = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured.append((text, kwargs.get("reply_markup")))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_show_enchant_item_recipes(FakeUpdate(user_id, "", []), gen_item_id)
+        text, markup = captured[-1]
+        self.assertIn("A Very Long Generated Weapon Name Indeed", text)  # the full name lives in the header, not a button
+        callback_data = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        # Real mechanics change (2026-09-11, per Coffee: "use RNG to
+        # determine the spell... only have 1 enchant per item") -- the
+        # 9 elemental_damage recipes are no longer individually
+        # pickable; collapsed into one "Elemental Enchant" entry.
+        self.assertIn(f"enchant|rollpreview|{gen_item_id}", callback_data)
+        self.assertNotIn(f"enchant|preview|enchant_flame|{gen_item_id}", callback_data)
+        button_texts = [btn.text for row in markup.inline_keyboard for btn in row]
+        self.assertTrue(any(t == "✨ Elemental Enchant (random)" for t in button_texts), button_texts)
+
+    async def test_elemental_enchant_only_ever_rolls_a_damage_type_the_caster_actually_knows(self):
+        """
+        Real mechanics change (2026-09-11, per Coffee: "use RNG to
+        determine the spell that gets enchant onto the item from the
+        spells the user has available"). A caster who knows only a
+        fire spell must only ever roll fire -- never one of the other
+        8 real elemental_damage recipes it doesn't have a matching
+        known spell for, even across many real attempts.
+        """
+        user_id = 951047
+        make_basic_character(
+            user_id, "ElementalRollTester", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fire_bolt"],
+        )
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Roll Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        db.add_item(user_id, -999, "sulfur_dust", 20)
+        db.add_item(user_id, -999, "moonpetal", 20)
+        from unittest.mock import patch
+        for _ in range(10):
+            with patch("bot.narrate_skill_check", return_value="You enchant it carefully."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}), \
+                 patch("bot._roll_masterwork_quality", return_value=False):
+                character = db.get_character(user_id, -999)
+                item = items_module.get_item(gen_item_id)
+                await bot._do_enchant_item_elemental_roll(FakeUpdate(user_id, "", []), character, gen_item_id, item, "enchant my roll test blade")
+            self.assertEqual(items_module.get_item(gen_item_id)["damage_type"], "fire")
+
+    def test_enchant_item_instance_replace_kinds_clears_the_old_affix_instead_of_stacking(self):
+        """
+        Real mechanics change (2026-09-11, per Coffee: "only have 1
+        enchant per item (recast rerolls the spell put onto the
+        item)"). Direct, deterministic proof of the new db.py primitive
+        _do_enchant_item_elemental_roll relies on: re-enchanting with
+        replace_kinds genuinely REMOVES the prior same-kind affix
+        (never leaves a permanently-dead second copy in storage) --
+        unlike every other enchant path in this game, which still
+        appends and stacks on purpose.
+        """
+        item_id = db.create_item_instance(
+            item_type="weapon", name="Replace Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.enchant_item_instance(item_id, {"kind": "elemental_damage", "damage_type": "fire"})
+        self.assertEqual(items_module.get_item(item_id)["damage_type"], "fire")
+
+        db.enchant_item_instance(
+            item_id, {"kind": "elemental_damage", "damage_type": "cold"},
+            replace_kinds=["elemental_damage", "elemental_damage_bonus"],
+        )
+        item = items_module.get_item(item_id)
+        self.assertEqual(item["damage_type"], "cold")
+
+        # The real proof it's a REPLACE, not a stack: inspecting the raw
+        # stored row (not the materialized/last-wins view) shows exactly
+        # one elemental_damage affix survives, not two.
+        with db.get_connection() as conn:
+            row = conn.execute(
+                "SELECT affixes FROM item_instances WHERE instance_id = ?",
+                (int(item_id[len(db.GENERATED_ITEM_ID_PREFIX):]),),
+            ).fetchone()
+        import json as json_module
+        stored_affixes = json_module.loads(row["affixes"])
+        elemental_affixes = [a for a in stored_affixes if a.get("kind") == "elemental_damage"]
+        self.assertEqual(len(elemental_affixes), 1, stored_affixes)
+        self.assertEqual(elemental_affixes[0]["damage_type"], "cold")
 
     async def test_enchant_menu_callback_actually_enchants_end_to_end(self):
         """End-to-end: tapping an Alchemy menu Enchant button actually applies the real affix."""
@@ -15223,6 +15342,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_show_enchant_preview(FakeUpdate(user_id, "", sink2), "enchant_flame", gen_item_id)
         self.assertIn("Enchant Test Blade + Flame", sink2[-1])
         self.assertIn("your odds:", sink2[-1])
+
+    async def test_elemental_enchant_roll_preview_shows_odds_and_known_options_no_materials(self):
+        """
+        Real feature (2026-09-11, same mechanics change): the roll
+        preview can honestly show real odds (all 9 elemental_damage
+        recipes share one DC/ability) but genuinely can't show a
+        materials checklist -- the element isn't decided until Confirm
+        is tapped -- so it names which elements are actually possible
+        instead, without pretending to know the outcome in advance.
+        """
+        user_id = 951048
+        make_basic_character(user_id, "RollPreviewTester", char_class="Wizard", current_location="crossroads_tavern", known_spells=["fire_bolt"])
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Preview Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        sink = []
+        await bot._do_show_enchant_roll_preview(FakeUpdate(user_id, "", sink), gen_item_id)
+        text = sink[-1]
+        self.assertIn("your odds:", text)
+        self.assertIn("Fire", text)
+        self.assertNotIn("Materials:\n", text)  # no checklist -- genuinely can't be known before the roll
+
+    async def test_enchant_menu_callback_rollpreview_and_roll_actions_reach_the_real_flow(self):
+        """End-to-end button routing: enchant|rollpreview then enchant|roll reach the real preview screen and actually apply a real elemental enchant."""
+        user_id = 951049
+        make_basic_character(user_id, "RollButtonTester", char_class="Wizard", current_location="crossroads_tavern", known_spells=["fire_bolt"])
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Button Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        db.add_item(user_id, -999, "sulfur_dust", 5)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        sink = []
+        await bot.enchant_menu_callback(FakeCallbackUpdate(user_id, f"enchant|rollpreview|{gen_item_id}", sink), DummyContext())
+        self.assertIn("Elemental Enchant", sink[-1])
+
+        from unittest.mock import patch
+        sink2 = []
+        with patch("bot.narrate_skill_check", return_value="You enchant it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot.enchant_menu_callback(FakeCallbackUpdate(user_id, f"enchant|roll|{gen_item_id}", sink2), DummyContext())
+        self.assertEqual(items_module.get_item(gen_item_id)["damage_type"], "fire")
 
     async def test_blacksmith_and_alchemy_landing_screens_show_category_buttons_and_mastery_status(self):
         """The new landing screens carry the real mastery status line (same one _do_check_professions shows) and route into the 3/2 real category screens."""

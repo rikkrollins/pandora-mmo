@@ -2,6 +2,55 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.586] — fix: Alchemy Enchant menu legibility + real elemental-enchant redesign
+
+Two real reports from Coffee: a Dev-topic screenshot ("I cant read the
+item names. Please make it legible") of the new Alchemy Enchant menu,
+and a design question about whether re-enchanting an item cancels its
+previous enchantment (answer: no — every enchant kind except the
+elemental retype family stacks with no cap, forever, which Coffee
+then asked to be redesigned specifically for that family).
+
+**Menu legibility.** Root cause: the Enchant category rendered one
+button per (owned item × eligible recipe) pair, with the button text
+concatenating the item's own — often long, randomly-generated — name
+onto the recipe's label. Telegram truncates long button text
+illegibly, and a player with several enchantable weapons got a wall
+of near-duplicate, half-cut-off buttons. Fixed with item-first
+navigation: tap an item (short button, name only) → a second screen
+shows that item's name as the header (once, not per button) with
+short, single-word recipe buttons underneath.
+
+**Elemental enchant redesign.** The 9 real weapon damage-retype
+recipes (Flame/Frost/Force/Psychic/Necrotic/Radiant/Poison/Lightning/
+Earth) are no longer individually player-chosen. Enchanting a weapon's
+element now rolls randomly from whichever of those 9 the caster
+actually has a matching known damage spell for — the same real
+spell-known gate that already existed, just no longer a choice.
+Materials are checked only after the roll (an honest "the working
+became Frost, but you're missing X" outcome, not a guess in advance).
+Capped at exactly one elemental retype per item: re-enchanting
+replaces the prior one (and any masterwork bonus it carried) instead
+of stacking a second, permanently-dead affix entry — a new `db.
+enchant_item_instance(..., replace_kinds=[...])` primitive that clears
+matching-kind affixes before appending the new one. Scoped to exactly
+this one family, per Coffee's own explicit choice — Warding/Sharpen/
+Arcana/the Enchanters' Guild ladder are untouched and keep their
+existing, still-stacking behavior. The Enchant menu collapses the 9
+individual element buttons into one "✨ Elemental Enchant (random)"
+entry, which also directly helps the legibility fix above.
+
+Found and fixed one real regression during verification: the new
+roll's own failure message didn't say "fizzles" like the rest of this
+codebase's enchant/craft failures do, which broke 3 pre-existing
+tests' own retry-loop detection (`if not any("fizzles" in s.lower()
+...)`) — they were silently treating a failed roll as a success and
+asserting on unenchanted items. Fixed by matching the existing wording.
+
+144 tests run across every touched area; clean except the same one
+pre-existing, unrelated battle-menu concurrency failure confirmed in
+prior deploys.
+
 ## [1.27.585] — feat: replace the attunement slot cap with a per-rarity level requirement
 
 Per Coffee: "i dont really like the attunement system you have in
