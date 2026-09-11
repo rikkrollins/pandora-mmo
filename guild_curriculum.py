@@ -445,6 +445,16 @@ GUILD_CURRICULUM = {
             "reward_gold": 30,
             "reward_mastery_profession": "blacksmithing",
             "reward_mastery_pct": 2.0,
+            # Real gap fix (2026-09-11, per Coffee: "Are there quests in
+            # the guilds to teach the players these skills" -- confirmed
+            # no: finishing this whole curriculum never taught a single
+            # real recipe name before this. Granting the actual advanced
+            # book on graduation ties "you finished training" to "now
+            # you genuinely know what you can build" -- see items.py's
+            # grandmasters_forge_tome. Only granted if not already owned
+            # (bot._complete_guild_curriculum_step), so buying one first
+            # doesn't waste the reward.
+            "reward_item": "grandmasters_forge_tome",
         },
     ],
     "enchanters_guild": [
@@ -519,6 +529,14 @@ GUILD_CURRICULUM = {
             },
             "reward_xp": 0,
             "reward_gold": 0,
+            # Enchanters' Guild's own equivalent of forge_4's
+            # grandmasters_forge_tome grant, per the same real gap fix
+            # (2026-09-11) -- granted regardless of which branch is
+            # picked (bind_it/release_it), since bot.guild_curriculum_
+            # callback's own resolved_step merge only ever overrides
+            # reward_xp/reward_gold/reward_mastery_* from the chosen
+            # branch, never reward_item.
+            "reward_item": "enchanters_grimoire",
         },
     ],
 }

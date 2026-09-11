@@ -361,6 +361,28 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # them mean anything else here (no food/dining menu, no dance-
     # formation flavor text, no other use of "waypoint" anywhere in this
     # campaign).
+    # Blacksmith/Alchemy crafting menus (2026-09-11, per Coffee: "i dont
+    # want to have to type 'journeyman, or Masterwork' ... how can we
+    # improve the Forging system so i can open a menu"). Checked BEFORE
+    # the bare "menu" catch just below -- "blacksmith menu"/"alchemy
+    # menu" both contain the word "menu" and would otherwise always be
+    # swallowed by that unconditional generic-menu match first. Also
+    # checked before the forge_item/forge_magic_item/enchant_item
+    # triggers further down this function, none of which this phrasing
+    # can collide with (those all require a possessive "forge my"/
+    # "forge the X"/"enchant my", never bare "forge"/"blacksmith"/
+    # "alchemy" + "menu").
+    if any(p in lowered for p in (
+        "blacksmith menu", "smithy menu", "forge menu", "forging menu",
+        "open the forge", "visit the forge", "blacksmith options",
+    )):
+        return {**base, "action": "check_blacksmith_menu"}
+    if any(p in lowered for p in (
+        "alchemy menu", "alchemist menu", "enchanting menu", "enchant menu",
+        "potion menu", "alchemy lab", "alchemy options",
+    )):
+        return {**base, "action": "check_alchemy_menu"}
+
     if re.search(r"\bmenu\b", lowered):
         return {**base, "action": "check_menu"}
     if re.search(r"\bformation\b", lowered):
@@ -2919,6 +2941,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "enter_labyrinth", "leave_labyrinth", "descend_labyrinth",
                 "check_labyrinth_seed", "load_labyrinth_seed",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
+                "check_blacksmith_menu", "check_alchemy_menu",
                 "check_remnants", "check_story", "check_magic", "check_affinity",
                 "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
             )

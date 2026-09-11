@@ -2,6 +2,66 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.582] — feat: real Blacksmith/Alchemy crafting menus, and the recipe-teaching gaps behind them
+
+Per Coffee: "i dont want to have to type 'journeyman, or Masterwork'
+... how can we improve the Forging system so i can open a menu and see
+what i can craft and build, upgrade, enchant... Are there quests in
+the guilds to teach the players these skills... have these recipies
+been added to the books or are they guild only?" All four real gaps
+this surfaced, fixed together:
+
+**Recipe books.** Confirmed the actual gap first: the only advanced
+book that ever existed was the blacksmithing-only Grandmaster's Forge
+Tome, and even it never covered a GATED plain `RECIPES` entry (Greater
+scrolls, the new Alchemy Ascension/Cooking ladders) — only
+`ADVANCED_RECIPES`/`ENCHANT_RECIPES`. Enchanting's whole content
+(elemental retypes, resistance wards, the Enchanters' Guild ladder) had
+zero book coverage at all. Added a new **Enchanters' Grimoire** (mirrors
+the Forge Tome exactly — `_do_read_advanced_recipe_book` already took
+`profession` as a plain parameter, so this needed one new item, not new
+code), sold at Vane's Curiosities, and extended that same function to
+also reveal gated `RECIPES` entries for its profession, live-gated the
+same way as everything else in it.
+
+**Guild curricula now actually teach something.** Finishing the Forge
+Guild's or Enchanters' Guild's full 4-step curriculum previously ended
+in XP/gold/mastery% only — never a single recipe name. Both guilds'
+final step now grants their own advanced book for free on graduation
+(skipped if already owned, so buying one early never wastes the
+reward) — a real `guild_curriculum.py` `reward_item` field, applied in
+`bot._complete_guild_curriculum_step`.
+
+**Real Blacksmith and Alchemy & Enchanting menus.** Two new focused,
+tap-only screens ("blacksmith menu"/"forge menu"/"open the forge", and
+"alchemy menu"/"enchanting menu"/"alchemy lab") — no more needing to
+type an exact recipe name. Blacksmith shows base + eligible advanced
+recipes and any plain owned item eligible for `forge_magic_upgrade`.
+Alchemy & Enchanting shows base + eligible alchemy recipes and one
+button per (owned magic item, eligible enchant recipe) pair. Every
+button dispatches through the exact same real handlers (`_do_craft`/
+`_do_forge_magic_item`/`_do_enchant_item`) free text already used —
+this is a UX layer, not a new rules path. The pre-existing `craft|`
+button menu itself also got a real fix along the way: it only ever
+resolved a static `RECIPES` id, so a button for an `ADVANCED_RECIPES`
+entry (e.g. Journeyman's Blade) would have silently done nothing.
+
+**Found and fixed while building the enchant menu**: `_find_enchant_
+recipe_in_text` matched labels in plain dict order, so "enchant my
+shield with frost ward" resolved to the base `enchant_frost` retype
+instead of the real `enchant_frost_ward` resistance ward — same bug
+for flame/flame_ward. This was a real, pre-existing free-text bug
+(not something the menu introduced), fixed by matching the longest
+label first, same "most specific wins" discipline this codebase
+already uses elsewhere.
+
+Verified end-to-end throughout (gate rejections, real menu contents,
+real button taps producing real crafted/forged/enchanted items, real
+curriculum-step book grants) — 156 tests run across every touched
+area, all green except one confirmed pre-existing, unrelated failure
+(`test_battle_menu_callback_serializes_rapid_duplicate_taps_per_user`,
+reproduced identically on the prior commit before any of this work).
+
 ## [1.27.581] — fix: overworld loop-back connections now actually fire
 
 The last genuinely open item from v1.27.579's "fill all gaps" pass

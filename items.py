@@ -948,6 +948,23 @@ ITEMS = {
         "price": 150, "weight": 2, "teaches_advanced_profession": "blacksmithing",
         "description": "Bound in scorched iron plate; only someone who's actually stood at a real forge for years could make sense of it.",
     },
+    # Alchemy/enchanting's own equivalent (2026-09-11, per Coffee: "have
+    # these recipies been added to the books or are they guild only" --
+    # confirmed they were guild-only tribal knowledge, no book at all
+    # ever covered them). bot._do_read_advanced_recipe_book already
+    # takes `profession` as a plain parameter -- it was never
+    # blacksmithing-specific, just never given a second real book to
+    # dispatch to. Reveals every ENCHANT_RECIPES entry tagged "alchemy"
+    # (the whole Enchanters' Guild ladder included, since enchanting
+    # itself stays alchemy's own identity, not blacksmithing's -- see
+    # [[feedback_enchanting_stays_alchemy_not_blacksmithing]]) plus any
+    # gated (min_level/requires_guild/min_rebirth) alchemy RECIPES entry,
+    # same live recipe_requirement_gate check the Forge Tome already uses.
+    "enchanters_grimoire": {
+        "name": "Enchanters' Grimoire", "type": "book", "rarity": "rare",
+        "price": 150, "weight": 2, "teaches_advanced_profession": "alchemy",
+        "description": "The binding is warm to the touch, and the ink seems to shift slightly whenever you're not looking directly at the page.",
+    },
 
     # --- Quest items (never sellable, never have a price) ---
     "waterlogged_journal": {

@@ -316,6 +316,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_skills_keyword_classified_as_skill_tree(self):
         self.assertEqual(_keyword_fallback("skills", [])["action"], "skill_tree")
 
+    def test_blacksmith_and_alchemy_menu_keywords_classified_correctly(self):
+        """
+        Real feature (2026-09-11, per Coffee: "i dont want to have to
+        type 'journeyman, or Masterwork' ... how can we improve the
+        Forging system so i can open a menu"). Checked BEFORE the bare
+        "menu" catch above (both phrasings contain the word "menu") and
+        before the forge_item/forge_magic_item/enchant_item triggers.
+        """
+        for text in ("blacksmith menu", "smithy menu", "forge menu", "forging menu", "open the forge", "visit the forge"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_blacksmith_menu", text)
+        for text in ("alchemy menu", "alchemist menu", "enchanting menu", "enchant menu", "potion menu", "alchemy lab"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_alchemy_menu", text)
+        # No regression: real forge/enchant free-text actions are unaffected.
+        self.assertEqual(_keyword_fallback("forge my longsword", [])["action"], "forge_item")
+        self.assertEqual(_keyword_fallback("forge my longsword into a magic item", [])["action"], "forge_magic_item")
+        self.assertEqual(_keyword_fallback("enchant my longsword with flame", [])["action"], "enchant_item")
+
     def test_view_prefixed_screen_names_reach_their_real_screen_not_examine(self):
         """
         Real dev-bridge report (2026-08-18, Coffee): "When I use open,
@@ -14810,6 +14827,215 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Masterwork Rapier", combined)  # task #4
         self.assertIn("Journeyman's Blade", combined)  # pre-existing guild-gated ladder
         self.assertIn("Forge Magic Upgrade", combined)  # task #6
+
+    async def test_enchanters_grimoire_shows_the_full_ladder_to_a_qualified_enchanters_guild_member(self):
+        """
+        Real gap fix (2026-09-11, per Coffee: "have these recipies been
+        added to the books or are they guild only" -- confirmed no book
+        at all ever covered alchemy's own ENCHANT_RECIPES ladder, unlike
+        blacksmithing's Grandmaster's Forge Tome). Same shape as that
+        book's own tests -- a level 20+, rebirth-3 Enchanters' Guild
+        member sees the full real ladder up to the mythic capstone.
+        """
+        make_basic_character(950996, "QualifiedEnchantReader", current_location="crossroads_tavern")
+        db.update_character(950996, -999, guild="enchanters_guild", level=20, rebirth_count=3)
+        db.add_item(950996, -999, "enchanters_grimoire", 1)
+        sink = []
+        update = FakeUpdate(950996, "use my enchanters grimoire", sink)
+        await bot._do_use_item(update, "use my enchanters grimoire")
+        combined = "\n".join(sink)
+        self.assertIn("Sharpen", combined)  # base tier, no guild gate
+        self.assertIn("Grand Ward", combined)  # rebirth 2 tier
+        self.assertIn("Godsforged Ward", combined)  # mythic capstone, rebirth 3
+
+    async def test_enchanters_grimoire_sealed_under_level_20_and_scoped_to_alchemy_only(self):
+        """A non-guild, under-20 reader gets the same sealed response the Forge Tome gives; a qualified reader never sees blacksmithing-only content."""
+        make_basic_character(950997, "TooYoungEnchantReader", current_location="crossroads_tavern")
+        db.add_item(950997, -999, "enchanters_grimoire", 1)
+        sink = []
+        update = FakeUpdate(950997, "use my enchanters grimoire", sink)
+        await bot._do_use_item(update, "use my enchanters grimoire")
+        self.assertIn("level 20", sink[-1])
+
+        make_basic_character(950998, "QualifiedEnchantReader2", current_location="crossroads_tavern")
+        db.update_character(950998, -999, guild="enchanters_guild", level=20, rebirth_count=3)
+        db.add_item(950998, -999, "enchanters_grimoire", 1)
+        sink2 = []
+        update2 = FakeUpdate(950998, "use my enchanters grimoire", sink2)
+        await bot._do_use_item(update2, "use my enchanters grimoire")
+        combined = "\n".join(sink2)
+        self.assertNotIn("Journeyman's Blade", combined)
+        self.assertNotIn("Godsforged Blade", combined)
+
+    async def test_advanced_book_now_also_reveals_gated_RECIPES_entries_not_just_ADVANCED_RECIPES(self):
+        """
+        Real gap fix (2026-09-11): _do_read_advanced_recipe_book used to
+        read ONLY ADVANCED_RECIPES/ENCHANT_RECIPES -- a gated (min_level/
+        requires_guild/min_rebirth) plain RECIPES entry (the Greater
+        scrolls, and the new Alchemy Ascension/Cooking ladders) was
+        invisible to every book. Confirms the Enchanters' Grimoire now
+        reveals both a level-gated RECIPES entry (a Greater scroll) and
+        a guild+rebirth-gated one (Godsbrew of Ascension), and that an
+        UNGATED RECIPES entry (already covered by the basic book) is
+        never listed twice.
+        """
+        make_basic_character(950999, "GrimoireRecipesReader", current_location="crossroads_tavern")
+        db.update_character(950999, -999, guild="arcane_circle", level=20, rebirth_count=3)
+        db.add_item(950999, -999, "enchanters_grimoire", 1)
+        sink = []
+        update = FakeUpdate(950999, "use my enchanters grimoire", sink)
+        await bot._do_use_item(update, "use my enchanters grimoire")
+        combined = "\n".join(sink)
+        self.assertIn("Greater Scroll of Flame Strike", combined)
+        self.assertIn("Godsbrew of Ascension", combined)
+        self.assertNotIn("Healing Potion", combined)  # ungated -- basic book's territory, not this one's
+
+    async def test_craft_menu_button_now_handles_an_advanced_recipe_id(self):
+        """
+        Real gap fix (2026-09-11, per Coffee: "i dont want to have to
+        type 'journeyman, or Masterwork'"): craft_menu_callback used to
+        resolve ONLY a static RECIPES id via items_module.get_item --
+        an ADVANCED_RECIPES id like "masterwork_dagger" has no items.py
+        catalog entry at all, so tapping a button for one would have
+        silently done nothing. Confirms the new get_advanced_recipe
+        fallback actually crafts it end-to-end.
+        """
+        user_id = 951000
+        make_basic_character(user_id, "AdvancedButtonCrafter", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        from unittest.mock import patch
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="You forge it carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot.craft_menu_callback(FakeCallbackUpdate(user_id, "craft|make|masterwork_dagger", sink), DummyContext())
+        updated = db.get_character(user_id, -999)
+        self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in updated["inventory"]))
+
+    def test_blacksmith_menu_rows_shows_base_advanced_and_forge_options_when_eligible(self):
+        """
+        Real feature (2026-09-11, per Coffee: "Shud we have a Blacksmith
+        menu for forging guild"). A qualified Forge Guild member sees a
+        base craftable recipe, an eligible advanced-ladder recipe, and a
+        real forge-eligible plain item to promote to magic -- all three
+        real categories this one focused menu is meant to cover.
+        """
+        make_basic_character(951020, "BlacksmithMenuTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(951020, -999, guild="forge_guild", level=20)
+        db.add_item(951020, -999, "iron_ore", 20)
+        db.add_item(951020, -999, "moonpetal", 5)
+        db.add_item(951020, -999, "longsword", 1)
+        character = db.get_character(951020, -999)
+        rows = bot._blacksmith_menu_rows(character)
+        callback_data = [btn.callback_data for row in rows for btn in row]
+        self.assertIn("craft|make|longsword", callback_data)  # base RECIPES
+        self.assertIn("craft|make|journeyman_blade", callback_data)  # eligible ADVANCED_RECIPES
+        self.assertIn("forge|make|longsword", callback_data)  # forge-eligible plain owned item
+
+    def test_blacksmith_menu_excludes_advanced_recipes_when_not_guild_eligible(self):
+        """A non-guild, low-level character sees only ungated base recipes -- no journeyman_blade, no forge option."""
+        make_basic_character(951021, "UngatedBlacksmithMenuTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(951021, -999, "iron_ore", 20)
+        db.add_item(951021, -999, "moonpetal", 5)
+        db.add_item(951021, -999, "longsword", 1)
+        character = db.get_character(951021, -999)
+        rows = bot._blacksmith_menu_rows(character)
+        callback_data = [btn.callback_data for row in rows for btn in row]
+        self.assertIn("craft|make|longsword", callback_data)
+        self.assertNotIn("craft|make|journeyman_blade", callback_data)
+        self.assertNotIn("forge|make|longsword", callback_data)
+
+    def test_blacksmith_menu_never_offers_to_forge_an_already_magic_item(self):
+        """forge_magic_upgrade is scoped to PLAIN items only in this menu -- an already-generated item belongs to the Alchemy menu's own Enchant section instead."""
+        make_basic_character(951022, "GeneratedItemForgeTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(951022, -999, guild="forge_guild", level=20)
+        db.add_item(951022, -999, "iron_ore", 20)
+        db.add_item(951022, -999, "moonpetal", 5)
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(951022, -999, gen_item_id, 1)
+        character = db.get_character(951022, -999)
+        rows = bot._blacksmith_menu_rows(character)
+        callback_data = [btn.callback_data for row in rows for btn in row]
+        self.assertNotIn(f"forge|make|{gen_item_id}", callback_data)
+
+    async def test_forge_menu_callback_actually_forges_a_plain_item_end_to_end(self):
+        """End-to-end: tapping a Blacksmith menu Forge button actually promotes the plain item to a real magic item."""
+        user_id = 951023
+        make_basic_character(user_id, "ForgeButtonTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        db.add_item(user_id, -999, "longsword", 1)
+        from unittest.mock import patch
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="You forge it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot.forge_menu_callback(FakeCallbackUpdate(user_id, "forge|make|longsword", sink), DummyContext())
+        updated = db.get_character(user_id, -999)
+        self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in updated["inventory"]))
+
+    def test_alchemy_menu_rows_shows_craft_and_enchant_options_when_eligible(self):
+        """
+        Real feature (2026-09-11, per Coffee: "shud we have the same
+        thing for Alchemy"). Covers both of alchemy's real crafting
+        surfaces in one menu: brewing (RECIPES) and enchanting an
+        already-owned magic item (ENCHANT_RECIPES) -- an enchant button
+        is per (item, recipe) pair since a bare recipe name alone would
+        be ambiguous once a player owns more than one eligible item.
+        """
+        make_basic_character(
+            951024, "AlchemyMenuTester", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fire_bolt"],
+        )
+        db.add_item(951024, -999, "silverleaf_herb", 5)
+        db.add_item(951024, -999, "moonpetal", 5)
+        db.add_item(951024, -999, "sulfur_dust", 5)
+        db.add_item(951024, -999, "iron_ore", 5)
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(951024, -999, gen_item_id, 1)
+        character = db.get_character(951024, -999)
+        rows = bot._alchemy_menu_rows(character)
+        callback_data = [btn.callback_data for row in rows for btn in row]
+        self.assertIn("craft|make|healing_potion", callback_data)  # base RECIPES
+        self.assertIn(f"enchant|make|enchant_flame|{gen_item_id}", callback_data)  # eligible ENCHANT_RECIPES on an owned item
+
+    async def test_enchant_menu_callback_actually_enchants_end_to_end(self):
+        """End-to-end: tapping an Alchemy menu Enchant button actually applies the real affix."""
+        user_id = 951025
+        make_basic_character(user_id, "EnchantButtonTester", char_class="Wizard", current_location="crossroads_tavern", known_spells=["fire_bolt"])
+        db.add_item(user_id, -999, "sulfur_dust", 5)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        from unittest.mock import patch
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="You enchant it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot.enchant_menu_callback(FakeCallbackUpdate(user_id, f"enchant|make|enchant_flame|{gen_item_id}", sink), DummyContext())
+        item = items_module.get_item(gen_item_id)
+        self.assertEqual(item["damage_type"], "fire")
+
+    def test_find_enchant_recipe_in_text_prefers_the_longer_more_specific_label(self):
+        """
+        Real bug found building the Alchemy menu (2026-09-11): "enchant
+        my shield with frost ward" used to match "enchant_frost" (the
+        base retype) before ever reaching "enchant_frost_ward" (the real
+        resistance ward), since the plain-dict-order loop returned on
+        the FIRST substring match. Same for flame/flame_ward.
+        """
+        self.assertEqual(bot._find_enchant_recipe_in_text("enchant my shield with frost ward"), "enchant_frost_ward")
+        self.assertEqual(bot._find_enchant_recipe_in_text("enchant my shield with flame ward"), "enchant_flame_ward")
+        self.assertEqual(bot._find_enchant_recipe_in_text("enchant my longsword with frost"), "enchant_frost")
+        self.assertEqual(bot._find_enchant_recipe_in_text("enchant my longsword with flame"), "enchant_flame")
 
     def test_profession_mastery_pct_persists_across_reload(self):
         character = make_basic_character(950937, "MasteryPersistTester", current_location="crossroads_tavern")
@@ -34141,6 +34367,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    async def test_forge_guild_final_curriculum_step_grants_the_forge_tome(self):
+        """
+        Real gap fix (2026-09-11, per Coffee: "Are there quests in the
+        guilds to teach the players these skills" -- confirmed no book
+        was ever granted by finishing a curriculum). Forge Guild's own
+        final step (forge_4_temper_the_steel) now grants a real
+        Grandmaster's Forge Tome on completion.
+        """
+        import guild_curriculum as gc
+        user_id = 951010
+        make_basic_character(user_id, "ForgeGraduate", current_location="market_row")
+        db.update_character(user_id, -999, guild="forge_guild")
+        step = gc.get_step("forge_guild", 3)
+        self.assertEqual(step["reward_item"], "grandmasters_forge_tome")
+
+        sink = []
+        await bot._complete_guild_curriculum_step(FakeUpdate(user_id, "", sink), user_id, -999, step)
+        updated = db.get_character(user_id, -999)
+        self.assertEqual(updated["inventory"].get("grandmasters_forge_tome", 0), 1)
+        self.assertIn("Grandmaster's Forge Tome", "\n".join(sink))
+
+    async def test_forge_guild_curriculum_reward_item_not_granted_twice(self):
+        """A player who already bought their own copy still gets full curriculum credit, just no duplicate book."""
+        import guild_curriculum as gc
+        user_id = 951011
+        make_basic_character(user_id, "ForgeGraduateWithOwnCopy", current_location="market_row")
+        db.update_character(user_id, -999, guild="forge_guild")
+        db.add_item(user_id, -999, "grandmasters_forge_tome", 1)
+        step = gc.get_step("forge_guild", 3)
+
+        sink = []
+        await bot._complete_guild_curriculum_step(FakeUpdate(user_id, "", sink), user_id, -999, step)
+        updated = db.get_character(user_id, -999)
+        self.assertEqual(updated["inventory"].get("grandmasters_forge_tome", 0), 1, "must not grant a duplicate")
+        self.assertNotIn("Grandmaster's Forge Tome", "\n".join(sink), "reward text shouldn't claim a book that wasn't actually granted")
+
+    async def test_enchanters_guild_final_curriculum_step_grants_the_grimoire(self):
+        """Enchanters' Guild's own equivalent (ench_4_bind_or_release) grants a real Enchanters' Grimoire, regardless of which branch was chosen."""
+        import guild_curriculum as gc
+        user_id = 951012
+        make_basic_character(user_id, "EnchantGraduate", char_class="Wizard", current_location="market_row")
+        db.update_character(user_id, -999, guild="enchanters_guild")
+        step = gc.get_step("enchanters_guild", 3)
+        self.assertEqual(step["reward_item"], "enchanters_grimoire")
+
+        sink = []
+        await bot._complete_guild_curriculum_step(FakeUpdate(user_id, "", sink), user_id, -999, step)
+        updated = db.get_character(user_id, -999)
+        self.assertEqual(updated["inventory"].get("enchanters_grimoire", 0), 1)
+
     def test_guild_curriculum_alignment_choice_announcement_has_a_call_to_action(self):
         """
         Real bug caught proactively (direct reproduction, not a live
@@ -41670,6 +41946,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             ("check_sheet", "open my player sheet"),
             ("check_menu", "open the menu"),
             ("check_equip_menu", "show my equip menu"),
+            ("check_blacksmith_menu", "open the blacksmith menu"),
+            ("check_alchemy_menu", "open the alchemy menu"),
             ("check_magic", "show my magic"),
             ("check_remnants", "show my remnants"),
             ("check_story", "check my story so far"),

@@ -21685,7 +21685,99 @@ def _craft_keyboard(character: dict) -> InlineKeyboardMarkup | None:
 
 
 async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on _craft_keyboard -- dispatches through the exact same _do_craft free text already uses."""
+    """
+    Handles taps on _craft_keyboard/_blacksmith_menu_keyboard/
+    _alchemy_menu_keyboard -- dispatches through the exact same
+    _do_craft free text already uses.
+
+    Real gap fix (2026-09-11, per Coffee: "i dont want to have to type
+    'journeyman, or Masterwork'"): this only ever resolved a static
+    RECIPES id via items_module.get_item -- an ADVANCED_RECIPES id
+    (e.g. "journeyman_blade") has no items.py catalog entry at all (its
+    own "name" field lives only on the recipe dict), so a button for one
+    would have silently done nothing. Falls back to get_advanced_recipe
+    when the plain item lookup misses, same "reconstruct the natural-
+    language text and let _do_craft's own real parsing/gating handle
+    everything else" discipline this handler already followed for
+    static recipes -- _do_craft already tries an advanced-recipe name
+    match FIRST (see its own docstring), so `craft {recipe['name']}`
+    round-trips correctly.
+    """
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "make" or len(parts) < 3:
+        return
+    item = items_module.get_item(parts[2])
+    if item is not None:
+        await _do_craft(update, f"craft {item['name']}")
+        return
+    recipe = get_advanced_recipe(parts[2])
+    if recipe is not None:
+        await _do_craft(update, f"craft {recipe['name']}")
+
+
+# Blacksmith menu (2026-09-11, per Coffee: "i dont want to have to type
+# 'journeyman, or Masterwork' ... how can we improve the Forging system
+# so i can open a menu and see what i can craft and build, upgrade").
+# A real, focused screen scoped to ONE profession (blacksmithing) --
+# unlike the generic backpack's own _craft_keyboard (which shows every
+# affordable base RECIPES entry regardless of profession or eligibility,
+# and can't show ADVANCED_RECIPES/forge_magic_upgrade at all), this one
+# only shows what the reader can ACTUALLY use right now: base recipes
+# they can afford, advanced-ladder recipes they're both eligible for
+# (recipe_requirement_gate) and can afford, and any owned PLAIN (not
+# already-generated) weapon/armor/shield/ring/amulet/wondrous item
+# they're eligible to promote into a real magic item. Every button
+# dispatches through the exact same real handlers (_do_craft/_do_forge_
+# magic_item) free text already uses -- this is a UX layer, not a new
+# game-rule path.
+def _blacksmith_menu_rows(character: dict) -> list[list[InlineKeyboardButton]]:
+    inventory = character.get("inventory", {})
+    rows = [
+        [InlineKeyboardButton(f"🔨 Craft {items_module.get_item(rid)['name']}", callback_data=f"craft|make|{rid}")]
+        for rid, recipe in RECIPES.items()
+        if recipe.get("profession") == "blacksmithing" and has_materials(inventory, recipe)
+        and not recipe_requirement_gate(character, recipe)
+    ]
+    rows += [
+        [InlineKeyboardButton(f"⚒️ Craft {recipe['name']}", callback_data=f"craft|make|{rid}")]
+        for rid, recipe in ADVANCED_RECIPES.items()
+        if recipe.get("profession") == "blacksmithing" and not recipe_requirement_gate(character, recipe)
+        and has_materials(inventory, recipe)
+    ]
+    forge_recipe = get_enchant_recipe("forge_magic_upgrade")
+    if forge_recipe and not recipe_requirement_gate(character, forge_recipe) and has_materials(inventory, forge_recipe):
+        seen_names = set()
+        for item_id in inventory:
+            if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+                continue  # already magic -- that's the Alchemy menu's Enchant section, not this one
+            item = items_module.get_item(item_id)
+            if item is None or item["type"] not in forge_recipe["applies_to"] or item["name"] in seen_names:
+                continue
+            seen_names.add(item["name"])
+            rows.append([InlineKeyboardButton(f"✨ Forge {item['name']} into a Magic Item", callback_data=f"forge|make|{item_id}")])
+    return rows
+
+
+async def _do_show_blacksmith_menu(update: Update) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    rows = _blacksmith_menu_rows(character)
+    text = "🔨 **The Forge**\nTap below to craft, build, or upgrade a weapon or piece of armor."
+    if not rows:
+        text += "\n\nNothing to show yet — you're missing materials, level, or Forge Guild standing for everything below level 1."
+    keyboard = InlineKeyboardMarkup(rows) if rows else None
+    await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
+
+
+async def forge_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _blacksmith_menu_rows' Forge buttons -- dispatches through the exact same _do_forge_magic_item free text already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
@@ -21695,7 +21787,82 @@ async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     item = items_module.get_item(parts[2])
     if item is None:
         return
-    await _do_craft(update, f"craft {item['name']}")
+    await _do_forge_magic_item(update, f"forge my {item['name']} into a magic item")
+
+
+# Alchemy & Enchanting menu (2026-09-11, same real ask as the Blacksmith
+# menu above, applied to alchemy's own two real crafting surfaces:
+# brewing potions/scrolls (RECIPES) and enchanting an already-magic item
+# (ENCHANT_RECIPES) -- both stay tagged "alchemy" by design, see
+# [[feedback_enchanting_stays_alchemy_not_blacksmithing]], so this one
+# menu covers both rather than needing a separate "Enchanting" screen.
+# An enchant button is per (owned generated item, eligible recipe) PAIR
+# -- unlike craft, enchanting always needs a real target item, so a
+# bare recipe name alone would be ambiguous the moment a player owns
+# more than one eligible magic item.
+def _alchemy_menu_rows(character: dict) -> list[list[InlineKeyboardButton]]:
+    inventory = character.get("inventory", {})
+    rows = [
+        [InlineKeyboardButton(f"⚗️ Craft {items_module.get_item(rid)['name']}", callback_data=f"craft|make|{rid}")]
+        for rid, recipe in RECIPES.items()
+        if recipe.get("profession") == "alchemy" and has_materials(inventory, recipe)
+        and not recipe_requirement_gate(character, recipe)
+    ]
+    known_spell_damage_types = {
+        spells_module.get_spell(sid).get("damage_type")
+        for sid in character.get("known_spells", [])
+        if spells_module.get_spell(sid)
+    }
+    for item_id in inventory:
+        if not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+            continue
+        item = items_module.get_item(item_id)
+        if item is None:
+            continue
+        for recipe_id, recipe in ENCHANT_RECIPES.items():
+            if recipe.get("profession") != "alchemy" or item["type"] not in recipe["applies_to"]:
+                continue
+            if recipe_requirement_gate(character, recipe) or not has_materials(inventory, recipe):
+                continue
+            affix_damage_type = recipe["affix"].get("damage_type")
+            if affix_damage_type and affix_damage_type not in known_spell_damage_types:
+                continue
+            label = recipe_id.replace("enchant_", "").replace("_", " ").title()
+            rows.append([
+                InlineKeyboardButton(f"✨ Enchant {item['name']} with {label}", callback_data=f"enchant|make|{recipe_id}|{item_id}")
+            ])
+    return rows
+
+
+async def _do_show_alchemy_menu(update: Update) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    rows = _alchemy_menu_rows(character)
+    text = "⚗️ **The Alchemy Lab**\nTap below to brew a potion or scroll, or enchant a magic item you're carrying."
+    if not rows:
+        text += "\n\nNothing to show yet — you're missing materials, a known matching spell, level, or Enchanters' Guild standing for everything below level 1."
+    keyboard = InlineKeyboardMarkup(rows) if rows else None
+    await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
+
+
+async def enchant_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _alchemy_menu_rows' Enchant buttons -- dispatches through the exact same _do_enchant_item free text already uses."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    action = parts[1] if len(parts) > 1 else ""
+    await _safe_answer(query)
+    if action != "make" or len(parts) < 4:
+        return
+    recipe = get_enchant_recipe(parts[2])
+    item = items_module.get_item(parts[3])
+    if recipe is None or item is None:
+        return
+    label = parts[2].replace("enchant_", "").replace("_", " ")
+    await _do_enchant_item(update, f"enchant my {item['name']} with {label}")
 
 
 def _item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
@@ -22382,6 +22549,25 @@ async def _do_read_advanced_recipe_book(update: Update, item: dict, profession: 
             f"- **{label}** (DC {r['dc']} {r['ability']}): needs "
             + ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in r["materials"].items())
         )
+    # Real gap fix (2026-09-11, per Coffee: "have these recipies been
+    # added to the books or are they guild only" -- confirmed no: this
+    # function only ever read ADVANCED_RECIPES/ENCHANT_RECIPES, never
+    # RECIPES, so a GATED RECIPES entry (min_level/requires_guild/
+    # min_rebirth -- the Greater scrolls, and the new Alchemy Ascension/
+    # Cooking ladders) was invisible to every book, guild-only tribal
+    # knowledge same as this whole function exists to fix for
+    # ADVANCED_RECIPES/ENCHANT_RECIPES. Ungated RECIPES entries are
+    # deliberately excluded here (the basic book already covers those,
+    # see _do_read_recipe_book's own docstring) so nothing is listed twice.
+    for recipe_id, r in RECIPES.items():
+        if r.get("profession") != profession or not (r.get("min_level") or r.get("requires_guild") or r.get("min_rebirth")):
+            continue
+        if recipe_requirement_gate(character, r):
+            continue
+        lines.append(
+            f"- **{items_module.get_item(r['result_item'])['name']}** (DC {r['dc']} {r['ability']}): needs "
+            + ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in r["materials"].items())
+        )
 
     if not lines:
         await _safe_send(
@@ -22788,8 +22974,22 @@ def _find_advanced_recipe_in_text(text: str) -> str | None:
 
 
 def _find_enchant_recipe_in_text(text: str) -> str | None:
+    """
+    Real bug found building the Alchemy menu (2026-09-11): checking
+    ENCHANT_RECIPES in plain dict order meant a SHORTER label defined
+    earlier could win over a longer, more specific one whose text it
+    happens to be a substring of -- confirmed live, "enchant my shield
+    with frost ward" matched "enchant_frost" (the base elemental
+    retype), never reaching "enchant_frost_ward" (the real resistance
+    ward) at all, same for flame/flame_ward. Same "longest match wins"
+    fix this codebase already applies elsewhere (items_module.
+    find_item_mentioned_in_text's own name-length sort, and _do_craft's
+    advanced-before-static recipe check) -- sorting by label length,
+    longest first, makes the more specific recipe win whenever both
+    labels appear in the text.
+    """
     lowered = text.lower()
-    for recipe_id in ENCHANT_RECIPES:
+    for recipe_id in sorted(ENCHANT_RECIPES, key=lambda rid: len(rid), reverse=True):
         label = recipe_id.replace("enchant_", "").replace("_", " ")
         if label in lowered:
             return recipe_id
@@ -27689,6 +27889,23 @@ async def _complete_guild_curriculum_step(
             db.update_character_by_id(character_id, profession_mastery_pct=updated_pct)
         else:
             db.update_character(telegram_user_id, chat_id, profession_mastery_pct=updated_pct)
+    # Real gap fix (2026-09-11, per Coffee: "Are there quests in the
+    # guilds to teach the players these skills" -- see forge_4/ench_4's
+    # own reward_item comments in guild_curriculum.py). Only granted if
+    # not already owned, same "don't waste a reward" discipline as any
+    # other real reward -- a player who already bought their own copy
+    # still gets full credit for the curriculum, just no duplicate book.
+    reward_item = step.get("reward_item")
+    reward_item_granted = False
+    if reward_item:
+        fresh = db.get_character_by_id(character_id) if character_id is not None else db.get_character(telegram_user_id, chat_id)
+        if reward_item not in fresh["inventory"]:
+            updated_inventory = {**fresh["inventory"], reward_item: fresh["inventory"].get(reward_item, 0) + 1}
+            if character_id is not None:
+                db.update_character_by_id(character_id, inventory=updated_inventory)
+            else:
+                db.update_character(telegram_user_id, chat_id, inventory=updated_inventory)
+            reward_item_granted = True
 
     if character_id is not None:
         updated_character = db.advance_guild_curriculum_step_by_id(character_id, guild_id)
@@ -27702,6 +27919,8 @@ async def _complete_guild_curriculum_step(
         reward_parts.append(f"{reward_xp} XP")
     if reward_gold:
         reward_parts.append(f"{reward_gold} gold")
+    if reward_item_granted:
+        reward_parts.append(items_module.get_item(reward_item)["name"])
     reward_text = ", ".join(reward_parts) or "real progress"
     await _safe_send(
         update_like, f"✅ **{updated_character['name']}** completes \"{step['title']}\" — {reward_text}.{extra_note}",
@@ -35071,6 +35290,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_show_waypoints(update)
     elif action == "check_equip_menu":
         await _do_show_equip_menu(update)
+    elif action == "check_blacksmith_menu":
+        await _do_show_blacksmith_menu(update)
+    elif action == "check_alchemy_menu":
+        await _do_show_alchemy_menu(update)
     elif action == "check_magic":
         await _do_show_magic_menu(update)
     elif action == "check_remnants":
@@ -38928,6 +39151,8 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(support_vote_callback, pattern=r"^supportvote\|"))
     application.add_handler(CallbackQueryHandler(boss_confrontation_dialog_callback, pattern=r"^bossdlg\|"))
     application.add_handler(CallbackQueryHandler(craft_menu_callback, pattern=r"^craft\|"))
+    application.add_handler(CallbackQueryHandler(forge_menu_callback, pattern=r"^forge\|"))
+    application.add_handler(CallbackQueryHandler(enchant_menu_callback, pattern=r"^enchant\|"))
     application.add_handler(CallbackQueryHandler(give_menu_callback, pattern=r"^give\|"))
     application.add_handler(CallbackQueryHandler(member_level_callback, pattern=r"^memberlvl\|"))
     application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu\|"))
