@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.587] — feat: Sharpen and Arcana now scale with real profession mastery
+
+Follow-up to v1.27.586's enchant audit, per Coffee: "sharpen shud get
+better % damage bonus based on the blacksmith proficiency and Arcana
+shud grant the wearer a lv1 magic spell based on RNG, once alchemy
+proficiency increases past mastery the user can then grant a lv2
+magic spell based on RNG. Both increase as the proficiency increases."
+
+**Sharpen** (`enchant_sharpen`) no longer grants a flat +15% damage
+bonus. It's crafted as an alchemy action (the DC roll/materials/
+mastery-grind stay alchemy, unchanged) but the RESULT is a sharper
+weapon, so its magnitude now reads the caster's own **Blacksmithing**
+`profession_mastery_pct` — a deliberate cross-profession reference,
+not a mix-up. Scales linearly from the recipe's own base value (15%
+at 1% blacksmithing mastery) up to double that (30% at 100%). A
+masterwork roll still multiplies whatever that blacksmithing-scaled
+base comes out to by another 1.5x, same as before.
+
+**Arcana** (`enchant_arcana`) no longer always grants Magic Missile.
+It now rolls a real spell fresh every time it's enchanted, from every
+level-1 spell in spells.py (16 today). Once the caster's own
+**Alchemy** mastery crosses 50%, real level-2 spells (9 today) join
+the pool ADDITIVELY — level-1 odds are never removed, only the ceiling
+rises. Masterwork still adds an extra use, independent of which spell
+landed.
+
+130 tests run across every touched area; clean except the same one
+pre-existing, unrelated battle-menu concurrency failure confirmed in
+every prior deploy this week.
+
 ## [1.27.586] — fix: Alchemy Enchant menu legibility + real elemental-enchant redesign
 
 Two real reports from Coffee: a Dev-topic screenshot ("I cant read the

@@ -23529,6 +23529,39 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     # above, before this point, so this masterwork branching no longer
     # needs its own case for it.
     affix = dict(recipe["affix"])
+    # Real feature (2026-09-11, per Coffee: "sharpen shud get better %
+    # damage bonus based on the blacksmith proficiency"). Sharpen is
+    # crafted as an alchemy action (the DC roll/materials/mastery-grind
+    # above are all real alchemy, unchanged) but what it actually
+    # produces is a sharper WEAPON, so its magnitude is deliberately
+    # read off the caster's own BLACKSMITHING mastery instead -- a real
+    # cross-profession reference, not a mix-up. Scales linearly from
+    # the recipe's own base value (15%) at 1% blacksmithing mastery up
+    # to double that (30%) at 100%, so it keeps growing as
+    # blacksmithing does, same real "both increase as proficiency
+    # increases" ask Coffee gave for Arcana just below too. Applied
+    # BEFORE the masterwork multiplier, so a masterwork roll still
+    # multiplies whatever the blacksmithing-scaled base actually is.
+    if recipe_id == "enchant_sharpen":
+        blacksmithing_pct = character.get("profession_mastery_pct", {}).get("blacksmithing", PROFICIENCY_STARTING_PCT)
+        base_value = recipe["affix"]["value"]
+        affix["value"] = round(base_value + (blacksmithing_pct / 100) * base_value)
+    # Real feature (2026-09-11, per Coffee: "Arcana shud grant the
+    # wearer a lv1 magic spell based on RNG, once alchemy proficiency
+    # increases past mastery the user can then grant a lv2 magic spell
+    # based on RNG. Both increase as the proficiency increases"). No
+    # longer fixed to Magic Missile -- rolled fresh every time Arcana
+    # is actually enchanted, from every real level-1 spell in spells.py
+    # (16 today); the real level-2 pool (9 today) joins in ADDITIVELY
+    # -- never replacing level-1 odds, per Coffee's own confirmed
+    # choice -- once the caster's own ALCHEMY mastery crosses the 50%
+    # threshold Coffee also confirmed.
+    elif recipe_id == "enchant_arcana":
+        alchemy_pct = character.get("profession_mastery_pct", {}).get("alchemy", PROFICIENCY_STARTING_PCT)
+        spell_pool = [sid for sid, s in spells_module.SPELLS.items() if s.get("level") == 1]
+        if alchemy_pct >= 50:
+            spell_pool += [sid for sid, s in spells_module.SPELLS.items() if s.get("level") == 2]
+        affix["spell_id"] = random.choice(spell_pool)
     masterwork_note = ""
     if masterwork:
         if "value" in affix:

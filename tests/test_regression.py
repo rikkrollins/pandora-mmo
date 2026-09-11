@@ -14827,6 +14827,104 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated_item = db.materialize_item_instance(item_id)
         self.assertEqual(updated_item["elemental_damage_bonus_pct"], round(15 * 1.5))
 
+    async def test_sharpen_bonus_scales_with_the_casters_own_blacksmithing_mastery(self):
+        """
+        Real feature (2026-09-11, per Coffee: "sharpen shud get better
+        % damage bonus based on the blacksmith proficiency... increase
+        as the proficiency increases"). Deliberately reads BLACKSMITHING
+        mastery, not alchemy (the profession the enchant is actually
+        crafted under) -- Sharpen produces a sharper weapon, so its
+        real magnitude is tied to the caster's own weapon-forging
+        skill. Scales from the recipe's own base value (15%) at 1%
+        mastery up to double (30%) at 100%.
+        """
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        make_basic_character(950934, "MasterBlacksmithSharpener", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(950934, -999, profession_mastery_pct={"blacksmithing": 100.0})
+        db.add_item(950934, -999, "iron_ore", 4)
+        db.add_item(950934, -999, "sulfur_dust", 2)
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950934, -999, item_id, 1)
+        sink = []
+        update = FakeUpdate(950934, f"enchant my {base_weapon['name']} with sharpen", sink)
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="You work the blade's edge."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with sharpen")
+        updated_item = db.materialize_item_instance(item_id)
+        self.assertEqual(updated_item["elemental_damage_bonus_pct"], 30)  # 15 + (100/100)*15 == 30, no masterwork this time
+
+    async def test_arcana_grants_a_random_level_1_spell_below_the_alchemy_mastery_threshold(self):
+        """
+        Real feature (2026-09-11, per Coffee: "Arcana shud grant the
+        wearer a lv1 magic spell based on RNG"). No longer hardcoded to
+        Magic Missile -- rolled fresh from spells.py's own real level-1
+        spells, and never a level-2 one below the 50% alchemy mastery
+        threshold.
+        """
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        make_basic_character(950935, "ArcanaApprentice", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(950935, -999, "moonpetal", 3)
+        db.add_item(950935, -999, "iron_ore", 1)
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950935, -999, item_id, 1)
+        level1_ids = {sid for sid, s in spells.SPELLS.items() if s.get("level") == 1}
+        level2_ids = {sid for sid, s in spells.SPELLS.items() if s.get("level") == 2}
+        rolled = set()
+        for _ in range(15):
+            db.add_item(950935, -999, "moonpetal", 3)
+            db.add_item(950935, -999, "iron_ore", 1)
+            sink = []
+            update = FakeUpdate(950935, f"enchant my {base_weapon['name']} with arcana", sink)
+            with patch("bot.roll_percentage_check", return_value=False), \
+                 patch("bot.narrate_skill_check", return_value="You bind the working in."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+                await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with arcana")
+            rolled.add(db.materialize_item_instance(item_id)["grants_spell"])
+        self.assertTrue(rolled <= level1_ids, rolled)
+        self.assertFalse(rolled & level2_ids, rolled)
+
+    async def test_arcana_grants_from_the_combined_level_1_and_2_pool_at_50_percent_alchemy_mastery(self):
+        """Real feature (2026-09-11, same ask): once alchemy mastery crosses 50%, level-2 spells join the pool ADDITIVELY -- level-1 odds are never removed, per Coffee's own confirmed choice."""
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        make_basic_character(950936, "ArcanaMaster", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(950936, -999, profession_mastery_pct={"alchemy": 50.0})
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950936, -999, item_id, 1)
+        level2_ids = {sid for sid, s in spells.SPELLS.items() if s.get("level") == 2}
+        rolled_level2 = False
+        for _ in range(40):
+            db.add_item(950936, -999, "moonpetal", 3)
+            db.add_item(950936, -999, "iron_ore", 1)
+            sink = []
+            update = FakeUpdate(950936, f"enchant my {base_weapon['name']} with arcana", sink)
+            with patch("bot.roll_percentage_check", return_value=False), \
+                 patch("bot.narrate_skill_check", return_value="You bind the working in."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+                await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with arcana")
+            if db.materialize_item_instance(item_id)["grants_spell"] in level2_ids:
+                rolled_level2 = True
+                break
+        self.assertTrue(rolled_level2, "expected at least one level-2 spell across 40 real rolls at 50% mastery")
+
     async def test_masterwork_craft_static_recipe_grants_bonus_yield(self):
         """Real feature (2026-08-11, per Coffee: alchemy/cooking need this mechanic too): a masterwork roll on a static recipe crafts +1 extra unit."""
         from unittest.mock import patch
