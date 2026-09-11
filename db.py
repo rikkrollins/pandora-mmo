@@ -1884,64 +1884,37 @@ def _meets_proficiency_requirement(character: dict, item: dict) -> bool:
     return True
 
 
-# Real 5E attunement (2026-09-09, gap found scanning FEATURE_WISHLIST.md
-# against the actual codebase): equipping a rare+ item today applies its
-# bonuses completely unconditionally -- nothing stops a character from
-# stacking an unlimited number of powerful magic items at once. Real 5E
-# caps simultaneous attunement at 3; scoped here to exactly that cap,
-# gated by rarity (every item -- generated or static -- already carries a
-# real "rarity" field, so no new per-item authoring is needed). Common/
-# uncommon gear was never the problem this system exists to solve, so it
-# stays completely unaffected.
+# Real per-rarity level requirement (2026-09-11, REPLACING the old 5E-
+# style attunement slot cap below, per Coffee: "i dont really like the
+# attunement system... i want the player to be able to wear it
+# simultaiously as well. maybe instead of attunement have a Required Lv
+# to use the item"). The attunement cap (2026-09-09) solved a real
+# problem -- equipping a rare+ item applied its bonuses completely
+# unconditionally, no limit on how many at once -- but the fix Coffee
+# actually wants is a level gate per item, not a shared slot cap: wear
+# as much rare+ gear as you want simultaneously, just not before you've
+# individually earned the level for each piece. Same "every item
+# already carries a real rarity field, no new per-item authoring
+# needed" property the old system had. Common/uncommon stay ungated,
+# same as the old system never touched them either -- that was never
+# the tier this exists to gate.
 #
-# Deliberately NOT a separate stored "attuned_items" list: this game's
-# equip model has no true "worn but inert" state for weapon/armor/shield
-# (equip_item bakes AC deltas straight into the stored armor_class column
-# on every swap, and the live "profession_bonus"/ability-bonus/resistance
-# readers already treat "currently equipped" as the one source of truth,
-# same as _equipped_profession_bonus/_compute_equipped_resist_profile).
-# Piggybacking on that same live-computed convention means attunement
-# state can never drift out of sync with what's actually equipped -- it's
-# simply "how many of my currently-equipped items are rare+," recomputed
-# fresh every time, not a second copy of the same fact that could go
-# stale on an unequip/swap this function doesn't know about.
-ATTUNEMENT_TIERS = {"rare", "very_rare", "legendary", "mythic", "epic", "unique"}
-ATTUNEMENT_SLOT_CAP = 3
+# Deliberately NOT retroactive: only checked at the moment of equipping
+# something NEW (same call sites the old attunement check lived at) --
+# a character already wearing something above their current level from
+# before this change keeps wearing it. rare:5/very_rare:15/legendary:35/
+# mythic:60 -- rare is common enough (~15% of rolls, see rules.item_
+# generator.roll_tier) to want a low bar; mythic is a true 1%-roll
+# flex, so it stays a real milestone well short of MAX_LEVEL (99).
+RARITY_LEVEL_REQUIREMENT = {"rare": 5, "very_rare": 15, "legendary": 35, "mythic": 60}
 
 
-def _requires_attunement(item: dict) -> bool:
-    return item.get("rarity") in ATTUNEMENT_TIERS
+def _item_level_requirement(item: dict) -> int:
+    return RARITY_LEVEL_REQUIREMENT.get(item.get("rarity"), 0)
 
 
-def _attuned_count(character: dict, exclude_item_id: str | None = None) -> int:
-    """
-    How many of this character's CURRENTLY EQUIPPED items require
-    attunement, optionally excluding one specific item_id -- used at
-    equip time to count everything else worn before deciding whether
-    the item about to be equipped would push the character over the
-    cap. Exclude the outgoing weapon/armor/shield when checking a same-
-    slot swap (that item is leaving the moment this one arrives, so it
-    shouldn't count against the incoming item); pass None for an
-    accessory add, since accessories are additive, never a replacement.
-    """
-    equipped_ids = [
-        character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"),
-        character.get("equipped_offhand_weapon"),
-    ] + character.get("equipped_accessories", [])
-    count = 0
-    for eid in equipped_ids:
-        if not eid or eid == exclude_item_id:
-            continue
-        equipped_item = items_module.get_item(eid)
-        if equipped_item and _requires_attunement(equipped_item):
-            count += 1
-    return count
-
-
-def _meets_attunement_requirement(character: dict, item: dict, exclude_item_id: str | None = None) -> bool:
-    if not _requires_attunement(item):
-        return True
-    return _attuned_count(character, exclude_item_id) < ATTUNEMENT_SLOT_CAP
+def _meets_rarity_level_requirement(character: dict, item: dict) -> bool:
+    return character.get("level", 1) >= _item_level_requirement(item)
 
 
 def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool, str, dict | None]:
@@ -1999,11 +1972,11 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
         )
 
     if item["type"] == "weapon":
-        if not _meets_attunement_requirement(character, item, exclude_item_id=character.get("equipped_weapon")):
+        if not _meets_rarity_level_requirement(character, item):
+            required = _item_level_requirement(item)
             return (
                 False,
-                f"You're already attuned to {ATTUNEMENT_SLOT_CAP} magic items — "
-                f"unequip one of your other rare-or-better gear before wielding the {item['name']}.",
+                f"The {item['name']} demands more experience — you need to be level {required} to wield it.",
                 character,
             )
         # A weapon carries no AC of its own, but COULD complete a set
@@ -2029,11 +2002,11 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
     ring_bonus = _equipped_ring_ac_bonus(character)
 
     if item["type"] == "armor":
-        if not _meets_attunement_requirement(character, item, exclude_item_id=character.get("equipped_armor")):
+        if not _meets_rarity_level_requirement(character, item):
+            required = _item_level_requirement(item)
             return (
                 False,
-                f"You're already attuned to {ATTUNEMENT_SLOT_CAP} magic items — "
-                f"unequip one of your other rare-or-better gear before donning the {item['name']}.",
+                f"The {item['name']} demands more experience — you need to be level {required} to wear it.",
                 character,
             )
         # Real bug caught before shipping (2026-08-02): an earlier
@@ -2090,11 +2063,11 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
         return True, f"You put on the {item['name']} (AC {new_ac}).", updated
 
     if item["type"] == "shield":
-        if not _meets_attunement_requirement(character, item, exclude_item_id=character.get("equipped_shield")):
+        if not _meets_rarity_level_requirement(character, item):
+            required = _item_level_requirement(item)
             return (
                 False,
-                f"You're already attuned to {ATTUNEMENT_SLOT_CAP} magic items — "
-                f"unequip one of your other rare-or-better gear before raising the {item['name']}.",
+                f"The {item['name']} demands more experience — you need to be level {required} to raise it.",
                 character,
             )
         # Additive on top of current AC, swapping out any previously-
@@ -2111,11 +2084,11 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
     accessories = character["equipped_accessories"]
     if item_id in accessories:
         return False, f"You're already wearing the {item['name']}.", character
-    if not _meets_attunement_requirement(character, item):
+    if not _meets_rarity_level_requirement(character, item):
+        required = _item_level_requirement(item)
         return (
             False,
-            f"You're already attuned to {ATTUNEMENT_SLOT_CAP} magic items — "
-            f"unequip one of your other rare-or-better gear before putting on the {item['name']}.",
+            f"The {item['name']} demands more experience — you need to be level {required} to wear it.",
             character,
         )
     old_set_bonus = _equipped_set_ac_bonus(character)
@@ -2207,11 +2180,11 @@ def equip_offhand_weapon(telegram_user_id: int, chat_id: int, item_id: str) -> t
     if not eligible:
         return False, reason, character
 
-    if not _meets_attunement_requirement(character, item, exclude_item_id=character.get("equipped_offhand_weapon")):
+    if not _meets_rarity_level_requirement(character, item):
+        required = _item_level_requirement(item)
         return (
             False,
-            f"You're already attuned to {ATTUNEMENT_SLOT_CAP} magic items — "
-            f"unequip one of your other rare-or-better gear before wielding the {item['name']} off-hand.",
+            f"The {item['name']} demands more experience — you need to be level {required} to wield it off-hand.",
             character,
         )
 

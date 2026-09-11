@@ -26474,8 +26474,9 @@ def _format_item_stats_line(item: dict) -> str | None:
     elif item_type in ("armor", "shield"):
         category = item.get("armor_category", "shield" if item_type == "shield" else "light")
         parts.append(f"requires {category} armor proficiency")
-    if item.get("rarity") in db.ATTUNEMENT_TIERS:
-        parts.append(f"requires attunement (max {db.ATTUNEMENT_SLOT_CAP} at once)")
+    required_level = db.RARITY_LEVEL_REQUIREMENT.get(item.get("rarity"))
+    if required_level:
+        parts.append(f"requires level {required_level}")
     equip_req = item.get("equip_requirement")
     if equip_req:
         # Real conditions, not the old vague placeholder (2026-08-14,
@@ -26582,8 +26583,9 @@ def _format_item_detail_block(item: dict) -> str:
     elif item_type in ("armor", "shield"):
         category = item.get("armor_category", "shield" if item_type == "shield" else "light")
         req_bits.append(f"🔒 Requires {category} armor proficiency")
-    if item.get("rarity") in db.ATTUNEMENT_TIERS:
-        req_bits.append(f"🔒 Requires attunement (max {db.ATTUNEMENT_SLOT_CAP} at once)")
+    required_level = db.RARITY_LEVEL_REQUIREMENT.get(item.get("rarity"))
+    if required_level:
+        req_bits.append(f"🔒 Requires Level {required_level}")
     equip_req = item.get("equip_requirement")
     if equip_req:
         cond_bits = []

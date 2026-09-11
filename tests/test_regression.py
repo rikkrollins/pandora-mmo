@@ -5108,6 +5108,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test.db")
         user_id = 900401
         make_basic_character(user_id, "RingBearer", current_location="crossroads_tavern", armor_class=15)
+        db.update_character(user_id, -999, level=5)  # ring_of_protection is rare -- RARITY_LEVEL_REQUIREMENT["rare"] == 5
         db.add_item(user_id, -999, "ring_of_protection", 1)
         success, message, updated = db.equip_item(user_id, -999, "ring_of_protection")
         self.assertTrue(success)
@@ -5118,6 +5119,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test2.db")
         user_id = 900402
         make_basic_character(user_id, "TwoRings", current_location="crossroads_tavern", armor_class=15)
+        db.update_character(user_id, -999, level=5)  # ring_of_protection is rare
         db.add_item(user_id, -999, "ring_of_protection", 1)
         db.add_item(user_id, -999, "ring_of_the_undertow", 1)
         db.equip_item(user_id, -999, "ring_of_protection")
@@ -5129,6 +5131,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test3.db")
         user_id = 900403
         character = make_basic_character(user_id, "RingThenArmor", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # ring_of_protection is rare
         db.add_item(user_id, -999, "ring_of_protection", 1)
         db.add_item(user_id, -999, "chain_mail", 1)
         db.equip_item(user_id, -999, "ring_of_protection")
@@ -5142,6 +5145,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/amulet_test.db")
         user_id = 900404
         make_basic_character(user_id, "Amuleted", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # amulet_of_health is rare
         db.add_item(user_id, -999, "amulet_of_health", 1)
         success, message, updated = db.equip_item(user_id, -999, "amulet_of_health")
         self.assertTrue(success)
@@ -5155,6 +5159,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             ability_scores={"strength": 10, "dexterity": 10, "constitution": 20,
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
         )
+        db.update_character(user_id, -999, level=5)  # amulet_of_health is rare
         db.add_item(user_id, -999, "amulet_of_health", 1)
         success, message, updated = db.equip_item(user_id, -999, "amulet_of_health")
         self.assertTrue(success)
@@ -5164,6 +5169,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/ring_test4.db")
         user_id = 900406
         make_basic_character(user_id, "Careful", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # ring_of_protection is rare
         db.add_item(user_id, -999, "ring_of_protection", 1)
         db.equip_item(user_id, -999, "ring_of_protection")
         success, message, _ = db.equip_item(user_id, -999, "ring_of_protection")
@@ -5173,6 +5179,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         use_test_db("tests/tmp/auto_equip_accessories_test.db")
         user_id = 900407
         make_basic_character(user_id, "AutoAccessory", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # ring_of_protection/amulet_of_health are rare
         db.add_item(user_id, -999, "ring_of_protection", 1)
         db.add_item(user_id, -999, "ring_of_the_undertow", 1)
         db.add_item(user_id, -999, "amulet_of_health", 1)
@@ -5189,80 +5196,90 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         success, message, _ = db.equip_item(user_id, -999, "waterlogged_journal")
         self.assertFalse(success)
 
-    # -- Real 5E attunement (2026-09-09, gap found scanning
-    #    FEATURE_WISHLIST.md against the actual codebase): equipping a
-    #    rare+ item used to apply its bonuses completely unconditionally,
-    #    with no cap at all on how many could be stacked at once ---------
-    def test_a_fourth_rare_accessory_is_refused_once_attuned_to_three(self):
-        use_test_db("tests/tmp/attunement_test1.db")
+    # -- Real per-rarity level requirement (2026-09-11, REPLACING the old
+    #    5E-style attunement slot cap, per Coffee: "i dont really like
+    #    the attunement system... i want the player to be able to wear
+    #    it simultaiously as well. maybe instead of attunement have a
+    #    Required Lv to use the item"). The old cap solved a real
+    #    problem (equipping a rare+ item applied its bonuses completely
+    #    unconditionally, no limit on how many at once) but the actual
+    #    fix wanted is a level gate per item, not a shared slot cap ------
+    def test_equipping_a_rare_item_is_refused_below_the_required_level_and_allowed_at_it(self):
+        use_test_db("tests/tmp/rarity_level_test1.db")
         user_id = 900501
-        make_basic_character(user_id, "Attuner", current_location="crossroads_tavern")
+        make_basic_character(user_id, "TooYoungWearer", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "ring_of_protection", 1)  # rare -- RARITY_LEVEL_REQUIREMENT["rare"] == 5
+        success, message, updated = db.equip_item(user_id, -999, "ring_of_protection")
+        self.assertFalse(success)
+        self.assertIn("level 5", message.lower())
+        self.assertNotIn("ring_of_protection", updated["equipped_accessories"])
+
+        db.update_character(user_id, -999, level=5)
+        success2, message2, updated2 = db.equip_item(user_id, -999, "ring_of_protection")
+        self.assertTrue(success2, message2)
+        self.assertIn("ring_of_protection", updated2["equipped_accessories"])
+
+    def test_multiple_rare_items_can_all_be_worn_simultaneously_once_leveled(self):
+        """
+        The whole point of replacing the old attunement cap: once a
+        character meets EACH item's own level requirement, there's no
+        shared slot limit anymore -- every rare+ piece can be worn at
+        the same time, unlike the old "max 3 at once" cap.
+        """
+        use_test_db("tests/tmp/rarity_level_test2.db")
+        user_id = 900502
+        make_basic_character(user_id, "FullyGearedWearer", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)
         for iid in ("ring_of_protection", "amulet_of_health", "stormguard_cloak", "lantern_of_true_sight"):
             db.add_item(user_id, -999, iid, 1)
-        s1, _, _ = db.equip_item(user_id, -999, "ring_of_protection")
-        s2, _, _ = db.equip_item(user_id, -999, "amulet_of_health")
-        s3, _, _ = db.equip_item(user_id, -999, "stormguard_cloak")
-        self.assertTrue(s1 and s2 and s3)
-        success, message, updated = db.equip_item(user_id, -999, "lantern_of_true_sight")
-        self.assertFalse(success)
-        self.assertIn("attuned", message.lower())
-        self.assertNotIn("lantern_of_true_sight", updated["equipped_accessories"])
-
-    def test_common_and_uncommon_gear_never_counts_toward_the_attunement_cap(self):
-        """
-        The real point of this system is capping RARE+ magic items --
-        common/uncommon gear (the vast majority of a market/starting
-        inventory) must never be affected, no matter how many pieces are
-        worn at once.
-        """
-        use_test_db("tests/tmp/attunement_test2.db")
-        user_id = 900502
-        make_basic_character(user_id, "Unaffected", current_location="crossroads_tavern")
-        db.add_item(user_id, -999, "ring_of_protection", 1)
-        db.add_item(user_id, -999, "amulet_of_health", 1)
-        db.add_item(user_id, -999, "stormguard_cloak", 1)
-        db.add_item(user_id, -999, "ring_of_the_undertow", 1)  # uncommon -- the 4th accessory overall
-        for iid in ("ring_of_protection", "amulet_of_health", "stormguard_cloak", "ring_of_the_undertow"):
+        for iid in ("ring_of_protection", "amulet_of_health", "stormguard_cloak", "lantern_of_true_sight"):
             success, message, _ = db.equip_item(user_id, -999, iid)
             self.assertTrue(success, f"{iid} should have equipped fine: {message}")
+        final = db.get_character(user_id, -999)
+        for iid in ("ring_of_protection", "amulet_of_health", "stormguard_cloak", "lantern_of_true_sight"):
+            self.assertIn(iid, final["equipped_accessories"])
 
-    def test_swapping_a_rare_weapon_for_a_different_rare_weapon_does_not_double_count(self):
-        """
-        The outgoing weapon must be excluded from its own slot's count --
-        otherwise a character already at the cap could never legitimately
-        swap one rare weapon for another, even though the old one is
-        leaving the moment the new one arrives.
-        """
-        use_test_db("tests/tmp/attunement_test3.db")
+    def test_common_and_uncommon_gear_never_requires_a_level(self):
+        """Common/uncommon gear (the vast majority of a market/starting inventory) must never be level-gated, even at level 1."""
+        use_test_db("tests/tmp/rarity_level_test3.db")
         user_id = 900503
+        make_basic_character(user_id, "Unaffected", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "ring_of_the_undertow", 1)  # uncommon
+        success, message, _ = db.equip_item(user_id, -999, "ring_of_the_undertow")
+        self.assertTrue(success, message)
+
+    def test_swapping_a_rare_weapon_for_a_different_rare_weapon_still_works(self):
+        use_test_db("tests/tmp/rarity_level_test4.db")
+        user_id = 900504
         make_basic_character(user_id, "WeaponSwapper", current_location="crossroads_tavern")
-        for iid in ("ring_of_protection", "amulet_of_health", "flametongue_shortsword", "stoneheart_warhammer"):
+        db.update_character(user_id, -999, level=5)
+        for iid in ("flametongue_shortsword", "stoneheart_warhammer"):
             db.add_item(user_id, -999, iid, 1)
-        db.equip_item(user_id, -999, "ring_of_protection")
-        db.equip_item(user_id, -999, "amulet_of_health")
         s1, _, updated1 = db.equip_item(user_id, -999, "flametongue_shortsword")
         self.assertTrue(s1)
         self.assertEqual(updated1["equipped_weapon"], "flametongue_shortsword")
-
-        # Now at 3/3 (2 rings + the flametongue) -- swapping to a
-        # DIFFERENT rare weapon must still succeed, since the flametongue
-        # is leaving the same slot the warhammer is entering.
         s2, message2, updated2 = db.equip_item(user_id, -999, "stoneheart_warhammer")
         self.assertTrue(s2, message2)
         self.assertEqual(updated2["equipped_weapon"], "stoneheart_warhammer")
 
-        # Re-equipping the SAME already-equipped rare item must also
-        # never be refused for "being at the cap" -- it's a no-op swap.
-        s3, message3, _ = db.equip_item(user_id, -999, "stoneheart_warhammer")
-        self.assertTrue(s3, message3)
+    def test_gear_equipped_before_this_change_is_never_retroactively_stripped(self):
+        """Not retroactive, per Coffee's own confirmed choice: the level requirement is only ever checked at the moment of equipping something NEW."""
+        use_test_db("tests/tmp/rarity_level_test5.db")
+        user_id = 900505
+        make_basic_character(user_id, "GrandfatheredWearer", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "ring_of_protection", 1)
+        db.update_character(user_id, -999, level=99, equipped_accessories=["ring_of_protection"])
+        db.update_character(user_id, -999, level=1)  # simulate a rebirth/reset that drops them back under the requirement
+        character = db.get_character(user_id, -999)
+        self.assertIn("ring_of_protection", character["equipped_accessories"])
 
-    def test_item_stats_line_and_detail_block_both_show_attunement_requirement(self):
+    def test_item_stats_line_and_detail_block_both_show_the_level_requirement(self):
         rare_ring = items_module.get_item("ring_of_protection")
         common_ring_like = {"type": "amulet", "rarity": "common", "ac_bonus": 0}
-        self.assertIn("requires attunement", bot._format_item_stats_line(rare_ring))
-        self.assertIn("Requires attunement", bot._format_item_detail_block(rare_ring))
+        self.assertIn("requires level 5", bot._format_item_stats_line(rare_ring))
+        self.assertIn("Requires Level 5", bot._format_item_detail_block(rare_ring))
         stats_common = bot._format_item_stats_line(common_ring_like)
-        self.assertTrue(stats_common is None or "attunement" not in stats_common)
+        self.assertTrue(stats_common is None or "level" not in stats_common)
 
     def test_cloak_of_elvenkind_grants_advantage_on_sneak_checks(self):
         use_test_db("tests/tmp/cloak_test.db")
@@ -12329,6 +12346,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         db.add_item(user_id, -999, ring_id, 1)
+        db.update_character(user_id, -999, level=5)  # generated item is rare
         db.equip_item(user_id, -999, ring_id)
         character = db.get_character(user_id, -999)
         self.assertEqual(bot._equipped_proficiency_bonus(character, "weapon", "martial"), 5.0)
@@ -12512,6 +12530,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from rules.item_generator import generate_weapon, generate_armor
         user_id = 950901
         make_basic_character(user_id, "LootTester2", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=35)  # legendary gear -- RARITY_LEVEL_REQUIREMENT["legendary"] == 35
 
         legendary_weapon = generate_weapon(tier="legendary")
         self.assertNotIn("+", legendary_weapon["damage_dice"])
@@ -12764,6 +12783,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from rules.item_generator import generate_armor
         user_id = 950903
         character = make_basic_character(user_id, "ElementalTester2", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=35)  # legendary armor
 
         self.assertEqual(apply_damage_type_modifier(20, "fire", character), 20)
 
@@ -12971,6 +12991,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from rules.item_generator import generate_armor, generate_shield
         user_id = 950921
         make_basic_character(user_id, "WardStacker", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=35)  # legendary armor/shield
 
         armor = generate_armor(tier="legendary")
         armor["affixes"] = [a for a in armor["affixes"] if a.get("kind") != "elemental_resistance"]
@@ -13092,6 +13113,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         from rules.combat import resolve_attack
         user_id = 950930
         make_basic_character(user_id, "StoneArmoured", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # stoneward_plate + the generated shield below are rare
         armor_id = "stoneward_plate"
         db.add_item(user_id, -999, armor_id, 1)
         self.assertTrue(db.equip_item(user_id, -999, armor_id)[0])
@@ -13230,6 +13252,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         user_id = 950904
         character = make_basic_character(user_id, "GearCaster2", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # generated ring is rare
         self.assertNotIn("cure_wounds", character["known_spells"])
         known_spells_before = list(character["known_spells"])
         slots_before = character["spell_slots_current"]
@@ -13368,6 +13391,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
         )
         db.add_item(user_id, -999, "pickaxe", 1)
+        db.update_character(user_id, -999, level=5)  # generated ring below is rare
         character = db.get_character(user_id, -999)
         self.assertEqual(bot._equipped_profession_bonus(character, "mining"), 0)
 
@@ -13420,6 +13444,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             ability_scores={"strength": 10, "dexterity": 12, "constitution": 10,
                              "intelligence": 10, "wisdom": 10, "charisma": 10},
         )
+        db.update_character(user_id, -999, level=5)  # the two generated set pieces below are rare
         set_id = "emberwoven_vanguard"
         set_def = ITEM_SETS[set_id]
         expected_bonus = set_def["pieces"][2][0]["value"]
@@ -13807,7 +13832,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(success_before)
         self.assertNotEqual(db.get_character(user_id, -999).get("equipped_weapon"), item_id)
 
-        db.update_character(user_id, -999, rebirth_count=1)
+        db.update_character(user_id, -999, rebirth_count=1, level=60)  # 60 == RARITY_LEVEL_REQUIREMENT["mythic"]
         success_after, _msg2, _u2 = db.equip_item(user_id, -999, item_id)
         self.assertTrue(success_after)
         self.assertEqual(db.get_character(user_id, -999).get("equipped_weapon"), item_id)

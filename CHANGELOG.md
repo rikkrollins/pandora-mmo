@@ -2,6 +2,50 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.585] — feat: replace the attunement slot cap with a per-rarity level requirement
+
+Per Coffee: "i dont really like the attunement system you have in
+place... i want the player to be able to wear it simultaiously as
+well. maybe instead of attunement have a Required Lv to use the
+item." The old system (shipped 2026-09-09) capped a character at 3
+simultaneously-equipped Rare-or-better items, counted across every
+gear slot — real 5E flavor, but it meant a fully-decked character
+could never wear more than 3 of their best items at once no matter
+how strong they'd become.
+
+Replaced entirely with `db.RARITY_LEVEL_REQUIREMENT` — Rare: 5, Very
+Rare: 15, Legendary: 35, Mythic: 60 (common/uncommon stay ungated, as
+before). No shared cap anymore: a character can wear as much rare+
+gear as they want simultaneously, as long as they individually meet
+each item's own level requirement. Checked at the same 5 equip-time
+call sites (weapon/armor/shield/offhand/accessory) the old attunement
+check lived at; deliberately not retroactive — only checked at the
+moment of equipping something NEW, so nothing already worn gets
+stripped by this change. Item display text updated from "requires
+attunement (max 3 at once)" to "requires level N" in both the stats
+line and detail view.
+
+**Real bug fixed along the way**: `recipe_requirement_gate`'s guild
+rejection text read "reserved for members of the The Forge Guild" for
+6 of the 7 real guild names — always wrong, caught while auditing
+every equip-time rejection message during this change. Fixed by
+stripping a leading "The " before interpolating.
+
+Found and fixed 16 real pre-existing tests that equipped rare+/
+legendary/mythic gear on a default level-1 test character (the old
+attunement system only capped simultaneous count, never checked
+level, so these never needed a level bump before) — each fixed by
+setting an appropriate level before the equip call, not by weakening
+the new rule. Verified via an exhaustive static check across every
+`create_item_instance` call and every real catalog item at Rare+ in
+the test suite, then a 369-test targeted sweep across every gear/
+equip/rarity-related test — clean except two confirmed pre-existing,
+unrelated flakes (`test_battle_menu_callback_serializes_rapid_
+duplicate_taps_per_user`, a concurrency test; `test_loot_gold_still_
+reaches_the_real_owner_when_the_fight_was_all_ai_companions`, a non-
+deterministic gold-split test) — both reproduced identically on the
+prior commit via `git stash`.
+
 ## [1.27.584] — feat: make the Blacksmith/Alchemy menus genuinely interactive
 
 Follow-up to v1.27.582/583, per Coffee: "is there a way you can make
