@@ -195,10 +195,31 @@ def _skill_check_preamble() -> str:
 def _build_skill_check_prompt(character: dict, action_text: str, ability: str,
                                mechanical_result: dict, grounded_fact: str | None = None) -> str:
     raw_roll = mechanical_result.get("raw_roll")
+    # Real live bug (2026-09-12, dev-bridge, Sugar's own screenshot):
+    # unlike an attack roll (rules/dice.roll_attack bakes in the real
+    # 5E rule that a natural 1 always misses and a natural 20 always
+    # hits, so critical_hit/critical_fail there can never disagree with
+    # the real outcome), a SKILL check's natural 1/20 has no such
+    # auto-fail/auto-succeed rule -- success here is purely `total >=
+    # dc`, so a big enough bonus lets a natural 1 still succeed (this
+    # is what fixing bot._format_skill_check_result's identical banner
+    # bug, same day, already established is real and did happen live).
+    # Before this fix, this function told the model "This was a NATURAL
+    # 1 -- a humiliating, comedic total failure" purely from raw_roll,
+    # completely ignoring the real `success` value already sitting in
+    # mechanical_result (every one of narrate_skill_check's 12 call
+    # sites in bot.py includes it) -- producing exactly the ambiguous,
+    # failure-flavored prose ("resistance clawed back... nearly
+    # reached") her screenshot showed despite a real, passing roll. The
+    # critical tone only applies now when it's also consistent with
+    # the real outcome; otherwise it falls through to the plain
+    # strong/weak/ordinary tone below, same fallback shape the banner
+    # fix uses.
+    success = mechanical_result.get("success")
     drama = _drama_instruction(
         raw_roll,
-        critical_hit=(raw_roll == 20),
-        critical_fail=(raw_roll == 1),
+        critical_hit=(raw_roll == 20 and success is not False),
+        critical_fail=(raw_roll == 1 and success is not True),
     )
     fact_line = (
         f"Known real fact (reflect this exactly on success, invent nothing "
@@ -303,9 +324,13 @@ def _fallback_skill_check_narration(character: dict, action_text: str, mechanica
     success = mechanical_result.get("success", False)
     name = character.get("name", "You")
 
-    if raw_roll == 20:
+    # Same real success-flag gate as _build_skill_check_prompt's drama
+    # instruction above -- a natural 1 that still clears the DC (or a
+    # natural 20 that still misses it) must never claim the opposite
+    # of what actually happened, even in this offline fallback path.
+    if raw_roll == 20 and success:
         base = f"{name} pulls it off spectacularly — a natural 20! Nothing could have gone better."
-    elif raw_roll == 1:
+    elif raw_roll == 1 and not success:
         base = f"{name} fumbles badly — a natural 1. It couldn't have gone worse."
     elif success:
         base = f"{name} succeeds. The attempt goes just as hoped."
@@ -349,13 +374,20 @@ def _drama_instruction(raw_roll: int | None, critical_hit: bool, critical_fail: 
     """
     if raw_roll is None:
         return ""
-    if critical_hit or raw_roll == 20:
+    # Real live bug (2026-09-12): these branches used to also fall back
+    # to a bare `raw_roll == 20`/`raw_roll == 1` check, which made the
+    # critical_hit/critical_fail parameters moot for a skill check --
+    # _build_skill_check_prompt above now deliberately passes False for
+    # either when it disagrees with the real success flag, so this
+    # function must actually respect that instead of re-deriving the
+    # same wrong answer from raw_roll on its own.
+    if critical_hit:
         return (
             "This was a NATURAL 20 — a legendary, spectacular critical success. "
             "Go big: make this the single most triumphant, over-the-top moment "
             "of the fight so far."
         )
-    if critical_fail or raw_roll == 1:
+    if critical_fail:
         return (
             "This was a NATURAL 1 — a humiliating, comedic total failure. "
             "Make it embarrassing and a little funny: a stumble, a fumble, "

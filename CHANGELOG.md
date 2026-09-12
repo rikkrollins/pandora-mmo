@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.589] — fix: skill-check narration could sound like a failure despite a real success
+
+Follow-up to v1.27.588's banner fix, same root screenshot: the AI
+narration for Sugar's natural-1-that-still-succeeded lockpick read as
+an ambiguous near-failure ("resistance clawed back... a faint click
+lingered") despite the real roll passing (22 vs DC 13). Traced to
+`ai/dm_agent.py`'s `_build_skill_check_prompt`: it told the model
+"This was a NATURAL 1 — a humiliating, comedic total failure" purely
+from `raw_roll == 1`, ignoring the real `success` value already
+present in every one of `narrate_skill_check`'s 12 call sites. Unlike
+an attack roll (`rules/dice.roll_attack` bakes in the real 5E rule
+that a natural 1 always misses and a natural 20 always hits, so that
+path can never disagree with itself), a skill check has no such
+auto-fail/auto-succeed rule — success is purely `total >= dc`, so a
+big enough bonus lets a natural 1 still succeed. `_drama_instruction`'s
+critical-tone branches (and the offline fallback narration, and both
+had the identical bug) now only fire when they agree with the real
+outcome, exactly mirroring the banner fix.
+
 ## [1.27.588] — fix: natural 1/20 banners could contradict the real success flag
 
 Two real dev-bridge reports from Sugar, both traced to the same root

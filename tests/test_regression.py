@@ -5533,6 +5533,54 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Known real fact: this is a d20 roll", prompt)
         self.assertIn("never a d12", prompt)
 
+    def test_skill_check_prompt_tone_never_claims_the_opposite_of_the_real_outcome(self):
+        """
+        Real live bug (dev-bridge screenshot, 2026-09-12, Sugar): the
+        SAME roll that got _format_skill_check_result's false "NATURAL 1
+        -- Complete Failure!" banner (v1.27.588) also fed the narration
+        prompt a hardcoded "This was a NATURAL 1 -- a humiliating,
+        comedic total failure" tone instruction purely from raw_roll,
+        ignoring the real `success: True` already sitting right there in
+        mechanical_result -- which is exactly why her screenshot's
+        narration read as an ambiguous near-failure ("resistance clawed
+        back... a faint click lingered") despite a real, passing 22 vs
+        DC 13. Unlike an attack roll (rules/dice.roll_attack bakes in
+        the real 5E auto-hit/auto-miss rule, so critical framing there
+        can never disagree with the real outcome), a skill check's
+        natural 1/20 has no such rule -- success is pure `total >= dc`.
+        The tone instruction must now agree with the real outcome.
+        """
+        import ai.dm_agent as dm_agent_module
+        character = {"name": "Sugar", "char_class": "Rogue"}
+
+        # Natural 1 that still succeeds -- must NOT call it a failure.
+        prompt = dm_agent_module._build_skill_check_prompt(
+            character, "pick the lock", "dexterity",
+            {"raw_roll": 1, "total": 22, "dc": 13, "success": True},
+        )
+        self.assertNotIn("humiliating", prompt)
+        self.assertNotIn("total failure", prompt)
+
+        # Natural 20 that still fails -- must NOT call it a triumph.
+        prompt2 = dm_agent_module._build_skill_check_prompt(
+            character, "pick the lock", "dexterity",
+            {"raw_roll": 20, "total": 20, "dc": 50, "success": False},
+        )
+        self.assertNotIn("legendary, spectacular critical success", prompt2)
+        self.assertNotIn("triumphant", prompt2)
+
+        # The real, consistent cases still get the big dramatic tone.
+        prompt3 = dm_agent_module._build_skill_check_prompt(
+            character, "pick the lock", "dexterity",
+            {"raw_roll": 1, "total": 3, "dc": 13, "success": False},
+        )
+        self.assertIn("humiliating", prompt3)
+        prompt4 = dm_agent_module._build_skill_check_prompt(
+            character, "pick the lock", "dexterity",
+            {"raw_roll": 20, "total": 25, "dc": 13, "success": True},
+        )
+        self.assertIn("legendary, spectacular critical success", prompt4)
+
     def test_puzzle_next_step_hint_prompt_requires_naming_the_real_location(self):
         """
         Real live report (2026-09-01, dev-bridge screenshot + caption,
