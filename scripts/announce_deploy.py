@@ -24,8 +24,12 @@ every real update from now on, not a one-off. Requires the bot to have
 loudly rather than silently doing nothing, so the missing permission
 gets noticed immediately.
 """
+import json
 import os
+import re
 import sys
+import urllib.error
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,6 +39,8 @@ import config
 import db
 
 REQUIRED_ENV = "TELEGRAM_CHAT_ID"
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_GITHUB_REPO = "rikkrollins/pandora-mmo"
 
 
 def _escape_markdown(text: str) -> str:
@@ -131,6 +137,81 @@ def pin_update(catchy_text: str) -> None:
     db.set_setting(_PINNED_MESSAGE_ID_SETTING, str(new_message_id))
 
 
+def _read_github_token() -> str:
+    env_path = os.path.join(_REPO_ROOT, ".env")
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("GITHUB_TOKEN="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError("GITHUB_TOKEN isn't set in .env — can't publish a GitHub Release.")
+
+
+def _changelog_section(version: str) -> tuple[str, str]:
+    """Returns (title, body) for one version's own '## [x.y.z] — title' section in CHANGELOG.md."""
+    changelog_path = os.path.join(_REPO_ROOT, "CHANGELOG.md")
+    with open(changelog_path) as f:
+        content = f.read()
+    pattern = re.compile(r"^## \[(\d+\.\d+\.\d+)\] — (.+)$", re.MULTILINE)
+    matches = list(pattern.finditer(content))
+    for i, m in enumerate(matches):
+        if m.group(1) != version:
+            continue
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+        return m.group(2), content[start:end].strip()
+    raise RuntimeError(f"No CHANGELOG.md section found for version {version} (expected '## [{version}] — ...').")
+
+
+def publish_github_release(version: str) -> str:
+    """
+    Publishes a real GitHub Release for this version, pulling the title
+    and body straight from CHANGELOG.md's own section for it -- this is
+    now a REQUIRED step of every version-bump deploy (see
+    scripts/announce_deploy.py's own --version branch below), not an
+    optional extra. Real, recurring lapse (2026-09-06, then again
+    2026-09-12: 32 then 33 versions shipped with zero GitHub Releases,
+    both times only caught by someone noticing after the fact) --
+    leaving this as a manual "remember to also run curl" step has
+    failed twice, so it's now wired directly into the one script this
+    project already always runs at the end of every deploy, instead of
+    depending on a separate remembered step. Fails loudly (raises) on
+    any problem -- a missing token or a bad CHANGELOG.md section should
+    be noticed immediately, not silently skipped.
+    """
+    token = _read_github_token()
+    title, body = _changelog_section(version)
+    tag = f"v{version}"
+    payload = json.dumps({
+        "tag_name": tag,
+        "target_commitish": "main",
+        "name": f"{tag} — {title}",
+        "body": body,
+        "draft": False,
+        "prerelease": False,
+    }).encode()
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{_GITHUB_REPO}/releases",
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "pandora-mmo-announce-deploy",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.load(resp)
+            return result.get("html_url", "")
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        if e.code == 422 and "already_exists" in error_body:
+            return f"(release {tag} already exists, skipped)"
+        raise RuntimeError(f"GitHub Release publish failed ({e.code}): {error_body}")
+
+
 if __name__ == "__main__":
     usage_lines = [
         "Usage: python3 scripts/announce_deploy.py \"message text\"",
@@ -167,6 +248,8 @@ if __name__ == "__main__":
             sys.exit(1)
         announce(f"v{version_text} deployed\n\n{summary_text}")
         print("Posted to Development topic.")
+        release_url = publish_github_release(version_text)
+        print(f"GitHub Release: {release_url}")
     elif sys.argv[1].startswith("--"):
         print(f"Unrecognized flag: {sys.argv[1]}", file=sys.stderr)
         print("\n".join(usage_lines), file=sys.stderr)
