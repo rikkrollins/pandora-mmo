@@ -147,8 +147,8 @@ def _read_github_token() -> str:
     raise RuntimeError("GITHUB_TOKEN isn't set in .env — can't publish a GitHub Release.")
 
 
-def _changelog_section(version: str) -> tuple[str, str]:
-    """Returns (title, body) for one version's own '## [x.y.z] — title' section in CHANGELOG.md."""
+def _changelog_section(version: str) -> tuple[str, str] | None:
+    """Returns (title, body) for one version's own '## [x.y.z] — title' section in CHANGELOG.md, or None if it doesn't exist yet."""
     changelog_path = os.path.join(_REPO_ROOT, "CHANGELOG.md")
     with open(changelog_path) as f:
         content = f.read()
@@ -160,27 +160,36 @@ def _changelog_section(version: str) -> tuple[str, str]:
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
         return m.group(2), content[start:end].strip()
-    raise RuntimeError(f"No CHANGELOG.md section found for version {version} (expected '## [{version}] — ...').")
+    return None
+
+
+def _read_current_version() -> str:
+    with open(os.path.join(_REPO_ROOT, "VERSION")) as f:
+        return f.read().strip()
 
 
 def publish_github_release(version: str) -> str:
     """
     Publishes a real GitHub Release for this version, pulling the title
-    and body straight from CHANGELOG.md's own section for it -- this is
-    now a REQUIRED step of every version-bump deploy (see
-    scripts/announce_deploy.py's own --version branch below), not an
-    optional extra. Real, recurring lapse (2026-09-06, then again
-    2026-09-12: 32 then 33 versions shipped with zero GitHub Releases,
-    both times only caught by someone noticing after the fact) --
-    leaving this as a manual "remember to also run curl" step has
-    failed twice, so it's now wired directly into the one script this
-    project already always runs at the end of every deploy, instead of
-    depending on a separate remembered step. Fails loudly (raises) on
-    any problem -- a missing token or a bad CHANGELOG.md section should
-    be noticed immediately, not silently skipped.
+    and body straight from CHANGELOG.md's own section for it. Real,
+    recurring lapse (2026-09-06, then again 2026-09-12: 32 then 33
+    versions shipped with zero GitHub Releases, both times only caught
+    by someone noticing after the fact, the second time because Coffee
+    asked directly: "why hasnt the releases on github been updated?")
+    -- leaving this as a manual "remember to also run curl" step failed
+    twice in a row. Fails loudly (raises) on a real problem -- a
+    missing token or a GitHub API error should be noticed immediately.
+    A missing CHANGELOG.md section is treated as "nothing to publish
+    yet" (returns None) rather than an error, since _auto_publish_
+    release_for_current_version below calls this unconditionally on
+    EVERY invocation of this script, including --warn calls that can
+    legitimately fire before a version bump's CHANGELOG entry exists.
     """
     token = _read_github_token()
-    title, body = _changelog_section(version)
+    section = _changelog_section(version)
+    if section is None:
+        raise RuntimeError(f"No CHANGELOG.md section found for version {version} (expected '## [{version}] — ...').")
+    title, body = section
     tag = f"v{version}"
     payload = json.dumps({
         "tag_name": tag,
@@ -210,6 +219,37 @@ def publish_github_release(version: str) -> str:
         if e.code == 422 and "already_exists" in error_body:
             return f"(release {tag} already exists, skipped)"
         raise RuntimeError(f"GitHub Release publish failed ({e.code}): {error_body}")
+
+
+def _auto_publish_release_for_current_version() -> None:
+    """
+    Self-healing safety net, called unconditionally at the end of EVERY
+    invocation of this script regardless of which flag was used. The
+    real gap the two GitHub Release lapses above shared: the release
+    publish only ever happened from the --version/--summary branch, so
+    forgetting that exact flag combo (a plain-message call, a --warn-
+    only call, or just running the wrong command) silently skipped it
+    again, exactly like a third lapse waiting to happen. This checks
+    the live VERSION file directly and (re)publishes its release if
+    CHANGELOG.md already has that version's section and GitHub doesn't
+    have the release yet -- regardless of what this particular
+    invocation was actually for. Deliberately non-fatal: this must
+    never take down a time-sensitive --warn or announce call just
+    because GitHub's API hiccuped, but it DOES print a loud, impossible
+    -to-miss status line either way, since a human (Claude) reads this
+    script's stdout every time it runs.
+    """
+    version = _read_current_version()
+    if _changelog_section(version) is None:
+        # Normal, not an error: e.g. a --warn posted before this
+        # version's CHANGELOG.md entry has been written yet.
+        return
+    try:
+        result = publish_github_release(version)
+        print(f"[github-release] v{version}: {result}")
+    except Exception as e:
+        print(f"[github-release] ⚠️  WARNING: v{version} release publish FAILED: {e}", file=sys.stderr)
+        print(f"[github-release] ⚠️  Fix this and re-run: python3 scripts/announce_deploy.py --version {version} --summary \"...\"", file=sys.stderr)
 
 
 if __name__ == "__main__":
@@ -248,8 +288,6 @@ if __name__ == "__main__":
             sys.exit(1)
         announce(f"v{version_text} deployed\n\n{summary_text}")
         print("Posted to Development topic.")
-        release_url = publish_github_release(version_text)
-        print(f"GitHub Release: {release_url}")
     elif sys.argv[1].startswith("--"):
         print(f"Unrecognized flag: {sys.argv[1]}", file=sys.stderr)
         print("\n".join(usage_lines), file=sys.stderr)
@@ -257,3 +295,10 @@ if __name__ == "__main__":
     else:
         announce(sys.argv[1])
         print("Posted to Development topic.")
+
+    # Self-healing GitHub Release check -- runs after EVERY successful
+    # invocation above, not just --version calls. See
+    # _auto_publish_release_for_current_version's own docstring: this
+    # is what actually closes the recurring lapse, since it no longer
+    # depends on remembering the right flag combination.
+    _auto_publish_release_for_current_version()
