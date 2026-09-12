@@ -6784,6 +6784,75 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         lever_id = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_cinder_key_alcove")["lockables"][0]["id"]
         self.assertIn(lever_id, bot._UNLOCKED.get(-999, set()))
 
+    def test_format_skill_check_result_banner_always_agrees_with_the_real_success_flag(self):
+        """
+        Real live bug (dev-bridge screenshots, 2026-09-12, Sugar: "Asked
+        to open the door. It said successful but was false" / "A message
+        should have advised me I could not open the door without a key")
+        -- reproduced from her own screenshots: a natural 1 that still
+        totaled 22 vs DC 13 (a real success, the door genuinely did
+        unlock) got the false "NATURAL 1 -- Complete Failure!" banner
+        anyway, because the banner branches keyed off raw_roll alone,
+        completely ignoring the real `success` flag this function is
+        handed. The symmetric case (a natural 20 that still fails an
+        absurd DC) had the identical bug the other direction. Both
+        critical banners must now only fire when they also agree with
+        the real outcome; otherwise it falls through to the plain
+        Success/Failure line.
+        """
+        # Natural 1 that still succeeds -- must NOT show "Complete Failure!".
+        msg = bot._format_skill_check_result(
+            "flavor", {"total": 22, "raw_roll": 1}, "dexterity", 13, success=True,
+        )
+        self.assertIn("✨ **Success!** ✨", msg)
+        self.assertNotIn("Complete Failure", msg)
+
+        # Natural 20 that still fails -- must NOT show "Incredible Success!".
+        msg2 = bot._format_skill_check_result(
+            "flavor", {"total": 5, "raw_roll": 20}, "dexterity", 50, success=False,
+        )
+        self.assertIn("💨 **Failure...**", msg2)
+        self.assertNotIn("Incredible Success", msg2)
+
+        # The real, consistent cases are untouched.
+        msg3 = bot._format_skill_check_result(
+            "flavor", {"total": 25, "raw_roll": 20}, "dexterity", 13, success=True,
+        )
+        self.assertIn("NATURAL 20", msg3)
+        msg4 = bot._format_skill_check_result(
+            "flavor", {"total": 2, "raw_roll": 1}, "dexterity", 13, success=False,
+        )
+        self.assertIn("NATURAL 1", msg4)
+
+    async def test_lockpick_natural_1_that_still_clears_the_dc_shows_a_real_success_not_a_false_failure_banner(self):
+        """
+        End-to-end version of the banner fix above, through the real
+        _do_lockpick handler: a character with a huge dexterity bonus
+        still clears DC 13 on a forced natural 1, and the door really
+        does unlock (matches the live game-state behavior Sugar's
+        screenshot showed) -- the message header must say so honestly
+        instead of "Complete Failure!".
+        """
+        user_id = 960241
+        chat_id = -960241
+        character = make_basic_character(
+            user_id, "NaturalOneSuccessTester", chat_id=chat_id,
+            current_location="wrathflame_vault_forgeholds_cache",
+            ability_scores={
+                "strength": 15, "dexterity": 40, "constitution": 13,
+                "intelligence": 10, "wisdom": 10, "charisma": 10,
+            },
+        )
+        cache = cl.get_location(bot.CAMPAIGN, "wrathflame_vault_forgeholds_cache")
+        chest = cache["lockables"][0]
+        sink = []
+        from unittest.mock import patch
+        with patch("bot.narrate_skill_check", return_value="A quick, practiced twist of the pick."):
+            await bot._do_lockpick(FakeUpdate(user_id, "pick the lock", sink, chat_id=chat_id), character, dict(chest), "pick the lock", forced_roll=1)
+        self.assertIn(chest["id"], bot._UNLOCKED.get(chat_id, set()))
+        self.assertIn("Success!", sink[-1])
+        self.assertNotIn("Complete Failure", sink[-1])
+
     # -- Dungeon redesign Phase 2 (2026-08-30, same template as Phase 1):
     #    Deep Root Vault is now a real hub-and-spoke too, not an 11-room
     #    corridor with one dead-end chest. -----------------------------

@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.588] — fix: natural 1/20 banners could contradict the real success flag
+
+Two real dev-bridge reports from Sugar, both traced to the same root
+cause: "Asked to open the door. It said successful but was false" and
+"A message should have advised me I could not open the door without a
+key." Her own screenshots showed the real bug plainly — a lockpick
+roll of a natural 1 that still totaled 22 vs DC 13 (a genuine success;
+the door really did unlock) displayed "💀 NATURAL 1 — Complete
+Failure!" anyway, and a natural 20 has the identical bug in reverse.
+
+`_format_skill_check_result` (bot.py) branched on `raw_roll == 1`/`==
+20` alone, completely independent of the `success` boolean it's also
+handed — so a big enough ability bonus could produce a banner that
+flatly contradicted the real outcome underneath it (loot, unlocked
+doors, and everything else was always computed correctly and
+independently; this was a pure but highly visible display bug). Fixed
+by gating both critical banners on agreement with the real `success`
+flag; a roll that disagrees now falls through to the plain Success!/
+Failure... line instead. This function has 11 real call sites across
+lockpicking, gathering, crafting, every enchant path, and both steal
+variants — all fixed at once.
+
 ## [1.27.587] — feat: Sharpen and Arcana now scale with real profession mastery
 
 Follow-up to v1.27.586's enchant audit, per Coffee: "sharpen shud get

@@ -13545,14 +13545,36 @@ def _apply_damage_with_death_ward(target: dict, damage: int) -> tuple[int, bool]
 
 
 def _format_skill_check_result(flavor_text: str, result: dict, ability: str, dc: int, success: bool) -> str:
-    """Visual template for non-combat skill checks, mirroring the combat template's style."""
+    """
+    Visual template for non-combat skill checks, mirroring the combat
+    template's style.
+
+    Real live bug (2026-09-12, dev-bridge, Sugar's own screenshots):
+    the natural-1/natural-20 banners used to fire off `raw_roll` alone,
+    completely independent of the real `success` boolean this same
+    function is handed -- a big enough ability-check bonus means a
+    natural 1 can still total well past the DC (confirmed live: rolled
+    a 1, totaled 22 vs DC 13, a real success -- the door actually did
+    unlock, `reward_line`/the travel button both fired correctly off
+    the real `success` value at every one of this function's 11 real
+    call sites), yet the header screamed "NATURAL 1 — Complete
+    Failure!" regardless, flatly contradicting both the real game
+    state AND the AI narration underneath it (which correctly wrote
+    the door opening, since it WAS told success=True). The inverse
+    case (a natural 20 that still fails an absurdly high DC) has the
+    identical bug the other direction. Each critical banner now only
+    fires when it's also consistent with the real outcome; a natural 1
+    that still succeeds -- or a natural 20 that still fails -- falls
+    through to the plain Success/Failure line instead of a headline
+    that contradicts what actually happened.
+    """
     lines = []
     raw_roll = result.get("raw_roll")
     roll_suffix = f" (rolled a **{raw_roll}**)" if raw_roll is not None else ""
 
-    if raw_roll == 20:
+    if raw_roll == 20 and success:
         lines.append(f"🔥 **NATURAL 20 — Incredible Success!** 🔥{roll_suffix}")
-    elif raw_roll == 1:
+    elif raw_roll == 1 and not success:
         lines.append(f"💀 **NATURAL 1 — Complete Failure!** 💀{roll_suffix}")
     elif success:
         lines.append(f"✨ **Success!** ✨{roll_suffix}")
