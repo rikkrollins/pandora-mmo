@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.598] — feat: AI companion parity — self-preservation, re-equip, forge/enchant + trade awareness
+
+Coffee: "do all of it" — closing 4 real gaps between recruited AI
+companions and human players, found in a proactive audit. The
+biggest one turned out to be a data-creation bug, not a missing
+AI-decision feature:
+
+- **Self-preservation (root cause).** The existing enemy/monster heal
+  AI (`_decide_monster_heal`/`_maybe_monster_cast_heal`, Synergy Phase
+  9C) already runs unconditionally for whichever combatant's turn it
+  is, with no party/enemy restriction — it just never activated for a
+  companion, because `_do_recruit_npc` and `_balance_companion_level_to_party`
+  never granted `known_spells`/`spell_slots_max`/`spell_slots_current`
+  at all. Every recruited spellcaster was a permanently empty-spellbook
+  caster, same class of bug as the Paladin/Ranger fix (v1.27.596).
+  Fixed at the source: companions now get real starting spells/slots
+  on recruitment, backfilled on the next party-level-balance pass for
+  anyone recruited before this fix. On top of that data fix, added a
+  genuinely new fallback: a companion with no heal spell (or none left)
+  but a real healing potion in their own pack now drinks it at a
+  critical HP floor, through the same item-use resolution a human's
+  own "use healing potion" already goes through. No retreat/flee
+  behavior — healing only, per Coffee's direction.
+- **Auto re-equip.** `db.auto_equip_best_gear` already existed and was
+  correct but only ever ran once, at recruitment. It's now called at
+  the top of every AI companion's turn tick, so any gear picked up
+  since (loot vote winnings, crafted gear, gifts) gets worn within one
+  tick — no need to hook every individual acquisition path.
+- **Forge/enchant awareness.** The out-of-combat autonomous decision
+  loop (`ai/autonomous_player.py`) can now recognize "I could forge a
+  plain item into a real magic item" and "I have a real magic item I
+  could enchant further" — grounded in the exact same eligibility
+  checks (`recipe_requirement_gate`, materials-on-hand) the human-facing
+  menus already use, never shown unless genuinely true right now.
+- **Trade-response awareness.** An AI companion on the separate,
+  fully self-directed `is_autonomous` roster can now recognize and
+  respond to an active trade proposal from a real player. Ordinary
+  recruited companions (`is_ai=1`, not `is_autonomous`) are unaffected
+  — real trading stays deliberately restricted to real players plus
+  that autonomous roster, by existing design (a plain companion isn't
+  an independent trader).
+
 ## [1.27.597] — fix: leaving the Labyrinth mid-segment no longer discards real progress
 
 Per Coffee: "when we leave the labyrinth dont reset our progress" —

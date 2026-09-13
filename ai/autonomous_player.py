@@ -107,6 +107,21 @@ _EXAMPLE_LINES = [
     ("Resources here", "I gather [something listed under Resources here]"),
     ("still needs", "I gather [the material named in the party's quest need] to help finish it"),
     ("You have the materials to craft", "I craft [something listed under You have the materials to craft]"),
+    # AI companion parity fix (2026-09-13, per Coffee: "do all of it")
+    # -- forge/enchant were structurally invisible to this decision
+    # loop even when a companion genuinely qualified (real Forge Guild/
+    # level gate, or a real owned magic item + eligible recipe -- see
+    # bot._build_ai_player_situation_facts, same fact-gating every
+    # other line here already follows).
+    ("You could forge a plain item into a real magic item", "I forge my [something listed under You could forge a plain item into a real magic item] into a magic item"),
+    ("You have a real magic item you could enchant further", "I enchant my [something listed under You have a real magic item you could enchant further]"),
+    # AI companion parity fix (2026-09-13) -- this only ever appears
+    # for the separate, fully-autonomous AI roster (is_autonomous=1),
+    # never a regular recruited companion (deliberately barred from
+    # trading at all, see bot._do_trade_request's own real refusal).
+    # Response-only: accept or decline a trade a human already opened,
+    # never proactively starting a new one.
+    ("You have an active trade proposal with", "accept the trade"),
     ("could make a campfire", "I make a campfire"),
     (None, "I rest for now"),
 ]

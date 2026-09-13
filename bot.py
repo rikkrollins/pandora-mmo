@@ -8094,6 +8094,14 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             # the extra-attack-countered guard above.
             if await _maybe_monster_cast_heal(update, session, current):
                 continue
+            # AI companion parity fix (2026-09-13): the fallback for
+            # when there's no heal spell available -- see _maybe_ai_
+            # use_healing_item's own docstring. Checked right after the
+            # spell option, before any attack/damage-spell decision, so
+            # a critically wounded companion reaches for a real potion
+            # instead of swinging away with the party bleeding out.
+            if await _maybe_ai_use_healing_item(update, session, current):
+                continue
             result = await _maybe_monster_cast_spell(
                 update, session, current, target, spell_id=pre_decided_spell_id, preferred_damage_type=preferred_damage_type,
             )
@@ -12681,6 +12689,87 @@ async def _maybe_monster_cast_heal(update: Update, session: sessions.Session, ca
     return True
 
 
+_AI_HEALING_ITEM_HP_FRACTION = 0.3  # a real, deliberately low "last resort" floor -- a renewable heal spell (checked first) is always preferred over burning a limited consumable
+
+
+async def _maybe_ai_use_healing_item(update: Update, session: sessions.Session, caster: dict) -> bool:
+    """
+    Real gap found 2026-09-13 (AI companion parity audit): unlike
+    _maybe_monster_cast_heal just above (a real heal SPELL, a
+    renewable resource), there was no fallback at all for an AI party
+    companion with no heal spell known/available but a real healing
+    potion sitting unused in their own backpack -- they'd fight on
+    (or go down) with a full inventory of Healing Potions a human
+    teammate could have told them to drink. Checked right after
+    _maybe_monster_cast_heal in _resolve_ai_turns_inner (spell first,
+    since it's free/renewable; this is the last-resort fallback),
+    party-side only -- real players already have exclusive, deliberate
+    control over their own potions, and enemies don't carry
+    consumables today, so this never touches the enemy side.
+
+    Deliberately narrow HP floor (_AI_HEALING_ITEM_HP_FRACTION, 30%):
+    per Coffee's own explicit scope confirmation, this is healing ONLY,
+    no retreat/flee behavior -- a companion this low is exactly the
+    real "about to go down" case a human would reach for a potion for,
+    not a cautious top-off that would burn through the party's shared
+    potion supply for a graze.
+
+    Reuses the identical real formula _do_use_item's own "heal"
+    branch already computes (roll_damage on the item's heal_dice,
+    _grind_heal_mastery's overflow multiplier, clamp to hp_max) rather
+    than calling that function directly -- it's built around parsing a
+    human's own free-text target selection across the whole party,
+    which doesn't fit a single in-combat AI decision the way _maybe_
+    monster_cast_heal already doesn't call spells_module.resolve_heal_
+    spell's sibling human-facing wrapper either. Same real numbers, a
+    narrower entry point.
+    """
+    if not caster.get("is_ai") or session.sides.get(caster["telegram_user_id"]) != "party":
+        return False
+    allies = session.living_on_side("party")
+    wounded = [
+        a for a in allies
+        if a.get("hp_current", 0) > 0
+        and a.get("hp_current", 0) / max(a.get("hp_max", 1), 1) <= _AI_HEALING_ITEM_HP_FRACTION
+    ]
+    if not wounded:
+        return False
+    heal_target = min(wounded, key=lambda a: a.get("hp_current", 0) / max(a.get("hp_max", 1), 1))
+
+    inventory = caster.get("inventory") or {}
+    potion_id = next(
+        (
+            item_id for item_id, qty in inventory.items()
+            if qty > 0
+            and (item_data := items_module.get_item(item_id))
+            and item_data.get("effect") == "heal"
+            and item_data.get("heal_dice")
+        ),
+        None,
+    )
+    if potion_id is None:
+        return False
+    item_data = items_module.get_item(potion_id)
+
+    healing = roll_damage(item_data["heal_dice"])
+    healed_amount = int(healing["total"] * _mastery_overflow_multiplier(_grind_heal_mastery(caster)))
+    hp_before = heal_target["hp_current"]
+    hp_max = heal_target.get("hp_max", hp_before)
+    new_hp = min(hp_before + healed_amount, hp_max)
+    heal_target["hp_current"] = new_hp
+    db.update_character_by_id(heal_target["character_id"], hp_current=new_hp)
+    db.remove_item(caster["telegram_user_id"], update.effective_chat.id, potion_id, 1)
+    caster["inventory"] = {**inventory, potion_id: inventory[potion_id] - 1}
+
+    target_note = "itself" if heal_target is caster else f"**{heal_target['name']}**"
+    await _safe_send(
+        update,
+        f"🧪 **{caster['name']}** uses a {item_data['name']} on {target_note} — heals "
+        f"{new_hp - hp_before} HP ({new_hp}/{hp_max}).",
+    )
+    return True
+
+
 async def _maybe_use_breath_weapon(
     update: Update, session: sessions.Session, caster: dict, target: dict,
 ) -> dict | None:
@@ -13430,6 +13519,39 @@ async def _do_pass_turn(update: Update) -> None:
         await _resolve_ai_turns(update, session)
 
 
+def _spells_and_slots_for_class_at_level(char_class: str, level: int) -> tuple[list[str], int]:
+    """
+    Real, class-appropriate known_spells + spell_slots_max for a
+    character at a given level -- the exact same real grant a human's
+    own character creation/level-up path uses
+    (spells_module.spells_unlocked_at_level, spells_module.
+    starting_spell_slots_for_class, plus the real Paladin/Ranger
+    level-2 half-caster slot grant db._compute_xp_updates added in
+    v1.27.596). Shared by AI companion recruitment, the party-level-
+    balance bump, and the self-heal backfill for a companion recruited
+    before this existed (2026-09-13, AI companion parity audit: every
+    recruited companion of a spellcasting class was a real caster with
+    a permanently empty spellbook and 0/0 slots forever, silently
+    disabling the ALREADY-WORKING combat heal-AI -- _decide_monster_
+    heal/_maybe_monster_cast_heal check known_spells unconditionally
+    for whichever combatant's turn it is, never side-restricted).
+    Always computes the FULL real set for the given level (never an
+    incremental union) -- correct here because an AI companion never
+    individually "picks" spells the way a human's own creation flow
+    might vary; pruned the same way a real level-up prunes now-
+    redundant lower-power duplicates (spells_module.prune_redundant_
+    lower_power_spells).
+    """
+    cls = char_class.lower()
+    known_spells = spells_module.prune_redundant_lower_power_spells(
+        spells_module.spells_unlocked_at_level(cls, level)
+    )
+    slots = spells_module.starting_spell_slots_for_class(cls)
+    if cls in ("paladin", "ranger") and level >= 2:
+        slots = max(slots, 1)
+    return known_spells, slots
+
+
 async def _balance_companion_level_to_party(update: Update, companion_telegram_user_id: int, party_id: int | None) -> None:
     """
     Per Coffee (2026-08-01): "when we get a new AI party member to the
@@ -13457,6 +13579,21 @@ async def _balance_companion_level_to_party(update: Update, companion_telegram_u
     if companion is None:
         return
     current_level = companion.get("level", 1)
+    # Self-heal backfill (2026-09-13, AI companion parity fix): a
+    # companion recruited before spells/slots were granted at
+    # recruitment time is missing them entirely no matter what happens
+    # below -- seed for their real CURRENT level here, unconditionally,
+    # the same self-healing shape already used for Paladin/Ranger
+    # (v1.27.596). `known_spells` is only ever empty for a genuinely
+    # un-seeded companion (a real caster always knows at least one
+    # cantrip by level 1), so this never re-stamps someone already fine.
+    if not companion.get("known_spells"):
+        backfill_spells, backfill_slots = _spells_and_slots_for_class_at_level(companion["char_class"], current_level)
+        if backfill_spells or backfill_slots:
+            db.update_character_by_id(
+                companion["character_id"],
+                known_spells=backfill_spells, spell_slots_max=backfill_slots, spell_slots_current=backfill_slots,
+            )
     other_levels = [
         m.get("level", 1) for m in db.get_party_members_by_id(party_id)
         if m["telegram_user_id"] != companion_telegram_user_id
@@ -13469,11 +13606,19 @@ async def _balance_companion_level_to_party(update: Update, companion_telegram_u
     new_hp_max = full_hp_max_for(
         companion["char_class"], companion["constitution"], target_level, companion.get("rebirth_count", 0),
     )
+    # Real class-appropriate spells/slots for the NEW level too (2026-
+    # 09-13) -- a level-balance bump previously only touched hp/xp/
+    # proficiency, silently leaving a caster's spellbook frozen at
+    # whatever (possibly still-empty) state they had before.
+    leveled_spells, leveled_slots = _spells_and_slots_for_class_at_level(companion["char_class"], target_level)
     db.update_character_by_id(
         companion["character_id"],
         level=target_level,
         xp=XP_THRESHOLDS[target_level],
         hp_max=new_hp_max,
+        known_spells=leveled_spells,
+        spell_slots_max=leveled_slots,
+        spell_slots_current=leveled_slots,
         hp_current=new_hp_max,
         proficiency_bonus=proficiency_bonus_for_level(target_level),
     )
@@ -13556,6 +13701,24 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
     # combat stats despite owning a weapon the whole time. Same helper,
     # same fix.
     db.auto_equip_best_gear(companion["telegram_user_id"], update.effective_chat.id)
+    # Real gap found 2026-09-13 (AI companion parity audit): a real
+    # human character creation always grants class-appropriate real
+    # spells/slots (see whatever calls spells_module.spells_unlocked_
+    # at_level/starting_spell_slots_for_class at level 1) -- this path
+    # never did, so every recruited companion of a spellcasting class
+    # was a real caster with a permanently empty known_spells list and
+    # 0/0 spell slots. This alone was silently disabling the EXISTING,
+    # already-working combat heal-AI (_decide_monster_heal/_maybe_
+    # monster_cast_heal, checked unconditionally for whichever
+    # combatant's turn it is, never side-restricted) for every real
+    # companion -- a Cleric companion with a genuine known Cure Wounds
+    # would already save a dying ally today, the moment it actually
+    # knows Cure Wounds at all.
+    known_spells, spell_slots = _spells_and_slots_for_class_at_level(stats["char_class"], 1)
+    db.update_character_by_id(
+        companion["character_id"],
+        known_spells=known_spells, spell_slots_max=spell_slots, spell_slots_current=spell_slots,
+    )
 
     # Real live report (2026-08-25, dev-bridge: "some characters are
     # saying she when they are male characters"). Root cause: even
@@ -39259,6 +39422,74 @@ def _build_ai_player_situation_facts(character: dict, location_id: str) -> str:
     ]
     if craftable:
         lines.append(f"You have the materials to craft: {', '.join(craftable)}")
+
+    # AI companion parity fix (2026-09-13, per Coffee: "do all of it"
+    # on a proposed follow-up to the AI companion audit) -- forge/
+    # enchant were structurally invisible to the autonomous decision
+    # loop even when a companion genuinely qualified. Same "only
+    # mention what's real right now" convention as every other fact
+    # here: real guild/level gate (recipe_requirement_gate, the exact
+    # same check the human-facing Blacksmith/Alchemy menus use, never
+    # re-derived a second way) AND a real eligible item actually owned.
+    forge_recipe = get_enchant_recipe("forge_magic_upgrade")
+    if forge_recipe and not recipe_requirement_gate(character, forge_recipe):
+        forgeable_names = sorted({
+            items_module.get_item(item_id)["name"]
+            for item_id in inventory
+            if not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX)
+            and (item := items_module.get_item(item_id))
+            and item["type"] in forge_recipe["applies_to"]
+        })
+        if forgeable_names:
+            lines.append(f"You could forge a plain item into a real magic item: {', '.join(forgeable_names)}")
+
+    generated_item_names = sorted({
+        items_module.get_item(item_id)["name"]
+        for item_id in inventory
+        if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX) and items_module.get_item(item_id)
+    })
+    if generated_item_names:
+        known_spell_damage_types = {
+            spells_module.get_spell(sid).get("damage_type")
+            for sid in character.get("known_spells", [])
+            if spells_module.get_spell(sid)
+        }
+        has_eligible_enchant = any(
+            recipe.get("profession") == "alchemy"
+            and not recipe_requirement_gate(character, recipe)
+            and has_materials(inventory, recipe)
+            and (
+                (dtype := recipe["affix"].get("damage_type")) is None
+                or dtype in known_spell_damage_types
+            )
+            for recipe in ENCHANT_RECIPES.values()
+        )
+        if has_eligible_enchant:
+            lines.append(f"You have a real magic item you could enchant further: {', '.join(generated_item_names)}")
+
+    # AI companion parity fix (2026-09-13, per Coffee: "do all of it")
+    # -- real player-to-player trading (_do_trade_request) is
+    # DELIBERATELY restricted to real players and the separate,
+    # fully-autonomous AI party (is_autonomous=1) -- an ordinary
+    # recruited combat companion is explicitly refused as a trade
+    # partner ("a companion, not an independent trader", see
+    # _do_trade_request's own real refusal message), so this fact only
+    # ever appears for the autonomous roster, never a regular
+    # companion, matching that same existing, intentional restriction
+    # rather than contradicting it. Response-only for this pass (per
+    # Coffee's own scoping) -- an autonomous AI player can react to a
+    # trade a human already started, not proactively open a new one.
+    if character.get("is_autonomous"):
+        active_trade = _find_trade_for_user(character["chat_id"], character["telegram_user_id"])
+        if active_trade is not None:
+            side = _trade_side_key(active_trade, character["telegram_user_id"])
+            other_side = "party_b" if side == "party_a" else "party_a"
+            other_name = active_trade[other_side]["name"]
+            lines.append(
+                f"You have an active trade proposal with {other_name} — say \"accept the trade\" if the "
+                f"offer looks fair, or \"cancel the trade\" to back out."
+            )
+
     if inventory.get("wood", 0) >= 1 and character.get("hp_current", 0) < character.get("hp_max", 0):
         lines.append("You're carrying wood and could make a campfire to recover some HP.")
     shop_id = location.get("shop")
@@ -39654,6 +39885,24 @@ async def _ai_party_autonomous_tick(bot) -> None:
 async def _ai_party_act_one_turn(bot, actor: dict) -> None:
     user_id = actor["telegram_user_id"]
     chat_id = actor["chat_id"]
+
+    # Real gap found 2026-09-13 (AI companion parity audit):
+    # db.auto_equip_best_gear already exists and is correct (used at
+    # character creation and at recruitment, see _do_recruit_npc) but
+    # was never called again after that -- a companion that loots,
+    # crafts, buys, or is gifted a better weapon/armor/accessory had no
+    # path to ever actually wear it without a human manually tapping
+    # Auto Equip for them. Cheap (pure DB comparison, no Ollama call)
+    # and silent -- called unconditionally on this actor's own tick so
+    # ANY newly-acquired gear gets worn within one tick cycle
+    # regardless of how it was acquired (loot vote, crafting, market,
+    # a gift), rather than needing to hook every individual acquisition
+    # path. Never announced: the function's own real summary text is
+    # honestly verbose even when nothing changed ("No weapon carried to
+    # equip." etc.), which would spam the chat every single tick for
+    # every companion -- the player just sees the gear equipped, same
+    # as the silent creation-time/recruitment-time calls already are.
+    db.auto_equip_best_gear(user_id, chat_id)
 
     # Party cohesion fix (2026-07-25, per Coffee, reported twice: "the
     # parties scattered all over the place... we need them to stay in

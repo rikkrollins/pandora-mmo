@@ -12633,6 +12633,177 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(companion_xp_after, companion_xp_before)
         sessions.end_session(-999)
 
+    # -- AI companion parity fix (2026-09-13, per Coffee: "do all of
+    #    it" on a proposed follow-up to an AI companion audit). Real
+    #    root cause of the "companions never heal" finding: recruited
+    #    companions of a spellcasting class were never granted real
+    #    known_spells/spell_slots at all, silently disabling the
+    #    ALREADY-WORKING combat heal-AI (_decide_monster_heal/_maybe_
+    #    monster_cast_heal) rather than that AI itself being missing. --
+    async def test_recruited_spellcasting_companion_gets_real_known_spells_and_slots(self):
+        user_id = 950971
+        make_basic_character(user_id, "WrenRecruiter", current_location="hollow_stump_shrine")
+        db.update_character(user_id, -999, gold=10000)
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Wren Hollowbrook", []), "Wren Hollowbrook")
+        companion = next(
+            m for m in db.get_party_members_by_id(db.get_character(user_id, -999)["party_id"])
+            if m.get("is_ai")
+        )
+        self.assertIn("cure_wounds", companion["known_spells"])
+        self.assertEqual(companion["spell_slots_max"], 2)
+        self.assertEqual(companion["spell_slots_current"], 2)
+
+    async def test_balance_companion_level_backfills_missing_spells_for_a_pre_fix_companion(self):
+        """A companion recruited before this fix existed is missing known_spells/slots entirely -- the next real party-level-balance pass must backfill them for their CURRENT level, not just on a fresh recruit."""
+        leader_id = 950972
+        make_basic_character(leader_id, "BackfillLeader", current_location="crossroads_tavern")
+        db.update_character(leader_id, -999, level=5)
+        party_id = db.create_party(leader_id, -999)
+        companion = db.create_ai_companion(
+            -999, "PreFixDruid", "Human", "Druid",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 16, "charisma": 10},
+            hp_max=20, armor_class=12, gold=0, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
+        db.update_character_by_id(companion["character_id"], level=3)  # simulates the real pre-fix stuck state: real level, empty spellbook
+        self.assertEqual(db.get_character_by_id(companion["character_id"])["known_spells"], [])
+
+        await bot._balance_companion_level_to_party(FakeUpdate(leader_id, "", []), companion["telegram_user_id"], party_id)
+        healed = db.get_character_by_id(companion["character_id"])
+        self.assertIn("cure_wounds", healed["known_spells"])
+        self.assertGreater(healed["spell_slots_max"], 0)
+
+    def test_recruited_caster_companion_activates_the_existing_heal_ai_once_seeded_with_real_spells(self):
+        """
+        Direct proof of the real root-cause fix: _decide_monster_heal/
+        _maybe_monster_cast_heal (Synergy Phase 9C) already work for
+        ANY combatant's turn, party or enemy, with zero side
+        restriction -- they were just never reachable for a companion
+        with an empty known_spells list. No new combat-decision code
+        was needed, only real data.
+        """
+        companion = db.create_ai_companion(
+            -999, "SeededHealer", "Human", "Druid",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 16, "charisma": 10},
+            hp_max=20, armor_class=12, gold=0, inventory={},
+        )
+        known_spells, slots = bot._spells_and_slots_for_class_at_level("Druid", 1)
+        db.update_character_by_id(companion["character_id"], known_spells=known_spells, spell_slots_max=slots, spell_slots_current=slots)
+        companion = db.get_character_by_id(companion["character_id"])
+        wounded_ally = {"telegram_user_id": 1, "name": "WoundedAlly", "hp_current": 5, "hp_max": 20}
+        from unittest.mock import patch
+        with patch("bot.random.random", return_value=0.0):
+            decision = bot._decide_monster_heal(companion, [companion, wounded_ally])
+        self.assertIsNotNone(decision, "a real recruited Druid companion must be a valid healer once seeded with real spells")
+        spell_id, target = decision
+        self.assertEqual(spell_id, "cure_wounds")
+        self.assertIs(target, wounded_ally)
+
+    async def test_ai_companion_uses_a_healing_potion_when_critically_wounded_with_no_heal_spell(self):
+        """Part 1b: the new fallback for a companion with no heal spell at all but a real potion in their own backpack."""
+        import sessions
+        sessions.end_session(-999)
+        companion = db.create_ai_companion(
+            -999, "PotionUser", "Human", "Fighter",
+            ability_scores={"strength": 14, "dexterity": 12, "constitution": 12, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=100, armor_class=14, gold=0, inventory={"healing_potion": 1},
+        )
+        db.update_character_by_id(companion["character_id"], hp_current=10)  # under the 30% floor
+        companion_dict = db.get_character_by_id(companion["character_id"])
+        companion_dict["telegram_user_id"] = companion["telegram_user_id"]
+        enemy_id = -2_500_970
+        enemy = {"telegram_user_id": enemy_id, "name": "Rat", "dexterity": 10, "hp_current": 5, "hp_max": 5, "armor_class": 10}
+        session = sessions.start_session(-999, [companion_dict, enemy], {companion["telegram_user_id"]: "party", enemy_id: "enemy"})
+
+        used = await bot._maybe_ai_use_healing_item(FakeUpdate(companion["telegram_user_id"], "", []), session, companion_dict)
+        self.assertTrue(used)
+        healed = next(p for p in session.participants if p["telegram_user_id"] == companion["telegram_user_id"])
+        self.assertGreater(healed["hp_current"], 10)
+        final_character = db.get_character_by_id(companion["character_id"])
+        self.assertEqual(final_character["inventory"].get("healing_potion", 0), 0)
+        sessions.end_session(-999)
+
+    async def test_ai_companion_does_not_use_a_healing_item_above_the_critical_floor(self):
+        """The 30% floor is a real, deliberate 'last resort' gate -- a companion only lightly wounded must not burn the party's shared potion supply."""
+        import sessions
+        sessions.end_session(-999)
+        companion = db.create_ai_companion(
+            -999, "NotYetCritical", "Human", "Fighter",
+            ability_scores={"strength": 14, "dexterity": 12, "constitution": 12, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=100, armor_class=14, gold=0, inventory={"healing_potion": 1},
+        )
+        db.update_character_by_id(companion["character_id"], hp_current=80)  # well above the 30% floor
+        companion_dict = db.get_character_by_id(companion["character_id"])
+        companion_dict["telegram_user_id"] = companion["telegram_user_id"]
+        enemy_id = -2_500_971
+        enemy = {"telegram_user_id": enemy_id, "name": "Rat", "dexterity": 10, "hp_current": 5, "hp_max": 5, "armor_class": 10}
+        session = sessions.start_session(-999, [companion_dict, enemy], {companion["telegram_user_id"]: "party", enemy_id: "enemy"})
+
+        used = await bot._maybe_ai_use_healing_item(FakeUpdate(companion["telegram_user_id"], "", []), session, companion_dict)
+        self.assertFalse(used)
+        sessions.end_session(-999)
+
+    async def test_ai_party_tick_auto_equips_a_companion_with_an_unequipped_upgrade(self):
+        """Part 2: db.auto_equip_best_gear already exists and is correct -- it just never ran again after recruitment. _ai_party_act_one_turn's own tick now calls it every time."""
+        import sessions
+        sessions.end_session(-999)
+        leader_id = 950973
+        make_basic_character(leader_id, "AutoEquipLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(leader_id, -999)
+        companion = db.create_ai_companion(
+            -999, "UpgradeCarrier", "Human", "Fighter",
+            ability_scores={"strength": 14, "dexterity": 12, "constitution": 12, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=20, armor_class=11, gold=0, inventory={"longsword": 1},  # a real, better weapon than bare fists, never equipped
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
+        before = db.get_character_by_id(companion["character_id"])
+        self.assertIsNone(before.get("equipped_weapon"))
+
+        from unittest.mock import patch
+        with patch("bot.choose_next_action", return_value="I rest for now"), \
+             patch("bot._ollama_congested", return_value=False):
+            actor = db.get_character_by_id(companion["character_id"])
+            actor["telegram_user_id"] = companion["telegram_user_id"]
+            await bot._ai_party_act_one_turn(None, actor)
+        after = db.get_character_by_id(companion["character_id"])
+        self.assertEqual(after.get("equipped_weapon"), "longsword")
+
+    def test_ai_situation_facts_show_forge_and_enchant_only_when_genuinely_eligible(self):
+        """Part 3: same 'never show an example with nothing real behind it' convention every other AI fact already follows."""
+        user_id = 950974
+        make_basic_character(user_id, "ForgeEnchantAwareness", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20, inventory={"iron_ore": 4, "moonpetal": 2, "longsword": 1})
+        facts = bot._build_ai_player_situation_facts(db.get_character(user_id, -999), "crossroads_tavern")
+        self.assertIn("You could forge a plain item into a real magic item", facts)
+        self.assertIn("Longsword", facts)
+
+        # Not eligible (no Forge Guild membership) -- must never appear.
+        no_guild_id = 950975
+        make_basic_character(no_guild_id, "NoForgeGuild", current_location="crossroads_tavern")
+        db.update_character(no_guild_id, -999, level=20, inventory={"iron_ore": 4, "moonpetal": 2, "longsword": 1})
+        facts2 = bot._build_ai_player_situation_facts(db.get_character(no_guild_id, -999), "crossroads_tavern")
+        self.assertNotIn("You could forge a plain item into a real magic item", facts2)
+
+    async def test_ai_situation_facts_show_trade_response_only_for_autonomous_ai_never_a_plain_companion(self):
+        """Part 4: real player-to-player trading is deliberately restricted to real players + the separate is_autonomous roster -- this fact must never contradict that existing, intentional exclusion for an ordinary recruited companion."""
+        human_id, companion_a_id, autonomous_id = 950976, 950977, 950978
+        make_basic_character(human_id, "TradeInitiator", current_location="crossroads_tavern")
+        make_basic_character(companion_a_id, "PlainCompanion", current_location="crossroads_tavern", is_ai=True)
+        make_basic_character(autonomous_id, "AutonomousTrader", current_location="crossroads_tavern", is_ai=True)
+        db.update_character(autonomous_id, -999, is_autonomous=1)
+
+        sink = []
+        # Use the real handler to open a trade with the autonomous AI (a valid partner) so a real record exists.
+        await bot._do_trade_request(FakeUpdate(human_id, "trade with AutonomousTrader", sink), "trade with AutonomousTrader")
+
+        autonomous_char = db.get_character(autonomous_id, -999)
+        facts = bot._build_ai_player_situation_facts(autonomous_char, "crossroads_tavern")
+        self.assertIn("You have an active trade proposal with", facts)
+
+        companion_char = db.get_character(companion_a_id, -999)
+        facts_companion = bot._build_ai_player_situation_facts(companion_char, "crossroads_tavern")
+        self.assertNotIn("You have an active trade proposal with", facts_companion)
+
     async def test_victory_xp_survives_a_synthetic_party_side_summon(self):
         """
         Real live crash (2026-08-21, Coffee: "What happened to the
