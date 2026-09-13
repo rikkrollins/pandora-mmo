@@ -29438,6 +29438,66 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
     MARKET_BUTTONS_CHAT = -998810  # dedicated chat_id: keeps this whole button-feature suite isolated from -999's shared listings
 
+    # -- Average sell-price hint (2026-09-13, per Coffee: "when we are
+    #    selling an item please put the avg sell price to help the
+    #    player"). Dedicated chat_id per test below, same isolation
+    #    convention as MARKET_BUTTONS_CHAT, so other tests' leftover
+    #    listings at -999 can never skew a real average computed here.
+    async def test_market_price_hint_averages_other_sellers_current_listings(self):
+        chat_id = -998830
+        seller_a, seller_b, viewer_id = 950960, 950961, 950962
+        make_basic_character(seller_a, "HintSellerA", chat_id=chat_id, inventory={"rusty_dagger": 1})
+        make_basic_character(seller_b, "HintSellerB", chat_id=chat_id, inventory={"rusty_dagger": 1})
+        make_basic_character(viewer_id, "HintViewer", chat_id=chat_id, inventory={"rusty_dagger": 1})
+        await bot._do_sell_market(FakeUpdate(seller_a, "", [], chat_id=chat_id), ["1", "10", "rusty dagger"])
+        await bot._do_sell_market(FakeUpdate(seller_b, "", [], chat_id=chat_id), ["1", "20", "rusty dagger"])
+        # (10 + 20) / 2 == 15 -- the viewer's OWN listing doesn't exist yet, so this is purely the other two sellers.
+        hint = bot._market_average_sell_price_hint(chat_id, "rusty_dagger", exclude_seller_id=viewer_id)
+        self.assertIn("15 gold", hint)
+        self.assertIn("2 listing", hint)
+
+    async def test_market_price_hint_excludes_the_askers_own_listings(self):
+        """The average must reflect what OTHER sellers are asking, never be skewed by the same player's own current listing(s)."""
+        chat_id = -998831
+        seller_id = 950963
+        make_basic_character(seller_id, "HintSelfSeller", chat_id=chat_id, inventory={"rusty_dagger": 2})
+        await bot._do_sell_market(FakeUpdate(seller_id, "", [], chat_id=chat_id), ["1", "999", "rusty dagger"])
+        hint = bot._market_average_sell_price_hint(chat_id, "rusty_dagger", exclude_seller_id=seller_id)
+        # No OTHER seller has this listed (the asker's own is excluded) -- falls through to the real shop-reference branch, not a "999 gold" average skewed by their own listing.
+        self.assertIn("Nobody else has this listed", hint)
+        self.assertNotIn("999", hint)
+
+    def test_market_price_hint_divides_by_quantity_before_averaging(self):
+        """A listing's stored price is the TOTAL for the whole quantity -- averaging raw totals across differently-sized listings would be meaningless."""
+        chat_id = -998832
+        db.create_market_listing(950964, chat_id, "BulkSeller", "silverleaf_herb", 10, 40)  # 4 gold/unit
+        db.create_market_listing(950965, chat_id, "SingleSeller", "silverleaf_herb", 1, 8)  # 8 gold/unit
+        hint = bot._market_average_sell_price_hint(chat_id, "silverleaf_herb")
+        self.assertIn("6 gold", hint)  # (4 + 8) / 2 == 6, not a quantity-weighted or raw-total average
+
+    def test_market_price_hint_falls_back_to_shop_reference_with_no_market_history(self):
+        chat_id = -998833
+        hint = bot._market_average_sell_price_hint(chat_id, "rusty_dagger")
+        self.assertIn("1 gold", hint)  # sell-back: round(2 * 0.5) == 1
+        self.assertIn("2 gold", hint)  # shop buy price
+        self.assertIn("Nobody else has this listed", hint)
+
+    async def test_market_sellpick_prompt_and_sell_confirmation_both_include_the_price_hint(self):
+        """End-to-end: both real places a player sees a price prompt/confirmation actually show the real computed hint, not just the helper in isolation."""
+        chat_id = -998834
+        other_seller, buyer_id = 950966, 950967
+        make_basic_character(other_seller, "OtherLister", chat_id=chat_id, inventory={"rusty_dagger": 1})
+        make_basic_character(buyer_id, "PriceHintBuyer", chat_id=chat_id, inventory={"rusty_dagger": 1})
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "30", "rusty dagger"])
+
+        sink = []
+        await bot.market_menu_callback(FakeCallbackUpdate(buyer_id, f"market|sellpick|rusty_dagger", sink, chat_id=chat_id), DummyContext())
+        self.assertTrue(any("30 gold" in m and "average" in m.lower() for m in sink), sink)
+
+        sink2 = []
+        await bot._do_sell_market(FakeUpdate(buyer_id, "", sink2, chat_id=chat_id), ["1", "5", "rusty dagger"])
+        self.assertTrue(any("30 gold" in m and "average" in m.lower() for m in sink2), sink2)
+
     async def test_market_keyboard_shows_unlist_for_own_listing_buy_for_others(self):
         """
         Real live request (2026-08-20, Coffee, screenshot): "give us

@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.594] — feat: show the average sell price when listing on the market
+
+Per Coffee: "when we are selling an item please put the avg sell
+price to help the player." Previously a player listing an item on the
+player marketplace picked a price with zero reference point — no idea
+whether they were wildly over- or under-pricing it.
+
+Now shown in both real places a player sets a price: the button-flow
+prompt right after picking an item to sell, and the confirmation
+message after listing via `/sell_market` or natural language (which
+skip that prompt). Two real, honest sources, never fabricated: if
+other players currently have the same item listed, the real per-unit
+average across those live listings (excluding the asker's own, so it
+reflects what OTHERS are asking); otherwise, the item's real shop
+buy/sell-back prices as a grounded floor/ceiling reference instead of
+a blind guess.
+
 ## [1.27.593] — fix: a real Moltbook post leaked a literal `<title>` tag
 
 Dev-bridge report (screenshot): "Is everything all right with our

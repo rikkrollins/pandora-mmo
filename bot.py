@@ -18961,6 +18961,15 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
         f"(listing #{listing_id}). Say \"/buy_market {listing_id}\" to buy it, or "
         f"\"/cancel_market {listing_id}\" to pull it back if you listed it by mistake."
     )
+    # Real feature (2026-09-13, per Coffee: "when we are selling an
+    # item please put the avg sell price to help the player") -- shown
+    # AFTER listing too, not just the button-flow's pre-price prompt,
+    # since this same function is also reached by a typed "/sell_market"
+    # or natural-language "sell my X for Y gold" that already committed
+    # to a price without ever seeing that earlier prompt.
+    price_hint = _market_average_sell_price_hint(update.effective_chat.id, item_id, exclude_seller_id=update.effective_user.id)
+    if price_hint:
+        message += f"\n{price_hint}"
     stats_line = _format_item_stats_line(listed_item)
     if stats_line:
         message += f"\n\n📊 **Stats:** {stats_line}"
@@ -31597,6 +31606,51 @@ def _format_market_listing_detail(listing: dict) -> str | None:
     return f"{header}\n{detail}{footer}" if detail else f"{header}{footer}"
 
 
+def _market_average_sell_price_hint(chat_id: int, item_id: str, exclude_seller_id: int | None = None) -> str:
+    """
+    Real, computed reference to help a player price their own listing
+    sensibly (per Coffee: "when we are selling an item please put the
+    avg sell price to help the player"). Two real, honest sources, in
+    priority order, never fabricated:
+    1. If OTHER players currently have this same item listed, the real
+       per-unit average across those live listings (excluding this
+       seller's own current/about-to-be-made listing, so it reflects
+       what OTHER sellers are actually asking, not skewed by their own
+       number).
+    2. Otherwise (no market history for this item at all), the real
+       shop buy/sell-back prices (shop.py's own fixed formulas: buy =
+       full catalog price, sell-back = 0.5x) as a grounded floor/
+       ceiling anchor instead of a blind guess.
+    A listing's own stored `price` is the TOTAL for the whole
+    `quantity` (see db.create_market_listing), so this divides down to
+    a real per-unit figure before averaging -- comparing two listings'
+    raw totals directly would be meaningless if their quantities differ.
+    """
+    item = items_module.get_item(item_id)
+    if item is None:
+        return ""
+    other_listings = [
+        l for l in db.get_market_listings(chat_id)
+        if l["item_id"] == item_id and l.get("quantity", 0) > 0
+        and (exclude_seller_id is None or l["seller_id"] != exclude_seller_id)
+    ]
+    if other_listings:
+        per_unit_prices = [l["price"] / l["quantity"] for l in other_listings]
+        avg = round(sum(per_unit_prices) / len(per_unit_prices))
+        count = len(other_listings)
+        return (
+            f"💡 Other current listings for {item['name']} average **{avg} gold** each "
+            f"({count} listing{'s' if count != 1 else ''})."
+        )
+    price = item.get("price", 0)
+    if price <= 0:
+        return ""
+    return (
+        f"💡 Nobody else has this listed right now — for reference, shops buy it for "
+        f"{round(price * 0.5)} gold and sell it for {price} gold."
+    )
+
+
 async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Handles taps on _market_keyboard -- dispatches through the same
@@ -31658,11 +31712,14 @@ async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await _safe_send(update, "You don't have that item anymore.")
             return
         _chat_scoped_dict(_PENDING_MARKET_SELL, update.effective_chat.id)[update.effective_user.id] = item_id
-        await _safe_send(
-            update,
+        price_hint = _market_average_sell_price_hint(update.effective_chat.id, item_id, exclude_seller_id=update.effective_user.id)
+        message = (
             f"How many **{item['name']}** (you have {held}), and for how much total gold? Reply like "
-            f"\"3 for 50 gold\" to sell 3 for 50g total, or \"50 gold\" to sell 1 for 50g.",
+            f"\"3 for 50 gold\" to sell 3 for 50g total, or \"50 gold\" to sell 1 for 50g."
         )
+        if price_hint:
+            message += f"\n{price_hint}"
+        await _safe_send(update, message)
 
 
 async def _do_list_shop(update: Update) -> None:
