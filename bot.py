@@ -36341,6 +36341,12 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # only reads CAMPAIGN["quests"], a plain dict with no location
     # concept at all) -- every one degrades gracefully or simply
     # doesn't care what LABYRINTH_LOCATION_SENTINEL even is.
+    # Real gap, located 2026-09-13 (test_menu_actions_now_work_inside_the_labyrinth,
+    # failing since v1.27.582-584): check_blacksmith_menu/check_alchemy_menu were
+    # added for the Forge/Alchemy tap-menus well after this list's own v1.27.541
+    # audit and were simply missed. Both handlers only read character state/RECIPES/
+    # recipe_requirement_gate -- never cl.get_location or CAMPAIGN["locations"] --
+    # so they're Labyrinth-safe by the same test as check_menu/check_equip_menu above.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
@@ -36351,6 +36357,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "auto_equip", "equip_item", "unequip_item", "set_front_row", "set_back_row",
         "bench_party_member", "unbench_party_member", "check_sheet", "check_menu",
         "check_equip_menu", "check_magic", "check_remnants", "check_story", "steal", "buy",
+        "check_blacksmith_menu", "check_alchemy_menu",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",

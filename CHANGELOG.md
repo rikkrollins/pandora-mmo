@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.599] — fix: Blacksmith/Alchemy menus blocked deep in the Labyrinth
+
+`check_blacksmith_menu`/`check_alchemy_menu` (the Forge/Alchemy tap
+menus, shipped v1.27.582-584) were added after the Labyrinth's own
+allowlist audit and were simply never folded in — "open the blacksmith
+menu"/"open the alchemy menu" hit the generic "That doesn't work this
+deep in the Labyrinth" refusal every time, even though both menus only
+read character/recipe state and never touch the overworld location
+system. Found during Solo Mode testing (v1.27.595), located but
+deliberately deferred, now fixed: both actions added to the allowlist.
+
 ## [1.27.598] — feat: AI companion parity — self-preservation, re-equip, forge/enchant + trade awareness
 
 Coffee: "do all of it" — closing 4 real gaps between recruited AI
