@@ -9446,6 +9446,26 @@ LABYRINTH_TUTORIAL_TEXT = (
 )
 
 
+def _labyrinth_has_other_real_humans(character: dict) -> bool:
+    """
+    Labyrinth Solo Mode (2026-09-13): true only when the party/solo
+    choice is actually meaningful -- another real human (positive
+    telegram_user_id, never an AI companion) besides this character
+    themselves genuinely shares their party. A player who's always
+    been alone (or whose party is only AI companions) keeps seeing the
+    exact same single-button entry prompt as before this feature
+    shipped -- Solo Mode only ever needs to be an explicit CHOICE when
+    there's a real teammate it would actually leave behind.
+    """
+    party_id = character.get("party_id")
+    if not party_id:
+        return False
+    return any(
+        m["telegram_user_id"] > 0 and m["character_id"] != character["character_id"]
+        for m in db.get_party_members_by_id(party_id)
+    )
+
+
 async def _do_labyrinth_entry_prompt(update: Update) -> None:
     """
     The real gate in front of _do_enter_labyrinth -- shares its exact
@@ -9453,6 +9473,14 @@ async def _do_labyrinth_entry_prompt(update: Update) -> None:
     gets the honest rejection message instead of a teaser they can't
     act on, but stops short of actually creating/resuming a run until
     the player taps through the real warning below.
+
+    Labyrinth Solo Mode (2026-09-13, per Coffee: "ask if the player
+    wants to go in with the party or go into 'solo mode'... play by
+    themselves as the only human but with the rest of the AI party
+    members on team") -- the 3-button variant only ever appears when
+    _labyrinth_has_other_real_humans is true; see that helper's own
+    docstring for why the common case (no other real humans to leave
+    behind) stays exactly as it was.
     """
     chat_id = update.effective_chat.id
     character = db.get_character(update.effective_user.id, chat_id)
@@ -9465,18 +9493,38 @@ async def _do_labyrinth_entry_prompt(update: Update) -> None:
     if not _labyrinth_unlocked(character):
         await _safe_send(update, "Something here waits on the Colosseum Champion falling first.", speak=False)
         return
-    await _safe_send(
-        update,
-        LABYRINTH_ENTRY_WARNING,
-        reply_markup=InlineKeyboardMarkup([
+    if _labyrinth_has_other_real_humans(character):
+        buttons = [
+            [InlineKeyboardButton("🌀 Enter with the Party", callback_data="labyrinth|confirm_enter")],
+            [InlineKeyboardButton("🧍 Enter Solo (AI companions only)", callback_data="labyrinth|confirm_enter_solo")],
+            [InlineKeyboardButton("Not yet", callback_data="labyrinth|cancel_enter")],
+        ]
+    else:
+        buttons = [
             [InlineKeyboardButton("🌀 Yes, I'm ready", callback_data="labyrinth|confirm_enter")],
             [InlineKeyboardButton("Not yet", callback_data="labyrinth|cancel_enter")],
-        ]),
-    )
+        ]
+    await _safe_send(update, LABYRINTH_ENTRY_WARNING, reply_markup=InlineKeyboardMarkup(buttons))
 
 
 def _labyrinth_party_key(character: dict) -> str:
-    """A solo character is just a 'party of one' for run-sharing purposes -- unifies partied/solo lookups into one indexed db.py column."""
+    """
+    A solo character is just a 'party of one' for run-sharing purposes
+    -- unifies partied/solo lookups into one indexed db.py column.
+
+    Labyrinth Solo Mode (2026-09-13, per Coffee): a real, live "is this
+    character's CURRENT Labyrinth presence a solo one" flag
+    (labyrinth_solo_mode) short-circuits to a THIRD, distinct key
+    namespace -- deliberately never `f"solo:{...}"` (already used by a
+    genuinely partyless character) or `f"party:{...}"` (would drag
+    other real party members into a run they explicitly weren't
+    invited to), so a solo-mode run is automatically isolated from
+    both this player's real party run AND their own already-existing
+    "naturally solo" run, with zero change needed at any of this
+    function's ~20 call sites.
+    """
+    if character.get("labyrinth_solo_mode"):
+        return f"soloplay:{character['telegram_user_id']}"
     party_id = character.get("party_id")
     return f"party:{party_id}" if party_id else f"solo:{character['telegram_user_id']}"
 
@@ -9503,7 +9551,20 @@ def _labyrinth_active_party_members(character: dict) -> list[dict]:
     truncation (which is a per-fight sizing rule, not a party-membership
     one) -- every real active member genuinely shares a Labyrinth run,
     no cap.
+
+    Labyrinth Solo Mode (2026-09-13, per Coffee: "play by themselves as
+    the only human but with the rest of the AI party members on
+    team"): when labyrinth_solo_mode is set, this deliberately bypasses
+    every exclusion below and returns ONLY this character plus the
+    real AI companions (is_ai) sharing their party_id -- every OTHER
+    real human in the party is intentionally left out, since the whole
+    point of Solo Mode is that they explicitly chose not to bring them
+    along for this run.
     """
+    if character.get("labyrinth_solo_mode"):
+        party_id = character.get("party_id")
+        companions = [m for m in db.get_party_members_by_id(party_id) if m.get("is_ai")] if party_id else []
+        return [character] + companions
     if not character.get("party_id"):
         return [character]
     members = []
@@ -9955,11 +10016,20 @@ async def _resolve_labyrinth_checkpoint(update: Update, character: dict, room: d
             # max-guard, matching labyrinth_best_floor's own existing
             # SQL-level "only if higher" semantics (db.bump_labyrinth_
             # best_floor) instead of a plain overwrite.
-            checkpoints_reached = set(m.get("labyrinth_checkpoints_reached") or [])
+            # Labyrinth Solo Mode (2026-09-13): a solo-mode run writes
+            # to the SEPARATE labyrinth_solo_* fields instead -- never
+            # merged into real party progress. `character` is the one
+            # who triggered this call; in solo mode `members` only
+            # ever contains that same human among non-AI members (see
+            # _labyrinth_active_party_members), so this branch is safe
+            # to key off `character`'s own flag rather than `m`'s.
+            checkpoint_key = "labyrinth_solo_checkpoints_reached" if character.get("labyrinth_solo_mode") else "labyrinth_checkpoints_reached"
+            floor_key = "labyrinth_solo_checkpoint_floor" if character.get("labyrinth_solo_mode") else "labyrinth_checkpoint_floor"
+            checkpoints_reached = set(m.get(checkpoint_key) or [])
             checkpoints_reached.add(floor)
-            update_fields = {"labyrinth_checkpoints_reached": sorted(checkpoints_reached)}
-            if floor > m.get("labyrinth_checkpoint_floor", 0):
-                update_fields["labyrinth_checkpoint_floor"] = floor
+            update_fields = {checkpoint_key: sorted(checkpoints_reached)}
+            if floor > m.get(floor_key, 0):
+                update_fields[floor_key] = floor
             db.update_character_by_id(m["character_id"], **update_fields)
             refreshed = db.get_character_by_id(m["character_id"])
             await _check_and_award_achievements(update, refreshed)
@@ -10026,7 +10096,15 @@ async def _do_enter_labyrinth(update: Update, forced_seed: int | None = None, fo
         if forced_segment is not None:
             segment = forced_segment
         else:
-            checkpoint = max((m.get("labyrinth_checkpoint_floor", 0) for m in members_for_start), default=0)
+            # Labyrinth Solo Mode (2026-09-13): a solo-mode run resumes
+            # past THIS character's own solo checkpoint, never the
+            # party's -- members_for_start is already solo-scoped (see
+            # _labyrinth_active_party_members), so an AI companion in
+            # the mix never contributes a checkpoint of its own (AI
+            # companions never earn checkpoint progress, see
+            # _resolve_labyrinth_checkpoint's `if not m.get("is_ai")`).
+            checkpoint_field = "labyrinth_solo_checkpoint_floor" if character.get("labyrinth_solo_mode") else "labyrinth_checkpoint_floor"
+            checkpoint = max((m.get(checkpoint_field, 0) for m in members_for_start), default=0)
             start_floor = checkpoint + 1
             segment = labyrinth_module.segment_number_for_floor(start_floor)
         seed = forced_seed if forced_seed is not None else random.randint(0, 2**31 - 1)
@@ -10064,7 +10142,7 @@ async def _do_enter_labyrinth(update: Update, forced_seed: int | None = None, fo
         await _send_labyrinth_segment_flavor_when_ready(update, new_segment_theme, run["floor"])
 
 
-async def _do_enter_labyrinth_at_checkpoint(update: Update, floor: int) -> None:
+async def _do_enter_labyrinth_at_checkpoint(update: Update, floor: int, solo: bool = False) -> None:
     """
     Real dev-bridge request (2026-09-09, Coffee: "this should allow us
     to go back to previous labyrinth if possible for future grinding" +
@@ -10090,6 +10168,18 @@ async def _do_enter_labyrinth_at_checkpoint(update: Update, floor: int) -> None:
     requested floor was never actually banked by THIS character
     (labyrinth_checkpoints_reached, not just a plausible-looking number
     someone typed).
+
+    `solo` (2026-09-13, Labyrinth Solo Mode, per Coffee: "when we use
+    the waypoints it asks us whether we want to go party mode or solo
+    mode, if we don't have that lvl yet say you have not gotten there
+    yet in solo mode... that way the waypoints in labyrinth are usable
+    for both modes") -- defaults False so every existing, unchanged
+    caller keeps today's exact party-mode behavior. When True, checks
+    the completely separate labyrinth_solo_checkpoints_reached list
+    instead, with its own honest rejection wording, and flips
+    labyrinth_solo_mode on BEFORE computing party_key so the warp
+    lands in this character's own solo-scoped run (see
+    _labyrinth_party_key).
     """
     chat_id = update.effective_chat.id
     character = db.get_character(update.effective_user.id, chat_id)
@@ -10102,9 +10192,13 @@ async def _do_enter_labyrinth_at_checkpoint(update: Update, floor: int) -> None:
     if not _labyrinth_unlocked(character):
         await _safe_send(update, "Something here waits on the Colosseum Champion falling first.", speak=False)
         return
-    if floor not in (character.get("labyrinth_checkpoints_reached") or []):
-        await _safe_send(update, "You haven't reached that waystation yet.", speak=False)
+    checkpoints_key = "labyrinth_solo_checkpoints_reached" if solo else "labyrinth_checkpoints_reached"
+    if floor not in (character.get(checkpoints_key) or []):
+        mode_note = " in Solo Mode" if solo else ""
+        await _safe_send(update, f"You haven't reached that waystation{mode_note} yet.", speak=False)
         return
+    db.update_character_by_id(character["character_id"], labyrinth_solo_mode=1 if solo else 0)
+    character = db.get_character(update.effective_user.id, chat_id)
     party_key = _labyrinth_party_key(character)
     if db.get_labyrinth_run(chat_id, party_key) is not None:
         await _safe_send(
@@ -10168,11 +10262,19 @@ async def _do_leave_labyrinth(update: Update) -> None:
                 reset_ids.add(m["character_id"])
     for m in members:
         db.update_character_by_id(m["character_id"], current_location="the_colosseum")
-    checkpoint = character.get("labyrinth_checkpoint_floor", 0)
+    was_solo = bool(character.get("labyrinth_solo_mode"))
+    # Labyrinth Solo Mode (2026-09-13): the flag is scoped to exactly
+    # ONE Labyrinth visit -- clearing it here means a later "enter the
+    # labyrinth" asks the party/solo question fresh instead of being
+    # stuck in whichever mode was last chosen.
+    if was_solo:
+        db.update_character_by_id(character["character_id"], labyrinth_solo_mode=0)
+    checkpoint = character.get("labyrinth_solo_checkpoint_floor" if was_solo else "labyrinth_checkpoint_floor", 0)
     resume_note = f" Your last cleared waystation (floor {checkpoint}) is still there next time." if checkpoint else ""
+    party_word = "you" if was_solo else "your party"
     await _safe_send(
         update,
-        f"🌀 The Labyrinth releases your party, {int(run['floor'])} floors down. You're back at the Colosseum.{resume_note}",
+        f"🌀 The Labyrinth releases {party_word}, {int(run['floor'])} floors down. You're back at the Colosseum.{resume_note}",
     )
 
 
@@ -10293,7 +10395,14 @@ async def _do_descend_labyrinth(update: Update) -> None:
     )
     members = _labyrinth_active_party_members(character)
     for m in members:
-        db.bump_labyrinth_best_floor_by_id(m["character_id"], entry_room["floor"])  # 2026-09-04: character_id, not telegram_user_id -- see bump_labyrinth_best_floor_by_id's own docstring
+        # Labyrinth Solo Mode (2026-09-13): the human entrant's own
+        # best-floor bragging rights go to the separate solo column in
+        # a solo-mode run; an AI companion's own field is untouched
+        # either way (never displayed, harmless either way).
+        if character.get("labyrinth_solo_mode") and not m.get("is_ai"):
+            db.bump_labyrinth_solo_best_floor_by_id(m["character_id"], entry_room["floor"])
+        else:
+            db.bump_labyrinth_best_floor_by_id(m["character_id"], entry_room["floor"])  # 2026-09-04: character_id, not telegram_user_id -- see bump_labyrinth_best_floor_by_id's own docstring
     db.log_labyrinth_seed(
         chat_id, party_key, new_segment, new_segment_seed, segment_data["theme"]["name"],
         [m["name"] for m in members],
@@ -10744,7 +10853,11 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
     if newly_reached:
         members = _labyrinth_active_party_members(character)
         for m in members:
-            db.bump_labyrinth_best_floor_by_id(m["character_id"], dest_floor)  # 2026-09-04: character_id, not telegram_user_id -- see bump_labyrinth_best_floor_by_id's own docstring
+            # Labyrinth Solo Mode (2026-09-13): same split as the fresh-segment bump above.
+            if character.get("labyrinth_solo_mode") and not m.get("is_ai"):
+                db.bump_labyrinth_solo_best_floor_by_id(m["character_id"], dest_floor)
+            else:
+                db.bump_labyrinth_best_floor_by_id(m["character_id"], dest_floor)  # 2026-09-04: character_id, not telegram_user_id -- see bump_labyrinth_best_floor_by_id's own docstring
     checkpoint_line = await _resolve_labyrinth_checkpoint(update, character, destination, run, chat_id, party_key)
     hazard_line = "" if checkpoint_line else await _resolve_labyrinth_hazard(update, character, destination, run, chat_id, party_key)
 
@@ -18768,15 +18881,28 @@ async def _do_check_quests(update: Update) -> None:
         else:
             checkpoint = character.get("labyrinth_checkpoint_floor", 0)
             best = character.get("labyrinth_best_floor", 0)
+            # Labyrinth Solo Mode (2026-09-13, per Coffee: "track their
+            # progress differently from multiplayer completion, show
+            # this in achievements and on quests") -- a completely
+            # separate line, same fields _labyrinth_progress_line's own
+            # solo addition reads, shown only when real solo progress
+            # exists.
+            solo_checkpoint = character.get("labyrinth_solo_checkpoint_floor", 0)
+            solo_best = character.get("labyrinth_solo_best_floor", 0)
             if checkpoint or best:
                 lines.append(
                     f"Deepest floor reached: {best} · last waystation cleared: floor {checkpoint or 'none yet'}. "
                     f"Say \"enter the labyrinth\" at the Colosseum to continue."
                 )
-            else:
+            elif not solo_best:
                 lines.append(
                     "Say \"enter the labyrinth\" at the Colosseum to begin — survive 5-floor segments, "
                     "reaching each one's waystation to go deeper."
+                )
+            if solo_best:
+                lines.append(
+                    f"🧍 Solo Mode — deepest floor reached: {solo_best} · last waystation cleared: "
+                    f"floor {solo_checkpoint or 'none yet'}."
                 )
 
     location_id = character["current_location"]
@@ -25421,6 +25547,21 @@ async def labyrinth_travel_callback(update: Update, context: ContextTypes.DEFAUL
         await _do_descend_labyrinth(update)
         return
     if action == "confirm_enter":
+        # Real safety (2026-09-13, Solo Mode): clear a stale flag in
+        # case this character solo'd a previous run without a clean
+        # leave in between -- never trust leftover state, same
+        # convention as every other Labyrinth stuck-state fix.
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character and character.get("labyrinth_solo_mode"):
+            db.update_character_by_id(character["character_id"], labyrinth_solo_mode=0)
+        await _do_enter_labyrinth(update)
+        return
+    if action == "confirm_enter_solo":
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None:
+            await _safe_send(update, "You don't have a character yet!", speak=False)
+            return
+        db.update_character_by_id(character["character_id"], labyrinth_solo_mode=1)
         await _do_enter_labyrinth(update)
         return
     if action == "cancel_enter":
@@ -29044,12 +29185,37 @@ async def _check_and_award_achievements(update: Update, character: dict | None) 
 
 
 def _labyrinth_progress_line(character: dict) -> str | None:
-    """Real Labyrinth progress for the achievements screen (2026-09-02, per Coffee: "under achievements you can list there progress in the labarythn"), grounded only in the two permanent, already-existing fields -- best floor ever reached (bragging rights, can exceed the checkpoint) and the last checkpoint actually cleared (the real, load-bearing resume point)."""
+    """
+    Real Labyrinth progress for the achievements screen (2026-09-02,
+    per Coffee: "under achievements you can list there progress in
+    the labarythn"), grounded only in the two permanent, already-
+    existing fields -- best floor ever reached (bragging rights, can
+    exceed the checkpoint) and the last checkpoint actually cleared
+    (the real, load-bearing resume point).
+
+    Labyrinth Solo Mode (2026-09-13, per Coffee: "track their progress
+    differently from multiplayer completion, show this in achievements
+    and on quests"): a second, separate line for solo depth, using the
+    completely separate labyrinth_solo_* fields -- shown only when the
+    character actually has real solo progress, and never merged into
+    the party line above. This function only ever feeds the
+    achievements screen (_do_check_achievements, its one real call
+    site) -- the quests screen (_do_check_quests) has its own separate
+    inline Labyrinth block, given the identical solo-line treatment
+    directly there rather than being refactored to share this function.
+    """
     best = character.get("labyrinth_best_floor", 0)
-    checkpoint = character.get("labyrinth_checkpoint_floor", 0)
-    if not best:
+    solo_best = character.get("labyrinth_solo_best_floor", 0)
+    if not best and not solo_best:
         return None
-    line = f"🌀 **Labyrinth:** deepest floor reached {best} · last waystation cleared: floor {checkpoint or 'none yet'}"
+    lines = []
+    if best:
+        checkpoint = character.get("labyrinth_checkpoint_floor", 0)
+        lines.append(f"🌀 **Labyrinth:** deepest floor reached {best} · last waystation cleared: floor {checkpoint or 'none yet'}")
+    if solo_best:
+        solo_checkpoint = character.get("labyrinth_solo_checkpoint_floor", 0)
+        lines.append(f"🧍 **Solo Labyrinth:** deepest floor reached {solo_best} · last waystation cleared: floor {solo_checkpoint or 'none yet'}")
+    line = "\n".join(lines)
     # Real live ask (2026-09-04, per Coffee: "can u show our current
     # seed beside the labyrinth info in quests and in achievements?")
     # -- the seed only means anything while a real run is actually
@@ -30050,8 +30216,13 @@ async def _do_fast_travel(update: Update, text: str) -> None:
     # visited_locations loop below; recognized here as its own free-text
     # destination, same as the button _waypoint_keyboard now offers.
     checkpoint_floor = character.get("labyrinth_checkpoint_floor", 0)
+    # Labyrinth Solo Mode (2026-09-13): a character with ONLY real solo
+    # progress (party checkpoint still 0) must still reach this whole
+    # block, or "labyrinth waypoints"/bare "labyrinth" would silently
+    # do nothing for a solo-only player.
+    solo_checkpoint_floor = character.get("labyrinth_solo_checkpoint_floor", 0)
     lowered_travel_text = text.lower()
-    if checkpoint_floor and character["current_location"] != LABYRINTH_LOCATION_SENTINEL:
+    if (checkpoint_floor or solo_checkpoint_floor) and character["current_location"] != LABYRINTH_LOCATION_SENTINEL:
         # "labyrinth waypoints" (2026-09-09, real dev-bridge request):
         # plural/list phrasing opens the real sub-menu of every
         # personally-earned checkpoint instead of always resuming at
@@ -30062,7 +30233,18 @@ async def _do_fast_travel(update: Update, text: str) -> None:
             await _do_show_labyrinth_waypoints(update)
             return
         if re.search(r"\b(labyrinth|waystation|way station)\b", lowered_travel_text):
-            await _do_enter_labyrinth(update)
+            # Labyrinth Solo Mode (2026-09-13, per Coffee: natural
+            # language must never silently assume a mode this game
+            # actually asks about via the button flow) -- when there's
+            # a real other human to potentially leave behind, route to
+            # the SAME Party/Solo picker the waypoint button uses
+            # instead of assuming party mode. No other real humans
+            # (the common case): identical, unchanged instant-resume
+            # behavior.
+            if _labyrinth_has_other_real_humans(character):
+                await _do_show_labyrinth_waypoints(update)
+            else:
+                await _do_enter_labyrinth(update)
             return
 
     # Real live crash (2026-09-04, error log, Sheri/Charvenna, count=3):
@@ -34777,7 +34959,7 @@ def _waypoint_keyboard(visited_locations: list[str], current_location_id: str, l
     return InlineKeyboardMarkup(rows)
 
 
-def _labyrinth_waypoint_submenu_keyboard(checkpoints_reached: list[int]) -> InlineKeyboardMarkup:
+def _labyrinth_waypoint_submenu_keyboard(checkpoints_reached: list[int], mode: str = "full") -> InlineKeyboardMarkup:
     """
     The Labyrinth's own "sub folder" of waypoints (2026-09-09, see
     _waypoint_keyboard's docstring) -- one row per distinct checkpoint
@@ -34786,12 +34968,19 @@ def _labyrinth_waypoint_submenu_keyboard(checkpoints_reached: list[int]) -> Inli
     (_do_enter_labyrinth_at_checkpoint), plus a "Continue" row that's
     the exact same real-frontier-progress entry the old single button
     always was (_do_enter_labyrinth, unchanged).
+
+    `mode` (2026-09-13, Labyrinth Solo Mode) -- "full" or "solo",
+    carried through every button's own callback_data so
+    waypoint_menu_callback knows which of the two completely separate
+    checkpoint tracks a tap is acting on; defaults to "full" so a
+    caller that never asked the party/solo question (see
+    _labyrinth_has_other_real_humans) gets today's exact behavior.
     """
-    rows = [[InlineKeyboardButton("▶️ Continue (your furthest progress)", callback_data="waypoint|labyrinth")]]
+    rows = [[InlineKeyboardButton("▶️ Continue (your furthest progress)", callback_data=f"waypoint|labyrinth|{mode}")]]
     for floor in sorted(checkpoints_reached):
         start = floor - labyrinth_module.SEGMENT_SIZE + 1
         rows.append([InlineKeyboardButton(
-            f"🌀 Floor {start}-{floor} Waystation", callback_data=f"waypoint|labyrinth_at|{floor}",
+            f"🌀 Floor {start}-{floor} Waystation", callback_data=f"waypoint|labyrinth_at|{floor}|{mode}",
         )])
     return InlineKeyboardMarkup(rows)
 
@@ -34804,7 +34993,14 @@ async def _do_show_waypoints(update: Update) -> None:
         )
         return
     visited = character["visited_locations"]
-    checkpoint_floor = character.get("labyrinth_checkpoint_floor", 0) if character["current_location"] != LABYRINTH_LOCATION_SENTINEL else 0
+    # Labyrinth Solo Mode (2026-09-13): a character with ONLY solo
+    # progress (party checkpoint still 0) must still see the "Labyrinth
+    # Waypoints" row -- _waypoint_keyboard only ever uses this as a
+    # truthy gate, never displays the number itself, so combining both
+    # fields here is safe.
+    checkpoint_floor = (
+        character.get("labyrinth_checkpoint_floor", 0) or character.get("labyrinth_solo_checkpoint_floor", 0)
+    ) if character["current_location"] != LABYRINTH_LOCATION_SENTINEL else 0
     others = [
         loc_id for loc_id in visited
         if loc_id != character["current_location"]
@@ -34824,22 +35020,55 @@ async def _do_show_waypoints(update: Update) -> None:
 
 
 async def _do_show_labyrinth_waypoints(update: Update) -> None:
+    """
+    Labyrinth Solo Mode (2026-09-13, per Coffee: "when we use the
+    waypoints it asks us whether we want to go party mode or solo
+    mode... that way the waypoints in labyrinth are usable for both
+    modes"). Only asks when the choice is actually meaningful (same
+    _labyrinth_has_other_real_humans gate the entry prompt uses) --
+    otherwise this is byte-for-byte the original single-mode behavior.
+    """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
         await update.effective_chat.send_message(
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    checkpoints_reached = character.get("labyrinth_checkpoints_reached") or []
+    if _labyrinth_has_other_real_humans(character):
+        await _safe_send(
+            update, "🌀 **Labyrinth Waypoints** — Party or Solo?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🌀 Party", callback_data="waypoint|labyrinth_menu_mode|full")],
+                [InlineKeyboardButton("🧍 Solo", callback_data="waypoint|labyrinth_menu_mode|solo")],
+            ]),
+            speak=False,
+        )
+        return
+    await _do_show_labyrinth_waypoints_for_mode(update, character, solo=False)
+
+
+async def _do_show_labyrinth_waypoints_for_mode(update: Update, character: dict, solo: bool) -> None:
+    """
+    The actual submenu for one specific mode's own checkpoint list --
+    split out from _do_show_labyrinth_waypoints so both the "no choice
+    needed" default path and the real Party/Solo picker above land
+    here. Solo Mode (2026-09-13): checks the completely separate
+    labyrinth_solo_checkpoints_reached list, and if it's empty, says so
+    honestly instead of showing an empty/misleading menu -- the literal
+    "say you have not gotten there yet in solo mode" ask.
+    """
+    checkpoints_reached = character.get("labyrinth_solo_checkpoints_reached" if solo else "labyrinth_checkpoints_reached") or []
     if not checkpoints_reached:
+        mode_note = "in Solo Mode" if solo else "with the party"
         await update.effective_chat.send_message(
-            "You haven't reached a real Labyrinth waystation yet.",
+            f"You haven't reached a real Labyrinth waystation {mode_note} yet.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
+    mode_label = "Solo" if solo else "Party"
     await _safe_send(
-        update, "🌀 **Labyrinth Waypoints** — tap one to fast-travel there:",
-        reply_markup=_labyrinth_waypoint_submenu_keyboard(checkpoints_reached),
+        update, f"🌀 **Labyrinth Waypoints ({mode_label})** — tap one to fast-travel there:",
+        reply_markup=_labyrinth_waypoint_submenu_keyboard(checkpoints_reached, mode="solo" if solo else "full"),
         speak=False,
     )
 
@@ -34853,14 +35082,35 @@ async def waypoint_menu_callback(update: Update, context: ContextTypes.DEFAULT_T
     if action == "labyrinth_menu":
         await _do_show_labyrinth_waypoints(update)
         return
+    if action == "labyrinth_menu_mode" and len(parts) >= 3:
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None:
+            return
+        await _do_show_labyrinth_waypoints_for_mode(update, character, solo=(parts[2] == "solo"))
+        return
     if action == "labyrinth_at" and len(parts) >= 3:
         try:
             floor = int(parts[2])
         except ValueError:
             return
-        await _do_enter_labyrinth_at_checkpoint(update, floor)
+        # `mode` (2026-09-13, Labyrinth Solo Mode) is a 4th segment on
+        # any button built by the new mode-aware submenu; a stale
+        # button from before this feature shipped (3 segments) still
+        # works, defaulting to Party mode, today's original behavior.
+        solo = len(parts) >= 4 and parts[3] == "solo"
+        await _do_enter_labyrinth_at_checkpoint(update, floor, solo=solo)
         return
     if action == "labyrinth":
+        solo = len(parts) >= 3 and parts[2] == "solo"
+        if not solo:
+            character = db.get_character(update.effective_user.id, update.effective_chat.id)
+            if character and character.get("labyrinth_solo_mode"):
+                db.update_character_by_id(character["character_id"], labyrinth_solo_mode=0)
+        else:
+            character = db.get_character(update.effective_user.id, update.effective_chat.id)
+            if character is None:
+                return
+            db.update_character_by_id(character["character_id"], labyrinth_solo_mode=1)
         await _do_enter_labyrinth(update)
         return
     if action != "go" or len(parts) < 3:

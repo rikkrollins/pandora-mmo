@@ -38081,7 +38081,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         cls._ollama_patcher.stop()
         cls._image_patcher.stop()
 
-    async def _walk_to_checkpoint(self, user_id: int, chat_id: int) -> dict:
+    async def _walk_to_checkpoint(self, user_id: int, chat_id: int, party_key: str | None = None) -> dict:
         """
         Real, handler-driven walk from a fresh segment's entry floor
         down through every connector to its checkpoint floor -- shared
@@ -38105,7 +38105,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         """
         import sessions
         from collections import deque
-        party_key = f"solo:{user_id}"
+        if party_key is None:
+            party_key = f"solo:{user_id}"  # Labyrinth Solo Mode (2026-09-13): callers testing a partied/solo-mode run pass their own real party_key instead.
         for _ in range(10 * labyrinth_module.SEGMENT_SIZE):
             run = db.get_labyrinth_run(chat_id, party_key)
             room = run["rooms"][run["current_room_id"]]
@@ -42542,12 +42543,19 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("already mid-run" in m for m in sink))
 
     def test_labyrinth_waypoint_submenu_lists_continue_plus_every_earned_checkpoint(self):
+        """
+        Labyrinth Solo Mode (2026-09-13) note: every button now carries
+        a trailing `|{mode}` segment ("full" by default) so
+        waypoint_menu_callback knows which of the two separate
+        checkpoint tracks a tap acts on -- see
+        _labyrinth_waypoint_submenu_keyboard's own updated docstring.
+        """
         kb = bot._labyrinth_waypoint_submenu_keyboard([5, 10])
         datas = [btn.callback_data for row in kb.inline_keyboard for btn in row]
         labels = [btn.text for row in kb.inline_keyboard for btn in row]
-        self.assertIn("waypoint|labyrinth", datas)
-        self.assertIn("waypoint|labyrinth_at|5", datas)
-        self.assertIn("waypoint|labyrinth_at|10", datas)
+        self.assertIn("waypoint|labyrinth|full", datas)
+        self.assertIn("waypoint|labyrinth_at|5|full", datas)
+        self.assertIn("waypoint|labyrinth_at|10|full", datas)
         self.assertTrue(any("Floor 1-5" in label for label in labels))
         self.assertTrue(any("Floor 6-10" in label for label in labels))
 
@@ -42568,6 +42576,218 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # Must NOT have entered the Labyrinth directly (that's the
         # singular "labyrinth"/"waystation" phrasing's job, unchanged).
         self.assertNotEqual(db.get_character(user_id, chat_id)["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+
+    # -- Labyrinth Solo Mode (2026-09-13, per Coffee: "when entering the
+    #    labyrinth ask if the player wants to go in with the party or go
+    #    into 'solo mode'... play by themselves as the only human but
+    #    with the rest of the AI party members on team", plus a real
+    #    follow-up: "track their progress differently from multiplayer
+    #    completion, show this in achievements and on quests", plus:
+    #    "when we use the waypoints it asks us whether we want to go
+    #    party mode or solo mode, if we don't have that lvl yet say you
+    #    have not gotten there yet in solo mode"). -------------------
+    def test_labyrinth_has_other_real_humans_only_true_with_a_real_teammate(self):
+        chat_id = -962400
+        solo_id = 962400
+        make_basic_character(solo_id, "PartylessSoloTester", chat_id=chat_id)
+        self.assertFalse(bot._labyrinth_has_other_real_humans(db.get_character(solo_id, chat_id)))
+
+        ai_only_id = 962401
+        make_basic_character(ai_only_id, "AIOnlyPartyTester", chat_id=chat_id)
+        ai_party_id = db.create_party(ai_only_id, chat_id)
+        companion = db.create_ai_companion(
+            chat_id, "SoloBuddy", "Human", "Fighter",
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=12, armor_class=15, gold=10, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], chat_id, ai_party_id)
+        self.assertFalse(bot._labyrinth_has_other_real_humans(db.get_character(ai_only_id, chat_id)))
+
+        human_a, human_b = 962402, 962403
+        make_basic_character(human_a, "RealTeammateA", chat_id=chat_id)
+        make_basic_character(human_b, "RealTeammateB", chat_id=chat_id)
+        real_party_id = db.create_party(human_a, chat_id)
+        db.update_character(human_b, chat_id, party_id=real_party_id)
+        self.assertTrue(bot._labyrinth_has_other_real_humans(db.get_character(human_a, chat_id)))
+        self.assertTrue(bot._labyrinth_has_other_real_humans(db.get_character(human_b, chat_id)))
+
+    def test_labyrinth_party_key_and_active_members_scope_to_solo_mode(self):
+        chat_id = -962410
+        human_a, human_b = 962410, 962411
+        make_basic_character(human_a, "SoloKeyTesterA", chat_id=chat_id)
+        make_basic_character(human_b, "SoloKeyTesterB", chat_id=chat_id)
+        party_id = db.create_party(human_a, chat_id)
+        db.update_character(human_b, chat_id, party_id=party_id)
+        companion = db.create_ai_companion(
+            chat_id, "KeyTestBuddy", "Human", "Fighter",
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=12, armor_class=15, gold=10, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], chat_id, party_id)
+
+        character = db.get_character(human_a, chat_id)
+        human_b_character_id = db.get_character(human_b, chat_id)["character_id"]
+        self.assertEqual(bot._labyrinth_party_key(character), f"party:{party_id}")
+        members = bot._labyrinth_active_party_members(character)
+        self.assertEqual(
+            {m["character_id"] for m in members}, {character["character_id"], human_b_character_id, companion["character_id"]},
+        )
+
+        db.update_character(human_a, chat_id, labyrinth_solo_mode=1)
+        character = db.get_character(human_a, chat_id)
+        self.assertEqual(bot._labyrinth_party_key(character), f"soloplay:{human_a}")
+        solo_members = bot._labyrinth_active_party_members(character)
+        # Only the solo entrant + the real AI companion -- human_b is deliberately excluded.
+        self.assertEqual({m["character_id"] for m in solo_members}, {character["character_id"], companion["character_id"]})
+
+    async def test_labyrinth_solo_mode_end_to_end_enters_only_ai_companions_and_tracks_separately(self):
+        chat_id = -962420
+        human_a, human_b = 962420, 962421
+        make_basic_character(human_a, "SoloEndToEndA", chat_id=chat_id, current_location="the_colosseum")
+        make_basic_character(human_b, "SoloEndToEndB", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(human_a, chat_id, defeated_monsters=["colosseum_champion"])
+        db.update_character(human_b, chat_id, defeated_monsters=["colosseum_champion"])
+        party_id = db.create_party(human_a, chat_id)
+        db.update_character(human_b, chat_id, party_id=party_id)
+        companion = db.create_ai_companion(
+            chat_id, "EndToEndBuddy", "Human", "Fighter",
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=12, armor_class=15, gold=10, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], chat_id, party_id)
+
+        sink = []
+        await bot.labyrinth_travel_callback(
+            FakeCallbackUpdate(human_a, "labyrinth|confirm_enter_solo", sink, chat_id=chat_id), DummyContext(),
+        )
+        char_a = db.get_character(human_a, chat_id)
+        char_b = db.get_character(human_b, chat_id)
+        companion_after = db.get_character_by_id(companion["character_id"])
+        self.assertEqual(char_a["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        self.assertEqual(companion_after["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        self.assertEqual(char_b["current_location"], "the_colosseum")  # left behind, untouched
+        self.assertTrue(char_a["labyrinth_solo_mode"])
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, f"soloplay:{human_a}"))
+        self.assertIsNone(db.get_labyrinth_run(chat_id, f"party:{party_id}"))
+
+        await self._walk_to_checkpoint(human_a, chat_id, party_key=f"soloplay:{human_a}")
+        char_a = db.get_character(human_a, chat_id)
+        self.assertEqual(char_a["labyrinth_solo_checkpoint_floor"], 5)
+        self.assertEqual(char_a["labyrinth_solo_checkpoints_reached"], [5])
+        self.assertGreaterEqual(char_a["labyrinth_solo_best_floor"], 5)
+        # Real party progress must be completely untouched by a solo run.
+        self.assertEqual(char_a["labyrinth_checkpoint_floor"], 0)
+        self.assertEqual(char_a["labyrinth_best_floor"], 0)
+        char_b_after = db.get_character(human_b, chat_id)
+        self.assertEqual(char_b_after["labyrinth_checkpoint_floor"], 0)
+
+        await bot._do_leave_labyrinth(FakeUpdate(human_a, "", [], chat_id=chat_id))
+        self.assertFalse(db.get_character(human_a, chat_id)["labyrinth_solo_mode"])
+
+    async def test_labyrinth_entry_prompt_offers_solo_choice_only_with_other_real_humans(self):
+        chat_id = -962430
+        human_a, human_b = 962430, 962431
+        make_basic_character(human_a, "EntryPromptPartied", chat_id=chat_id, current_location="the_colosseum")
+        make_basic_character(human_b, "EntryPromptPartiedB", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(human_a, chat_id, defeated_monsters=["colosseum_champion"])
+        party_id = db.create_party(human_a, chat_id)
+        db.update_character(human_b, chat_id, party_id=party_id)
+
+        captured = []
+        update = FakeUpdate(human_a, "", [], chat_id=chat_id)
+        real_send = update.effective_chat.send_message
+        async def spy_send(text, **kwargs):
+            captured.append(kwargs.get("reply_markup"))
+            return await real_send(text, **kwargs)
+        update.effective_chat.send_message = spy_send
+        await bot._do_labyrinth_entry_prompt(update)
+        markup = next(m for m in captured if m is not None)
+        datas = [btn.callback_data for row in markup.inline_keyboard for btn in row]
+        self.assertIn("labyrinth|confirm_enter", datas)
+        self.assertIn("labyrinth|confirm_enter_solo", datas)
+        self.assertIn("labyrinth|cancel_enter", datas)
+
+        solo_id = 962432
+        make_basic_character(solo_id, "EntryPromptSolo", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(solo_id, chat_id, defeated_monsters=["colosseum_champion"])
+        captured2 = []
+        update2 = FakeUpdate(solo_id, "", [], chat_id=chat_id)
+        real_send2 = update2.effective_chat.send_message
+        async def spy_send2(text, **kwargs):
+            captured2.append(kwargs.get("reply_markup"))
+            return await real_send2(text, **kwargs)
+        update2.effective_chat.send_message = spy_send2
+        await bot._do_labyrinth_entry_prompt(update2)
+        markup2 = next(m for m in captured2 if m is not None)
+        datas2 = [btn.callback_data for row in markup2.inline_keyboard for btn in row]
+        self.assertIn("labyrinth|confirm_enter", datas2)
+        self.assertNotIn("labyrinth|confirm_enter_solo", datas2)
+
+    def test_labyrinth_progress_line_and_check_quests_show_solo_line_only_when_present(self):
+        chat_id = -962440
+        user_id = 962440
+        make_basic_character(user_id, "ProgressLineTester", chat_id=chat_id)
+        self.assertIsNone(bot._labyrinth_progress_line(db.get_character(user_id, chat_id)))
+
+        db.update_character(user_id, chat_id, labyrinth_solo_best_floor=15, labyrinth_solo_checkpoint_floor=10)
+        line = bot._labyrinth_progress_line(db.get_character(user_id, chat_id))
+        self.assertIn("Solo Labyrinth", line)
+        self.assertIn("15", line)
+        self.assertNotIn("🌀 **Labyrinth:**", line)  # no real party progress yet
+
+        db.update_character(user_id, chat_id, labyrinth_best_floor=5, labyrinth_checkpoint_floor=5)
+        line2 = bot._labyrinth_progress_line(db.get_character(user_id, chat_id))
+        self.assertIn("🌀 **Labyrinth:**", line2)
+        self.assertIn("Solo Labyrinth", line2)
+
+    async def test_labyrinth_waypoint_menu_mode_choice_and_honest_empty_state(self):
+        chat_id = -962450
+        human_a, human_b = 962450, 962451
+        make_basic_character(human_a, "WaypointModeA", chat_id=chat_id, current_location="the_colosseum")
+        make_basic_character(human_b, "WaypointModeB", chat_id=chat_id, current_location="the_colosseum")
+        party_id = db.create_party(human_a, chat_id)
+        db.update_character(human_b, chat_id, party_id=party_id)
+        db.update_character(human_a, chat_id, labyrinth_checkpoints_reached=[5])  # real party progress, zero solo progress
+
+        sink = []
+        await bot._do_show_labyrinth_waypoints(FakeUpdate(human_a, "", sink, chat_id=chat_id))
+        combined = " ".join(sink)
+        self.assertIn("Party or Solo", combined)
+
+        sink2 = []
+        await bot.waypoint_menu_callback(
+            FakeCallbackUpdate(human_a, "waypoint|labyrinth_menu_mode|solo", sink2, chat_id=chat_id), DummyContext(),
+        )
+        self.assertTrue(any("haven't reached" in m and "Solo Mode" in m for m in sink2), sink2)
+
+        sink3 = []
+        await bot.waypoint_menu_callback(
+            FakeCallbackUpdate(human_a, "waypoint|labyrinth_menu_mode|full", sink3, chat_id=chat_id), DummyContext(),
+        )
+        self.assertTrue(any("Labyrinth Waypoints (Party)" in m for m in sink3), sink3)
+        self.assertFalse(any("haven't reached" in m for m in sink3), sink3)
+        character_a = db.get_character(human_a, chat_id)
+        full_submenu_kb = bot._labyrinth_waypoint_submenu_keyboard(character_a["labyrinth_checkpoints_reached"], mode="full")
+        full_labels = [btn.text for row in full_submenu_kb.inline_keyboard for btn in row]
+        self.assertTrue(any("Floor 1-5" in label for label in full_labels))
+
+        kb_solo = bot._labyrinth_waypoint_submenu_keyboard([10], mode="solo")
+        datas = [btn.callback_data for row in kb_solo.inline_keyboard for btn in row]
+        self.assertIn("waypoint|labyrinth|solo", datas)
+        self.assertIn("waypoint|labyrinth_at|10|solo", datas)
+
+        # A partyless character never even sees the mode question.
+        solo_only_id = 962452
+        make_basic_character(solo_only_id, "WaypointModeSoloOnly", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(solo_only_id, chat_id, labyrinth_checkpoints_reached=[5])
+        sink4 = []
+        await bot._do_show_labyrinth_waypoints(FakeUpdate(solo_only_id, "", sink4, chat_id=chat_id))
+        combined4 = " ".join(sink4)
+        self.assertNotIn("Party or Solo", combined4)
+        self.assertIn("Labyrinth Waypoints", combined4)
+        solo_only_kb = bot._labyrinth_waypoint_submenu_keyboard([5], mode="full")
+        solo_only_labels = [btn.text for row in solo_only_kb.inline_keyboard for btn in row]
+        self.assertTrue(any("Floor 1-5" in label for label in solo_only_labels))
 
     def test_every_theme_signature_hazard_can_actually_be_generated(self):
         """Phase L3, per Coffee: "themes shud have hazards for them" -- each theme's real signature_hazard/secondary_hazard shows up in real generated output across enough seeds."""

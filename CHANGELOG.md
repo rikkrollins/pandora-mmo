@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.595] — feat: Labyrinth Solo Mode
+
+Per Coffee: "when entering the labyrinth ask if the player wants to go
+in with the party or go into 'solo mode'... play by themselves as the
+only human but with the rest of the AI party members on team," plus
+two real follow-ups: track solo progress completely separately from
+real party progress (shown in achievements and on quests), and make
+the Labyrinth Waypoints fast-travel feature ask the same party/solo
+question so both modes' own earned checkpoints are independently
+usable.
+
+Only ever asks when the choice is actually meaningful — a player
+who's never had another real human in their party (the common case,
+including one who's always played with AI companions) sees the exact
+same single-button entry prompt as before this shipped. When another
+real human genuinely shares the party, entering the Labyrinth now
+offers "Enter with the Party" or "Enter Solo (AI companions only)" —
+choosing Solo brings only the entering human plus their party's real
+AI companions into the run, leaving every other human behind
+untouched in the overworld.
+
+Solo depth (checkpoint floor, best floor, and full checkpoint history)
+is tracked in four brand-new, completely separate character fields —
+never merged into real party progress, and confirmed to NOT unlock
+the existing party-progress Labyrinth achievements (a deliberate scope
+decision). Both the achievements screen and the quests screen now show
+a second "Solo Labyrinth" line whenever real solo progress exists.
+
+The Labyrinth Waypoints menu (and its natural-language equivalent)
+now asks Party or Solo first when the choice is meaningful, then shows
+only that mode's own earned checkpoints — picking a mode with zero
+checkpoints reached says so honestly ("You haven't reached a real
+Labyrinth waystation in Solo Mode yet") instead of an empty or
+misleading menu.
+
+Also fixed along the way: `_row_to_dict` was missing the JSON
+deserialization line for the new solo-checkpoints-history field (an
+easy-to-miss second list separate from the write-side `json_fields`
+tuple) — caught immediately by a real test failure, not shipped.
+
 ## [1.27.594] — feat: show the average sell price when listing on the market
 
 Per Coffee: "when we are selling an item please put the avg sell
