@@ -5683,6 +5683,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for tool_id in ("fishing_pole", "bait", "woodcutters_axe", "pickaxe", "shears"):
             self.assertIn(tool_id, shop["inventory"], tool_id)
 
+    # -- Gathering professions get the real mastery grind (2026-09-13,
+    #    per Coffee, off a fresh feature-gap audit: Herbalism/Mining/
+    #    Fishing/Lumberjacking were the one profession family never
+    #    wired into the shared profession_mastery_pct grind every
+    #    craft/forge/enchant handler already uses -- confirmed via grep,
+    #    _grind_profession_mastery had exactly 4 real call sites, all
+    #    crafting/enchanting, never _do_gather. Their own % sat frozen
+    #    at PROFICIENCY_STARTING_PCT forever no matter how much a
+    #    player gathered, unlike Blacksmithing/Alchemy/Cooking. --------
+    async def test_gather_success_grinds_profession_mastery_pct(self):
+        from unittest.mock import patch
+        user_id = 950950
+        make_basic_character(user_id, "MasteringHerbalist", current_location="hollow_stump_shrine")
+        before = db.get_character(user_id, -999).get("profession_mastery_pct", {}).get("herbalism", bot.PROFICIENCY_STARTING_PCT)
+        sink = []
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="A quiet, successful gathering."):
+            await bot._do_gather(FakeUpdate(user_id, "gather moonpetal", sink), "gather moonpetal", forced_roll=20)
+        after = db.get_character(user_id, -999).get("profession_mastery_pct", {}).get("herbalism", bot.PROFICIENCY_STARTING_PCT)
+        self.assertAlmostEqual(after - before, bot.PROFICIENCY_GRIND_INCREMENT, places=4)
+
+    async def test_gather_failure_does_not_grind_profession_mastery_pct(self):
+        """Success-only convention, matching db.record_skill_use's own -- a failed gather already wastes a turn, it shouldn't also (wrongly) advance mastery."""
+        from unittest.mock import patch
+        user_id = 950951
+        make_basic_character(user_id, "FumblingHerbalist", current_location="hollow_stump_shrine")
+        before = db.get_character(user_id, -999).get("profession_mastery_pct", {}).get("herbalism", bot.PROFICIENCY_STARTING_PCT)
+        sink = []
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="The moonpetal slips from reach."):
+            await bot._do_gather(FakeUpdate(user_id, "gather moonpetal", sink), "gather moonpetal", forced_roll=1)
+        after = db.get_character(user_id, -999).get("profession_mastery_pct", {}).get("herbalism", bot.PROFICIENCY_STARTING_PCT)
+        self.assertEqual(after, before)
+
+    async def test_gather_masterwork_roll_grants_a_real_bonus_unit(self):
+        """Matches _do_craft's identical static-recipe convention (masterwork = +1 yield, since gathering has no item tier to bump) -- the real, immediate payoff for a mastery % that now actually grows."""
+        from unittest.mock import patch
+        user_id = 950952
+        make_basic_character(user_id, "MasterworkHarvester", current_location="hollow_stump_shrine")
+        sink = []
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.narrate_skill_check", return_value="A quiet, successful gathering."):
+            await bot._do_gather(FakeUpdate(user_id, "gather moonpetal", sink), "gather moonpetal", forced_roll=20)
+        self.assertTrue(any("masterwork" in m.lower() for m in sink), sink)
+        character = db.get_character(user_id, -999)
+        self.assertGreaterEqual(character["inventory"].get("moonpetal", 0), 2)  # base 1 + masterwork bonus 1
+
     # -- Level 2-10 class features batch (2026-07-16, per Coffee): Action
     #    Surge, Reckless Attack, Divine Smite, Flurry of Blows. ----------
     async def test_action_surge_rejects_non_fighter(self):

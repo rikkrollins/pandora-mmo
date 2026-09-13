@@ -22620,12 +22620,33 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     bonus += _effective_ability_check_bonus(character, node["ability"])
     result["total"] += bonus
     result["practiced_bonus"] = bonus
+    # Real audit fix (2026-09-13, per Coffee: a fresh feature-gap audit
+    # found this was the one profession family with zero connection to
+    # the shared profession_mastery_pct grind every crafting/enchanting
+    # path already uses -- _grind_profession_mastery/_roll_masterwork_
+    # quality were called from all 4 craft/forge/enchant handlers but
+    # never here, so Herbalism/Mining/Fishing/Lumberjacking/bait_
+    # gathering's own mastery % sat permanently frozen at
+    # PROFICIENCY_STARTING_PCT forever, no matter how much a player
+    # gathered -- unlike Blacksmithing/Alchemy/Cooking, which all grind
+    # this same %. Rolled up front against the gatherer's own stored
+    # mastery, independent of the gather's own success check just below
+    # -- same ordering _do_craft already uses, see _roll_masterwork_
+    # quality's own docstring for why.
+    masterwork = _roll_masterwork_quality(character, skill_key)
     success = result["total"] >= SKILL_CHECK_DC
     material = items_module.get_item(node["material"])
     quantity = _gather_quantity(character, skill_key, bonus) if success else 0
+    # Masterwork bonus yield (matches _do_craft's identical static-
+    # recipe convention: alchemy/cooking's own RECIPES have no tier to
+    # bump either, so a masterwork roll there is +1 yield too -- same
+    # real payoff for grinding, now shared by gathering as well.
+    if success and masterwork:
+        quantity += 1
 
     if success:
         db.record_skill_use(update.effective_user.id, update.effective_chat.id, skill_key)
+        _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, skill_key)
         db.add_item(update.effective_user.id, update.effective_chat.id, node["material"], quantity)
 
     # Per Coffee (2026-07-19): fishing consumes bait by chance, not on a
@@ -22645,7 +22666,8 @@ async def _do_gather(update: Update, action_text: str, forced_roll: int | None =
     )
     message = _format_skill_check_result(flavor, result, node["ability"], SKILL_CHECK_DC, success)
     if success:
-        message += f"\n🌿 **{character['name']}** gathers **{quantity}x {material['name']}**."
+        masterwork_note = " — a masterwork haul, one extra found!" if masterwork else ""
+        message += f"\n🌿 **{character['name']}** gathers **{quantity}x {material['name']}**.{masterwork_note}"
     if bait_lost:
         message += "\n🪱 The bait comes free of the hook and is gone."
 

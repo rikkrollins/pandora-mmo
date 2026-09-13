@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.591] — fix: gathering professions now actually grind toward mastery
+
+Found via a fresh feature-gap audit, per Coffee: Herbalism/Mining/
+Fishing/Lumberjacking (the home profession of 6 of 12 classes) were
+the one profession family completely disconnected from the shared
+`profession_mastery_pct` grind every crafting/enchanting/forging
+handler already uses. `_grind_profession_mastery`/`_roll_masterwork_
+quality` had exactly 4 real call sites before this, all crafting or
+enchanting — never `_do_gather`. A gatherer's own mastery % sat
+permanently frozen at its starting value forever, no matter how much
+they gathered, unlike Blacksmithing/Alchemy/Cooking (which all have
+real endgame ladders built on this same %).
+
+A successful gather now grinds this profession's mastery % exactly
+like a successful craft does, and rolls the same masterwork check for
+a real, immediate payoff: a masterwork gather grants +1 bonus unit of
+whatever was gathered (matching the existing "masterwork on a static
+recipe = +1 yield" convention Alchemy/Cooking's own recipes already
+use, since gathering has no item tier to bump either). A failed gather
+still doesn't advance mastery, matching `db.record_skill_use`'s own
+success-only convention.
+
+This is the mechanical fix; a real rebirth-gated capstone content
+ladder for these 4 professions (matching Forge Guild/Enchanters'
+Guild/Alchemy Ascension) is a separate, bigger design decision, not
+included here.
+
 ## [1.27.590] — fix: extend the enchant-restack cap to Warding and the Enchanters' Guild ladder
 
 Follow-up audit, per Coffee ("do 1 and 2" on a proposed follow-up to
