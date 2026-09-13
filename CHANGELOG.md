@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.597] — fix: leaving the Labyrinth mid-segment no longer discards real progress
+
+Per Coffee: "when we leave the labyrinth dont reset our progress" —
+confirmed via a follow-up question: mid-segment floor progress
+specifically. Checkpoint progress (the permanent, segment-boundary
+record) was already preserved; what wasn't was everything cleared
+*within* the current, unfinished segment — leaving before reaching
+that segment's own checkpoint used to unconditionally delete the
+whole run, so the next entry always regenerated that same segment
+from scratch, discarding every floor already cleared since the last
+real checkpoint.
+
+`_do_leave_labyrinth` now only deletes the run when its current room
+is an actually-claimed checkpoint (segment genuinely complete, nothing
+left to resume). Leaving anywhere else keeps the run exactly as it
+stands — same rooms, same current position, same unlocked doors and
+switches — so the next "enter the labyrinth" resumes room-for-room
+instead of rerolling a brand new layout for ground already covered.
+
+Also fixed a real edge case this surfaced: "Load labyrinth seed #X" is
+a deliberate, explicit override and must always produce the exact
+requested segment — it now force-clears any kept-alive run first,
+rather than silently just resuming whatever was already there.
+
 ## [1.27.596] — fix: Paladin and Ranger could never cast any of their own spells
 
 Found via a class/combat balance audit: `spells.STARTING_SPELL_SLOTS`

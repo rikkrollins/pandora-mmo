@@ -38606,18 +38606,75 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run_after["floor"], 6)
         self.assertEqual(sorted({r["floor"] for r in run_after["rooms"].values()}), [6, 7, 8, 9, 10])
 
+        rooms_before_leave = run_after["rooms"]
         sink3 = []
         await bot._do_leave_labyrinth(FakeUpdate(user_id, "", sink3, chat_id=chat_id))
-        self.assertIsNone(db.get_labyrinth_run(chat_id, f"solo:{user_id}"))
+        # Real live ask (2026-09-13, per Coffee: "when we leave the
+        # labyrinth dont [reset] our progress" -- confirmed: mid-
+        # segment floor progress specifically): leaving BEFORE floor
+        # 6-10's own checkpoint is reached must keep this run alive,
+        # not discard it -- floor 5's segment is genuinely complete
+        # (that checkpoint WAS claimed above), but segment 2 isn't.
+        kept_run = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
+        self.assertIsNotNone(kept_run, "an unfinished segment must be kept alive on leave, not discarded")
+        self.assertEqual(kept_run["rooms"].keys(), rooms_before_leave.keys())
         character_after_leave = db.get_character(user_id, chat_id)
         self.assertEqual(character_after_leave["current_location"], "the_colosseum")
         self.assertEqual(character_after_leave["labyrinth_best_floor"], 6)
 
-        # Re-entering resumes past the last CLEARED checkpoint (floor 5), never back at floor 1.
+        # Re-entering resumes the EXACT kept-alive segment 2, never a freshly regenerated one and never back at floor 1.
         sink4 = []
         await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink4, chat_id=chat_id))
         run_resumed = db.get_labyrinth_run(chat_id, f"solo:{user_id}")
         self.assertEqual(run_resumed["floor"], 6)
+        self.assertEqual(run_resumed["rooms"].keys(), rooms_before_leave.keys())
+
+    async def test_leaving_a_freshly_entered_unfinished_segment_keeps_the_exact_same_room(self):
+        """
+        Real live ask (2026-09-13, per Coffee: "when we leave the
+        labyrinth dont [reset] our progress" -- confirmed: mid-segment
+        floor progress specifically). Leaving from the very first room
+        of a brand-new segment (nowhere near its own checkpoint) must
+        still resume at that EXACT room next time, not a freshly
+        regenerated segment 1 -- the smallest possible real case of
+        this fix, distinct from test_enter_walk_checkpoint_deeper_
+        leave_end_to_end's "already past one real checkpoint" case.
+        """
+        user_id, chat_id = 962500, -962500
+        make_basic_character(user_id, "MidSegmentLeaveTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        entry_run = db.get_labyrinth_run(chat_id, party_key)
+        entry_room_id = entry_run["current_room_id"]
+        self.assertFalse(entry_run["rooms"][entry_room_id].get("is_checkpoint"))
+
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        kept_run = db.get_labyrinth_run(chat_id, party_key)
+        self.assertIsNotNone(kept_run, "an unfinished segment (not even past its own first room) must still be kept alive")
+        self.assertEqual(kept_run["current_room_id"], entry_room_id)
+        self.assertEqual(kept_run["seed"], entry_run["seed"])
+
+        sink = []
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", sink, chat_id=chat_id))
+        resumed_run = db.get_labyrinth_run(chat_id, party_key)
+        self.assertEqual(resumed_run["current_room_id"], entry_room_id)
+        self.assertEqual(resumed_run["seed"], entry_run["seed"])  # the exact same layout, not a reroll
+
+    async def test_leaving_right_after_claiming_a_checkpoint_still_discards_the_finished_segment(self):
+        """The one case discarding IS still correct: a segment whose own checkpoint was just claimed has nothing left to resume -- the next entry should generate the NEXT fresh segment, not linger in a finished one."""
+        user_id, chat_id = 962501, -962501
+        make_basic_character(user_id, "FinishedSegmentLeaveTester", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        await self._walk_to_checkpoint(user_id, chat_id)
+        party_key = f"solo:{user_id}"
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, party_key))
+
+        await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        self.assertIsNone(db.get_labyrinth_run(chat_id, party_key))
 
     async def test_enter_and_descend_both_log_a_real_durable_seed_row(self):
         """
@@ -38688,7 +38745,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         original_seed = first_run["seed"]
 
         await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
-        self.assertIsNone(db.get_labyrinth_run(chat_id, party_key))
+        # Real live ask (2026-09-13): leaving an unfinished segment (no
+        # checkpoint reached at floor 1's entry room) now keeps the run
+        # alive instead of discarding it -- but an EXPLICIT seed/segment
+        # load must still override it outright, confirmed just below.
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, party_key))
 
         sink = []
         await bot._do_load_labyrinth_seed(FakeUpdate(user_id, "", sink, chat_id=chat_id), seed=original_seed, segment=1)
@@ -38702,7 +38763,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # A completely new, never-before-seen seed number still produces a real, valid segment -- no whitelist, no error.
         await bot._do_leave_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
         never_seen_seed = 424242424
-        self.assertIsNone(db.get_labyrinth_run(chat_id, party_key))
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, party_key))  # kept alive again, same as above
         sink2 = []
         await bot._do_load_labyrinth_seed(FakeUpdate(user_id, "", sink2, chat_id=chat_id), seed=never_seen_seed, segment=1)
         fresh_run = db.get_labyrinth_run(chat_id, party_key)
@@ -43703,7 +43764,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             db.get_character_by_id(first["character_id"])["current_location"], "the_colosseum",
             "expected the real character sitting in the Labyrinth to be reset even after the owner switched active alts",
         )
-        self.assertIsNone(db.get_labyrinth_run(chat_id, f"party:{party_id}"))
+        # Real live ask (2026-09-13): the run itself is now kept alive
+        # on leaving an unfinished segment (entry room, no checkpoint
+        # reached) -- this test's own real point (character-location
+        # reset across an alt switch) is unaffected either way.
+        self.assertIsNotNone(db.get_labyrinth_run(chat_id, f"party:{party_id}"))
 
     async def test_labyrinth_leave_resets_a_benched_or_inactive_member_stuck_at_the_sentinel(self):
         """

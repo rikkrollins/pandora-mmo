@@ -10083,6 +10083,18 @@ async def _do_enter_labyrinth(update: Update, forced_seed: int | None = None, fo
 
     party_key = _labyrinth_party_key(character)
     run = db.get_labyrinth_run(chat_id, party_key)
+    # Real fix (2026-09-13, alongside the "leaving keeps an unfinished
+    # segment alive" change below): an EXPLICIT seed/segment request
+    # (forced_seed/forced_segment -- "Load labyrinth seed #X") is a
+    # deliberate override, never a plain "continue" -- it must always
+    # produce the exact requested segment, even if a kept-alive,
+    # unfinished run happens to already exist under this same
+    # party_key. Without this, loading a specific seed would silently
+    # just resume whatever was already there instead, ignoring the
+    # request entirely.
+    if run is not None and (forced_seed is not None or forced_segment is not None):
+        db.delete_labyrinth_run(chat_id, party_key)
+        run = None
     new_segment_theme = None
     if run is None:
         # Phase L3: resume PAST whatever segment this character's party
@@ -10235,7 +10247,29 @@ async def _do_leave_labyrinth(update: Update) -> None:
             "You're not in the Labyrinth right now.", message_thread_id=topics.thread_id_for(chat_id, "adventure"),
         )
         return
-    db.delete_labyrinth_run(chat_id, party_key)
+    # Real live ask (2026-09-13, per Coffee: "when we leave the
+    # labyrinth dont [reset] our progress" -- confirmed: specifically
+    # mid-segment floor progress, not the already-preserved checkpoint
+    # record). This used to unconditionally delete the run on every
+    # leave, so leaving mid-segment (before reaching that segment's own
+    # checkpoint) silently threw away every floor cleared since the
+    # LAST checkpoint -- re-entering always regenerated that same
+    # segment fresh from its own first floor, discarding real, already-
+    # earned depth. Only delete the run once its own checkpoint room
+    # has actually been reached and claimed (segment genuinely
+    # complete, see _resolve_labyrinth_checkpoint's `checkpoint_
+    # claimed` flag) -- that's the one case where discarding is
+    # correct, since the NEXT entry is supposed to generate the next
+    # fresh segment past it, not linger in a segment there's nothing
+    # left to do in. Leaving anywhere else in an unfinished segment
+    # keeps the run exactly as it stands (same rooms, same current
+    # position, same unlocked doors/switches), so the next "enter the
+    # labyrinth" resumes room-for-room instead of rerolling a brand
+    # new layout for ground already covered.
+    current_room = run["rooms"].get(run["current_room_id"], {})
+    segment_complete = bool(current_room.get("is_checkpoint") and current_room.get("checkpoint_claimed"))
+    if segment_complete:
+        db.delete_labyrinth_run(chat_id, party_key)
     members = _labyrinth_active_party_members(character)
     # Real live incident (2026-09-04, dev-bridge: Sugar's characters
     # "Laurienna"/"Charvenna" stuck at the sentinel with no matching
@@ -10266,12 +10300,20 @@ async def _do_leave_labyrinth(update: Update) -> None:
     # Labyrinth Solo Mode (2026-09-13): the flag is scoped to exactly
     # ONE Labyrinth visit -- clearing it here means a later "enter the
     # labyrinth" asks the party/solo question fresh instead of being
-    # stuck in whichever mode was last chosen.
+    # stuck in whichever mode was last chosen. Picking Solo again on
+    # that next prompt naturally resumes the SAME kept-alive run below
+    # (_labyrinth_party_key resolves back to the identical soloplay:
+    # key), so this doesn't cost any real progress either way.
     if was_solo:
         db.update_character_by_id(character["character_id"], labyrinth_solo_mode=0)
     checkpoint = character.get("labyrinth_solo_checkpoint_floor" if was_solo else "labyrinth_checkpoint_floor", 0)
-    resume_note = f" Your last cleared waystation (floor {checkpoint}) is still there next time." if checkpoint else ""
     party_word = "you" if was_solo else "your party"
+    if segment_complete:
+        resume_note = f" Your last cleared waystation (floor {checkpoint}) is still there next time." if checkpoint else ""
+    else:
+        # The run itself is kept alive (see the real fix above) --
+        # "next time" resumes this exact segment, not a fresh one.
+        resume_note = f" Floor {int(run['floor'])} is saved exactly as you left it -- pick up right there next time."
     await _safe_send(
         update,
         f"🌀 The Labyrinth releases {party_word}, {int(run['floor'])} floors down. You're back at the Colosseum.{resume_note}",
