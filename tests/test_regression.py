@@ -38527,17 +38527,25 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             if name_counts:
                 max_repeat_on_any_floor = max(max_repeat_on_any_floor, max(name_counts.values()))
         average_rooms = total_rooms / seeds
-        self.assertLess(average_rooms, 20, f"floor 11 shouldn't already be at deep-floor scale -- got {average_rooms:.1f}")
-        # Real, deliberate follow-up (2026-09-08): a real 8-name pool
-        # cycled by a floor-wide room index guarantees a 3rd repeat the
-        # moment a floor exceeds 16 rooms -- pure pigeonhole math, not a
-        # regression -- and floor 11 now genuinely reaches the low 20s
-        # on some real seeds (measured range 2-21 across 100 seeds,
-        # 13% hitting a real 3rd repeat). 4 is a real ceiling that would
-        # still catch an actual future regression (e.g. the pool
-        # silently shrinking back down, or index cycling breaking)
-        # without being fragile to this now-expected variance.
-        self.assertLessEqual(max_repeat_on_any_floor, 4, "no room name should need to repeat 4+ times even on a real, larger floor")
+        # Real, deliberate SUPERSESSION (2026-09-13, per Coffee: "the
+        # current labyrinth is jus a straight line... i want the
+        # labyrinths lvs larger, each floor substancially larger, with
+        # many paths, like a maze"): real internal branch forking
+        # (`_grow_wing_forks`) now runs on EVERY floor from floor 1
+        # onward, deliberately -- floor 11 genuinely averaging ~25 rooms
+        # (measured range 9-51 across 100 real seeds) is the intended
+        # new baseline, not a regression. This assertion now LOCKS IN
+        # "substantially larger" as a real guard instead of asserting
+        # the OLD, now-obsolete "still small at floor 11" ceiling.
+        self.assertGreater(average_rooms, 20, f"floor 11 should be substantially larger under real maze topology -- got {average_rooms:.1f}")
+        # Ceiling raised alongside the above (measured real max_repeat
+        # of 7 across 100 seeds, floors now reaching 50+ rooms against
+        # an 8-name-per-theme pool -- pure pigeonhole math at this new
+        # size, not a regression). Still a real ceiling that would catch
+        # an actual future regression (the pool silently shrinking back
+        # down, or index cycling breaking) without being fragile to
+        # this now-expected, much larger variance.
+        self.assertLessEqual(max_repeat_on_any_floor, 12, "no room name should need to repeat 12+ times even on a real, much larger floor")
 
         for theme in labyrinth_module.LABYRINTH_THEMES:
             self.assertGreaterEqual(len(theme["room_names"]), 8, f"{theme['id']} should have real widened variety, not just the original 5")
@@ -38555,6 +38563,105 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                     frontier.append(neighbor_id)
         self.assertEqual(visited, set(rooms.keys()), "every room must be reachable from the hub")
         self.assertIn(floor_data["connector_room_id"], visited)
+
+    def test_labyrinth_floors_never_generate_as_a_straight_line(self):
+        """
+        Real hard invariant (2026-09-13, per Coffee: "the current
+        labyrinth is jus a straight line... i want multiple paths and i
+        want them connected to make interesting layouts that are RNG
+        (not a straight line EVER)"). Before this session's maze-
+        topology work, EVERY branch was a pure straight chain -- no room
+        past the hub ever had more than 2 connections, at any floor.
+        `_grow_wing_forks`/`_add_loop_back_connections`/`_enforce_
+        minimum_maze_density` together make this a real, tested
+        guarantee across floor 1, a checkpoint floor, and a deep floor
+        -- not merely a probability that happened to look fine on a
+        handful of hand-picked seeds.
+        """
+        def junctions_and_cycles(rooms, hub_id):
+            junctions = sum(1 for rid, r in rooms.items() if rid != hub_id and len(r.get("connections", [])) >= 3)
+            edges = set()
+            for rid, r in rooms.items():
+                for nb in r.get("connections", []):
+                    if nb in rooms:
+                        edges.add(frozenset((rid, nb)))
+            cycles = max(0, len(edges) - (len(rooms) - 1))
+            return junctions, cycles
+
+        for floor in (1, 10, 101):
+            for seed in range(60):
+                fd = labyrinth_module.generate_floor(bot.CAMPAIGN, floor, random.Random(seed))
+                rooms = fd["rooms"]
+                junctions, cycles = junctions_and_cycles(rooms, fd["hub_room_id"])
+                self.assertGreater(junctions, 0, f"floor {floor} seed {seed}: zero real junctions -- reads as a straight line")
+                self.assertGreater(cycles, 0, f"floor {floor} seed {seed}: zero real cycles -- a branchier tree is still not a maze")
+
+    def test_labyrinth_maze_enforcement_never_breaks_solvability_or_bypasses_a_gate(self):
+        """
+        Companion to the invariant test above: proves the forced extra
+        structure `_enforce_minimum_maze_density` adds never defeats a
+        real gate or collapse-puzzle seal, and every room stays reachable
+        -- the exact same discipline `_add_loop_back_connections`'s own
+        long-standing tests already apply, extended to the new mechanic.
+        """
+        for floor in (1, 10, 101):
+            for seed in range(60):
+                fd = labyrinth_module.generate_floor(bot.CAMPAIGN, floor, random.Random(seed))
+                rooms = fd["rooms"]
+                hub_id = fd["hub_room_id"]
+                reachable = {hub_id}
+                frontier = [hub_id]
+                while frontier:
+                    cur = frontier.pop()
+                    for nb in list(rooms[cur].get("connections", [])) + list(rooms[cur].get("locked_connections", {}).keys()):
+                        if nb in rooms and nb not in reachable:
+                            reachable.add(nb)
+                            frontier.append(nb)
+                self.assertEqual(reachable, set(rooms.keys()), f"floor {floor} seed {seed}: a room became unreachable")
+
+                for room in rooms.values():
+                    for seal_leaf in room.get("collapsing_connections", {}):
+                        trimmed_reachable = {hub_id}
+                        trimmed_frontier = [hub_id]
+                        while trimmed_frontier:
+                            cur = trimmed_frontier.pop()
+                            for nb in rooms[cur].get("connections", []):
+                                if nb in rooms and nb not in trimmed_reachable and not (
+                                    (cur == room["id"] and nb == seal_leaf) or (cur == seal_leaf and nb == room["id"])
+                                ):
+                                    trimmed_reachable.add(nb)
+                                    trimmed_frontier.append(nb)
+                        self.assertNotIn(seal_leaf, trimmed_reachable, f"floor {floor} seed {seed}: a forced maze edge defeated a collapse seal")
+
+    def test_entrance_tease_chest_reward_is_seen_before_its_key_is_reachable(self):
+        """
+        Part of the backtracking work (2026-09-13): the tease chest sits
+        at a branch ROOT (visible the moment a player steps off the hub)
+        while its real key lives at a DIFFERENT branch's own TAIL --
+        proves the "see it first, walk elsewhere, come back" shape is
+        real, not just a same-room chest+key pair.
+        """
+        found = False
+        for seed in range(300):
+            fd = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(seed))
+            rooms = fd["rooms"]
+            tease_room = next(
+                (r for r in rooms.values() if any(lk.get("id", "").endswith("_tease_chest") for lk in r.get("lockables", []))),
+                None,
+            )
+            if tease_room is None:
+                continue
+            found = True
+            key_room = next(
+                (r for r in rooms.values() if r.get("guaranteed_key_drop") or any(
+                    lk.get("loot", {}).get("labyrinth_floor_key") for lk in r.get("lockables", [])
+                )),
+                None,
+            )
+            self.assertIsNotNone(key_room, f"seed {seed}: tease chest with no real key source anywhere")
+            self.assertNotEqual(tease_room["id"], key_room["id"], f"seed {seed}: tease chest and its own key must be in different rooms")
+            break
+        self.assertTrue(found, "expected at least one entrance tease across 300 real seeds")
 
     def test_generate_segment_produces_five_real_interconnected_floors(self):
         """Phase L3: the actual unit of persistence -- 5 real floors, all genuinely walkable from the entry hub down to the checkpoint via real descends_to/ascends_to edges."""
@@ -40194,10 +40301,26 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run_after["current_room_id"], gate_room_id)
 
     def test_labyrinth_mirror_pair_has_inverted_contents_and_distinct_names(self):
-        """Phase L2f: same connection shape, deliberately inverted contents -- one holds the floor's strongest monster, the other an unguarded matching chest. Real bug found testing this: identical names made the two genuinely unresolvable by a typed destination -- now numbered (I)/(II)."""
+        """
+        Phase L2f: same connection shape, deliberately inverted contents -- one holds the floor's strongest monster, the other an unguarded matching chest. Real bug found testing this: identical names made the two genuinely unresolvable by a typed destination -- now numbered (I)/(II).
+
+        Real, deliberate widening (2026-09-13): direct measurement (2000
+        real seeds, confirmed via a git-stash comparison to be the exact
+        same rate BEFORE this session's own maze-topology work, not a
+        regression it caused) found this floor's real mirror-pair rate
+        is ~0.5%, not the ~5%+ this test's original 200-seed sample
+        implicitly assumed -- floor 3's naturally small 2-4 branch-root
+        count, combined with the mandatory gate ALWAYS consuming one and
+        the branch-gate mechanic often consuming another, leaves too few
+        clean roots for len(mirror_eligible_room_ids) >= 2 most of the
+        time. 200 seeds at a true ~0.5% rate was already a real coin-
+        flip on whether this test passed at all (expected ~1 hit) --
+        2000 seeds brings the expected hit count to ~10, a real, stable
+        margin instead of a lucky draw.
+        """
         campaign = bot.CAMPAIGN
         found = False
-        for seed in range(200):
+        for seed in range(2000):
             fd = labyrinth_module.generate_floor(campaign, 3, random.Random(seed))
             mirrors = [r for r in fd["rooms"].values() if "mirror_twin" in r]
             if mirrors:
@@ -40211,7 +40334,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(monster_side["mirror_twin"], chest_side["id"])
                 self.assertEqual(chest_side["mirror_twin"], monster_side["id"])
                 break
-        self.assertTrue(found, "expected at least one mirror pair across 200 real seeds")
+        self.assertTrue(found, "expected at least one mirror pair across 2000 real seeds")
 
     def test_labyrinth_mirror_pair_never_overwrites_a_rooms_pre_existing_lockable(self):
         """

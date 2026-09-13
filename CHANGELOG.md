@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.601] — feat: real maze topology for every Labyrinth floor
+
+Coffee: "the current labyrinth is jus a straight line and doesnt look
+like a dungeon matching the samples i gave... i want the labyrinths
+lvs larger, each floor substancially larger, with many paths, like a
+maze... not a straight line EVER." Direct measurement confirmed the
+root cause: every branch off a floor's hub was a pure straight chain
+(no room past the hub ever had more than 2 connections, at any depth)
+and was ALSO laid out as a straight geometric compass ray, which
+starved the one existing loop mechanic of real candidates. All of the
+game's prior "Advanced Dungeons" work added real cross-BRANCH gating,
+but never fixed the underlying room-connectivity shape.
+
+- **Real internal forks ("wings").** Every branch now grows genuine
+  crossroads along its own length, not just more/longer independent
+  spokes — real hierarchical sub-branching, present from floor 1.
+- **A wiggled, curving spatial layout** instead of every branch laying
+  out as a straight ray from the hub — lets branches weave near each
+  other, feeding the existing loop-back mechanic real geometry to work
+  with (measured: it was adding ~0 real edges on a fresh floor 1
+  before this).
+- **A hard, tested guarantee**: after everything else runs, a floor
+  short on real junctions or real cycles gets forced extra structure
+  until it clears a real minimum — "not a straight line" is now an
+  invariant, verified across hundreds of real seeds at floor 1, a
+  checkpoint floor, and floor 100+, not a probability.
+- **A real backtracking beat**: a locked chest is sometimes glimpsed
+  right at a wing's entrance, its key sitting deep in a completely
+  different wing — see it first, can't take it yet, must come back.
+- Floor 1 now averages ~24 rooms (was ~13); the whole depth curve
+  scales up meaningfully without runaway growth or slower generation.
+
+Fixed one real, pre-existing latent gap exposed by the new density
+along the way: the collapse-puzzle safety check that keeps loop-back
+edges from bypassing a seal only ever excluded the immediate sealed
+room, not anything downstream of it.
+
 ## [1.27.600] — fix: quest journal, achievements, professions, and affinity screens blocked deep in the Labyrinth
 
 Follow-up to v1.27.599's Blacksmith/Alchemy fix: a systematic

@@ -101,6 +101,63 @@ _SIDE_ROOM_COUNT_RANGE = (2, 4)
 _BRANCH_DEPTH_WEIGHTS = ([0, 1, 2, 3, 4], [0.10, 0.20, 0.25, 0.25, 0.20])
 _BRANCH_GATE_CHANCE = 0.35
 _MINIBOSS_CHANCE = 0.3
+_ENTRANCE_TEASE_CHANCE = 0.3
+
+# Real maze topology (2026-09-13, per Coffee: "the current labyrinth is
+# jus a straight line and doesnt look like a dungeon matching the
+# samples i gave... i want multiple paths and i want them connected to
+# make interesting layouts that are RNG (not a straight line EVER)").
+# Direct measurement (generating real floors and inspecting the actual
+# room graph, not assumption) confirmed every branch was a PURE
+# straight chain -- no room past the hub ever had more than 2
+# connections, at ANY floor, despite all of Phase L5's real cross-
+# BRANCH gating work above and below. A player walking any one branch
+# always experienced a single unbranching hallway, regardless of how
+# much total content the floor had elsewhere. `_WING_FORK_*` below
+# grows real forks INSIDE a branch -- genuine crossroads a player must
+# actually choose between, turning each branch into a real "wing" with
+# its own internal sub-branches, not just one more/longer independent
+# spoke off the hub. A real, meaningfully nonzero floor-1 base (unlike
+# every other `_scaled_chance` roll in this file, which starts near
+# zero and grows with depth) -- this must already read as a maze on
+# floor 1, not only once a player is deep in.
+_WING_FORK_CHANCE = 0.35
+# Real, deliberate near-flat scaling (2026-09-13, found via direct
+# measurement): the pre-existing branch-count/branch-depth system
+# ALREADY scales floor size up with depth on its own -- letting THIS
+# roll also scale steeply with floor compounded multiplicatively with
+# that (recursive forking on top of an already-larger branch set),
+# ballooning a floor to 500+ rooms by floor 100+ in real testing. A
+# near-flat rate lets this mechanic do its one real job (branches get
+# internal forks, at every depth) without double-scaling on top of
+# growth that's already handled elsewhere.
+_WING_FORK_DEPTH_MAX = 3  # how many levels deep a sub-branch can itself fork again
+_WING_FORK_ROOM_WEIGHTS = ([1, 2, 3], [0.5, 0.35, 0.15])
+
+# Deliberate cross-wing bridges: connects branch/sub-branch TAILS
+# directly, by construction -- generalizes the pre-existing checkpoint-
+# only single tail-merge (see the `if checkpoint and boss_pool:` block
+# further down, kept exactly as-is) to every floor, with more than one
+# real bridge. Unlike `_add_loop_back_connections` (which only finds
+# rooms that happen to land grid-ADJACENT after placement, and was
+# measured to add ~0 real edges on a small floor 1), this never depends
+# on incidental geometry -- it directly wires two tails together
+# regardless of where they land, guaranteeing the "connected,
+# interesting layouts" ask is real rather than lucky.
+_WING_BRIDGE_BASE = 1
+_WING_BRIDGE_PER_FLOOR = 1 / 12
+_WING_BRIDGE_CAP = 6
+
+# Hard invariant (2026-09-13): "not a straight line EVER" is a
+# guarantee, not a probability. After every other mechanic above has
+# run, a floor with fewer real junctions (rooms with 3+ connections,
+# excluding the hub) than this floor-scaled minimum gets forced extra
+# fork/bridge edges -- deterministically, off the same RNG stream, so
+# generation stays fully seed-reproducible -- until it clears the bar.
+_MIN_JUNCTIONS_BASE = 2
+_MIN_JUNCTIONS_PER_FLOOR = 1 / 15
+_MIN_JUNCTIONS_CAP = 20
+_MAZE_ENFORCEMENT_MAX_ITERATIONS = 12  # safety cap, never an infinite loop even in a pathological seed
 
 # Real Phase L5 "Advanced Dungeons" v7 -- a repeated gate (2026-09-06,
 # per Coffee: "work on the lower-priority and unscheduled stuff" --
@@ -648,7 +705,11 @@ def _spiral_cells():
         radius += 1
 
 
-def _assign_grid_positions(rooms: dict, hub_room_id: str) -> None:
+_GRID_DIRECTIONS = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+_WIGGLE_TURN_CHANCE = 0.35  # real chance a room picks a NEW direction instead of continuing its parent's own last one
+
+
+def _assign_grid_positions(rooms: dict, hub_room_id: str, rng: random.Random) -> None:
     """
     Hub at the origin; every other room placed by a real BFS walk over
     its ACTUAL connections/locked_connections graph, one cardinal step
@@ -665,24 +726,49 @@ def _assign_grid_positions(rooms: dict, hub_room_id: str) -> None:
     two rooms are ACTUALLY connected) would show doors leading nowhere
     sensible. BFS placement keeps a branch visually contiguous, the way
     every real reference map studied actually reads.
+
+    Real maze-topology fix (2026-09-13): direction choice is now real,
+    per-room, rng-driven -- each room inherits its own parent's last
+    travel direction as its first preference (reads as a real corridor
+    continuing straight), with a real `_WIGGLE_TURN_CHANCE` chance each
+    step to pick a genuinely different direction instead (a "turn").
+    Before this, EVERY room tried the same fixed global order, which
+    made every branch's room-graph (already a straight chain in the
+    OLD data model) ALSO lay out as a straight compass ray from the
+    hub -- different branches' straight rays rarely became grid-
+    adjacent to each other, starving `_add_loop_back_connections` of
+    real candidates (measured live: ~0 loop-back edges on a real floor
+    1 generation). This makes branches/wings visually curve and weave
+    near each other, the way every real reference map studied actually
+    reads, and gives loop-back real geometry to work with. A fresh room
+    straight off the hub (no parent direction yet) always starts with a
+    genuinely random direction instead of the old fixed order, so
+    different branches fan out differently each generation too.
     """
     rooms[hub_room_id]["grid_position"] = {"x": 0, "y": 0}
     occupied = {(0, 0): hub_room_id}
     visited = {hub_room_id}
     queue = [hub_room_id]
-    directions = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    preferred_dir: dict[str, tuple[int, int]] = {}
     while queue:
         current_id = queue.pop(0)
         cx, cy = rooms[current_id]["grid_position"]["x"], rooms[current_id]["grid_position"]["y"]
         neighbor_ids = list(rooms[current_id].get("connections", [])) + list(rooms[current_id].get("locked_connections", {}).keys())
+        parent_dir = preferred_dir.get(current_id)
         for neighbor_id in neighbor_ids:
             if neighbor_id in visited or neighbor_id not in rooms:
                 continue
+            if parent_dir is not None and rng.random() >= _WIGGLE_TURN_CHANCE:
+                directions = [parent_dir] + [d for d in _GRID_DIRECTIONS if d != parent_dir]
+            else:
+                directions = list(_GRID_DIRECTIONS)
+                rng.shuffle(directions)
             placed = False
             for dx, dy in directions:
                 if (cx + dx, cy + dy) not in occupied:
                     rooms[neighbor_id]["grid_position"] = {"x": cx + dx, "y": cy + dy}
                     occupied[(cx + dx, cy + dy)] = neighbor_id
+                    preferred_dir[neighbor_id] = (dx, dy)
                     placed = True
                     break
             if not placed:
@@ -746,12 +832,34 @@ def _rooms_shadowed_by_a_real_gate(rooms: dict, hub_id: str, connector_id: str) 
     set as shadowed -- the same real invariant, computed the way that
     can't leak backward through a gate's own return trip.
     """
+    # Real bug found and fixed (2026-09-13, exposed by the maze-density
+    # work above -- more real grid density meant a downstream-of-a-seal
+    # room finally, coincidentally landed adjacent to something else
+    # often enough to actually hit this): a `collapsing_connections`
+    # seal_parent->seal_leaf edge is still a REAL, currently-open plain
+    # `connections` entry (only removed later, once the trigger actually
+    # fires) -- this BFS used to walk straight through it like any
+    # other edge, so only the immediate seal_leaf id ever got excluded
+    # afterward, never anything genuinely DOWNSTREAM of it. A loop-back/
+    # bridge edge landing on that downstream room (never itself a
+    # `collapsing_connections` key) then gave it a second, permanent
+    # route back to the rest of the floor -- reachable even after the
+    # real seal edge is gone, silently defeating the whole puzzle.
+    # Fixed the same way `locked_connections` are already excluded from
+    # this same BFS: never traverse a real seal edge, so reachability
+    # here matches what the floor will actually look like ONCE sealed,
+    # not just right now while it's still open.
+    collapsing_pairs = set()
+    for room in rooms.values():
+        for seal_leaf in room.get("collapsing_connections", {}):
+            collapsing_pairs.add(frozenset((room["id"], seal_leaf)))
+
     reachable = {hub_id}
     frontier = [hub_id]
     while frontier:
         cur = frontier.pop()
         for nb in rooms[cur].get("connections", []):
-            if nb not in reachable:
+            if nb not in reachable and frozenset((cur, nb)) not in collapsing_pairs:
                 reachable.add(nb)
                 frontier.append(nb)
 
@@ -855,6 +963,173 @@ def _add_loop_back_connections(
             added += 1
 
 
+def _junction_and_cycle_counts(rooms: dict, hub_id: str) -> tuple[int, int]:
+    """Real junctions (3+ connection rooms, excluding the hub) and real cycles (edges beyond a bare spanning tree) -- see `_enforce_minimum_maze_density`'s own docstring for what this measures and why."""
+    junctions = sum(1 for rid, r in rooms.items() if rid != hub_id and len(r.get("connections", [])) >= 3)
+    edges = set()
+    for rid, r in rooms.items():
+        for nb in r.get("connections", []):
+            if nb in rooms:
+                edges.add(frozenset((rid, nb)))
+    cycles = max(0, len(edges) - (len(rooms) - 1))
+    return junctions, cycles
+
+
+def _enforce_minimum_maze_density(rooms: dict, hub_id: str, connector_id: str, rng: random.Random, floor: int) -> None:
+    """
+    Hard invariant (2026-09-13, per Coffee: "i want multiple paths and i
+    want them connected to make interesting layouts that are RNG (not a
+    straight line EVER)"). `_grow_wing_forks` and `_add_loop_back_
+    connections` both only fire probabilistically, and loop-back
+    specifically depends on incidental post-placement grid adjacency --
+    direct measurement (300 real floor generations, after the wiggled-
+    layout fix above) found ~68% had ZERO real grid-adjacent candidate
+    pairs at all, not just an unlucky chance roll. This makes "many
+    paths, connected, never a straight line" a real guarantee instead
+    of a probability: after everything else has run, keep forcing extra
+    structure until the floor clears a real, floor-scaled minimum on
+    BOTH real junctions and at least one real cycle -- a floor with
+    forks but zero cycles is still just a branchier TREE, not a real
+    maze with actual multiple routes between two points.
+
+    Three escalating strategies, tried in order every iteration, all
+    guaranteed to only ever ADD a redundant path (never remove or lock
+    one), so none of them need their own solvability check:
+    1. A direct grid-adjacent connection -- the exact same candidate
+       shape `_add_loop_back_connections` already searches for, just
+       taken unconditionally instead of gated behind its own chance
+       roll. Cheap and correct, but frequently finds nothing (see
+       above).
+    2. An "elbow" bridge: place ONE brand-new connector room in a free
+       cell that's cardinally adjacent to BOTH of two existing,
+       unconnected, ungated rooms. Guaranteed renderable (placed
+       exactly like any other room via a real `grid_position`, so
+       map_render's per-edge wall drawing needs zero special-casing)
+       and doesn't depend on two EXISTING rooms happening to already be
+       adjacent -- only that a free cell exists near both, true on the
+       overwhelming majority of real generated floors.
+    3. Last resort (should be exceedingly rare given strategy 2's own
+       broad search): force one more extra room off an existing room,
+       preferring one that already has 2+ connections (so it becomes a
+       real junction immediately) -- guarantees real forward progress
+       every iteration even in a pathological seed with no free cell
+       anywhere near an eligible pair.
+    """
+    min_junctions = min(_MIN_JUNCTIONS_BASE + floor // 15, _MIN_JUNCTIONS_CAP)
+    bridge_index = 0
+    for _ in range(_MAZE_ENFORCEMENT_MAX_ITERATIONS):
+        junctions, cycles = _junction_and_cycle_counts(rooms, hub_id)
+        if junctions >= min_junctions and cycles >= 1:
+            return
+        excluded = _rooms_shadowed_by_a_real_gate(rooms, hub_id, connector_id)
+        by_cell = {(r["grid_position"]["x"], r["grid_position"]["y"]): rid for rid, r in rooms.items()}
+        eligible = [rid for rid in rooms if rid not in excluded]
+        if not eligible:
+            # Real edge case found via direct measurement: if a floor's
+            # OWN two (minimum) branch roots both happened to get gated
+            # (the mandatory gate plus an independent optional branch
+            # gate, each locking one of the hub's few real edges), the
+            # hub has ZERO plain open connections left -- `_rooms_
+            # shadowed_by_a_real_gate`'s own BFS (deliberately, safely
+            # conservative: only ever walks OPEN `connections`) then
+            # marks literally every other room unreachable, leaving
+            # nothing eligible for either strategy above. A brand-new
+            # room straight off the hub is always safe regardless (a
+            # fresh edge to a fresh room can never bypass an existing
+            # gate) -- added directly here, then the loop re-evaluates
+            # from scratch so this new room becomes real, eligible
+            # content for the strategies above on a later pass.
+            filler_theme = {"room_names": ["A Rough-Hewn Alcove"], "room_descriptions": ["Bare stone, recently disturbed."]}
+            new_room, new_room_id = _new_side_room(floor, hub_id, len(rooms), [], None, rng, filler_theme)
+            rooms[hub_id].setdefault("connections", []).append(new_room_id)
+            rooms[new_room_id] = new_room
+            hx, hy = rooms[hub_id]["grid_position"]["x"], rooms[hub_id]["grid_position"]["y"]
+            for dx, dy in _GRID_DIRECTIONS:
+                if (hx + dx, hy + dy) not in by_cell:
+                    new_room["grid_position"] = {"x": hx + dx, "y": hy + dy}
+                    break
+            else:
+                for dx, dy in _spiral_cells():
+                    if (hx + dx, hy + dy) not in by_cell:
+                        new_room["grid_position"] = {"x": hx + dx, "y": hy + dy}
+                        break
+            continue
+
+        direct_candidates = []
+        for rid in eligible:
+            room = rooms[rid]
+            x, y = room["grid_position"]["x"], room["grid_position"]["y"]
+            for dx, dy in _GRID_DIRECTIONS:
+                nb = by_cell.get((x + dx, y + dy))
+                if nb is None or nb in excluded:
+                    continue
+                if (
+                    nb in room.get("connections", []) or nb in room.get("warps", [])
+                    or nb in room.get("locked_connections", {}) or rid in rooms[nb].get("locked_connections", {})
+                ):
+                    continue
+                direct_candidates.append((rid, nb))
+        if direct_candidates:
+            a, b = rng.choice(direct_candidates)
+            rooms[a].setdefault("connections", []).append(b)
+            rooms[b].setdefault("connections", []).append(a)
+            continue
+
+        placed_bridge = False
+        shuffled = list(eligible)
+        rng.shuffle(shuffled)
+        for a in shuffled:
+            ax, ay = rooms[a]["grid_position"]["x"], rooms[a]["grid_position"]["y"]
+            for dxA, dyA in _GRID_DIRECTIONS:
+                mid = (ax + dxA, ay + dyA)
+                if mid in by_cell:
+                    continue
+                for dxB, dyB in _GRID_DIRECTIONS:
+                    b = by_cell.get((mid[0] + dxB, mid[1] + dyB))
+                    if b is None or b == a or b in excluded or b in rooms[a].get("connections", []):
+                        continue
+                    bridge_id = f"f{floor}_bridge{bridge_index}"
+                    bridge_index += 1
+                    rooms[bridge_id] = {
+                        "id": bridge_id, "floor": floor, "name": "A Narrow Cut-Through",
+                        "description": "A rough, unplanned passage -- like something forced its own way between two older halls.",
+                        "connections": [a, b], "monsters": [], "modifier": None,
+                        "grid_position": {"x": mid[0], "y": mid[1]},
+                    }
+                    rooms[a].setdefault("connections", []).append(bridge_id)
+                    rooms[b].setdefault("connections", []).append(bridge_id)
+                    placed_bridge = True
+                    break
+                if placed_bridge:
+                    break
+            if placed_bridge:
+                break
+        if placed_bridge:
+            continue
+
+        preferred = [rid for rid in eligible if len(rooms[rid].get("connections", [])) >= 2] or eligible
+        parent_id = rng.choice(preferred)
+        filler_theme = {"room_names": ["A Rough-Hewn Alcove"], "room_descriptions": ["Bare stone, recently disturbed."]}
+        new_room, new_room_id = _new_side_room(floor, parent_id, len(rooms), [], None, rng, filler_theme)
+        rooms[parent_id].setdefault("connections", []).append(new_room_id)
+        rooms[new_room_id] = new_room
+        # This room is created AFTER _assign_grid_positions already ran
+        # (same real gap `generate_segment`'s own gate-room placement
+        # already handles below -- see its own comment) -- give it a
+        # real position of its own: a free cell next to its real
+        # parent, or the nearest free cell on a spiral centered there.
+        px, py = rooms[parent_id]["grid_position"]["x"], rooms[parent_id]["grid_position"]["y"]
+        for dx, dy in _GRID_DIRECTIONS:
+            if (px + dx, py + dy) not in by_cell:
+                new_room["grid_position"] = {"x": px + dx, "y": py + dy}
+                break
+        else:
+            for dx, dy in _spiral_cells():
+                if (px + dx, py + dy) not in by_cell:
+                    new_room["grid_position"] = {"x": px + dx, "y": py + dy}
+                    break
+
+
 def _milestone_item_for_floor(floor: int) -> str:
     for lo, hi, item_id in _MILESTONE_ITEM_BANDS:
         if lo <= floor <= hi:
@@ -922,6 +1197,43 @@ def _new_side_room(floor: int, hub_id: str, index: int, pool: list[str], modifie
             "gold": (rng.randint(20, 80) * floor) * (2 if bountiful else 1),
         })
     return room, room_id
+
+
+def _grow_wing_forks(
+    rooms: dict, room_id: str, floor: int, next_index: list[int],
+    pool: list[str], modifier: str | None, rng: random.Random, theme: dict, depth: int = 0,
+) -> None:
+    """
+    Real maze topology (2026-09-13, see `_WING_FORK_CHANCE`'s own
+    module-level docstring for the full research this closes):
+    recursively rolls a chance for `room_id` to sprout a genuine side
+    fork -- 1-3 extra rooms that can themselves fork again, up to
+    `_WING_FORK_DEPTH_MAX` levels deep. Pure bonus content, deliberately
+    NEVER appended to a `branch_chains` entry -- every Phase L5
+    mechanic keyed off that flat spine list (gates, mesh, convergence,
+    tail-merge, all of which only ever touch a chain's own `[0]`/`[-1]`)
+    stays completely unaffected; this only adds real crossroads a
+    player can wander into and back out of. `next_index` is a real
+    mutable single-element list (not a plain int) so every recursive
+    call shares one real, always-increasing counter -- guarantees every
+    room id on this floor stays unique regardless of how deep or how
+    many times forking recurses.
+    """
+    if depth >= _WING_FORK_DEPTH_MAX:
+        return
+    if rng.random() >= _scaled_chance(_WING_FORK_CHANCE, floor, 0.0015, 0.5):
+        return
+    fork_len = rng.choices(*_WING_FORK_ROOM_WEIGHTS)[0]
+    parent_id = room_id
+    for _ in range(fork_len):
+        fork_room, fork_room_id = _new_side_room(floor, parent_id, next_index[0], pool, modifier, rng, theme)
+        next_index[0] += 1
+        rooms[parent_id]["connections"].append(fork_room_id)
+        rooms[fork_room_id] = fork_room
+        parent_id = fork_room_id
+        # A fork can itself fork again -- real hierarchical wings, not
+        # a single extra side-room bolted onto the spine.
+        _grow_wing_forks(rooms, parent_id, floor, next_index, pool, modifier, rng, theme, depth + 1)
 
 
 def _build_checkpoint_room(floor: int, hub_id: str, rng: random.Random, theme: dict) -> dict:
@@ -1036,10 +1348,10 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
     num_branch_roots = rng.randint(_SIDE_ROOM_COUNT_RANGE[0] + (2 if checkpoint else 0), side_room_max)
     room_ids = []
     branch_chains = []
-    next_index = 0
+    next_index = [0]  # a real mutable box (see _grow_wing_forks) -- shared with the fork pass just below
     for _ in range(num_branch_roots):
-        room, room_id = _new_side_room(floor, hub_id, next_index, pool, modifier, rng, theme)
-        next_index += 1
+        room, room_id = _new_side_room(floor, hub_id, next_index[0], pool, modifier, rng, theme)
+        next_index[0] += 1
         hub["connections"].append(room_id)
         rooms[room_id] = room
         room_ids.append(room_id)
@@ -1058,13 +1370,27 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             # _new_side_room's own 2nd positional param is only ever used
             # to set "connections": [that_id] -- passing the real parent
             # (not hub_id) is what actually builds a genuine deeper path.
-            deep_room, deep_room_id = _new_side_room(floor, parent_id, next_index, pool, modifier, rng, theme)
-            next_index += 1
+            deep_room, deep_room_id = _new_side_room(floor, parent_id, next_index[0], pool, modifier, rng, theme)
+            next_index[0] += 1
             rooms[parent_id]["connections"].append(deep_room_id)
             rooms[deep_room_id] = deep_room
             chain.append(deep_room_id)
             parent_id = deep_room_id
         branch_chains.append(chain)
+
+    # Real maze topology (2026-09-13, see `_WING_FORK_CHANCE`'s own
+    # module-level docstring): grow real internal forks off EVERY spine
+    # room in EVERY branch just built (root included) -- turns each
+    # branch into a real "wing" with its own crossroads, not a flat
+    # spoke. Deliberately a SEPARATE pass, run only after all spine
+    # chains above are fully built, so a fork room can never end up
+    # inside a `chain` list itself (forks are added straight to
+    # `rooms`, never appended to `chain`) -- every Phase L5 mechanic
+    # below that keys off `branch_chains`/`chain[0]`/`chain[-1]` is
+    # completely unaffected by anything this pass adds.
+    for chain in branch_chains:
+        for spine_room_id in chain:
+            _grow_wing_forks(rooms, spine_room_id, floor, next_index, pool, modifier, rng, theme)
 
     # The main path: the single longest branch leads to the real stairs
     # (the researched technique's/every reference map's own shape -- real content sits
@@ -1480,6 +1806,46 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         # room this pass just locked keeps them from compounding an
         # unrelated puzzle onto a room the party can't reach yet.
         room_ids = [rid for rid in room_ids if rid != gate_room_id]
+
+    # Real "visible-but-locked tease" (2026-09-13, per Coffee's own
+    # backtracking ask, a reference wing-and-item dungeon's own signature beat: the
+    # treasure chest sitting right at the entrance is glimpsed on the
+    # very first visit but can't be opened until its real key is found
+    # deep in a completely DIFFERENT branch -- distinct from every
+    # other gate in this generator in that the REWARD is seen FIRST,
+    # before the player has any way to solve it, rather than the lock
+    # being discovered only once its own source is already in hand.
+    # Deliberately placed at a branch ROOT (glimpsed the moment a
+    # player steps off the hub, not buried deep), with its real key
+    # source at a DIFFERENT branch's own TAIL (a genuine walk-there-
+    # and-back-again beat). Reuses `labyrinth_floor_key`/`guaranteed_
+    # key_drop` -- the exact same item and bot.py hook the mandatory
+    # "key" gate already uses -- so this needs zero new plumbing; a
+    # floor rolling both simply needs two real keys instead of one,
+    # never ambiguous since each chest/door gets its own distinct name.
+    if len(other_chains) >= 2 and rng.random() < _scaled_chance(_ENTRANCE_TEASE_CHANCE, floor, 0.001, 0.4):
+        tease_eligible = [c for c in other_chains if c is not gated_chain]
+        if len(tease_eligible) >= 2:
+            tease_chain, tease_source_chain = rng.sample(tease_eligible, 2)
+            tease_room_id = tease_chain[0]
+            tease_source_room_id = tease_source_chain[-1]
+            tease_chest_id = f"f{floor}_tease_chest"
+            loot = {"greater_healing_potion": rng.randint(1, 2)}
+            dungeon_audit.maybe_add_spell_tonic_to_loot(loot, rng)
+            rooms[tease_room_id].setdefault("lockables", []).append({
+                "id": tease_chest_id, "kind": "chest", "name": "a real, sturdy lockbox, sealed tight",
+                "requires_key_item": "labyrinth_floor_key", "consume_key": True,
+                "loot": loot, "gold": rng.randint(30, 90) * floor,
+            })
+            rooms[tease_room_id]["description"] += " A real, sturdy lockbox sits right here, sealed tight -- whatever opens it clearly isn't anywhere nearby."
+            if rng.random() < 0.5 and rooms[tease_source_room_id].get("monsters"):
+                rooms[tease_source_room_id]["guaranteed_key_drop"] = True
+                rooms[tease_source_room_id]["description"] += " Something here looks like it might be carrying something worth taking."
+            else:
+                rooms[tease_source_room_id].setdefault("lockables", []).append({
+                    "id": f"f{floor}_tease_key_cache", "kind": "chest", "name": "a small, dusty lockbox",
+                    "loot": {"labyrinth_floor_key": 1}, "gold": rng.randint(20, 60),
+                })
 
     # Real pressure-plate gate (2026-09-03, per Coffee: "look at the
     # dead ends... a grid style map with multiple paths" -- confirmed
@@ -2012,7 +2378,7 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             })
             rooms[tail_id].setdefault("locked_connections", {})[hub_id] = lever_id
 
-    _assign_grid_positions(rooms, hub_id)
+    _assign_grid_positions(rooms, hub_id, rng)
     _add_loop_back_connections(rooms, hub_id, connector["id"], rng, floor, warp_endpoint_ids)
 
     # Real Phase L5 "Advanced Dungeons" v3 (2026-09-05, per Coffee:
@@ -2077,6 +2443,15 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
             rooms[tail_b]["connections"].append(tail_a)
             rooms[tail_a]["description"] += " A real passage leads on from here, deeper into the floor."
             rooms[tail_b]["description"] += " A real passage leads on from here, deeper into the floor."
+
+    # Real hard invariant (2026-09-13, see `_enforce_minimum_maze_
+    # density`'s own docstring): everything above only ever fires
+    # probabilistically -- this guarantees "many paths, connected,
+    # never a straight line" instead of merely making it likely.
+    # Deliberately runs BEFORE the warp-revalidation block just below,
+    # not after -- any edge this adds could itself shrink a real warp's
+    # distance, exactly the case that revalidation exists to catch.
+    _enforce_minimum_maze_density(rooms, hub_id, connector["id"], rng, floor)
 
     # Real, general fix (2026-09-08, found running the full suite right
     # after enabling the mid-branch gate/key-mesh on ordinary
