@@ -15042,6 +15042,163 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 break
         self.assertTrue(rolled_level2, "expected at least one level-2 spell across 40 real rolls at 50% mastery")
 
+    async def test_enchant_sharpen_recast_replaces_instead_of_stacking(self):
+        """
+        Real audit fix (2026-09-13, Coffee: "do 1 and 2" on a proposed
+        follow-up to v1.27.586's elemental-retype redesign): Sharpen's
+        elemental_damage_bonus_pct is a single scalar _apply_affix
+        ADDS onto with every stored affix entry -- before this fix,
+        recasting Sharpen twice on the same weapon left TWO stored
+        affix entries, so the pct doubled (30% at 1% mastery, not 15%).
+        A recast must replace, not add a second contribution.
+        """
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        make_basic_character(950940, "SharpenRecaster", char_class="Fighter", current_location="crossroads_tavern")
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950940, -999, item_id, 1)
+        for _ in range(2):
+            db.add_item(950940, -999, "iron_ore", 2)
+            db.add_item(950940, -999, "sulfur_dust", 1)
+            sink = []
+            update = FakeUpdate(950940, f"enchant my {base_weapon['name']} with sharpen", sink)
+            with patch("bot.roll_percentage_check", return_value=False), \
+                 patch("bot.narrate_skill_check", return_value="You work the blade's edge."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+                await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with sharpen")
+        updated_item = db.materialize_item_instance(item_id)
+        self.assertEqual(updated_item["elemental_damage_bonus_pct"], 15)  # NOT 30 -- second cast replaces the first
+
+    async def test_enchant_ward_recast_same_element_replaces_instead_of_stacking(self):
+        """
+        Same audit, the Warding side: re-casting enchant_frost_ward on
+        the SAME item used to append a fresh {"damage_type": "cold",
+        "value": 50} entry every time with no cap, letting ONE item
+        alone reach the 100%/150% nullify-or-overheal threshold that's
+        supposed to require collecting several different equipped
+        items (see rules/crafting.py's own enchant_flame_ward
+        docstring). A recast of the SAME element on the SAME item must
+        replace, not add a second entry.
+        """
+        from unittest.mock import patch
+        from rules.item_generator import generate_armor
+        make_basic_character(950941, "WardRecaster", char_class="Wizard", current_location="crossroads_tavern", known_spells=["ray_of_frost"])
+        base_armor = generate_armor(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_armor["type"], name=base_armor["name"], rarity=base_armor["rarity"],
+            price=base_armor["price"], base_stats={k: v for k, v in base_armor.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950941, -999, item_id, 1)
+        for _ in range(2):
+            db.add_item(950941, -999, "moonpetal", 2)
+            db.add_item(950941, -999, "silverleaf_herb", 2)
+            sink = []
+            update = FakeUpdate(950941, f"enchant my {base_armor['name']} with frost ward", sink)
+            with patch("bot.roll_percentage_check", return_value=False), \
+                 patch("bot.narrate_skill_check", return_value="Cold seeps into the weave."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+                await bot._do_enchant_item(update, f"enchant my {base_armor['name']} with frost ward")
+        updated_item = db.materialize_item_instance(item_id)
+        self.assertEqual(updated_item["elemental_resistances"], [{"damage_type": "cold", "value": 50}])
+
+    async def test_enchant_ward_different_elements_on_same_item_coexist(self):
+        """A frost ward and a flame ward on the SAME item are a real, intended combo (cross-element defense) -- the same-element replace fix above must never touch a DIFFERENT element's ward."""
+        from unittest.mock import patch
+        from rules.item_generator import generate_armor
+        make_basic_character(
+            950942, "TwoElementWarder", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["ray_of_frost", "fire_bolt"],
+        )
+        base_armor = generate_armor(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_armor["type"], name=base_armor["name"], rarity=base_armor["rarity"],
+            price=base_armor["price"], base_stats={k: v for k, v in base_armor.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950942, -999, item_id, 1)
+        for enchant_text, mats in (
+            (f"enchant my {base_armor['name']} with frost ward", {"moonpetal": 2, "silverleaf_herb": 2}),
+            (f"enchant my {base_armor['name']} with flame ward", {"sulfur_dust": 2, "iron_ore": 1}),
+        ):
+            for mid, qty in mats.items():
+                db.add_item(950942, -999, mid, qty)
+            sink = []
+            update = FakeUpdate(950942, enchant_text, sink)
+            with patch("bot.roll_percentage_check", return_value=False), \
+                 patch("bot.narrate_skill_check", return_value="The weave hardens."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+                await bot._do_enchant_item(update, enchant_text)
+        updated_item = db.materialize_item_instance(item_id)
+        self.assertEqual(
+            {(e["damage_type"], e["value"]) for e in updated_item["elemental_resistances"]},
+            {("cold", 50), ("fire", 50)},
+        )
+
+    async def test_enchant_higher_guild_tier_ward_replaces_lower_tier_same_element(self):
+        """Casting the Enchanters' Guild's enchant_grand_ward (100% cold) on an item already carrying the base-tier enchant_frost_ward (50% cold) reads as a natural upgrade -- the old 50% entry is replaced, not left stacked underneath the new 100%."""
+        from unittest.mock import patch
+        from rules.item_generator import generate_armor
+        make_basic_character(
+            950943, "WardUpgrader", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["ray_of_frost"],
+        )
+        db.update_character(950943, -999, guild="enchanters_guild", rebirth_count=2)
+        base_armor = generate_armor(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_armor["type"], name=base_armor["name"], rarity=base_armor["rarity"],
+            price=base_armor["price"], base_stats={k: v for k, v in base_armor.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950943, -999, item_id, 1)
+        db.add_item(950943, -999, "moonpetal", 2)
+        db.add_item(950943, -999, "silverleaf_herb", 2)
+        sink = []
+        update = FakeUpdate(950943, f"enchant my {base_armor['name']} with frost ward", sink)
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="Cold seeps into the weave."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_enchant_item(update, f"enchant my {base_armor['name']} with frost ward")
+        db.add_item(950943, -999, "moonpetal", 6)
+        db.add_item(950943, -999, "silverleaf_herb", 4)
+        db.add_item(950943, -999, "glimmerdeep_moss", 2)
+        sink2 = []
+        update2 = FakeUpdate(950943, f"enchant my {base_armor['name']} with grand ward", sink2)
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="A greater cold ward takes hold."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_enchant_item(update2, f"enchant my {base_armor['name']} with grand ward")
+        updated_item = db.materialize_item_instance(item_id)
+        self.assertEqual(updated_item["elemental_resistances"], [{"damage_type": "cold", "value": 100}])
+
+    async def test_enchant_masters_focus_recast_replaces_instead_of_stacking(self):
+        """Same audit: enchant_masters_focus (Enchanters' Guild ladder, profession_bonus) used to let repeated recasts on one ring stack its alchemy bonus forever -- a recast now replaces the prior copy."""
+        from unittest.mock import patch
+        make_basic_character(950944, "FocusRecaster", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(950944, -999, guild="enchanters_guild", rebirth_count=1)
+        # Masters focus applies to ring/amulet/wondrous, not plain armor -- build a generated ring instance directly.
+        item_id = db.create_item_instance(
+            item_type="ring", name="Test Ring", rarity="common", price=10,
+            base_stats={"type": "ring"}, affixes=[],
+        )
+        db.add_item(950944, -999, item_id, 1)
+        for _ in range(2):
+            db.add_item(950944, -999, "moonpetal", 4)
+            db.add_item(950944, -999, "glimmerdeep_moss", 2)
+            sink = []
+            update = FakeUpdate(950944, "enchant my Test Ring with masters focus", sink)
+            with patch("bot.roll_percentage_check", return_value=False), \
+                 patch("bot.narrate_skill_check", return_value="Power settles into the band."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+                await bot._do_enchant_item(update, "enchant my Test Ring with masters focus")
+        updated_item = db.materialize_item_instance(item_id)
+        self.assertEqual(updated_item["profession_bonuses"], [{"profession": "alchemy", "value": 3}])
+
     async def test_masterwork_craft_static_recipe_grants_bonus_yield(self):
         """Real feature (2026-08-11, per Coffee: alchemy/cooking need this mechanic too): a masterwork roll on a static recipe crafts +1 extra unit."""
         from unittest.mock import patch

@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.590] — fix: extend the enchant-restack cap to Warding and the Enchanters' Guild ladder
+
+Follow-up audit, per Coffee ("do 1 and 2" on a proposed follow-up to
+v1.27.586's elemental-retype redesign): the same unbounded same-item
+restack exploit that redesign fixed for Flame/Frost/etc. was still
+live for Warding and 2 of the Enchanters' Guild ladder's own recipes,
+just on defense/utility instead of offense.
+
+Confirmed and fixed: re-casting the SAME numeric ward
+(`enchant_flame_ward`/`enchant_frost_ward`/`enchant_spark_ward`/
+`enchant_stone_ward`, plus the guild ladder's own `enchant_greater_
+ward`/`enchant_grand_ward`) onto the SAME item appended a fresh
+`elemental_resistance` entry every time with no cap, letting ONE item
+alone reach the 100%/150% nullify-or-overheal threshold that's
+supposed to require collecting several different equipped items.
+`enchant_masters_focus` (guild ladder, `profession_bonus`) had the
+identical gap. `enchant_sharpen` (base tier, `elemental_damage_bonus`)
+turned out to have it too, found during this same audit — a single
+scalar value that was still silently ADDING onto itself with every
+recast.
+
+`db.enchant_item_instance` gains an optional `replace_match` filter
+alongside the existing `replace_kinds`, so a recast only replaces a
+prior affix that ALSO matches on the given field (e.g. `damage_type`)
+— re-casting a cold ward now only ever replaces a PRIOR cold ward on
+that same item, never a fire one already there, and casting a higher
+guild-tier ward of the same element (`enchant_grand_ward`'s 100% cold
+replacing an old `enchant_frost_ward`'s 50%) reads as a natural
+upgrade. Cross-item stacking (the actual intended design — several
+different equipped items each contributing their own ward) is
+completely untouched. `enchant_warding`'s flat boolean resistance and
+`enchant_godsforged_ward`'s `ignore_resistance` flag were both already
+naturally self-capping and needed no change; `forge_magic_upgrade`'s
+`ability_bonus` stays a separate, untouched mechanic per Coffee's own
+prior scoping.
+
 ## [1.27.589] — fix: skill-check narration could sound like a failure despite a real success
 
 Follow-up to v1.27.588's banner fix, same root screenshot: the AI

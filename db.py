@@ -1687,7 +1687,10 @@ def forge_item_instance(item_id: str) -> tuple[bool, str, dict | None]:
     return True, f"The {forged_item['name']} is reforged into a real {next_tier.replace('_', ' ')}!", forged_item
 
 
-def enchant_item_instance(item_id: str, affix: dict, replace_kinds: list[str] | None = None) -> tuple[bool, str, dict | None]:
+def enchant_item_instance(
+    item_id: str, affix: dict, replace_kinds: list[str] | None = None,
+    replace_match: dict | None = None,
+) -> tuple[bool, str, dict | None]:
     """
     Enchanting/imbuing (Phase 7): appends ONE new affix, from the exact
     same shared vocabulary _apply_affix already understands, to an
@@ -1706,6 +1709,28 @@ def enchant_item_instance(item_id: str, affix: dict, replace_kinds: list[str] | 
     append-only behavior below is otherwise unchanged and still used
     by every other enchant/forge path, which deliberately still allows
     stacking -- only the elemental retype family got this treatment).
+
+    `replace_match` (2026-09-13, extending the same fix to Warding/the
+    Enchanters' Guild ladder, per Coffee: "do 1 and 2" on a proposed
+    audit): a real, confirmed same-item unbounded-restack exploit,
+    structurally identical to the elemental_damage one above but for
+    defense -- re-casting the SAME numeric ward (e.g. enchant_frost_
+    ward) onto the SAME item repeatedly appended a fresh {"damage_
+    type": "cold", "value": 50} entry every time with no cap, so ONE
+    ring alone could reach the 100%/150% nullify-or-overheal threshold
+    that's supposed to require collecting SEVERAL different items (see
+    enchant_flame_ward's own docstring in rules/crafting.py). Plain
+    `replace_kinds=["elemental_resistance"]` alone would be too broad,
+    though -- it would also wipe a DIFFERENT damage-type ward already
+    on the same item (a shield legitimately carrying both a frost_ward
+    AND a flame_ward is intended, real cross-element defense). This
+    extra, optional filter narrows the match to affixes ALSO matching
+    every key/value pair given here (e.g. {"damage_type": "cold"}) --
+    so recasting a cold ward only ever replaces a PRIOR cold ward on
+    that same item, never a fire one, and casting a higher guild-tier
+    ward of the same element (enchant_grand_ward's 100% cold replacing
+    an old enchant_frost_ward's 50%) reads as a natural upgrade, not a
+    separate stack.
     """
     if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
         return False, "Only a real generated magic item can be enchanted.", None
@@ -1722,7 +1747,13 @@ def enchant_item_instance(item_id: str, affix: dict, replace_kinds: list[str] | 
             return False, "That item no longer exists.", None
         affixes = json.loads(row["affixes"])
         if replace_kinds:
-            affixes = [a for a in affixes if a.get("kind") not in replace_kinds]
+            def _replaced(a: dict) -> bool:
+                if a.get("kind") not in replace_kinds:
+                    return False
+                if replace_match:
+                    return all(a.get(k) == v for k, v in replace_match.items())
+                return True
+            affixes = [a for a in affixes if not _replaced(a)]
         affixes.append(affix)
         conn.execute(
             "UPDATE item_instances SET affixes = ? WHERE instance_id = ?",

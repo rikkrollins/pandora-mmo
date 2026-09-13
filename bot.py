@@ -23474,8 +23474,10 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     # elemental_roll's own docstring for the full mechanic. Scoped to
     # exactly the 9 real "elemental_damage" kind recipes -- Warding/
     # Sharpen/Arcana/the Enchanters' Guild ladder stay player-chosen
-    # and keep their existing stacking behavior, unchanged, per
-    # Coffee's own explicit scoping.
+    # (2026-09-13: their own same-item unbounded-restack gap was
+    # separately fixed further down this function, via replace_kinds/
+    # replace_match -- see the comment right before this function's own
+    # final db.enchant_item_instance call).
     if recipe["affix"].get("kind") == "elemental_damage":
         await _do_enchant_item_elemental_roll(update, character, item_id, item, text)
         return
@@ -23595,7 +23597,41 @@ async def _do_enchant_item(update: Update, text: str) -> None:
         else:
             masterwork_note = " — a masterwork working!"
 
-    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(item_id, affix)
+    # Real audit fix (2026-09-13, per Coffee: "do 1 and 2" on a
+    # proposed follow-up to v1.27.586's elemental-retype redesign):
+    # Warding and the Enchanters' Guild ladder had the identical
+    # same-item unbounded-restack exploit the elemental retype family
+    # was fixed for, just on defense/utility affixes instead of
+    # offense -- see db.enchant_item_instance's own updated docstring
+    # for the full mechanic. Every numeric ward (elemental_resistance)
+    # now replaces a same-item PRIOR ward of the SAME damage_type only
+    # (a different element's ward on the same item is untouched, and a
+    # higher guild-tier ward of the same element cleanly upgrades the
+    # old one); enchant_masters_focus (profession_bonus) now replaces
+    # its own prior copy the same way materials/mastery scaling already
+    # governs its magnitude, rather than letting repeated recasts on
+    # one ring stack it forever; enchant_sharpen (elemental_damage_
+    # bonus) gets the same treatment for the identical reason -- it's a
+    # single scalar value, not a list, but was still silently ADDING
+    # onto itself with every recast before this fix, since _apply_affix
+    # accumulates it at materialize time from however many raw affix
+    # entries are actually stored. enchant_warding's own flat boolean
+    # "resistance" kind and enchant_godsforged_ward's "ignore_
+    # resistance" flag were both already naturally self-capping (a
+    # Python set/bool can't stack), so neither needed this. forge_
+    # magic_upgrade's ability_bonus stays untouched -- a separate
+    # mechanic, per Coffee's own prior "separate from forging" scoping.
+    replace_kinds = None
+    replace_match = None
+    if affix["kind"] == "elemental_resistance":
+        replace_kinds = ["elemental_resistance"]
+        replace_match = {"damage_type": affix["damage_type"]}
+    elif affix["kind"] in ("profession_bonus", "elemental_damage_bonus"):
+        replace_kinds = [affix["kind"]]
+
+    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(
+        item_id, affix, replace_kinds=replace_kinds, replace_match=replace_match,
+    )
     message += f"\n✨ {enchant_msg}{masterwork_note}"
     await _safe_send(update, message)
     if enchanted_item:
@@ -23611,9 +23647,11 @@ async def _do_enchant_item_elemental_roll(update: Update, character: dict, item_
     the 9 real ENCHANT_RECIPES entries whose affix kind is
     "elemental_damage" (Flame/Frost/Force/Psychic/Necrotic/Radiant/
     Poison/Lightning/Earth) -- Warding/Sharpen/Arcana/the Enchanters'
-    Guild ladder are unaffected, stay player-chosen via _do_enchant_
-    item's own normal path, and keep their existing (still-stacking)
-    behavior, per Coffee's own explicit scoping.
+    Guild ladder are unaffected by the RNG part, stay player-chosen via
+    _do_enchant_item's own normal path (their own separate same-item
+    unbounded-restack gap was fixed there directly, 2026-09-13, not
+    here -- Arcana was already naturally non-stacking, a flat field
+    overwrite rather than an accumulating one).
 
     Real design decisions confirmed before building this (2026-09-11):
     the recipe is rolled FIRST, from whichever of these 9 the caster
