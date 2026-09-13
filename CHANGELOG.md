@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.600] — fix: quest journal, achievements, professions, and affinity screens blocked deep in the Labyrinth
+
+Follow-up to v1.27.599's Blacksmith/Alchemy fix: a systematic
+cross-check of every real intent action against the Labyrinth's own
+allowlist turned up 4 more of the same class of gap — `check_quests`,
+`check_achievements`, `check_professions`, and `check_affinity` were
+all missing, none ever excluded for a real reason. The first two are
+the most notable: both already had dedicated Labyrinth-progress
+content built in (the quest journal's own "Labyrinth" objective
+section, and the achievements screen's Solo/party depth line, from
+Solo Mode v1.27.595) that was completely unreachable while a player
+was actually standing inside a run, since the action itself couldn't
+even be dispatched there. All 4 confirmed pure character-state reads
+with no location dependency before being added.
+
 ## [1.27.599] — fix: Blacksmith/Alchemy menus blocked deep in the Labyrinth
 
 `check_blacksmith_menu`/`check_alchemy_menu` (the Forge/Alchemy tap

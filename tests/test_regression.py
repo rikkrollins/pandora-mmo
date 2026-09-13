@@ -43473,6 +43473,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             ("check_equip_menu", "show my equip menu"),
             ("check_blacksmith_menu", "open the blacksmith menu"),
             ("check_alchemy_menu", "open the alchemy menu"),
+            ("check_quests", "check my quests"),
+            ("check_achievements", "check my achievements"),
+            ("check_professions", "check my professions"),
+            ("check_affinity", "check affinity"),
             ("check_magic", "show my magic"),
             ("check_remnants", "show my remnants"),
             ("check_story", "check my story so far"),
@@ -43498,6 +43502,40 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 any("doesn't work this deep" in s for s in sink),
                 f"{action!r} ({raw_text!r}) still hit the generic Labyrinth refusal: {sink}",
             )
+
+    async def test_check_quests_and_achievements_show_real_labyrinth_progress_from_inside_a_run(self):
+        """
+        The gate fix above only proves check_quests/check_achievements
+        clear the allowlist -- this proves the point of fixing it: both
+        already had dedicated Labyrinth-progress content built in
+        (_do_check_quests' own "Labyrinth" objective section, and
+        _labyrinth_progress_line, both from Solo Mode v1.27.595) that
+        was completely unreachable while genuinely standing in a run,
+        since neither action could even be dispatched there before now.
+        """
+        user_id, chat_id = 962208, -962208
+        make_basic_character(user_id, "LabyrinthProgressChecker", chat_id=chat_id, current_location="the_colosseum")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        character = db.get_character(user_id, chat_id)
+        # A brand new entry doesn't bump labyrinth_best_floor until a real
+        # checkpoint/descend happens -- simulate real prior progress
+        # directly, same as every other test exercising this field.
+        db.bump_labyrinth_best_floor_by_id(character["character_id"], 3)
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "check my quests", sink, chat_id=chat_id), DummyContext(),
+            {"action": "check_quests", "raw_text": "check my quests"}, "check my quests",
+        )
+        self.assertTrue(any("Objective: reach floor" in s or "waystation" in s for s in sink), sink)
+
+        sink2 = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "check my achievements", sink2, chat_id=chat_id), DummyContext(),
+            {"action": "check_achievements", "raw_text": "check my achievements"}, "check my achievements",
+        )
+        self.assertTrue(any("deepest floor reached" in s for s in sink2), sink2)
 
     async def test_stale_overworld_travel_button_never_crashes_while_in_the_labyrinth(self):
         """

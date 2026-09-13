@@ -36347,6 +36347,15 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     # audit and were simply missed. Both handlers only read character state/RECIPES/
     # recipe_requirement_gate -- never cl.get_location or CAMPAIGN["locations"] --
     # so they're Labyrinth-safe by the same test as check_menu/check_equip_menu above.
+    # Found via a systematic cross-check of ai/intent_parser.py's full valid_actions
+    # against this allowlist (2026-09-13, same day): check_quests and check_
+    # achievements were both missing despite already having dedicated Labyrinth-
+    # aware content (_do_check_quests' own "Labyrinth" objective section, and
+    # _labyrinth_progress_line's Solo/party depth line, v1.27.595) that was
+    # completely unreachable while a player was actually standing inside a run.
+    # check_professions/check_affinity are the same class of gap (pure character-
+    # state reads, confirmed to never touch cl.get_location/CAMPAIGN anywhere in
+    # their bodies) -- there was never a reason for either to be excluded.
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
@@ -36358,6 +36367,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "bench_party_member", "unbench_party_member", "check_sheet", "check_menu",
         "check_equip_menu", "check_magic", "check_remnants", "check_story", "steal", "buy",
         "check_blacksmith_menu", "check_alchemy_menu",
+        "check_quests", "check_achievements", "check_professions", "check_affinity",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",
