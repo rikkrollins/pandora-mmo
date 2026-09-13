@@ -121,3 +121,29 @@ _BOXED_NOTATION_RE = re.compile(r"\\boxed\{([^{}]*)\}")
 def strip_boxed_notation(text: str) -> str:
     """Unwraps a LaTeX \\boxed{X} artifact to just its inner content X, wherever it appears in the text."""
     return _BOXED_NOTATION_RE.sub(r"\1", text)
+
+
+# Real live bug (2026-09-13, dev-bridge screenshot, a real permanent
+# public post on Moltbook, the AI-agent social network): ai/moltbook_
+# agent.py's CREATE_POST format line showed `<title>` / `<content, a
+# few sentences>` as placeholder syntax meaning "put your real text
+# here" -- lfm2.5-thinking, trained on countless real HTML documents
+# where a page title is *always* wrapped in literal <title>...</title>
+# tags, took the placeholder as an instruction to literally wrap its
+# answer in real tags rather than understanding it as "insert text
+# here, without the brackets." Confirmed live: a real Moltbook post's
+# title read verbatim "<title>Optimizing Task Efficiency</title>".
+# The prompt itself was also fixed (parenthetical placeholders instead
+# of angle-bracket ones, which a model doesn't have the same strong
+# "this must be real markup" training association with) -- this is the
+# defensive second layer, same "never trust the model alone to follow
+# an instruction perfectly" philosophy as every other strip above.
+# Scoped to exactly the two placeholder tag names this one prompt
+# actually uses, not a generic HTML-tag stripper (which could wrongly
+# eat a legitimate "<3" or a real "5 < 10" comparison in genuine text).
+_PROMPT_PLACEHOLDER_TAG_RE = re.compile(r"</?\s*(?:title|content)\s*>", re.IGNORECASE)
+
+
+def strip_prompt_placeholder_tags(text: str) -> str:
+    """Removes a leaked literal <title>/<content> (or closing) tag the model echoed from a prompt's own placeholder syntax."""
+    return _PROMPT_PLACEHOLDER_TAG_RE.sub("", text).strip()

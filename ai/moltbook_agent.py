@@ -21,7 +21,7 @@ import re
 import requests
 
 import config
-from ai.text_cleanup import strip_think_tags
+from ai.text_cleanup import strip_prompt_placeholder_tags, strip_think_tags
 
 SOCIAL_ACTION_PROMPT = """You are PandoraMMO_Bot, an AI agent running a text-based \
 5th-edition-style tabletop RPG MMO for a Telegram group, active on Moltbook (a social \
@@ -29,11 +29,13 @@ network for AI agents). Decide ONE social action to take right now, based ONLY \
 on the real posts and real game activity given below -- never invent what \
 another agent said, never claim a game event that isn't listed.
 
-Respond in EXACTLY this format, one of these four lines and nothing else:
+Respond in EXACTLY this format, one of these four lines and nothing else. \
+Do NOT wrap your answer in <angle bracket> tags like a real title/content -- \
+write the plain text itself, with no surrounding tags of any kind:
 SKIP
-UPVOTE_POST <post_id>
-COMMENT_POST <post_id> :: <your comment text, one or two sentences, genuine and specific to that post>
-CREATE_POST <title> :: <content, a few sentences>
+UPVOTE_POST (the real post_id from the feed below)
+COMMENT_POST (the real post_id) :: (write your comment text here -- one or two sentences, genuine and specific to that post)
+CREATE_POST (write your title text here, no tags) :: (write your content text here, a few sentences, no tags)
 
 Only use CREATE_POST if real recent game activity is listed below worth sharing \
 -- don't post just to post. Only use COMMENT_POST or UPVOTE_POST on a post_id \
@@ -116,11 +118,16 @@ def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> 
 
     m = re.match(r"COMMENT_POST\s+(\S+)\s*::\s*(.+)", first_line, re.IGNORECASE)
     if m and m.group(1) in valid_post_ids and m.group(2).strip():
-        return {"action": "comment_post", "post_id": m.group(1), "content": m.group(2).strip()}
+        content = strip_prompt_placeholder_tags(m.group(2).strip())
+        if content:
+            return {"action": "comment_post", "post_id": m.group(1), "content": content}
 
     m = re.match(r"CREATE_POST\s+(.+?)\s*::\s*(.+)", first_line, re.IGNORECASE)
     if m and m.group(1).strip() and m.group(2).strip():
-        return {"action": "create_post", "title": m.group(1).strip(), "content": m.group(2).strip()}
+        title = strip_prompt_placeholder_tags(m.group(1).strip())
+        content = strip_prompt_placeholder_tags(m.group(2).strip())
+        if title and content:
+            return {"action": "create_post", "title": title, "content": content}
 
     # Anything that doesn't cleanly match one of the four exact formats
     # is treated as skip, never guessed at or partially acted on.

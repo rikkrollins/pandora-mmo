@@ -31706,6 +31706,65 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(strip_boxed_notation(r"The answer is \boxed{5} scrolls."), "The answer is 5 scrolls.")
         self.assertEqual(strip_boxed_notation("Nothing special here."), "Nothing special here.")
 
+    def test_strip_prompt_placeholder_tags_unwraps_a_leaked_title_content_tag(self):
+        """
+        Real live bug (2026-09-13, dev-bridge screenshot: a real,
+        permanent public post on Moltbook, the AI-agent social
+        network): ai/moltbook_agent.py's CREATE_POST format line showed
+        `<title>` / `<content, a few sentences>` as placeholder syntax
+        meaning "put your real text here" -- lfm2.5-thinking, trained
+        on countless real HTML documents where a page title is always
+        wrapped in literal <title>...</title> tags, took the
+        placeholder as an instruction to literally wrap its answer in
+        real tags. Confirmed live: a real post's title read verbatim
+        "<title>Optimizing Task Efficiency</title>".
+        """
+        from ai.text_cleanup import strip_prompt_placeholder_tags
+        self.assertEqual(
+            strip_prompt_placeholder_tags("<title>Optimizing Task Efficiency</title>"),
+            "Optimizing Task Efficiency",
+        )
+        self.assertEqual(strip_prompt_placeholder_tags("<content>Just some real prose.</content>"), "Just some real prose.")
+        self.assertEqual(strip_prompt_placeholder_tags("<title>Bare opening tag only"), "Bare opening tag only")
+        self.assertEqual(strip_prompt_placeholder_tags("Nothing wrapped here at all."), "Nothing wrapped here at all.")
+        # Must never eat unrelated angle-bracket text that isn't one of the two known placeholder tag names.
+        self.assertEqual(strip_prompt_placeholder_tags("5 < 10 and that's <3 cute"), "5 < 10 and that's <3 cute")
+
+    def test_moltbook_decide_social_action_strips_a_leaked_title_tag_from_a_real_create_post(self):
+        """End-to-end version of the fix above: decide_social_action's own CREATE_POST parsing must never hand a literal <title>/<content> wrapper to moltbook.create_post."""
+        from unittest.mock import patch
+        import ai.moltbook_agent as moltbook_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "CREATE_POST <title>Optimizing Task Efficiency</title> :: A manual review reveals real progress."}
+
+        with patch("ai.moltbook_agent.requests.post", return_value=FakeResponse()):
+            decision = moltbook_agent_module.decide_social_action([], ["A real quest was completed."])
+        self.assertEqual(decision["action"], "create_post")
+        self.assertEqual(decision["title"], "Optimizing Task Efficiency")
+        self.assertNotIn("<title>", decision["title"])
+        self.assertNotIn("<", decision["content"])
+
+    def test_moltbook_decide_social_action_skips_if_stripping_leaves_an_empty_title(self):
+        """A degenerate response that's ENTIRELY placeholder tags (nothing real inside) must fall through to skip, never post an empty title/content."""
+        from unittest.mock import patch
+        import ai.moltbook_agent as moltbook_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "CREATE_POST <title></title> :: <content></content>"}
+
+        with patch("ai.moltbook_agent.requests.post", return_value=FakeResponse()):
+            decision = moltbook_agent_module.decide_social_action([], ["A real quest was completed."])
+        self.assertEqual(decision["action"], "skip")
+
     def test_support_question_never_leaks_raw_boxed_notation(self):
         """The real support_agent call path applies strip_boxed_notation, not just the shared utility in isolation."""
         from unittest.mock import patch

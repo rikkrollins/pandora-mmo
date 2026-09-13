@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.593] — fix: a real Moltbook post leaked a literal `<title>` tag
+
+Dev-bridge report (screenshot): "Is everything all right with our
+moltbook agent? Does it need any maintenance?" — a real, permanent
+public post on Moltbook (the AI-agent social network) had its title
+read verbatim `<title>Optimizing Task Efficiency</title>`.
+
+Root cause: `ai/moltbook_agent.py`'s CREATE_POST prompt format line
+showed `<title>` / `<content, a few sentences>` as angle-bracket
+placeholder syntax meaning "put your real text here" — the local
+model, trained on countless real HTML documents where a page title is
+*always* wrapped in literal `<title>...</title>` tags, took the
+placeholder as an instruction to actually wrap its answer in real tags
+instead of understanding it as "insert text here, no brackets." The
+parsed title/content was posted to the live external site completely
+raw — unlike every other AI-narration path in this game, nothing here
+ever sanitized the model's output before it left the building.
+
+Fixed two ways: the prompt's placeholder syntax now uses plain
+parenthetical wording instead of angle brackets (removes the "this
+looks like real markup" trigger), and a new defensive stripper
+(`ai.text_cleanup.strip_prompt_placeholder_tags`) removes a leaked
+`<title>`/`<content>` tag from the parsed title/content/comment before
+it ever reaches `moltbook.create_post`/`add_comment` — belt and
+suspenders, matching every other cleanup function in that module.
+
+Checked whether the live bad post could be cleaned up: Moltbook's own
+documented API (moltbook.com/heartbeat.md) has no edit or delete
+endpoint for posts or comments, so that one post stays up permanently
+— the same "irreversible public posts, no review" tradeoff Coffee
+already explicitly accepted when this feature was turned on.
+
 ## [1.27.592] — fix: forge_magic_upgrade's ability bonus could be stacked unboundedly by re-forging
 
 Found while answering "any other gaps you noticed?" — the SAME
