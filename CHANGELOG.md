@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.592] — fix: forge_magic_upgrade's ability bonus could be stacked unboundedly by re-forging
+
+Found while answering "any other gaps you noticed?" — the SAME
+same-item unbounded-restack exploit fixed for Warding/the Enchanters'
+Guild ladder in v1.27.590 was also live in `forge_magic_upgrade`
+(Forge Guild, "forge my X into a magic item"), just never audited
+because it's a blacksmithing recipe, not alchemy. `db.enchant_item_
+instance` was called with no `replace_kinds` at all, so re-forging an
+already-magic item appended a SECOND `ability_bonus` affix instead of
+replacing the first — confirmed directly against the database (3
+re-forges of one weapon left 3 stacked entries), and `items.equipped_
+ability_bonus` live-sums every entry into real attack rolls and
+ability checks. That meant a player could stack an unlimited +ability
+bonus onto a single item just by repeatedly re-forging it — arguably a
+more severe exploit than the ward one, since ability scores are
+foundational to nearly every roll in the game. This recipe only ever
+rolls one ability from a single shared pool (no "different elements
+coexist" case like Warding has), so the fix is a plain
+`replace_kinds=["ability_bonus"]` — a re-forge always replaces the
+item's one prior magic upgrade with a freshly-rolled one, matching the
+original elemental-retype family's "1 enchant per item" rule.
+
 ## [1.27.591] — fix: gathering professions now actually grind toward mastery
 
 Found via a fresh feature-gap audit, per Coffee: Herbalism/Mining/

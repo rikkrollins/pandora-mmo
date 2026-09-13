@@ -23886,7 +23886,23 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
         db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
         db.add_item(update.effective_user.id, update.effective_chat.id, target_item_id, 1)
 
-    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(target_item_id, affix)
+    # Real exploit found 2026-09-13 (same audit pass that found the
+    # Warding/guild-ladder restack gap, v1.27.590): this call had NO
+    # replace_kinds at all, so re-forging the SAME already-magic item
+    # a second time appended a SECOND ability_bonus entry rather than
+    # replacing the first -- confirmed via a direct DB check (3 re-
+    # forges of one weapon left 3 stacked entries, ALL live-summed by
+    # items.equipped_ability_bonus into attack rolls/ability checks).
+    # Unlike Warding's legitimate different-element coexistence, this
+    # recipe only ever rolls ONE ability at a time from a single shared
+    # pool -- there's no "different elements can coexist" case to
+    # protect, so a plain replace_kinds (no replace_match) is correct:
+    # re-forging an item always replaces its one prior magic upgrade
+    # with a freshly-rolled one, exactly like the original elemental
+    # retype family's "only 1 enchant per item, recast rerolls" rule.
+    _ok, enchant_msg, enchanted_item = db.enchant_item_instance(
+        target_item_id, affix, replace_kinds=["ability_bonus"],
+    )
     message += f"\n✨ {enchant_msg} A surge of magic settles into it, granting +{affix['value']} {chosen_ability.title()}!{masterwork_note}"
     await _safe_send(update, message)
     if enchanted_item:

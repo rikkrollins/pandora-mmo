@@ -14539,6 +14539,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # masterwork forced True above -> round(1 * 1.5) == 2, not the plain +1.
         self.assertEqual(bonus["value"], 2)
 
+    async def test_forge_magic_item_reforge_replaces_instead_of_stacking_ability_bonus(self):
+        """
+        Real exploit found 2026-09-13 (same audit pass as the Warding/
+        guild-ladder restack fix, v1.27.590): db.enchant_item_instance
+        was called here with NO replace_kinds at all, so re-forging the
+        SAME already-magic item a second time appended a SECOND
+        ability_bonus entry rather than replacing the first -- since
+        items.equipped_ability_bonus live-sums every entry in the list
+        into real attack rolls/ability checks, this let a player stack
+        an unlimited +ability bonus onto one item just by re-forging it
+        over and over. A re-forge must always replace the item's one
+        prior magic upgrade with a freshly-rolled one, never stack a
+        second.
+        """
+        from unittest.mock import patch
+        make_basic_character(950949, "ReforgeExploiter", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(950949, -999, guild="forge_guild", level=20)
+        db.add_item(950949, -999, "longsword", 1)
+        for _ in range(2):
+            db.add_item(950949, -999, "iron_ore", 4)
+            db.add_item(950949, -999, "moonpetal", 2)
+            sink = []
+            update = FakeUpdate(950949, "forge my longsword into a magic item", sink)
+            with patch("bot.narrate_skill_check", return_value="Power surges into the blade."), \
+                 patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}), \
+                 patch("bot.roll_percentage_check", return_value=False):
+                await bot._do_forge_magic_item(update, "forge my longsword into a magic item")
+        character = db.get_character(950949, -999)
+        generated_ids = [iid for iid in character["inventory"] if iid.startswith(db.GENERATED_ITEM_ID_PREFIX)]
+        self.assertEqual(len(generated_ids), 1)
+        item = db.materialize_item_instance(generated_ids[0])
+        self.assertEqual(len(item["ability_bonuses"]), 1)  # NOT 2 -- the second forge replaces, not stacks
+
     def test_enchant_godsforged_ward_grants_ignore_resistance_to_a_real_weapon(self):
         """
         The true guild-ladder capstone: db._apply_affix's existing
