@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.596] — fix: Paladin and Ranger could never cast any of their own spells
+
+Found via a class/combat balance audit: `spells.STARTING_SPELL_SLOTS`
+correctly gives Paladin and Ranger zero spell slots at character
+level 1 (real 5E — half-casters don't gain spellcasting until level
+2), but nothing anywhere in the leveling code ever actually granted
+them their real level-2 spellcasting. Both classes were permanently
+stuck at 0/0 spell slots forever, despite already knowing real spells
+(Cure Wounds/Command/Banishment for Paladin, Hunter's Mark/
+Longstrider/Insect Plague for Ranger) from level 1 onward that they
+could structurally never cast.
+
+`db._compute_xp_updates` now grants 1 real spell slot (max and
+current) the moment a Paladin or Ranger reaches level 2, checked on
+every XP award rather than only inside the level-up branch — so a
+character who was already stuck at level 2+ before this fix shipped
+self-heals the next time they gain any XP at all, not only one leveling
+through 2 for the first time after this ships. Growth past this first
+slot is handled by the existing Universal Manipulation "Arcane
+Reserve" skill-tree pool, which was already built and already gated on
+`spell_slots_max > 0` — that gate simply could never be satisfied for
+these two classes until now.
+
 ## [1.27.595] — feat: Labyrinth Solo Mode
 
 Per Coffee: "when entering the labyrinth ask if the player wants to go

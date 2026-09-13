@@ -20723,6 +20723,72 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("burning_hands", updated["known_spells"])
         self.assertIn("fire_bolt", updated["known_spells"])  # cantrip, never pruned
 
+    # -- Real bug fix (2026-09-13, per Coffee, found via a class/combat
+    #    balance audit): Paladin/Ranger correctly start at 0 spell
+    #    slots (real 5E half-casters don't gain spellcasting until
+    #    level 2), but nothing ever actually granted them their real
+    #    level-2 spellcasting -- they were stuck at 0/0 forever despite
+    #    spells.spells_unlocked_at_level already handing them real
+    #    known_spells starting at level 1. -----------------------------
+    async def test_paladin_and_ranger_gain_a_real_spell_slot_at_level_2(self):
+        from rules.leveling import XP_THRESHOLDS
+        paladin_id, ranger_id = 950720, 950721
+        make_basic_character(paladin_id, "SlotlessPaladin", char_class="Paladin", current_location="crossroads_tavern")
+        make_basic_character(ranger_id, "SlotlessRanger", char_class="Ranger", current_location="crossroads_tavern")
+        before_paladin = db.get_character(paladin_id, -999)
+        before_ranger = db.get_character(ranger_id, -999)
+        self.assertEqual(before_paladin["spell_slots_max"], 0)
+        self.assertEqual(before_ranger["spell_slots_max"], 0)
+        # Real known_spells a real character sheet gets at level 1 (the
+        # actual visible symptom of this bug: spells they could never
+        # cast) -- make_basic_character is a raw DB helper, not the
+        # real creation handler, so it never grants these on its own;
+        # confirmed directly against the real catalog instead.
+        self.assertIn("cure_wounds", spells.spells_unlocked_at_level("paladin", 1))
+        self.assertIn("hunters_mark", spells.spells_unlocked_at_level("ranger", 1))
+
+        db.add_xp(paladin_id, -999, XP_THRESHOLDS[2])
+        db.add_xp(ranger_id, -999, XP_THRESHOLDS[2])
+        after_paladin = db.get_character(paladin_id, -999)
+        after_ranger = db.get_character(ranger_id, -999)
+        self.assertEqual(after_paladin["level"], 2)
+        self.assertEqual(after_paladin["spell_slots_max"], 1)
+        self.assertEqual(after_paladin["spell_slots_current"], 1)
+        self.assertEqual(after_ranger["level"], 2)
+        self.assertEqual(after_ranger["spell_slots_max"], 1)
+        self.assertEqual(after_ranger["spell_slots_current"], 1)
+
+    async def test_paladin_ranger_already_past_level_2_self_heals_on_next_xp_gain(self):
+        """A character who reached level 2+ BEFORE this fix shipped (permanently stuck at 0/0) must be backfilled by the very next XP award, not only one leveling through 2 for the first time after this fix."""
+        user_id = 950722
+        make_basic_character(user_id, "StuckPaladin", char_class="Paladin", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # simulates a character who reached level 2+ before this fix existed
+        stuck = db.get_character(user_id, -999)
+        self.assertEqual(stuck["level"], 5)
+        self.assertEqual(stuck["spell_slots_max"], 0)  # simulates the real pre-fix stuck state
+
+        db.add_xp(user_id, -999, 1)  # far too little to level up again -- the fix must not depend on that
+        healed = db.get_character(user_id, -999)
+        self.assertEqual(healed["level"], 5)  # confirms this wasn't a level-up side effect
+        self.assertEqual(healed["spell_slots_max"], 1)
+        self.assertEqual(healed["spell_slots_current"], 1)
+
+    async def test_other_classes_spell_slots_unaffected_by_the_paladin_ranger_fix(self):
+        from rules.leveling import XP_THRESHOLDS
+        fighter_id, wizard_id = 950723, 950724
+        make_basic_character(fighter_id, "UnaffectedFighter", char_class="Fighter", current_location="crossroads_tavern")
+        # spell_slots_max=2 explicitly -- make_basic_character is a raw
+        # DB helper, not the real creation handler, so it never applies
+        # spells.STARTING_SPELL_SLOTS on its own; this reproduces what a
+        # real Wizard's character sheet actually starts with.
+        make_basic_character(wizard_id, "UnaffectedWizard", char_class="Wizard", current_location="crossroads_tavern", spell_slots_max=2)
+        db.add_xp(fighter_id, -999, XP_THRESHOLDS[2])
+        db.add_xp(wizard_id, -999, XP_THRESHOLDS[2])
+        fighter_after = db.get_character(fighter_id, -999)
+        wizard_after = db.get_character(wizard_id, -999)
+        self.assertEqual(fighter_after["spell_slots_max"], 0)  # a real non-caster stays at 0
+        self.assertEqual(wizard_after["spell_slots_max"], 2)  # a full caster's own starting slots, untouched by this fix
+
     def test_bare_party_keyword_classified_as_check_party(self):
         """
         Found via topic-activity monitoring (2026-08-19): a bare "Party"

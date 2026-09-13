@@ -2988,6 +2988,30 @@ def _compute_xp_updates(character: dict, amount: int) -> dict:
 
     updates = {"xp": new_xp, "level": new_level, "proficiency_bonus": new_prof}
 
+    # Real bug fix (2026-09-13, per Coffee, found via a class/combat
+    # balance audit): spells.STARTING_SPELL_SLOTS correctly gives
+    # Paladin/Ranger ZERO spell slots at level 1 (real 5E: half-casters
+    # don't gain spellcasting until level 2) -- but nothing anywhere in
+    # this function ever actually granted them their real level-2
+    # spellcasting, so both classes were permanently stuck at 0/0 spell
+    # slots forever, despite spells.spells_unlocked_at_level already
+    # handing them real known_spells starting at character level 1
+    # (cure_wounds/command/banishment for Paladin, hunters_mark/
+    # longstrider/insect_plague for Ranger) that they could structurally
+    # never actually cast (bot._spend_cast_resource always fails at
+    # 0/0). Checked on EVERY xp award, not just inside the level-up
+    # branch below, so a character already sitting at level 2+ from
+    # before this fix shipped self-heals the next time they gain any
+    # XP at all, not only one leveling through 2 for the first time
+    # after this ships. Growth PAST this first slot is intentionally
+    # left to the existing Universal Manipulation "Arcane Reserve" pool
+    # (bot.py's UNIVERSAL_MANIPULATION_POOLS), which was already built
+    # and already gated on spell_slots_max > 0 -- that gate simply
+    # could never be satisfied for these two classes until now.
+    if character["char_class"].lower() in ("paladin", "ranger") and new_level >= 2 and character.get("spell_slots_max", 0) == 0:
+        updates["spell_slots_max"] = 1
+        updates["spell_slots_current"] = character.get("spell_slots_current", 0) + 1
+
     if new_level > old_level:
         con_mod = (character["constitution"] - 10) // 2
         hp_per_level = hp_gain_for_level(character["char_class"], con_mod)
