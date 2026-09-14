@@ -1443,7 +1443,25 @@ def generate_floor(campaign: dict, floor: int, rng: random.Random, pool: list[st
         # flagged for narration/map-icon use -- never an invented
         # enemy. Only rolled on non-checkpoint floors now that
         # checkpoint floors always get the real boss above instead.
-        miniboss_candidates = [rid for rid in main_chain if pool]
+        #
+        # Real live bug found and fixed (2026-09-14, live dev-bridge
+        # report: "we had jus entgered and was encountered by the
+        # whisper... the BOSS shud NOT be in the second room of the
+        # dungeon" -- confirmed via 500 real seeds at floor 3: `rng.
+        # choice(main_chain)` picked uniformly across the WHOLE main
+        # path, including its very first room past the mandatory gate
+        # -- 24% of real minibosses landed exactly one hop from the
+        # hub, directly contradicting this same comment's own "partway
+        # along the critical path" intent, and undercutting the whole
+        # real-maze-topology work (v1.27.601) that made floors actually
+        # worth exploring. Restricted to the DEEPER half of the main
+        # path (falling back to "anywhere but the very first room," and
+        # only in a genuinely 1-room-long chain does the fallback allow
+        # that first room at all) -- a real journey is now required
+        # before the fight, matching the guaranteed checkpoint boss's
+        # own placement at the path's actual far end just above.
+        deep_candidates = main_chain[len(main_chain) // 2:]  # never empty for a non-empty main_chain -- excludes at least the first room whenever the chain has 2+ rooms
+        miniboss_candidates = [rid for rid in deep_candidates if pool]
         if miniboss_candidates and rng.random() < _scaled_chance(_MINIBOSS_CHANCE, floor, 0.002, 0.6):
             miniboss_room_id = rng.choice(miniboss_candidates)
             strongest = max(pool, key=lambda mk: (campaign["monsters"].get(mk) or {}).get("hp_max", 0))

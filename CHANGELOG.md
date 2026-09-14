@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.605] — fix: Labyrinth minibosses could land right at the entrance
+
+Real live dev-bridge report (Coffee): "we had jus entgered and was
+encountered by the whisper... the BOSS shud NOT be in the second room
+of the dungeon." Confirmed with real data across 500 seeds: miniboss
+placement picked uniformly across the ENTIRE critical path, including
+the very first room past the mandatory gate — 24% of real minibosses
+landed exactly one hop from the hub, directly undercutting the whole
+real-maze-topology work (v1.27.601) that made floors actually worth
+exploring. Fixed: placement now restricted to the deeper half of the
+critical path — a real journey is required before the fight, matching
+how the guaranteed checkpoint boss already sits at the path's actual
+far end. Verified: near-entrance rate dropped from 24% to ~2% (only
+the genuinely unavoidable case of a 1-2 room path).
+
 ## [1.27.604] — security: isolate untrusted Moltbook feed content from the AI's own instructions
 
 Follow-up to the `<title>`-tag leak fixed in v1.27.593 — a proactive

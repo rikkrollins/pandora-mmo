@@ -41299,6 +41299,47 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             break
         self.assertTrue(miniboss_seen, "expected at least one miniboss room across 80 real seeds")
 
+    def test_generate_floor_never_places_a_miniboss_right_at_the_entrance(self):
+        """
+        Real live bug found and fixed (2026-09-14, dev-bridge report:
+        "we had jus entgered and was encountered by the whisper... the
+        BOSS shud NOT be in the second room of the dungeon"). Direct
+        measurement across 500 real seeds at floor 3 confirmed the root
+        cause: miniboss placement picked uniformly across the ENTIRE
+        main path, including the very first room past the mandatory
+        gate -- 24% of real minibosses landed exactly one hop from the
+        hub. Fixed by restricting placement to the deeper half of the
+        main path. This test proves the fix statistically: the real
+        near-entrance rate must now be rare (only the genuinely
+        unavoidable case of a 1-2 room main path), not routine.
+        """
+        from collections import deque
+        near_entrance = 0
+        total = 0
+        for seed in range(300):
+            floor_data = labyrinth_module.generate_floor(bot.CAMPAIGN, 3, random.Random(seed))
+            rooms = floor_data["rooms"]
+            hub_id = floor_data["hub_room_id"]
+            miniboss_room = next((rid for rid, r in rooms.items() if r.get("is_miniboss_room")), None)
+            if miniboss_room is None:
+                continue
+            total += 1
+            visited = {hub_id: 0}
+            frontier = deque([hub_id])
+            while frontier:
+                cur = frontier.popleft()
+                for nb in list(rooms[cur].get("connections", [])) + list(rooms[cur].get("locked_connections", {}).keys()):
+                    if nb not in visited:
+                        visited[nb] = visited[cur] + 1
+                        frontier.append(nb)
+            if visited.get(miniboss_room, -1) <= 1:
+                near_entrance += 1
+        self.assertGreater(total, 50, "expected plenty of real minibosses across 300 seeds")
+        self.assertLess(
+            near_entrance / total, 0.1,
+            f"{near_entrance}/{total} minibosses landed within 1 hop of the hub -- should be rare (short-chain edge case only), not routine",
+        )
+
     def test_render_labyrinth_map_gives_miniboss_and_boss_rooms_a_distinct_border(self):
         """
         Real live request (2026-09-05, per Coffee's own "Advanced
