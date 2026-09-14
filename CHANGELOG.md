@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.612] — fix: three Remnant superbosses sat right at dungeon doorsteps with zero warning
+
+Direct response to a real live playthrough report (Coffee: "we had jus
+entgered and was encountered by the whisper... why are bosses a room
+apart? the BOSS shud NOT be in the second room of the dungeon"). Audited
+The Sunken Root Caverns and its connected Stonearch Bridge approach room
+by room (67+ rooms, BFS distance + monster level per room) and found the
+exact shape of the complaint:
+
+- **The Buried Current** (a Remnant, level 70/20,000hp) sat in The
+  Forgotten Cistern, a real through-room only 2 hops from the dungeon's
+  own level-1/3 entrance, with no min_level, no story_gate, nothing.
+  Now requires level 14 to enter that room — same mechanism already
+  used for the_hush_below/the_first_city, a real "you're not ready yet"
+  message, not a spoiler. The Remnant itself is untouched.
+- **The Farthest Span** (a Remnant, level 60) sat one hop off the
+  Stonearch Bridge hub, completely ungated, even though the very next
+  room past it (Hollow Verge) already required rebirth 1. Gated its own
+  antechamber the same way, closing the one ungated step.
+- **The Drowned Choir** (a Remnant, level 40) sat in The Weeping Well —
+  the ONLY route from the surface into Sunken Root Caverns' own
+  genuinely-early content, so gating it would've locked out legitimate
+  low-level rooms behind it. Relocated instead, to a real, already-
+  existing dead-end room deep in the same complex (The Far Markers) —
+  the same "deepest, most isolated room of its own vault" placement
+  every other properly-placed Remnant (the_wrathflame_unbound, the_
+  root_that_remembers) already uses. Its quest's own location field
+  moved with it so quest/monster visibility stay in sync.
+
+Remnants are deliberately exempt from this game's own dungeon-audit
+tooling (`rules/dungeon_audit.py`'s boss-gating/level-band checks) —
+"reachable early, unbeatable for a long time" is intentional, established
+design. That doesn't mean walking blind into an unleveled "???" superboss
+within the first two rooms of a playthrough, with zero travel and zero
+warning, is a good live experience — it very much wasn't one. The other
+two Remnants in this same complex (The Archives Keeper, The Paymaster's
+Shadow, The Keeping Current) were confirmed already sitting at properly
+deep, isolated points and were left untouched.
+
+Full existing dungeon-audit + Sunken Root Caverns/Stonearch Bridge
+regression suites (63 tests) reconfirmed clean against the edited
+campaign.json, plus 3 new tests covering each fix directly.
+
 ## [1.27.611] — fix: rebirth-scaled items sold back at their unscaled base price
 
 Follow-up to the crafting/item economy audit's one minor finding.

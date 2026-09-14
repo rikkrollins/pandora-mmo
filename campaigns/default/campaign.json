@@ -660,6 +660,7 @@
         },
         "dungeon_id": "stonearch_bridge",
         "dungeon_interior": true,
+        "requires_rebirth_count": 1,
         "story_gates": {
           "hollow_verge_threshold": {
             "requires_completed_quest": "the_buried_glows_elder"
@@ -703,9 +704,6 @@
             "description": "Clear all the way down, with nothing floating in it and nothing growing on its walls -- water that's sat this long anywhere else would be thick with algae by now."
           }
         },
-        "monsters": [
-          "the_drowned_choir"
-        ],
         "directions": {
           "east": "stonearch_bridge"
         },
@@ -2115,7 +2113,8 @@
           "y": -55
         },
         "dungeon_id": "sunken_root_caverns",
-        "dungeon_interior": true
+        "dungeon_interior": true,
+        "min_level": 14
       },
       "sunken_root_caverns_precise_channel": {
         "name": "The Precise Channel",
@@ -6047,6 +6046,9 @@
             "description": "Placed with real care, recently -- someone comes through here often enough to need them."
           }
         },
+        "monsters": [
+          "the_drowned_choir"
+        ],
         "grid_position": {
           "x": 5,
           "y": -38
@@ -9800,7 +9802,7 @@
     "remnant_the_drowned_choir": {
       "title": "The Song Under the Well",
       "description": "Something real is still down here -- The Drowned Choir never fully faded like the rest did.",
-      "location": "the_weeping_well",
+      "location": "stonearch_bridge_the_far_markers",
       "reward_xp": 1550,
       "reward_gold": 200,
       "trigger": {

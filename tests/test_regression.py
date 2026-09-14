@@ -7916,6 +7916,102 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         cistern = locs["sunken_root_caverns_forgotten_cistern"]
         self.assertIn("sunken_root_caverns_flooded_gallery", cistern["connections"])
 
+    async def test_the_buried_current_room_now_requires_level_14_to_even_enter(self):
+        """
+        Real live report (2026-09-14, Coffee, mid-playthrough: "we had
+        jus entgered and was encountered by the whisper... why are
+        bosses a room apart? the BOSS shud NOT be in the second room
+        of the dungeon"). Root cause: The Buried Current (a real
+        Remnant superboss, level 70/20000hp) sat in sunken_root_
+        caverns_forgotten_cistern, a genuine THROUGH-room only 2 hops
+        from the dungeon's own entrance (whose own trash is level
+        1-3) -- no min_level, no story_gate, nothing stood between a
+        level-1 party and a blind walk-in. Remnants are deliberately
+        exempt from dungeon_audit's boss-gating/level-band checks
+        (see rules/dungeon_audit.py check_boss_gated/check_level_band
+        docstrings -- "reachable early, unbeatable for a long time, by
+        design"), and this game's own confirmed Ch5-8 level-band model
+        (goblin_warrens 40-55, sunken_root_caverns 50-65) means the
+        room's OWN zone is genuinely high-level by design -- but
+        walking straight into an unleveled, un-narrated "???" superboss
+        from a level-1-appropriate entrance, with zero travel and zero
+        warning, is a real, live, reported bad experience regardless of
+        that classification. Fixed with the same min_level mechanism
+        already used for the_hush_below/the_first_city (a real "you're
+        not ready" message, not a spoiler) -- the Remnant itself is
+        untouched, still discoverable, still unguarded by any quest/
+        item gate, just not reachable at level 1 by pure chance.
+        """
+        room = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_forgotten_cistern")
+        self.assertEqual(room.get("min_level"), 14)
+        self.assertIn("the_buried_current", room["monsters"])
+
+        user_id = 960501
+        make_basic_character(user_id, "CisternLevelChecker", current_location="sunken_root_caverns_deep_tunnels")
+        db.update_character(user_id, -999, level=1)
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the forgotten cistern")
+        character = db.get_character(user_id, -999)
+        self.assertNotEqual(character["current_location"], "sunken_root_caverns_forgotten_cistern")
+        self.assertTrue(any("not ready" in line for line in sink), sink)
+
+        db.update_character(user_id, -999, level=14)
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the forgotten cistern")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "sunken_root_caverns_forgotten_cistern")
+
+    async def test_the_farthest_span_room_now_requires_rebirth_1(self):
+        """
+        Same audit as the_buried_current above: The Farthest Span (a
+        Remnant, level 60) sat one hop off the Stonearch Bridge hub
+        with zero gate of its own, even though the very next room past
+        it (hollow_verge_threshold) already required real_rebirth_count
+        1 -- the boss's own antechamber was the one ungated step.
+        Gating it identically closes that gap without changing
+        anything about Hollow Verge's own existing requirements.
+        """
+        room = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_far_end")
+        self.assertEqual(room.get("requires_rebirth_count"), 1)
+        self.assertIn("the_farthest_span", room["monsters"])
+
+        user_id = 960502
+        make_basic_character(user_id, "FarEndRebirthChecker", current_location="stonearch_bridge")
+        db.update_character(user_id, -999, rebirth_count=0)
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the far end")
+        character = db.get_character(user_id, -999)
+        self.assertNotEqual(character["current_location"], "stonearch_bridge_far_end")
+
+        db.update_character(user_id, -999, rebirth_count=1)
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the far end")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "stonearch_bridge_far_end")
+
+    def test_the_drowned_choir_moved_off_the_mandatory_sunken_caverns_gateway(self):
+        """
+        The Weeping Well is the ONLY way to reach Sunken Root Caverns'
+        own genuinely-early (level 1-15) content from the surface --
+        gating it would have locked out that legitimate low-level
+        content behind a level-40 Remnant's own room, so unlike the two
+        tests above, the fix here is relocation, not a gate. The
+        Drowned Choir moved to The Far Markers, a real, already-
+        existing dead-end room deep in the same Stonearch Bridge
+        complex (matching how every other properly-placed Remnant in
+        this game -- e.g. the_wrathflame_unbound, the_root_that_
+        remembers -- already sits at the deepest, most isolated room of
+        its own vault). The matching remnant_the_drowned_choir quest's
+        own "location" field (used for quest/monster offer-visibility)
+        was moved along with it so the two stay in sync.
+        """
+        well = cl.get_location(bot.CAMPAIGN, "the_weeping_well")
+        self.assertNotIn("the_drowned_choir", well.get("monsters", []))
+        far_markers = cl.get_location(bot.CAMPAIGN, "stonearch_bridge_the_far_markers")
+        self.assertIn("the_drowned_choir", far_markers["monsters"])
+        quest = bot.CAMPAIGN["quests"]["remnant_the_drowned_choir"]
+        self.assertEqual(quest["location"], "stonearch_bridge_the_far_markers")
+
     def test_the_keeping_current_uses_the_real_new_systems_not_a_generic_statstick(self):
         boss = bot.CAMPAIGN["monsters"]["the_keeping_current"]
         self.assertTrue(boss["is_boss"])
