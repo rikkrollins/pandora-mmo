@@ -12768,6 +12768,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character_by_id(companion["character_id"])
         self.assertEqual(after.get("equipped_weapon"), "longsword")
 
+    async def test_ai_party_cohesion_snaps_to_an_active_human_not_an_arbitrary_inactive_one(self):
+        """
+        Real bug found and fixed (2026-09-14, proactive audit):
+        _ai_party_act_one_turn's own party-cohesion snap-back used to
+        pick whichever human db.get_party_members_by_id happened to
+        return FIRST (that query has no real ORDER BY) -- in a party
+        with more than one real human, if the arbitrarily-first one
+        happened to be resting/inactive, the whole cohesion check
+        refused to snap at all, silently stranding the companion even
+        though a genuinely ACTIVE human elsewhere existed to follow.
+        Creates the inactive human FIRST (the exact ordering that
+        exposed the bug) to prove the fix searches all real humans for
+        an active one, not just whichever the DB returns first.
+        """
+        import sessions
+        sessions.end_session(-999)
+        inactive_human_id = 950974
+        active_human_id = 950975
+        make_basic_character(inactive_human_id, "RestingLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(inactive_human_id, -999)
+        db.update_character(inactive_human_id, -999, is_inactive=1)
+        make_basic_character(active_human_id, "ActiveLeader", current_location="whispering_wood")
+        db.update_character(active_human_id, -999, party_id=party_id)
+        companion = db.create_ai_companion(
+            -999, "CohesionCompanion", "Human", "Fighter",
+            ability_scores={"strength": 14, "dexterity": 12, "constitution": 12, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=20, armor_class=11, gold=0, inventory={},
+        )
+        db.update_character_by_id(companion["character_id"], current_location="the_colosseum")
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
+
+        from unittest.mock import patch
+        with patch("bot.choose_next_action", return_value="I rest for now"), \
+             patch("bot._ollama_congested", return_value=False):
+            actor = db.get_character_by_id(companion["character_id"])
+            actor["telegram_user_id"] = companion["telegram_user_id"]
+            await bot._ai_party_act_one_turn(None, actor)
+        after = db.get_character_by_id(companion["character_id"])
+        self.assertEqual(
+            after["current_location"], "whispering_wood",
+            "must snap to the genuinely active human, not stay stranded because an arbitrary inactive one was checked first",
+        )
+
     def test_ai_situation_facts_show_forge_and_enchant_only_when_genuinely_eligible(self):
         """Part 3: same 'never show an example with nothing real behind it' convention every other AI fact already follows."""
         user_id = 950974

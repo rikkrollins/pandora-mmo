@@ -39960,8 +39960,22 @@ async def _ai_party_act_one_turn(bot, actor: dict) -> None:
     # their party around with them.
     party_id = actor.get("party_id")
     if party_id:
-        human_leader = next(
-            (m for m in db.get_party_members_by_id(party_id) if not m.get("is_ai")), None
+        # Real bug found and fixed (2026-09-14, proactive audit): with
+        # more than one real human in the same party, this used to take
+        # whichever human db.get_party_members_by_id happened to return
+        # FIRST -- that query has no real ORDER BY, so it's really
+        # "whichever row SQLite feels like," not "the active one." A
+        # party with one resting/inactive human and one genuinely
+        # active human elsewhere could land on the resting one, and the
+        # `not is_inactive` check below would then correctly refuse to
+        # snap -- but to the WRONG conclusion, silently stranding the
+        # companion even though a real active human to follow existed.
+        # Now prefers any genuinely active human over an arbitrary
+        # inactive one; only falls through to "nobody to follow" when
+        # every real human in the party is actually inactive.
+        party_humans = [m for m in db.get_party_members_by_id(party_id) if not m.get("is_ai")]
+        human_leader = next((m for m in party_humans if not m.get("is_inactive")), None) or (
+            party_humans[0] if party_humans else None
         )
         if (human_leader and not human_leader.get("is_inactive")
                 and human_leader["current_location"] != actor["current_location"]):

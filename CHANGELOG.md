@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.610] — fix: AI companions could get stranded when a party has 2+ real humans
+
+Proactive audit found a real bug in the party-cohesion snap-back
+(`_ai_party_act_one_turn`): it picked whichever human `db.get_party_
+members_by_id` happened to return first — that query has no real
+ordering, so it's arbitrary, not "the active one." In a party with
+more than one real human, if the arbitrarily-first one happened to be
+resting/inactive, the whole cohesion check refused to snap at all and
+silently stranded the companion, even though a genuinely active human
+elsewhere existed to follow. Fixed: now searches all real humans in
+the party for a genuinely active one before falling back. Verified via
+a real before/after reproduction against a clean, isolated DB — the
+companion previously stayed stuck at its starting location; now
+correctly follows the active human. Single-human parties (the
+overwhelmingly common case) were never affected.
+
 ## [1.27.609] — test-only: fix the last pre-existing test failure (Kess cutscene test asserted the wrong narration path)
 
 Dug into the final documented pre-existing test failure from this
