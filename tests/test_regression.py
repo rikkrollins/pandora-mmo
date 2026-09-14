@@ -13905,6 +13905,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(labyrinth_depth_resistance_pct(200), 100.0)
         self.assertLessEqual(labyrinth_depth_resistance_pct(2000), 100.0)
 
+    def test_rebirth_hp_and_incoming_monster_damage_stay_in_a_bounded_ratio(self):
+        """
+        Real, deliberate rebalance (2026-09-14, proactive audit +
+        Coffee's own follow-up: "tie world_damage_multiplier to HP's
+        own rate everywhere"). Before this fix, REBIRTH_POWER_GROWTH_
+        RATE (1.5x/rebirth, feeding world_damage_multiplier) badly
+        undershot a real character's own HP growth (full_hp_max_for's
+        recursive doubling, asymptotically ~2x/rebirth) -- confirmed via
+        real numbers, the gap between them grew UNBOUNDED (a rebirth-10
+        character's HP was ~2,044x baseline while incoming monster
+        damage was only ~58x baseline, a 35x-and-growing-worse relative
+        safety margin with no ceiling). Raised to 2.0 so the two curves
+        track each other -- this proves the ratio now converges to a
+        small, STABLE constant instead of diverging, across a real
+        range of rebirth counts.
+        """
+        from rules.leveling import full_hp_max_for, world_damage_multiplier
+        base_hp = full_hp_max_for("Fighter", 14, 99, 0)
+        ratios = []
+        for r in (1, 3, 5, 10, 15, 20):
+            hp_ratio = full_hp_max_for("Fighter", 14, 99, r) / base_hp
+            dmg_ratio = world_damage_multiplier(r)
+            ratios.append(hp_ratio / dmg_ratio)
+        # Every ratio must stay within a small, bounded band -- proves
+        # this doesn't diverge to the hundreds/thousands-to-one the old
+        # 1.5x rate produced (confirmed via direct measurement before
+        # this fix: 8.28 at r=5, 35.44 at r=10, 149.43 at r=15).
+        for ratio in ratios:
+            self.assertLess(ratio, 2.5, f"hp/dmg ratio {ratio:.2f} -- the gap must stay bounded, not diverge with depth")
+        # The ratio must also genuinely CONVERGE (settle down), not just
+        # happen to stay under the ceiling by coincidence at these
+        # specific sample points -- the last few values must be close
+        # to each other.
+        self.assertAlmostEqual(ratios[-1], ratios[-2], delta=0.05)
+
     def test_extra_monster_actions_capped_and_zero_at_rebirth_zero(self):
         from rules.leveling import extra_monster_actions, EXTRA_MONSTER_ACTIONS_CAP
         self.assertEqual(extra_monster_actions(0), 0)

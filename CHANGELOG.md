@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.607] — balance: monster damage growth now tracks a rebirthed player's own HP growth
+
+Follow-up to the resistance-wall fix (v1.27.603) — that same audit
+flagged a second, related gap: `world_damage_multiplier` (how much
+harder monsters hit a reborn player) grew 1.5x per rebirth, while a
+real character's own HP pool grows asymptotically ~2x per rebirth.
+The two curves drifted apart with no ceiling — a rebirth-10 character's
+HP was ~2,044x baseline while incoming monster damage was only ~58x
+baseline (monster hits ~35x less relatively threatening than at
+rebirth 0, ~149x by rebirth 15, worse every tier after). The Labyrinth's
+own separate depth-scaling already closes this gap for endgame content,
+but it meant "The World Evolves"' own purpose — replaying the story at
+higher rebirth should still feel dangerous — was quietly failing,
+since story bosses share this same multiplier.
+
+Per Coffee's direction ("tie world_damage_multiplier to HP's own rate
+everywhere"): raised the shared growth rate from 1.5x to 2.0x per
+rebirth. The hp/damage ratio now converges to a small, stable ~2x
+margin instead of diverging into the hundreds/thousands-to-one. Real,
+understood side effect: this also raises the player's own outgoing
+damage growth at the same rate (preserving the existing "both sides of
+the arms race share one rate" symmetry), so early rebirths (1-3) will
+feel meaningfully more dangerous than before — an intended part of
+closing the gap everywhere, not scoped narrowly to story replays.
+
 ## [1.27.606] — fix: unlimited free profession mastery via guild leave/rejoin, + 2 stale Remnant/monster data bugs
 
 Proactive audit found a real, live-exploitable bug: joining a

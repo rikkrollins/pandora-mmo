@@ -161,7 +161,32 @@ def magic_penetration_pct(rebirth_count: int) -> float:
 # already set (ability-score cap removal, uncapped Mastery Overflow):
 # Coffee's own words, "this is why 'breaking the game' mechanics in
 # needed so the players can beat the impossible bosses."
-REBIRTH_POWER_GROWTH_RATE = 1.5  # +50% per rebirth, compounding
+# Real, deliberate rebalance (2026-09-14, proactive audit + Coffee's
+# own follow-up: "tie world_damage_multiplier to HP's own rate
+# everywhere"). Direct measurement found this rate (1.5x/rebirth) badly
+# undershot REBIRTH_HP_MULTIPLIER's own 2x/rebirth HP growth -- since
+# world_damage_multiplier (monster damage against the player) and
+# world_resistance_pct both read this SAME constant, and full_hp_max_
+# for's own recursive doubling means a real character's HP grows
+# asymptotically at almost exactly 2x/rebirth too, the two curves
+# drifted apart unboundedly: a rebirth-10 character's real HP pool was
+# ~2,044x bigger than baseline while incoming monster damage was only
+# ~58x bigger -- monster hits became ~35x LESS relatively threatening
+# by rebirth 10, ~149x by rebirth 15, worse every tier after, with no
+# ceiling. This also meant "The World Evolves"' own stated purpose --
+# a rebirth REPLAY of the story should still feel dangerous -- was
+# quietly failing, since story bosses read this exact same multiplier.
+# Raised to 2.0 to match: the hp/dmg ratio now converges to a small,
+# STABLE constant (~2.0x, confirmed by direct computation across
+# rebirth 1-20) instead of diverging to hundreds/thousands-to-one.
+# Real, understood side effect: this also raises the player's OWN
+# outgoing damage growth (rebirth_power_multiplier reads the same
+# constant, preserving the existing "both sides of the arms race share
+# one rate" symmetry) and makes early rebirths (1-3) feel meaningfully
+# more dangerous than before, not just "endgame stays hard" -- an
+# intended, accepted consequence of closing the gap everywhere, not
+# scoped narrowly to story replays.
+REBIRTH_POWER_GROWTH_RATE = 2.0  # +100% per rebirth, compounding -- matches REBIRTH_HP_MULTIPLIER's own real growth rate
 
 
 def rebirth_power_multiplier(rebirth_count: int) -> float:
