@@ -23939,9 +23939,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ever trigger it. Same soft-lock shape as the reach_location
         completion fix right above this call site, just for the
         scripted-boss consumer instead.
+
+        Real, deliberate widening (2026-09-14, proactive audit): this
+        test used to assert `narrate_boss_confrontation` (the GENERIC
+        AI-narrated path) got called -- but Kess specifically has her
+        OWN hand-written confrontation script (`ai.dm_agent.kess_first_
+        confrontation_script`, shipped the same day as this test per
+        `_maybe_trigger_npc_encounter`'s own "her own two confrontations
+        are hand-written, not AI-generated" comment) and never calls
+        the generic function at all. This test's own real intent (per
+        its docstring above) was always "the cutscene fires immediately,
+        not deferred" -- checking the real, deterministic hand-written
+        text was actually sent proves that directly, without coupling
+        the test to WHICH narration mechanism a given scripted boss
+        happens to use.
         """
         from unittest.mock import patch, Mock, AsyncMock
         import sessions
+        import ai.dm_agent as dm_agent_module
         bot.setup_default_npcs()
         sessions.end_session(-996)
         user_id = 900947
@@ -23953,14 +23968,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         update = FakeUpdate(user_id, "irrelevant", sink, chat_id=-996)
         with patch("bot._npcs_at_location", return_value=["kess_the_bandit"]), \
              patch("bot._effective_disposition", return_value="hostile"), \
-             patch("bot.narrate_boss_confrontation", return_value="Kess blocks the road.") as mock_taunt, \
              patch("bot.narrate_boss_decision", new=Mock(return_value="Kess sizes you up.")), \
              patch("bot.narrate_action", new=Mock(return_value="Kess strikes.")), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             result = await bot._accept_offered_story_quest(update, "kess_first_reckoning", quest)
             await _drain_narration_queue(-996)
         self.assertTrue(result)
-        self.assertTrue(mock_taunt.called, "the scripted cutscene narration must fire the instant the quest is accepted in place")
+        # _safe_send strips real "**" markdown before actually sending
+        # (a known gotcha, see feedback_labyrinth_fog_of_war... memory)
+        # -- normalize both sides the same way rather than asserting
+        # against the raw, unstripped script text.
+        real_script = dm_agent_module.kess_first_confrontation_script(character["name"]).replace("**", "")
+        self.assertTrue(
+            any(real_script in s.replace("**", "") for s in sink),
+            "the real, hand-written cutscene must fire the instant the quest is accepted in place",
+        )
         session = sessions.get_session_for_user(-996, user_id)
         self.assertIsNotNone(session, "combat against the scripted boss must start immediately, not wait for a later arrival")
         sessions.end_session(-996)

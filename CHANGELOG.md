@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.609] — test-only: fix the last pre-existing test failure (Kess cutscene test asserted the wrong narration path)
+
+Dug into the final documented pre-existing test failure from this
+session's audit run. Root cause: the test asserted that accepting
+Kess's quest in place calls `narrate_boss_confrontation` (the generic
+AI-narrated confrontation path) — but Kess specifically has her own
+real, hand-written confrontation script (`kess_first_confrontation_
+script`, shipped the same day as this test) and never calls the
+generic function at all. The live game was already correct; the test
+was checking for the wrong mechanism. Fixed by asserting the real,
+deterministic hand-written cutscene text was actually sent instead —
+which is what the test's own stated intent ("the cutscene fires
+immediately, not deferred") always needed, without coupling it to
+which narration path a given scripted boss happens to use. Also hit
+and fixed the known "`_safe_send` strips `**` markdown" test gotcha
+along the way. No production code changed.
+
 ## [1.27.608] — test-only: fix a stale cluster of Remnant summon-damage range assertions, no gameplay change
 
 Dug into the 4 pre-existing `test_summon_remnant_*` failures flagged
