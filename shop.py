@@ -78,7 +78,20 @@ def sell_item(telegram_user_id: int, chat_id: int, item_id: str, quantity: int =
     if have < quantity:
         return False, f"You only have {have}x {item['name']}."
 
-    sell_price = round(item.get("price", 0) * 0.5 * quantity)
+    # Real bug found and fixed (2026-09-14, proactive audit): this
+    # always sold back at 50% of the item's flat, static catalog
+    # price, even for a `rebirth_scales_price` item (see buy_item's own
+    # real rebirth_power_multiplier scaling above) -- a rebirth-5+
+    # player who bought a Scroll of the Elder Spirit at its real
+    # inflated price got shortchanged selling it back, refunded 50% of
+    # the UNSCALED base price instead of 50% of what they actually
+    # paid. Never a dupe/profit vector either way (50% sell-back always
+    # stays a real loss versus the matching buy price, scaled or not),
+    # just a real fairness gap for a rebirth player specifically.
+    unit_price = item.get("price", 0)
+    if item.get("rebirth_scales_price"):
+        unit_price = int(unit_price * rebirth_power_multiplier(character.get("rebirth_count", 0)))
+    sell_price = round(unit_price * 0.5 * quantity)
     success, updated = db.remove_item(telegram_user_id, chat_id, item_id, quantity)
     if not success:
         return False, "Something went wrong removing the item."

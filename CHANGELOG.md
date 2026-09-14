@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.611] — fix: rebirth-scaled items sold back at their unscaled base price
+
+Follow-up to the crafting/item economy audit's one minor finding.
+`shop.sell_item` always refunded 50% of an item's flat, unscaled
+catalog price — but the 4 real `rebirth_scales_price` items (the tiered
+spirit-summon scrolls) charge a real, inflated price on purchase for a
+reborn buyer (`shop.buy_item` already handles this correctly). A
+rebirth-5+ player selling one of these back got shorted, refunded 50%
+of a number they never actually paid. Never a dupe/profit vector
+either way — fixed for fairness: `sell_item` now applies the same
+`rebirth_power_multiplier` scaling before taking its 50% cut, matching
+the buy side exactly.
+
 ## [1.27.610] — fix: AI companions could get stranded when a party has 2+ real humans
 
 Proactive audit found a real bug in the party-cohesion snap-back

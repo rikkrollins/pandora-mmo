@@ -28118,6 +28118,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         gold_after_plain = db.get_character(reborn_id, -999)["gold"]
         self.assertEqual(gold_before_plain - gold_after_plain, plain_price)
 
+    def test_rebirth_scaled_price_item_sells_back_at_half_the_real_scaled_price(self):
+        """
+        Real bug found and fixed (2026-09-14, proactive audit): sell_
+        item always refunded 50% of a rebirth_scales_price item's flat,
+        UNSCALED catalog price, even though buy_item (sibling test
+        above) correctly charges the real rebirth-scaled price up
+        front -- a reborn player selling one of these back got shorted,
+        refunded 50% of a number they never actually paid. Never a
+        dupe/profit vector either way (still a real loss vs. the
+        matching buy price), just a real fairness gap fixed here: sell_
+        item now applies the exact same rebirth_power_multiplier scaling
+        buy_item already does before taking its 50% cut.
+        """
+        import shop as shop_module
+        from rules.leveling import rebirth_power_multiplier
+
+        user_id = 900527
+        make_basic_character(user_id, "RebornSeller", current_location="crossroads_tavern", gold=0,
+                              inventory={"scroll_summon_spirit_ii": 1})
+        db.update_character(user_id, -999, rebirth_count=3)
+        base_price = items_module.get_item("scroll_summon_spirit_ii")["price"]
+        scaled_price = int(base_price * rebirth_power_multiplier(3))
+
+        ok, msg = shop_module.sell_item(user_id, -999, "scroll_summon_spirit_ii", 1)
+        self.assertTrue(ok, msg)
+        gained = db.get_character(user_id, -999)["gold"]
+        self.assertEqual(gained, round(scaled_price * 0.5))
+        self.assertGreater(gained, round(base_price * 0.5), "a reborn seller must get the real scaled sell-back, not the flat unscaled one")
+
     async def test_multi_item_give_hands_over_every_named_item(self):
         giver_id, recipient_id = 900523, 900524
         make_basic_character(giver_id, "Giver", current_location="market_row")
