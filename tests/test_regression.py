@@ -7989,6 +7989,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["current_location"], "stonearch_bridge_far_end")
 
+    async def test_the_cairnbound_room_now_requires_rebirth_1(self):
+        """
+        Same audit, extended to chapter 8 (2026-09-14, per Coffee:
+        "check and fix all the dungeons now from 1 - chapter 8"). The
+        Cairnbound (a Remnant, level 99/highest tier in the game) sat
+        in The Lonely Cairn, only 2 hops from Greymoor Downs' own real
+        entrance, past nothing but a trivial requires_cleared_location
+        clear of a single level-27 wolf pack at Windswept Ridge -- the
+        exact same "one mundane clear-gate, then a blind walk into a
+        top-tier superboss" shape already fixed for The Buried Current/
+        The Farthest Span/The Drowned Choir. The Lonely Cairn also
+        directly descends into Below the Cairn (The Waiting Dark,
+        another Remnant, level 95) with no gate of its own -- gating
+        the single chokepoint (Lonely Cairn) protects both, the same
+        way gating Stonearch Bridge's Far End already covers Hollow
+        Verge. requires_rebirth_count: 1 matches The Farthest Span's
+        own gate -- a real, lighter speed bump below the true, final
+        rebirth-10 gate at greymoor_downs_the_unopened_seal deeper in.
+        """
+        room = cl.get_location(bot.CAMPAIGN, "greymoor_downs_lonely_cairn")
+        self.assertEqual(room.get("requires_rebirth_count"), 1)
+        self.assertIn("the_cairnbound", room["monsters"])
+
+        user_id = 960503
+        make_basic_character(user_id, "LonelyCairnRebirthChecker", current_location="greymoor_downs_windswept_ridge")
+        db.mark_location_cleared(user_id, -999, "greymoor_downs_windswept_ridge")
+        db.update_character(user_id, -999, rebirth_count=0)
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "", sink), "go to the lonely cairn")
+        character = db.get_character(user_id, -999)
+        self.assertNotEqual(character["current_location"], "greymoor_downs_lonely_cairn")
+
+        db.update_character(user_id, -999, rebirth_count=1)
+        sink2 = []
+        await bot._do_move(FakeUpdate(user_id, "", sink2), "go to the lonely cairn")
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["current_location"], "greymoor_downs_lonely_cairn")
+
     def test_the_drowned_choir_moved_off_the_mandatory_sunken_caverns_gateway(self):
         """
         The Weeping Well is the ONLY way to reach Sunken Root Caverns'

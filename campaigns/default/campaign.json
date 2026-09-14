@@ -510,7 +510,8 @@
           "y": 2
         },
         "dungeon_id": "greymoor_downs",
-        "dungeon_interior": true
+        "dungeon_interior": true,
+        "requires_rebirth_count": 1
       },
       "greymoor_downs_broken_watchtower": {
         "name": "The Broken Watchtower",

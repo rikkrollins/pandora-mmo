@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.613] — fix: full chapter 1-8 dungeon audit finds a 4th misplaced Remnant
+
+Direct follow-up per Coffee: "check and fix all the dungeons now from
+1 - chapter 8 (to the end/beginning of chapter 9)". Ran the same
+BFS-distance + monster-level cross-reference from v1.27.612 against
+every dungeon/zone belonging to arcs 1-8 (crossroads_tavern/hollow_
+stump_shrine/goblin_warrens, glimmerdeep_grotto/the_hush_below, the
+First City, the Unmoored Isle, Sunken Root Caverns, Stonearch Bridge/
+Gorge, Greymoor Downs), this time also tracing real story_gates/
+locked_connections/requires_cleared_location chains (not just plain
+connections) to separate genuinely-exposed bosses from ones that only
+*looked* shallow on a naive distance count.
+
+Found one more real instance of the same bug: **The Cairnbound** (a
+Remnant, level 99 — the highest tier in the game) sat in The Lonely
+Cairn, 2 hops from Greymoor Downs' real entrance, past nothing but a
+trivial clear-gate on a single level-27 wolf pack. It also directly
+descends into Below the Cairn, home to **The Waiting Dark** (another
+Remnant, level 95) with no gate of its own. Gated The Lonely Cairn with
+`requires_rebirth_count: 1` (matching The Farthest Span's own gate) —
+protects both Remnants at once, since Lonely Cairn is the only way into
+either.
+
+Every other Remnant in arcs 1-8 was individually re-verified, not just
+skipped: The Archives Keeper and The Spire's Grace already sit at
+properly deep, isolated points; The Deepest Record (The First City,
+level 100) looked shallow on a naive distance count but is actually
+gated behind a real `requires_cleared_location` + `requires_completed_
+quest` chain already — confirmed via a proper gated-edge BFS, not
+assumed. No further dungeon-structure issues (reciprocity, hub
+branching, boss-gating, level-band ceilings, orphaned rooms, dangling
+warps) found anywhere in arcs 1-8 — the existing `rules/dungeon_audit.py`
+checker already covers all of those and passes clean against the full,
+edited campaign. One new test added covering the Cairnbound fix
+directly; full DungeonAuditTests + all Greymoor Downs regression tests
+(40 total) reconfirmed clean.
+
 ## [1.27.612] — fix: three Remnant superbosses sat right at dungeon doorsteps with zero warning
 
 Direct response to a real live playthrough report (Coffee: "we had jus
