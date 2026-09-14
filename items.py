@@ -288,6 +288,30 @@ ITEMS = {
         "note": "A real roof over everyone's head. Whatever happened out there, it stays outside.",
         "description": "Fully heals and revives the entire party to full HP. A real roof over everyone's head. Whatever happened out there, it stays outside.",
     },
+    # Real late-game gold sink (2026-09-14, per Coffee: gold sinks
+    # topped out at House's 10,000g while the final story quest alone
+    # grants 100,000g, per project_economy_market_audit_2026_09_13 --
+    # "just add higher house tiers... proportionally better effects").
+    # Manor/Castle reuse House's exact heal_and_revive shape (never a
+    # new effect type) with two new, real, additive flags bot.py's own
+    # heal_and_revive branch checks for: restoring every present party
+    # member's spell slots too (the one other real, DB-backed resource
+    # nothing outside a full rest normally restores at once), and, at
+    # the top tier, a real bonus potion restock.
+    "manor": {
+        "name": "Manor", "type": "consumable", "rarity": "legendary",
+        "price": 25000, "weight": 60, "effect": "heal_and_revive", "revive_targets": None,
+        "restore_spell_slots_too": True,
+        "note": "A real staffed household -- wounds mended, minds rested, every spell ready again.",
+        "description": "Fully heals and revives the entire party to full HP, and restores everyone's spell slots to full. A real staffed household -- wounds mended, minds rested, every spell ready again.",
+    },
+    "castle": {
+        "name": "Castle", "type": "consumable", "rarity": "legendary",
+        "price": 100000, "weight": 80, "effect": "heal_and_revive", "revive_targets": None,
+        "restore_spell_slots_too": True, "bonus_potion_grant": {"greater_healing_potion": 5},
+        "note": "The whole party, fully restored, and sent back out the gate with a real war chest of potions.",
+        "description": "Fully heals and revives the entire party to full HP, restores everyone's spell slots to full, and stocks the party with 5 Greater Healing Potions. The whole party, fully restored, and sent back out the gate with a real war chest of potions.",
+    },
     "rations": {
         "name": "Rations (1 day)", "type": "consumable", "rarity": "common",
         "price": 2, "weight": 2, "effect": "none",

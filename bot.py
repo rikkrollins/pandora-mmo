@@ -31051,12 +31051,31 @@ async def _do_use_item(update: Update, text: str) -> None:
             )
             if live_target is not None:
                 live_target["hp_current"] = hp_max
+            # Real late-game gold sink follow-up (2026-09-14, Manor/
+            # Castle): the exact same live-vs-DB slot sourcing the
+            # standalone `restore_spell_slots` effect above already
+            # uses, just looped across every real `heal_and_revive`
+            # recipient instead of a single named target.
+            if item.get("restore_spell_slots_too"):
+                slot_source = live_target if live_target is not None else recipient
+                slots_max_for_recipient = slot_source.get("spell_slots_max", 0)
+                db.update_character_by_id(recipient["character_id"], spell_slots_current=slots_max_for_recipient)
+                if live_target is not None:
+                    live_target["spell_slots_current"] = slots_max_for_recipient
             revive_note = " — brought back from death" if was_dead else ""
             healed_lines.append(f"**{recipient['name']}** fully restored{revive_note} ({hp_max}/{hp_max} HP)")
             _maybe_boost_companion_affinity_for_support(
                 update, character, recipient, 10 if was_dead else 2, "revived" if was_dead else "healed",
             )
-        message = f"🏕️ **{character['name']}** sets up the {item['name']} — " + "; ".join(healed_lines) + "."
+        bonus_note = ""
+        if item.get("bonus_potion_grant"):
+            granted = []
+            for bonus_item_id, bonus_qty in item["bonus_potion_grant"].items():
+                db.add_item(character["telegram_user_id"], character["chat_id"], bonus_item_id, bonus_qty)
+                bonus_item = items_module.get_item(bonus_item_id)
+                granted.append(f"{bonus_qty}x {bonus_item['name'] if bonus_item else bonus_item_id}")
+            bonus_note = f" The party's stash gains {', '.join(granted)}."
+        message = f"🏕️ **{character['name']}** sets up the {item['name']} — " + "; ".join(healed_lines) + f".{bonus_note}"
 
     elif effect == "restore_spell_slots":
         # Per Coffee (2026-08-10): a genuine in-battle way to recover

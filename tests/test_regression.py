@@ -21271,6 +21271,62 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(revived["is_dead"])
         sessions.end_session(-999)
 
+    async def test_manor_heals_revives_and_restores_spell_slots_for_the_whole_party(self):
+        """
+        Real late-game gold sink (2026-09-14, per Coffee: "just add
+        higher house tiers... proportionally better effects", following
+        project_economy_market_audit_2026_09_13's own finding that gold
+        stops mattering past House's 10,000g ceiling). Manor reuses
+        House's exact heal_and_revive shape, plus a new real addition:
+        restoring every present party member's spell slots too.
+        """
+        user_id, ally_id, dead_id = 950944, 950945, 950946
+        make_basic_character(user_id, "ManorUser", current_location="crossroads_tavern",
+                              inventory={"manor": 1}, spell_slots_max=4)
+        make_basic_character(ally_id, "ManorAlly", current_location="crossroads_tavern", spell_slots_max=2)
+        make_basic_character(dead_id, "ManorFallen", current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, -999)
+        db.update_character(ally_id, -999, party_id=party_id)
+        db.update_character(dead_id, -999, party_id=party_id, hp_current=0, is_dead=1)
+        db.update_character(user_id, -999, hp_current=1, spell_slots_current=0)
+        db.update_character(ally_id, -999, hp_current=1, spell_slots_current=0)
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "use manor", sink, chat_id=-999), "use manor")
+
+        user_after = db.get_character(user_id, -999)
+        ally_after = db.get_character(ally_id, -999)
+        dead_after = db.get_character(dead_id, -999)
+        self.assertEqual(user_after["hp_current"], user_after["hp_max"])
+        self.assertEqual(user_after["spell_slots_current"], 4)
+        self.assertEqual(ally_after["hp_current"], ally_after["hp_max"])
+        self.assertEqual(ally_after["spell_slots_current"], 2)
+        self.assertFalse(dead_after["is_dead"])
+        self.assertEqual(db.get_character(user_id, -999)["inventory"].get("manor", 0), 0)
+
+    async def test_castle_does_everything_manor_does_plus_grants_bonus_potions(self):
+        """The top gold-sink tier: same real heal_and_revive+spell-slot-restore shape as Manor, plus a real, tangible bonus -- 5 Greater Healing Potions added to the buyer's own inventory."""
+        user_id, ally_id = 950947, 950948
+        make_basic_character(user_id, "CastleUser", current_location="crossroads_tavern",
+                              inventory={"castle": 1}, spell_slots_max=3)
+        make_basic_character(ally_id, "CastleAlly", current_location="crossroads_tavern", spell_slots_max=1)
+        party_id = db.create_party(user_id, -999)
+        db.update_character(ally_id, -999, party_id=party_id)
+        db.update_character(user_id, -999, hp_current=1, spell_slots_current=0)
+        db.update_character(ally_id, -999, hp_current=1, spell_slots_current=0)
+
+        sink = []
+        await bot._do_use_item(FakeUpdate(user_id, "use castle", sink, chat_id=-999), "use castle")
+
+        user_after = db.get_character(user_id, -999)
+        ally_after = db.get_character(ally_id, -999)
+        self.assertEqual(user_after["hp_current"], user_after["hp_max"])
+        self.assertEqual(user_after["spell_slots_current"], 3)
+        self.assertEqual(ally_after["hp_current"], ally_after["hp_max"])
+        self.assertEqual(ally_after["spell_slots_current"], 1)
+        self.assertEqual(user_after["inventory"].get("greater_healing_potion", 0), 5)
+        self.assertTrue(any("Greater Healing Potion" in s for s in sink))
+
     async def test_shield_cast_via_battle_menu_offers_an_ally_target_picker(self):
         """
         Same gap, ally-facing side: Shield genuinely applies its AC

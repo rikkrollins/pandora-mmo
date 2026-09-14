@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.602] — feat: two higher house tiers, a real late-game gold sink
+
+Follow-up to the 2026-09-13 economy audit's one real soft finding: gold
+sinks topped out at House's 10,000g while the climactic final story
+quest alone grants 100,000g. Per Coffee: "just add higher house
+tiers... proportionally better effects." Two new legendary consumables
+at Old Maren's stall, reusing House's exact heal-and-revive shape:
+
+- **Manor** (25,000g) — fully heals and revives the whole party, and
+  now also restores everyone's spell slots to full (the one other
+  real, DB-backed resource nothing outside a full rest normally
+  restores at once).
+- **Castle** (100,000g) — everything Manor does, plus restocks the
+  party with 5 Greater Healing Potions.
+
 ## [1.27.601] — feat: real maze topology for every Labyrinth floor
 
 Coffee: "the current labyrinth is jus a straight line and doesnt look
