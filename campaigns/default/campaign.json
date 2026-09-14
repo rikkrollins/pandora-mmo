@@ -13529,9 +13529,6 @@
       ],
       "counters_sneak_attack": true,
       "extra_attack_when_enraged": true,
-      "vulnerabilities": [
-        "earth"
-      ],
       "stealable_items": [
         {
           "item_id": "greater_spell_tonic",

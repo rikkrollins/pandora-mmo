@@ -34642,6 +34642,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(db.get_character(user_id, -999)["profession_mastery_pct"].get("lumberjacking", 1.0), before)
         self.assertTrue(any("Promotion" in s for s in sink))
 
+    async def test_leaving_and_rejoining_a_guild_never_regrants_the_promotion_bonus(self):
+        """
+        Real, live-exploitable bug found and fixed (2026-09-14,
+        proactive audit): join_guild's Promotion bonus (see the sibling
+        test above) had no "already granted this specific guild's bonus
+        before" check -- leave_guild always frees a guild's slot with
+        no cooldown, and eligible_for_guild only ever looks at
+        CURRENTLY held guilds, so a real join -> leave -> rejoin loop
+        (every step individually legitimate) farmed unlimited free
+        profession mastery. Verified live before this fix: 5 real
+        cycles took blacksmithing mastery from 1% to 51%. Fixed via a
+        new permanent, append-only guild_promotion_bonus_granted list
+        leave_guild never touches -- this proves the fix through the
+        REAL player-facing handlers, not just db.join_guild/leave_guild
+        directly.
+        """
+        import guild_curriculum as gc
+        import guilds as guilds_module
+        user_id = 700211
+        make_basic_character(user_id, "GuildFarmExploitTester", char_class="Fighter", gold=100)
+        db.update_character(user_id, -999, level=20, proven_in_combat=True, subclass="Champion", rebirth_count=5)
+        db.join_guild(user_id, -999, "silver_wardens")
+        steps = len(gc.get_curriculum("silver_wardens"))
+        db.update_character(user_id, -999, guild_curriculum_step=steps)
+
+        for cycle in range(5):
+            sink = []
+            await bot._do_join_guild(FakeUpdate(user_id, "I join the Forge Guild", sink), "I join the Forge Guild")
+            mastery = db.get_character(user_id, -999)["profession_mastery_pct"].get("blacksmithing", 1.0)
+            if cycle == 0:
+                self.assertAlmostEqual(mastery, 1.0 + guilds_module.GUILD_PROMOTION_PCT_BONUS, msg="first join must still grant the real bonus")
+            else:
+                self.assertAlmostEqual(mastery, 1.0 + guilds_module.GUILD_PROMOTION_PCT_BONUS, msg=f"cycle {cycle}: bonus must never stack a second time")
+            sink2 = []
+            await bot._do_leave_guild(FakeUpdate(user_id, "I leave the Forge Guild", sink2), "I leave the Forge Guild")
+            self.assertEqual(db.get_character(user_id, -999)["secondary_guilds"], [])
+
     def test_promotion_rank_titles_escalate_and_cap_at_ten(self):
         """Per Coffee: "make a rank for 10 (something epic matching story ascending to god) dont spoil"."""
         import guilds as guilds_module

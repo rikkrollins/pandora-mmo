@@ -116,7 +116,13 @@ REMNANTS = {
         "name": "The Wrathflame Unbound",
         "monster_key": "the_wrathflame_unbound",
         "story_tied": False,
-        "location_id": "hollow_stump_shrine",
+        # Real data bug found and fixed (2026-09-14, proactive audit):
+        # this named "hollow_stump_shrine", where the_wrathflame_unbound
+        # was never actually listed as spawnable -- confirmed via
+        # campaign_loader.get_location that the monster's real spawn is
+        # wrathflame_vault_sanctum. Any hint/lookup keyed off this field
+        # was silently sending players to the wrong place.
+        "location_id": "wrathflame_vault_sanctum",
         "element": "fire",
         "summon_secondary": "none",
         "lore": "Not anger given shape -- anger that WAS a shape, once, before the Box, and hasn't forgiven the world for forgetting that.",
@@ -136,7 +142,12 @@ REMNANTS = {
         "name": "The Root That Remembers",
         "monster_key": "the_root_that_remembers",
         "story_tied": True,
-        "location_id": "whispering_wood_deep_glade",
+        # Real data bug found and fixed (2026-09-14, proactive audit,
+        # same class as the_wrathflame_unbound's identical fix above):
+        # whispering_wood_deep_glade never actually listed this monster
+        # as spawnable -- confirmed via campaign_loader.get_location
+        # that the real spawn is deep_root_vault_sanctum.
+        "location_id": "deep_root_vault_sanctum",
         "element": "poison",
         "summon_secondary": "dot",
         "lore": "Every forest has one root older than the forest. This one remembers what was planted here before there was a forest at all.",

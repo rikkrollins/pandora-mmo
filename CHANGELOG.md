@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.606] — fix: unlimited free profession mastery via guild leave/rejoin, + 2 stale Remnant/monster data bugs
+
+Proactive audit found a real, live-exploitable bug: joining a
+secondary guild grants a real, one-time profession mastery/proficiency
+bonus — but nothing checked whether a character had already received
+that specific guild's bonus before. Since leaving a guild always frees
+its slot with no cooldown, and re-entry only checks currently-held
+guilds, a join → leave → rejoin loop (every step individually
+legitimate) farmed unlimited free mastery — verified live before this
+fix: 5 real cycles took one profession from 1% to 51%. Fixed with a
+new permanent, append-only record of which guilds' bonuses a character
+has ever received, checked before granting it again; leaving and
+rejoining the same guild still correctly keeps the bonus already
+earned, it just can never stack a second copy.
+
+Also fixed 2 real data bugs found via the same audit: `the_wrathflame_
+unbound` and `the_root_that_remembers` (Remnant bosses) both listed a
+spawn location where they were never actually spawnable — any hint or
+lookup using that field silently pointed players to the wrong place.
+And `the_keeps_warden` carried an invalid "earth" vulnerability (not a
+real damage type in this game, so it was already a complete no-op) —
+removed.
+
 ## [1.27.605] — fix: Labyrinth minibosses could land right at the entrance
 
 Real live dev-bridge report (Coffee): "we had jus entgered and was

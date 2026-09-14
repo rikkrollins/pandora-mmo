@@ -1133,6 +1133,24 @@ def init_db() -> None:
         if "location_defeat_counts" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN location_defeat_counts TEXT NOT NULL DEFAULT '{}'")
 
+        # Real exploit found and fixed (2026-09-14, proactive audit):
+        # join_guild's secondary-guild branch granted its real, one-time
+        # GUILD_PROMOTION_PCT_BONUS every single time it ran, with
+        # nothing checking whether THIS character had already received
+        # that specific guild's bonus before. leave_guild fully clears a
+        # guild's own curriculum state and frees its slot with no
+        # cooldown, and eligible_for_guild's own gate only ever checks
+        # CURRENTLY held guilds -- so a join -> leave -> rejoin loop
+        # farmed free, unlimited profession mastery/proficiency %,
+        # verified live (1% -> 51% mastery across 5 real cycles).
+        # `guild_promotion_bonus_granted` is a JSON list of guild_ids
+        # this character has EVER received the bonus for, same "append,
+        # check membership, never cleared" shape as bound_remnants --
+        # leave_guild must never touch this, only join_guild's own
+        # bonus-granting block reads/writes it.
+        if "guild_promotion_bonus_granted" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN guild_promotion_bonus_granted TEXT NOT NULL DEFAULT '[]'")
+
         # labyrinth_runs.modifier (2026-09-02, Phase L2 floor modifiers)
         # -- a real DB already running Phase L1's CREATE TABLE IF NOT
         # EXISTS won't pick up a column added to that CREATE statement
@@ -1246,6 +1264,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["secondary_guild_curriculum_unlocked_at"] = json.loads(d["secondary_guild_curriculum_unlocked_at"])
     d["secondary_guild_curriculum_state"] = json.loads(d["secondary_guild_curriculum_state"])
     d["bound_remnants"] = json.loads(d["bound_remnants"])
+    d["guild_promotion_bonus_granted"] = json.loads(d["guild_promotion_bonus_granted"])
     d["dismissed_quest_ids"] = json.loads(d["dismissed_quest_ids"])
     d["spell_mastery_pct"] = json.loads(d["spell_mastery_pct"])
     d["element_mastery_pct"] = json.loads(d["element_mastery_pct"])
@@ -1383,7 +1402,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1427,7 +1446,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -2586,15 +2605,31 @@ def join_guild(telegram_user_id: int, chat_id: int, guild_id: str) -> dict | Non
     # the same 100%-capped "eventually maxing out" ceiling as everything
     # else in this %-based system.
     import guilds as guilds_module
-    promotion_professions = guilds_module.GUILD_PERMANENT_PROFESSION.get(guild_id) or []
-    if promotion_professions:
-        mastery = dict(character["profession_mastery_pct"])
-        for profession in promotion_professions:
-            mastery[profession] = min(mastery.get(profession, 1.0) + guilds_module.GUILD_PROMOTION_PCT_BONUS, 100.0)
-        updates["profession_mastery_pct"] = mastery
-    for scalar_field in guilds_module.GUILD_PERMANENT_SCALAR_PROFICIENCY.get(guild_id) or []:
-        current = character.get(scalar_field, 1.0)
-        updates[scalar_field] = min(current + guilds_module.GUILD_PROMOTION_PCT_BONUS, 100.0)
+    # Real exploit fix (2026-09-14, see this column's own migration
+    # comment for the full live-verified severity): this bonus is
+    # documented as a real, ONE-TIME Promotion payoff, but nothing ever
+    # checked whether this specific character had already received
+    # THIS guild's bonus before -- a join -> leave -> rejoin loop (every
+    # step of which is a normal, otherwise-legitimate action) could
+    # re-trigger it indefinitely, since leave_guild correctly frees the
+    # slot and eligible_for_guild only ever looks at currently-held
+    # guilds. Gated on `guild_promotion_bonus_granted`, a permanent,
+    # append-only list leave_guild never touches (mirrors bound_
+    # remnants' own "grant once, remember forever" shape) -- a
+    # character who leaves and rejoins the same guild keeps their
+    # earned bonus (per Coffee's own "when they leave they keep that
+    # bonus" design) but can never stack a second copy of it.
+    if guild_id not in character["guild_promotion_bonus_granted"]:
+        promotion_professions = guilds_module.GUILD_PERMANENT_PROFESSION.get(guild_id) or []
+        if promotion_professions:
+            mastery = dict(character["profession_mastery_pct"])
+            for profession in promotion_professions:
+                mastery[profession] = min(mastery.get(profession, 1.0) + guilds_module.GUILD_PROMOTION_PCT_BONUS, 100.0)
+            updates["profession_mastery_pct"] = mastery
+        for scalar_field in guilds_module.GUILD_PERMANENT_SCALAR_PROFICIENCY.get(guild_id) or []:
+            current = character.get(scalar_field, 1.0)
+            updates[scalar_field] = min(current + guilds_module.GUILD_PROMOTION_PCT_BONUS, 100.0)
+        updates["guild_promotion_bonus_granted"] = character["guild_promotion_bonus_granted"] + [guild_id]
     return update_character(telegram_user_id, chat_id, **updates)
 
 
