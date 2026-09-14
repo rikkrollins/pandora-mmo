@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.603] — fix: rebirth 2-9 hit a flat, unbreakable elemental resistance wall (and monsters were healing from it)
+
+Proactive audit found a real, severe balance bug: "The World Evolves"
+resistance scaling (`world_resistance_pct`, exponential, 1.5^rebirth)
+vastly outpaced its own counter (`magic_penetration_pct`, linear,
+capped at 100% only at rebirth 10). Confirmed with real computed
+numbers before touching anything: any party sitting at rebirth 2
+through 9 — 8 full progression tiers — hit a flat 100% elemental
+resistance wall against affected monsters, with zero visible effect
+from any gear or penetration investment the whole time. Worse: a
+second function (`elemental_overflow_heal`) independently recomputed
+the same uncapped product, so from rebirth 3 onward it handed back
+66%-393% of the player's own raw damage to the monster as free HP —
+elemental attacks were net-healing the enemy, not just being resisted.
+The same bug independently affected `labyrinth_depth_resistance_pct`
+(same exponential-vs-linear mismatch, hit even sooner — past floor
+~15 on its own).
+
+Fixed at the source: both resistance functions now cap their own
+output at 100%. The effective, post-penetration resistance now
+declines smoothly — 100/80/70/60/50/40/30/20/10/0% across rebirths
+2 through 10 — instead of a flat wall followed by a cliff, and the
+monster-heals-from-being-hit case can no longer trigger from ordinary
+world/depth scaling alone. A campaign-authored "strong in an element"
+monster can still stack on top and trigger a real, bounded overflow
+heal — that's the genuinely deliberate case this mechanic always
+existed for.
+
 ## [1.27.602] — feat: two higher house tiers, a real late-game gold sink
 
 Follow-up to the 2026-09-13 economy audit's one real soft finding: gold

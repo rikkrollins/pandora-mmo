@@ -181,16 +181,47 @@ def rebirth_power_multiplier(rebirth_count: int) -> float:
 def world_resistance_pct(party_rebirth_count: float) -> float:
     """
     How much extra elemental_resistance_pct the world's monsters gain
-    per the party's own average rebirth_count -- now the same
-    compounding curve as rebirth_power_multiplier (was flat +15%/
-    rebirth). Safe uncapped: rules.combat.apply_damage_type_modifier's
-    own magic_penetration_pct math already fully negates ANY resistance
-    magnitude once penetration reaches 100% (`elemental_pct * (1 -
-    1.0) == 0`, regardless of how large elemental_pct itself is), and
-    elemental_overflow_heal already handles the >100% case -- nothing
-    else needed to change for this to compound safely.
+    per the party's own average rebirth_count -- the same compounding
+    curve as rebirth_power_multiplier (was flat +15%/rebirth).
+
+    Real bug found and fixed (2026-09-14, proactive audit, confirmed by
+    computing the real numbers before asserting anything): this was
+    "safe uncapped" ONLY at the single endpoint rebirth 10, where
+    magic_penetration_pct finally reaches its own 100% ceiling. Every
+    rebirth from 2 through 9 sits in between -- and because this curve
+    is EXPONENTIAL while magic_penetration_pct only grows LINEARLY
+    (capped at 100% at rebirth 10), the product `elemental_pct * (1 -
+    penetration)` in rules.combat.apply_damage_type_modifier blew past
+    100 almost immediately (125% at rebirth 2 already exceeds what even
+    0% penetration could ever bring back under 100), clamping to a flat
+    100% resistance wall for 8 straight rebirth tiers -- real gear/
+    penetration investment had ZERO visible effect the whole time,
+    instead of the "genuine mid-game difficulty spike" this was meant
+    to be. Worse: elemental_overflow_heal (rules/combat.py) recomputes
+    this SAME product WITHOUT the 100% clamp, so from rebirth 3 onward
+    the "extreme overflow" heal-back branch fired on ordinary world
+    scaling alone -- confirmed via real numbers, this handed back
+    66%-393% of the player's own raw damage as free HP to the monster,
+    turning elemental attacks net-negative against the world's own
+    baseline resistance, not just resisted.
+
+    Fixed by capping THIS function's own output at 100 -- the real
+    source of the runaway magnitude -- rather than patching every
+    downstream consumer separately: a monster's world-scaled baseline
+    resistance can never exceed the same 100% ceiling a fully-resistant
+    hit already means, so `elemental_pct * (1 - penetration)` now
+    declines smoothly from a real 100% wall at rebirth 2 down to 0% at
+    rebirth 10 (80/70/60/50/40/30/20/10/0 across rebirths 2-10) instead
+    of staying flat then falling off a cliff, and elemental_overflow_
+    heal can never trigger from this baseline alone again. A campaign-
+    authored "strong in an element" monster (bot.py's own additive
+    `pct + world_resist_bonus` stacking) can still push the COMBINED
+    total past 100 and trigger a real, but now bounded, overflow heal
+    on top -- that stays exactly the "extreme, deliberately hand-
+    authored case" this mechanic was always meant to reward, not an
+    accident of ordinary progression math.
     """
-    return (REBIRTH_POWER_GROWTH_RATE ** max(party_rebirth_count, 0) - 1.0) * 100
+    return min((REBIRTH_POWER_GROWTH_RATE ** max(party_rebirth_count, 0) - 1.0) * 100, 100.0)
 
 
 def world_damage_multiplier(party_rebirth_count: float) -> float:
@@ -223,8 +254,19 @@ def labyrinth_depth_multiplier(floor: int) -> float:
 
 
 def labyrinth_depth_resistance_pct(floor: int) -> float:
-    """Same curve as labyrinth_depth_multiplier, expressed as a resistance percentage (mirrors world_resistance_pct's own relationship to world_damage_multiplier)."""
-    return (LABYRINTH_FLOOR_GROWTH_RATE ** max(floor - 1, 0) - 1.0) * 100
+    """
+    Same curve as labyrinth_depth_multiplier, expressed as a resistance
+    percentage (mirrors world_resistance_pct's own relationship to
+    world_damage_multiplier). Capped at 100 for the exact same real
+    reason world_resistance_pct is (2026-09-14) -- this is summed
+    additively with world_resistance_pct before either ever reaches
+    rules.combat.apply_damage_type_modifier/elemental_overflow_heal,
+    and floor depth grows unbounded far faster than the single-digit
+    rebirth counts world_resistance_pct deals with, so this side of the
+    sum hit the same "flat wall then a monster net-heals from being
+    hit" bug even sooner (measured: past floor ~15 on its own).
+    """
+    return min((LABYRINTH_FLOOR_GROWTH_RATE ** max(floor - 1, 0) - 1.0) * 100, 100.0)
 
 
 # Turn-based equivalent of a roguelike's exponential "attacks faster"

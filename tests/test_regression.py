@@ -13854,7 +13854,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for r in (0, 1, 3, 5):
             self.assertEqual(world_damage_multiplier(r), rebirth_power_multiplier(r))
         self.assertEqual(world_resistance_pct(0), 0.0)
-        self.assertAlmostEqual(world_resistance_pct(3), (rebirth_power_multiplier(3) - 1.0) * 100)
+        # r=1 is still below the 100% cap below, so it still directly
+        # tracks rebirth_power_multiplier's own uncapped rate here.
+        self.assertAlmostEqual(world_resistance_pct(1), (rebirth_power_multiplier(1) - 1.0) * 100)
+
+    def test_world_resistance_pct_never_exceeds_100_even_though_the_underlying_curve_is_exponential(self):
+        """
+        Real bug found and fixed (2026-09-14, proactive audit): world_
+        resistance_pct's own exponential curve (1.5^r) vastly outpaces
+        magic_penetration_pct's linear, 100%-at-rebirth-10 counter --
+        uncapped, this clamped rules.combat.apply_damage_type_modifier's
+        `elemental_pct * (1 - penetration)` to a flat 100% wall for
+        rebirths 2 through 9 (zero real effect from any penetration
+        investment for 8 straight tiers), and separately made
+        elemental_overflow_heal's OWN uncapped copy of that same product
+        hand monsters back 66%-393% of the player's own raw damage as
+        free HP from rebirth 3 onward -- confirmed via real computed
+        numbers before this fix existed. Capping this function's own
+        output at 100 fixes both: a smooth 80/70/60/50/40/30/20/10/0%
+        decline from rebirth 2 through 10 instead of a flat wall then a
+        cliff, and zero unintended overflow-heal from world scaling
+        alone (a campaign-authored "strong in an element" monster can
+        still stack on top and trigger a real, but now bounded, one).
+        """
+        from rules.leveling import world_resistance_pct, magic_penetration_pct
+        from rules.combat import apply_damage_type_modifier, elemental_overflow_heal
+        self.assertEqual(world_resistance_pct(2), 100.0)
+        self.assertEqual(world_resistance_pct(9), 100.0)
+        for r in range(2, 11):
+            elemental_pct = world_resistance_pct(r)
+            penetration = magic_penetration_pct(r) / 100.0
+            self.assertLessEqual(elemental_pct * (1 - penetration), 100.0)
+        # Real end-to-end proof through the actual damage pipeline, not
+        # just the raw numbers: a rebirth-5 monster with ONLY the world
+        # baseline resistance must deal real, nonzero, smoothly-scaled
+        # damage back, and must never heal from being hit.
+        for r in (2, 3, 5, 7, 9):
+            defender = {"elemental_resistance_pct": {"fire": world_resistance_pct(r)}}
+            attacker = {"rebirth_count": r}
+            modified = apply_damage_type_modifier(100, "fire", defender, attacker)
+            self.assertGreater(modified, 0, f"rebirth {r}: real penetration investment must have a visible effect")
+            overflow = elemental_overflow_heal(100, "fire", defender, attacker)
+            self.assertEqual(overflow, 0, f"rebirth {r}: world-baseline resistance alone must never overflow-heal the defender")
+
+    def test_labyrinth_depth_resistance_pct_never_exceeds_100_either(self):
+        """Same real bug, same fix, the Labyrinth's own independent depth-based resistance axis -- it sums additively with world_resistance_pct before either reaches apply_damage_type_modifier, and floor depth grows unbounded far faster than rebirth counts do."""
+        from rules.leveling import labyrinth_depth_resistance_pct
+        self.assertEqual(labyrinth_depth_resistance_pct(1), 0.0)
+        self.assertLessEqual(labyrinth_depth_resistance_pct(15), 100.0)
+        self.assertLessEqual(labyrinth_depth_resistance_pct(200), 100.0)
+        self.assertLessEqual(labyrinth_depth_resistance_pct(2000), 100.0)
 
     def test_extra_monster_actions_capped_and_zero_at_rebirth_zero(self):
         from rules.leveling import extra_monster_actions, EXTRA_MONSTER_ACTIONS_CAP
