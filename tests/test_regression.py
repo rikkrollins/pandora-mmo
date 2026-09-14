@@ -34945,14 +34945,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Damage as part of thier attack to make then much stronger than
         a normal attack, spell or ability." Verifies the exact math:
         The Cairnbound's summon (2d10+13) must add The Cairnbound
-        MONSTER template's own real damage_bonus (225, campaign.json --
-        the same number this session's chapter-band pass tuned) on top,
-        not just its own flat +13. forced_roll only pins the FIRST die
-        (rules.dice.roll_damage's own real physical-dice-mode design),
-        so the total is bounded, not exact: the forced d10 (10) + one
-        genuinely random d10 (1-10) + 13 + 225 +
+        MONSTER template's own real damage_bonus on top, not just its
+        own flat +13. forced_roll only pins the FIRST die (rules.dice.
+        roll_damage's own real physical-dice-mode design), so the total
+        is bounded, not exact: the forced d10 (10) + one genuinely
+        random d10 (1-10) + 13 + damage_bonus +
         remnants.REMNANT_SUMMON_POWER_BONUS (90, added 2026-08-20 per
-        Coffee's live "damage was abit low" report), i.e. 339-348.
+        Coffee's live "damage was abit low" report).
+
+        Real, deliberate widening (2026-09-14, proactive audit): this
+        test's own hardcoded 225/339-348 numbers went stale at some
+        point after a later, unrelated balance pass raised The
+        Cairnbound's real campaign.json damage_bonus to 280 -- this
+        test's own `assertEqual(..., 225)` line would have caught that
+        drift immediately if it had ever actually run clean, but 3
+        sibling tests sharing the same stale 339-348/344-353/508-522
+        numbers had gone undetected until this exact audit (confirmed
+        via direct computation from the real current catalog values,
+        not assumption -- see [[project_resistance_wall_bugfix_v1_27_603]]'s
+        own memory entry for how this cluster was first found). Reads
+        the real current value directly instead of hardcoding it a
+        second time, so a future rebalance can't silently desync the
+        two assertions again.
         """
         import sessions
         from unittest.mock import patch, AsyncMock
@@ -34978,9 +34992,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             )
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
-        self.assertEqual(cairnbound_template["damage_bonus"], 225)
+        cairnbound = remnants_module.get_remnant("the_cairnbound")
+        flat_mod = cairnbound["summon_damage_bonus"] + cairnbound_template["damage_bonus"] + remnants_module.REMNANT_SUMMON_POWER_BONUS
+        expected_min, expected_max = 10 + 1 + flat_mod, 10 + 10 + flat_mod  # forced d10 (10) + a genuinely random d10 (1-10)
         actual_damage = 100000 - goblin["hp_current"]
-        self.assertTrue(339 <= actual_damage <= 348, f"damage {actual_damage} outside expected 339-348 range")
+        self.assertTrue(
+            expected_min <= actual_damage <= expected_max,
+            f"damage {actual_damage} outside expected {expected_min}-{expected_max} range (cairnbound_template damage_bonus={cairnbound_template['damage_bonus']})",
+        )
         sessions.end_session(-987)
 
     async def test_summon_remnant_damage_gets_a_real_charisma_bonus(self):
@@ -34991,8 +35010,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         modifier (charisma 20 -> +5) is added on top of the existing
         stack, same forced_roll bounding as
         test_summon_remnant_damage_includes_source_bosses_own_damage_bonus
-        (339-348 there for charisma 10/+0) -- here shifted by exactly
-        +5 to 344-353.
+        (charisma 10/+0 there) -- here shifted by exactly +5. Computes
+        the expected range from the real current catalog values
+        directly (2026-09-14 fix) rather than a second hardcoded
+        number, so a future balance pass can't silently desync this
+        test from reality the way it did before this fix.
         """
         import sessions
         from unittest.mock import patch, AsyncMock
@@ -35020,8 +35042,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 forced_roll=10,
             )
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        cairnbound = remnants_module.get_remnant("the_cairnbound")
+        cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
+        charisma_bonus = 5
+        flat_mod = cairnbound["summon_damage_bonus"] + cairnbound_template["damage_bonus"] + remnants_module.REMNANT_SUMMON_POWER_BONUS + charisma_bonus
+        expected_min, expected_max = 10 + 1 + flat_mod, 10 + 10 + flat_mod
         actual_damage = 100000 - goblin["hp_current"]
-        self.assertTrue(344 <= actual_damage <= 353, f"damage {actual_damage} outside expected 344-353 range (charisma +5 bonus)")
+        self.assertTrue(
+            expected_min <= actual_damage <= expected_max,
+            f"damage {actual_damage} outside expected {expected_min}-{expected_max} range (charisma +5 bonus)",
+        )
         sessions.end_session(-985)
 
     async def test_summon_remnant_low_charisma_never_weaker_than_baseline(self):
@@ -35031,7 +35061,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         be a bonus stat." A below-average Charisma (8, a real -1
         modifier under the normal 5E formula) must NOT subtract
         anything -- the bonus is floored at 0, so this still lands in
-        the exact same 339-348 range the charisma-10/+0 baseline does.
+        the exact same range the charisma-10/+0 baseline does (computed
+        from real current catalog values, 2026-09-14 fix -- see the
+        sibling damage-bonus test's own docstring for why).
         """
         import sessions
         from unittest.mock import patch, AsyncMock
@@ -35059,8 +35091,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 forced_roll=10,
             )
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        cairnbound = remnants_module.get_remnant("the_cairnbound")
+        cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
+        flat_mod = cairnbound["summon_damage_bonus"] + cairnbound_template["damage_bonus"] + remnants_module.REMNANT_SUMMON_POWER_BONUS
+        expected_min, expected_max = 10 + 1 + flat_mod, 10 + 10 + flat_mod
         actual_damage = 100000 - goblin["hp_current"]
-        self.assertTrue(339 <= actual_damage <= 348, f"damage {actual_damage} outside expected 339-348 baseline range (no penalty)")
+        self.assertTrue(
+            expected_min <= actual_damage <= expected_max,
+            f"damage {actual_damage} outside expected {expected_min}-{expected_max} baseline range (no penalty)",
+        )
         sessions.end_session(-984)
 
     async def test_summon_remnant_mastery_overflow_scales_the_final_damage(self):
@@ -35069,9 +35108,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         damage so it scales", uncapped -- the literal answer to his own
         original "make it worth the grind" question about Summoning
         mastery. summoning_mastery_pct=150 (50% overflow -> 1.5x) should
-        scale the whole final damage total, same 339-348 baseline range
-        (charisma 10, mastery at the old 100% cap) from the sibling test
-        above, scaled by 1.5 and int()-truncated: 508-522.
+        scale the whole final damage total, same baseline range
+        (charisma 10) from the sibling test above, scaled by 1.5 and
+        int()-truncated. Computed from real current catalog values
+        (2026-09-14 fix -- see the sibling damage-bonus test's own
+        docstring for why this cluster of tests needed it).
         """
         import sessions
         from unittest.mock import patch, AsyncMock
@@ -35105,8 +35146,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 forced_roll=10,
             )
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
+        cairnbound = remnants_module.get_remnant("the_cairnbound")
+        cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
+        flat_mod = cairnbound["summon_damage_bonus"] + cairnbound_template["damage_bonus"] + remnants_module.REMNANT_SUMMON_POWER_BONUS
+        expected_min = int((10 + 1 + flat_mod) * 1.5)
+        expected_max = int((10 + 10 + flat_mod) * 1.5)
         actual_damage = 100000 - goblin["hp_current"]
-        self.assertTrue(508 <= actual_damage <= 522, f"damage {actual_damage} outside expected 508-522 overflow-scaled range")
+        self.assertTrue(
+            expected_min <= actual_damage <= expected_max,
+            f"damage {actual_damage} outside expected {expected_min}-{expected_max} overflow-scaled range",
+        )
         sessions.end_session(-983)
 
     async def test_summoning_the_root_that_remembers_sends_the_real_uploaded_animation(self):

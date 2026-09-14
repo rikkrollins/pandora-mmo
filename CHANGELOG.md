@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.608] — test-only: fix a stale cluster of Remnant summon-damage range assertions, no gameplay change
+
+Dug into the 4 pre-existing `test_summon_remnant_*` failures flagged
+in v1.27.603/606's own memory notes. Root cause, confirmed by direct
+computation: The Cairnbound's real `damage_bonus` in campaign.json is
+280 today, but these 4 tests still hardcoded expected damage ranges
+computed against an old value of 225 (one test even asserted the old
+225 value directly) — a real balance pass changed the number without
+these tests ever being updated to match. The current game code and
+catalog values are correct and self-consistent; only the tests were
+stale. Fixed by computing each test's expected range from the real
+current catalog values directly instead of a second hardcoded number,
+so a future rebalance can't silently desync them again. No production
+code changed.
+
 ## [1.27.607] — balance: monster damage growth now tracks a rebirthed player's own HP growth
 
 Follow-up to the resistance-wall fix (v1.27.603) — that same audit
