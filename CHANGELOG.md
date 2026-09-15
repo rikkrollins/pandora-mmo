@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.615] — fix: "open/view my professions" misclassified as examine
+
+Real live report (dev-bridge screenshot, Coffee: "I should be able to
+view or look at or open my professions menu" — got "doesn't spot
+anything like that here" instead of the real Professions screen).
+
+Root cause: the same shadowing bug already fixed once each for
+bestiary/leaderboard/menu/formation/waypoints/affinity/the map/
+blacksmith+alchemy menus — `_keyword_fallback`'s bare `\bprofessions?\b`
+check sat far down the function, well after the generic "open X" ->
+examine catch-all and the "view(ed/ing)?" examine-verb trigger, so
+either phrasing always matched one of those generic rules first. Moved
+the check up next to bestiary/leaderboard, the same early position
+every other instance of this exact bug class already lives at.
+
+One new test added (`Open my professions`/`View my profession`/`look
+at my profession`/`check my professions` all now route to
+`check_professions`). Confirmed the removed duplicate check further
+down the file was genuinely unreachable, not accidentally load-bearing.
+A pre-existing, unrelated failure (`test_view_classified_as_examine`'s
+"Viewing the map" case — a stale expectation predating the real
+`visual_map` action) was confirmed via git-stash to already fail
+identically before this change; left untouched.
+
 ## [1.27.614] — fix: 3 real Forge/Enchant gaps from live dev-bridge reports
 
 Three real reports came in from a live Forge session (dev-bridge,

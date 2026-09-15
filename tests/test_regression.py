@@ -211,6 +211,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         the new "view" examine trigger must not shadow it."""
         self.assertEqual(_keyword_fallback("view my inventory", [])["action"], "check_inventory")
 
+    def test_open_or_view_my_professions_now_routes_to_check_professions_not_examine(self):
+        """
+        Real live report (2026-09-15, dev-bridge screenshot, Coffee:
+        "I should be able to view or look at or open my professions
+        menu" -- got "doesn't spot anything like that here" instead).
+        Same exact shadowing bug already fixed once for bestiary/
+        leaderboard/menu/formation/waypoints/affinity: the generic
+        "open X" -> examine catch-all and the "view(ed/ing)?" examine
+        trigger both sit earlier in _keyword_fallback than the old
+        bare-"profession(s)" check did. Moved the check up alongside
+        bestiary/leaderboard so it wins first, same as those.
+        """
+        for text in ("Open my professions", "View my profession", "look at my profession", "check my professions"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_professions", text)
+
     def test_approach_classified_as_examine(self):
         """
         Real live gap found via the AI-driven Labyrinth playtest tool

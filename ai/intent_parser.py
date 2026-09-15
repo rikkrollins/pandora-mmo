@@ -426,6 +426,23 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
         return {**base, "action": "bestiary"}
     if re.search(r"\bleaderboard\b", lowered):
         return {**base, "action": "leaderboard"}
+    # check_professions -- moved up from its old spot much further down
+    # this function (2026-09-15, dev-bridge screenshot, Coffee: "I
+    # should be able to view or look at or open my professions menu").
+    # Real live bug: "Open my professions" got "doesn't spot anything
+    # like that here" instead of the real Professions screen. Root
+    # cause: the generic "open X" -> examine catch-all (much further
+    # down this function) and the "view/read/checked out" examine_verb_
+    # match sit far earlier in this function than the old bare-
+    # "profession(s)" check did, so both "open"/"view" phrasing always
+    # matched one of those generic examine triggers first -- the exact
+    # same shadowing bug already fixed once for bestiary/leaderboard/
+    # menu/formation/waypoints/affinity, all right above this line, for
+    # the identical reason. "profession(s)" is exactly as distinctive
+    # as those (no other real meaning anywhere in this game's
+    # vocabulary), so it gets the same early-position fix.
+    if re.search(r"\bprofessions?\b", lowered):
+        return {**base, "action": "check_professions"}
     if any(w in lowered for w in ["my achievements", "my titles", "unlocked achievements"]):
         return {**base, "action": "check_achievements"}
     # Real live gap found via topic-activity monitoring (2026-08-22,
@@ -2663,12 +2680,11 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if "echo" in lowered and any(w in lowered for w in ["challenge", "trial", "fight", "start", "begin"]):
         return {**base, "action": "start_echo_trial"}
 
-    # check_professions (2026-07-25, per Coffee: "continue with
-    # professions") -- "profession(s)" is distinctive enough in this
-    # game's vocabulary to fire on its own, same convention as bare
-    # "bestiary"/"leaderboard" elsewhere in this file.
-    if re.search(r"\bprofessions?\b", lowered):
-        return {**base, "action": "check_professions"}
+    # check_professions moved up near bestiary/leaderboard (see that
+    # comment, 2026-09-15) -- it's unreachable here now that "open"/
+    # "view"/"read"/etc. examine triggers earlier in this function
+    # would always win first anyway; kept out entirely rather than left
+    # as dead code that looks reachable but never runs.
 
     unconditional_shove_words = ["shove", "tackle", "trip", "push over"]
     knock_down_phrasing = "knock" in lowered and ("prone" in lowered or "down" in lowered)
