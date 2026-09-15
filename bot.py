@@ -22127,11 +22127,26 @@ async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 # narrator ground truth" discipline this whole codebase already follows
 # for combat; here the "narrator" is the menu screen itself.
 def _profession_status_line(character: dict, profession: str) -> str:
-    """The exact same rank/bonus/uses line _do_check_professions already shows, reused so a crafting menu never has to send a player elsewhere to see where they stand."""
+    """
+    The exact same rank/bonus/uses line _do_check_professions already
+    shows, reused so a crafting menu never has to send a player
+    elsewhere to see where they stand.
+
+    Real live gap (2026-09-15, dev-bridge, Coffee: "can u show the %
+    on the professions ? im not seeing it, put it in the menus for the
+    appropriate task") -- this line only ever showed skill_uses-based
+    rank/bonus, never the real profession_mastery_pct that actually
+    governs forge_magic_upgrade's ability pool (Strength/Constitution
+    only under 33%, per Coffee's own live question this same session),
+    masterwork-quality odds, and gathering yield. Two genuinely
+    different stats were both called "profession status" with only one
+    of them ever shown anywhere. Now shows both.
+    """
     uses = (character.get("skill_uses") or {}).get(profession, 0)
     bonus = practiced_bonus(uses)
     rank = _profession_rank_title(uses)
-    return f"{profession.capitalize()}: {rank} (+{bonus}, {uses} uses)"
+    mastery_pct = _profession_mastery_pct(character, profession)
+    return f"{profession.capitalize()}: {rank} (+{bonus}, {uses} uses) — {mastery_pct:.1f}% mastery"
 
 
 def _materials_checklist_lines(inventory: dict, materials: dict) -> list[str]:
@@ -23219,7 +23234,8 @@ async def _do_check_professions(update: Update) -> None:
         bonus = practiced_bonus(uses)
         rank = _profession_rank_title(uses)
         home_tag = " ⭐ *(favored trade)*" if prof == home_profession else ""
-        lines.append(f"• {prof.capitalize()}: {rank} (+{bonus}, {uses} uses){home_tag}")
+        mastery_pct = _profession_mastery_pct(character, prof)
+        lines.append(f"• {prof.capitalize()}: {rank} (+{bonus}, {uses} uses) — {mastery_pct:.1f}% mastery{home_tag}")
     # Real feature (2026-09-11, per Coffee: "include the blacksmith and
     # Alchemy menus into the Professions menu in the main menu") -- the
     # two focused crafting menus (_do_show_blacksmith_menu/_do_show_

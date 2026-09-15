@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.619] — feature: real mastery % now shown in the profession menus
+
+Direct follow-up to v1.27.618 (Coffee: "can u show the % on the
+professions ? im not seeing it, put it in the menus for the
+appropriate task. example for forging put the blacksmith % and for
+alchemy put the % for that one, if there is any other sub menus needed
+for professions for other tasks we shud do that too").
+
+Root cause: `_profession_status_line` (the header every Blacksmith/
+Alchemy menu and category screen already shows) and the main
+Professions screen (`_do_check_professions`, all 7 professions) both
+only ever displayed `skill_uses`-based rank/bonus — never the real
+`profession_mastery_pct` that actually governs forge_magic_upgrade's
+ability pool, masterwork-quality odds, and gathering yield. Two
+genuinely different stats were both being called "profession status,"
+and only one of them was ever shown anywhere in the game.
+
+Both now show the real mastery % alongside rank:
+"Blacksmithing: Novice (+0, 12 uses) — 11.8% mastery". Since
+`_profession_status_line` is shared by every Blacksmith/Alchemy menu
+and category screen, one change covers Forge/Craft/Advanced Ladder and
+Brew/Enchant all at once; the Professions overview screen covers the
+other 5 professions (cooking + the 4 gathering trades), which have no
+dedicated menu screen of their own. Gathering itself is free-text at a
+resource node with no button/preview screen to add a duplicate line
+to, so the Professions overview is the complete, appropriate coverage
+for those.
+
+1 new test added confirming the real % appears in both the main
+Professions screen and the shared status line; 6 related
+Blacksmith/Alchemy/Professions menu tests reconfirmed clean.
+
 ## [1.27.618] — rebalance: proficiency/mastery grind rate raised 10x
 
 Direct follow-up to the Charisma forge-pool question (Coffee: at 11.2%

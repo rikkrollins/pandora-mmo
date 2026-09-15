@@ -389,6 +389,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("menu|blacksmith", callback_data)
         self.assertIn("menu|alchemy", callback_data)
 
+    async def test_professions_menu_shows_the_real_mastery_pct_not_just_rank(self):
+        """
+        Real live report (2026-09-15, dev-bridge, Coffee: "can u show
+        the % on the professions ? im not seeing it, put it in the
+        menus for the appropriate task... for forging put the
+        blacksmith %, for alchemy put the % for that one"). This screen
+        (and _profession_status_line, shared by the Blacksmith/Alchemy
+        menu headers) only ever showed skill_uses-based rank/bonus --
+        never profession_mastery_pct, the real stat that governs
+        forge_magic_upgrade's ability pool, masterwork odds, and
+        gathering yield. Confirms both fixes: the main Professions
+        screen (all 7 professions) and the per-profession status line
+        the Blacksmith/Alchemy menus reuse.
+        """
+        user_id = 951032
+        make_basic_character(user_id, "MasteryPctVisibleTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, profession_mastery_pct={"blacksmithing": 11.8, "alchemy": 4.2})
+        character = db.get_character(user_id, -999)
+
+        sink = []
+        await bot._do_check_professions(FakeUpdate(user_id, "check my professions", sink))
+        combined = "\n".join(sink)
+        self.assertIn("11.8% mastery", combined)
+        self.assertIn("4.2% mastery", combined)
+
+        self.assertIn("11.8% mastery", bot._profession_status_line(character, "blacksmithing"))
+        self.assertIn("4.2% mastery", bot._profession_status_line(character, "alchemy"))
+
     async def test_professions_menu_buttons_actually_open_the_real_menus(self):
         """End-to-end: tapping the Professions screen's Blacksmith/Alchemy buttons reaches the exact same real menu screens their own natural-language triggers do."""
         user_id = 951031
