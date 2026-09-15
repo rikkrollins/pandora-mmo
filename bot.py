@@ -22233,18 +22233,48 @@ async def _do_show_blacksmith_category(update: Update, category: str) -> None:
                 button_rows.append([InlineKeyboardButton(f"⚒️ {recipe['name']} ({recipe['tier']})", callback_data=f"craft|preview|{rid}")])
     elif category == "forge":
         title = "✨ **The Forge — Forge Magic Item**"
-        intro = "Promote a plain weapon, armor, shield, ring, amulet, or wondrous item you already own into a real magic item with a random stat bonus."
+        intro = (
+            "Promote a plain weapon, armor, shield, ring, amulet, or wondrous item you already own into a real "
+            "magic item with a random stat bonus — or reforge one you've already enchanted this way to reroll "
+            "for a different stat."
+        )
         forge_recipe = get_enchant_recipe("forge_magic_upgrade")
         gate = recipe_requirement_gate(character, forge_recipe)
         if gate:
             locked_lines.append(f"🔒 Forge Magic Item — {gate}")
         else:
             seen_names = set()
+            # Real live gap (2026-09-15, dev-bridge, Coffee: forged an
+            # Amulet of Health, got a stat he didn't want, then couldn't
+            # find ANY way back in to reroll it -- "How do I reforge...
+            # if I want to roll for a different stat", "we need buttons
+            # in the menu to be able to do that or an explanation how").
+            # This used to skip every already-generated item outright
+            # with a comment claiming the Alchemy menu's Enchant
+            # category covers it instead -- it doesn't: that category
+            # only ever lists ENCHANT_RECIPES entries tagged
+            # profession=="alchemy" (elemental/warding/sharpen/arcana),
+            # and forge_magic_upgrade is profession=="blacksmithing", so
+            # it can never appear there. The underlying handler
+            # (_do_forge_magic_item, reached via this exact same
+            # forge|preview button) already correctly re-enchants an
+            # already-magic item IN PLACE (target_item_id = item_id,
+            # replace_kinds=["ability_bonus"] -- confirmed real,
+            # deliberate behavior from the 2026-09-13 restack-exploit
+            # fix) -- this was purely a menu-visibility gap, the
+            # mechanic itself always worked once you knew the right
+            # free-text phrasing. Now listed too, with a distinct
+            # "Reforge" label/icon so it doesn't read as a first-time
+            # promotion.
             for item_id in inventory:
-                if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
-                    continue  # already magic -- that's the Alchemy menu's Enchant category, not this one
+                already_magic = item_id.startswith(db.GENERATED_ITEM_ID_PREFIX)
                 item = items_module.get_item(item_id)
-                if item is None or item["type"] not in forge_recipe["applies_to"] or item["name"] in seen_names:
+                if item is None or item["type"] not in forge_recipe["applies_to"]:
+                    continue
+                if already_magic:
+                    button_rows.append([InlineKeyboardButton(f"🔄 Reforge {item['name']}", callback_data=f"forge|preview|{item_id}")])
+                    continue
+                if item["name"] in seen_names:
                     continue
                 seen_names.add(item["name"])
                 button_rows.append([InlineKeyboardButton(f"✨ {item['name']}", callback_data=f"forge|preview|{item_id}")])

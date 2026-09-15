@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.616] — fix: no menu path to reforge an already-magic item
+
+Real live report (dev-bridge, Coffee, live Forge session: rolled a
+Charisma bonus on the Amulet of Health he didn't want — "How do I
+reforge or re-enchant if I want to roll for a different stat... we
+need buttons in the menu to be able to do that or an explanation
+how").
+
+Root cause: the Forge menu's "Forge Magic Item" category skipped every
+already-generated (already-magic) item outright, with a comment
+claiming the Alchemy menu's own Enchant category covered rerolling
+instead — it never did. That category only ever lists `ENCHANT_RECIPES`
+entries tagged `profession == "alchemy"` (elemental/warding/sharpen/
+arcana), and `forge_magic_upgrade` is `profession == "blacksmithing"`,
+so it could never appear there. Net effect: a real, complete dead end
+in the menu system for an action the underlying handler
+(`_do_forge_magic_item`) already fully supported — it already
+re-enchants an already-magic item in place, replacing its prior
+ability-bonus roll rather than stacking a second one (same protection
+the v1.27.592 restack-exploit fix added). This was purely a menu-
+visibility gap, not a missing mechanic.
+
+Already-magic eligible items now show up in the same Forge category
+list too, labeled "🔄 Reforge {name}" to distinguish from a first-time
+promotion. One stale test that asserted the old (wrong) exclusion was
+updated; one new end-to-end test proves the reroll actually replaces
+the old stat rather than stacking. 7 related forge/blacksmith-menu
+tests reconfirmed clean.
+
 ## [1.27.615] — fix: "open/view my professions" misclassified as examine
 
 Real live report (dev-bridge screenshot, Coffee: "I should be able to

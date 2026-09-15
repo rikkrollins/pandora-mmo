@@ -16002,20 +16002,78 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("craft|preview|journeyman_blade", callback_data)
         self.assertIn("Forge Guild", text)
 
-    async def test_blacksmith_category_forge_shows_owned_plain_items_but_never_an_already_magic_one(self):
-        """forge_magic_upgrade is scoped to PLAIN items only -- an already-generated item belongs to the Alchemy menu's own Enchant category instead."""
+    async def test_blacksmith_category_forge_shows_owned_plain_items_and_offers_reforge_for_an_already_magic_one(self):
+        """
+        Real live gap (2026-09-15, dev-bridge, Coffee: forged an Amulet
+        of Health, didn't like the rolled stat, then couldn't find ANY
+        way back in to reroll it -- "How do I reforge or re-enchant...
+        we need buttons in the menu to be able to do that or an
+        explanation how"). This category used to skip every already-
+        generated item outright, with a comment claiming the Alchemy
+        menu's own Enchant category covered it instead -- it never did:
+        that category only ever lists ENCHANT_RECIPES tagged
+        profession=="alchemy", and forge_magic_upgrade is
+        profession=="blacksmithing", so it could never appear there.
+        The underlying handler (_do_forge_magic_item, reached via this
+        same forge|preview button) already correctly re-enchants an
+        already-magic item in place -- this was purely a menu-
+        visibility gap. Now listed with a distinct "Reforge" label.
+        """
         make_basic_character(951022, "GeneratedItemForgeTester", char_class="Fighter", current_location="crossroads_tavern")
         db.update_character(951022, -999, guild="forge_guild", level=20)
         db.add_item(951022, -999, "longsword", 1)
         gen_item_id = db.create_item_instance(
             item_type="weapon", name="Test Blade", rarity="rare", price=0,
             base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+            affixes=[{"kind": "ability_bonus", "ability": "charisma", "value": 1}],
         )
         db.add_item(951022, -999, gen_item_id, 1)
         update = FakeUpdate(951022, "", [])
-        text, callback_data = await self._render_category(951022, bot._do_show_blacksmith_category(update, "forge"))
-        self.assertIn(f"forge|preview|longsword", callback_data)
-        self.assertNotIn(f"forge|preview|{gen_item_id}", callback_data)
+        from unittest.mock import patch
+        captured = []
+        real_safe_send = bot._safe_send
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured.append((text, kwargs.get("reply_markup")))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_show_blacksmith_category(update, "forge")
+        text, markup = captured[-1]
+        buttons = [btn for row in markup.inline_keyboard for btn in row]
+        callback_data = [btn.callback_data for btn in buttons]
+        self.assertIn("forge|preview|longsword", callback_data)
+        self.assertIn(f"forge|preview|{gen_item_id}", callback_data)
+        reforge_button = next(btn for btn in buttons if btn.callback_data == f"forge|preview|{gen_item_id}")
+        self.assertEqual(reforge_button.text, "🔄 Reforge Test Blade")
+
+    async def test_forge_menu_callback_rerolls_an_already_magic_items_ability_bonus_end_to_end(self):
+        """
+        Direct proof the reforge button above actually works, not just
+        that it's shown: tapping it on an already-magic item replaces
+        its old ability_bonus with a freshly-rolled one in place (same
+        replace_kinds=["ability_bonus"] protection the 2026-09-13
+        restack-exploit fix already added), never stacking a second one.
+        """
+        from unittest.mock import patch
+        user_id = 951030
+        make_basic_character(user_id, "RerollForgeTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        gen_item_id = db.create_item_instance(
+            item_type="ring", name="Reroll Test Ring", rarity="rare", price=0,
+            base_stats={"type": "ring"},
+            affixes=[{"kind": "ability_bonus", "ability": "charisma", "value": 1}],
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        with patch("bot.narrate_skill_check", return_value="You rework it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}), \
+             patch("bot._roll_forge_magic_upgrade_ability", return_value="wisdom"):
+            sink = []
+            await bot.forge_menu_callback(FakeCallbackUpdate(user_id, f"forge|make|{gen_item_id}", sink), DummyContext())
+        item = items_module.get_item(gen_item_id)
+        self.assertEqual(item.get("ability_bonuses"), [{"ability": "wisdom", "value": 1}])
 
     async def test_blacksmith_category_forge_shows_locked_reason_when_not_guild_eligible(self):
         make_basic_character(951029, "UngatedForgeTester", char_class="Fighter", current_location="crossroads_tavern")
