@@ -311,7 +311,34 @@ def _effective_backstab_multiplier(character: dict) -> int:
     return character.get("backstab_base_multiplier", 1) * backstab_tier_multiplier(character.get("level", 1))
 
 
-PROFICIENCY_GRIND_INCREMENT = 0.01
+# Real live rebalance (2026-09-15, per Coffee: reaching the 33%
+# Blacksmithing mastery threshold that unlocks Charisma/Intelligence/
+# Wisdom in forge_magic_upgrade's own ability pool -- see
+# _roll_forge_magic_upgrade_ability -- from an already-real 11.2%
+# would have taken ~2180 more successful crafts at the original 0.01
+# rate: "instead of 2180 more times make it 218 - the % was too
+# steep... check other proficiences and masters also and make sure
+# they are more balanced as well"). This ONE shared constant is the
+# real grind rate behind EVERY flat-%-per-successful-use proficiency
+# in the game -- weapon/armor proficiency (_grind_dict_proficiency),
+# profession/crafting mastery (blacksmithing/alchemy/herbalism/mining/
+# fishing/lumberjacking, _grind_profession_mastery), Backstab/Steal/
+# Throw (_grind_flat_proficiency), and spell element + healing mastery
+# (_grind_element_mastery/_grind_heal_mastery) -- confirmed by reading
+# every one of those call sites: none of them carry their own separate
+# rate, so raising this one constant 10x speeds up all of them by the
+# same factor, keeping them exactly as balanced relative to each other
+# as they already were (perfectly, since they always shared one number).
+# This deliberately does NOT touch summoning_mastery_pct (grown by
+# spending a Universal Manipulation skill point, not by repeated use --
+# a different currency entirely, never reported as steep) or the
+# separate, much rarer guild-level-up passive bonus (a flat +1 per
+# GUILD_STAT_BONUS_LEVELS character levels, not a per-attempt grind).
+# The original 0.01 rate was itself a deliberate 2026-08-08 choice
+# (Coffee, verbatim: "make it an absolute grind to level up to 100% hit
+# probability") -- noted here since this change is a real, explicit
+# reversal of that earlier design, not an oversight being corrected.
+PROFICIENCY_GRIND_INCREMENT = 0.1
 PROFICIENCY_STARTING_PCT = 1.0
 PROFICIENCY_MAX_PCT = 100.0
 ARMOR_MASTERY_DAMAGE_REDUCTION_PCT = 25

@@ -12675,15 +12675,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         user_id = 950930
         make_basic_character(user_id, "GrindTester2", current_location="crossroads_tavern")
+        expected = bot.PROFICIENCY_STARTING_PCT + bot.PROFICIENCY_GRIND_INCREMENT
         bot._grind_dict_proficiency(user_id, -999, "weapon_proficiency_pct", {}, "martial")
         after1 = db.get_character(user_id, -999)
-        self.assertAlmostEqual(after1["weapon_proficiency_pct"]["martial"], 1.01, places=5)
+        self.assertAlmostEqual(after1["weapon_proficiency_pct"]["martial"], expected, places=5)
         self.assertNotIn("simple", after1["weapon_proficiency_pct"])
 
         bot._grind_dict_proficiency(user_id, -999, "weapon_proficiency_pct", after1["weapon_proficiency_pct"], "simple")
         after2 = db.get_character(user_id, -999)
-        self.assertAlmostEqual(after2["weapon_proficiency_pct"]["simple"], 1.01, places=5)
-        self.assertAlmostEqual(after2["weapon_proficiency_pct"]["martial"], 1.01, places=5)  # untouched by the other category's grind
+        self.assertAlmostEqual(after2["weapon_proficiency_pct"]["simple"], expected, places=5)
+        self.assertAlmostEqual(after2["weapon_proficiency_pct"]["martial"], expected, places=5)  # untouched by the other category's grind
 
     def test_equipped_proficiency_bonus_sums_matching_gear_only(self):
         user_id = 950931

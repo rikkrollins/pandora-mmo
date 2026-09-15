@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.618] — rebalance: proficiency/mastery grind rate raised 10x
+
+Direct follow-up to the Charisma forge-pool question (Coffee: at 11.2%
+Blacksmithing mastery, reaching the 33% threshold that unlocks
+Charisma/Intelligence/Wisdom in forge_magic_upgrade's ability pool
+would've taken ~2180 more successful crafts at the old rate — "instead
+of 2180 more times make it 218... check other proficiences and masters
+also and make sure they are more balanced as well").
+
+Checked every "mastery %" system in the game before touching anything:
+weapon/armor proficiency, profession/crafting mastery (blacksmithing,
+alchemy, herbalism, mining, fishing, lumberjacking), Backstab, Steal,
+Throw, and spell element + healing mastery all turned out to already
+share exactly ONE constant (`PROFICIENCY_GRIND_INCREMENT`) — none of
+them had their own separate, independently-tuned rate. They were
+already perfectly balanced against each other; just uniformly slower
+than felt good. Raised that one shared constant from 0.01 to 0.1 (10x),
+which speeds up every one of those systems by the identical factor,
+preserving that balance exactly.
+
+Deliberately left untouched: `summoning_mastery_pct` (grown by
+spending a Universal Manipulation skill point, a completely different
+currency than repeated use, never reported as steep) and the separate
+guild-level-up passive bonus (+1 per `GUILD_STAT_BONUS_LEVELS`
+character levels — automatic, not a manual grind).
+
+Worth noting for the record: the original 0.01 rate was itself a
+deliberate 2026-08-08 design choice (Coffee, verbatim at the time:
+"make it an absolute grind to level up to 100% hit probability"). This
+change is a real, explicit reversal of that earlier call, not a bug
+fix — noted here so a future session doesn't "restore" the old rate
+thinking this was an oversight.
+
+2 pre-existing tests that hardcoded the literal old value (1.01) were
+updated to reference the shared constant symbolically instead, matching
+every other test in this file; every other proficiency/mastery test
+already did this and needed no changes. 9 related tests across
+weapon/profession/heal/guild-growth mastery reconfirmed clean.
+
 ## [1.27.617] — feature: one-tap reroll button on every forge/enchant result
 
 Direct follow-up in the same dev-bridge session as v1.27.616 (Coffee:
