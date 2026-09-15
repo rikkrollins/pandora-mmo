@@ -24032,7 +24032,9 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     message += f"\n✨ {enchant_msg}{masterwork_note}"
     await _safe_send(update, message)
     if enchanted_item:
-        await _maybe_send_item_image(update, item_id, enchanted_item)
+        recast_label = recipe_id.replace("enchant_", "").replace("_", " ").title()
+        recast_button = [[InlineKeyboardButton(f"🔄 Recast {recast_label}", callback_data=f"enchant|preview|{recipe_id}|{item_id}")]]
+        await _maybe_send_item_image(update, item_id, enchanted_item, extra_buttons=recast_button)
 
 
 async def _do_enchant_item_elemental_roll(update: Update, character: dict, item_id: str, item: dict, text: str) -> None:
@@ -24138,7 +24140,8 @@ async def _do_enchant_item_elemental_roll(update: Update, character: dict, item_
     message += f"\n✨ The magic settles as **{recipe['affix']['damage_type']}** — {enchant_msg}{masterwork_note}"
     await _safe_send(update, message)
     if enchanted_item:
-        await _maybe_send_item_image(update, item_id, enchanted_item)
+        reroll_button = [[InlineKeyboardButton("🔄 Reroll Element", callback_data=f"enchant|roll|{item_id}")]]
+        await _maybe_send_item_image(update, item_id, enchanted_item, extra_buttons=reroll_button)
 
 
 # Magic item system Phase 8 (2026-09-08, per Coffee: "player must be Min
@@ -24281,7 +24284,8 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
     message += f"\n✨ {enchant_msg} A surge of magic settles into it, granting +{affix['value']} {chosen_ability.title()}!{masterwork_note}"
     await _safe_send(update, message)
     if enchanted_item:
-        await _maybe_send_item_image(update, target_item_id, enchanted_item)
+        reforge_button = [[InlineKeyboardButton("🔄 Reforge (reroll stat)", callback_data=f"forge|preview|{target_item_id}")]]
+        await _maybe_send_item_image(update, target_item_id, enchanted_item, extra_buttons=reforge_button)
 
 
 async def _do_make_campfire(update: Update) -> None:
@@ -26110,7 +26114,9 @@ def _item_image_prompt(item_id: str, item_data: dict) -> str:
     )
 
 
-async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) -> None:
+async def _maybe_send_item_image(
+    update: Update, item_id: str, item_data: dict, extra_buttons: list[list[InlineKeyboardButton]] | None = None,
+) -> None:
     """
     Real item icon (2026-07-22, task "images for the whole game" --
     item icons, last of the four pieces asked for). Sent when a
@@ -26127,12 +26133,22 @@ async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) 
     unlike a loot-drop's own announcement (_item_view_keyboard, already
     attached there). Now attaches the identical button here too, so
     every one of those call sites gets it for free.
+
+    `extra_buttons` (2026-09-15, same dev-bridge session, direct
+    follow-up: "After we forged make a magic item or enchant when you
+    show the item, can you please put the button below it so we can
+    re-roll... reforging or whatever it would be") -- an optional list
+    of extra button ROWS shown above the universal View Item row.
+    Forge/enchant call sites pass a real one-tap "reroll this exact
+    result again" button here; every other caller (buy/gather/equip,
+    nothing to reroll) leaves it None and is completely unaffected.
     """
     prompt = _item_image_prompt(item_id, item_data)
+    rows = list(extra_buttons or []) + [[InlineKeyboardButton("🔍 View Item", callback_data=f"itemview|show|{item_id}")]]
     await _send_generated_image(
         update, prompt, f"🎒 {item_data['name']}",
         seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
-        reply_markup=_item_view_keyboard(item_id),
+        reply_markup=InlineKeyboardMarkup(rows),
     )
 
 

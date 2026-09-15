@@ -16067,13 +16067,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             affixes=[{"kind": "ability_bonus", "ability": "charisma", "value": 1}],
         )
         db.add_item(user_id, -999, gen_item_id, 1)
+        update = FakeCallbackUpdate(user_id, f"forge|make|{gen_item_id}", [])
         with patch("bot.narrate_skill_check", return_value="You rework it carefully."), \
              patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}), \
              patch("bot._roll_forge_magic_upgrade_ability", return_value="wisdom"):
-            sink = []
-            await bot.forge_menu_callback(FakeCallbackUpdate(user_id, f"forge|make|{gen_item_id}", sink), DummyContext())
+            await bot.forge_menu_callback(update, DummyContext())
         item = items_module.get_item(gen_item_id)
         self.assertEqual(item.get("ability_bonuses"), [{"ability": "wisdom", "value": 1}])
+
+        # Real live follow-up (2026-09-15, same dev-bridge session:
+        # "After we forged make a magic item or enchant when you show
+        # the item, can you please put the button below it so we can
+        # re-roll... reforging or whatever it would be") -- the result
+        # image now carries a direct one-tap reroll button too, not
+        # just View Item.
+        reply_markup = update.effective_chat.sent_photos[-1]["reply_markup"]
+        callback_data = [btn.callback_data for row in reply_markup.inline_keyboard for btn in row]
+        self.assertIn(f"forge|preview|{gen_item_id}", callback_data)
 
     async def test_blacksmith_category_forge_shows_locked_reason_when_not_guild_eligible(self):
         make_basic_character(951029, "UngatedForgeTester", char_class="Fighter", current_location="crossroads_tavern")
@@ -16306,12 +16316,51 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         db.add_item(user_id, -999, gen_item_id, 1)
         from unittest.mock import patch
-        sink = []
+        update = FakeCallbackUpdate(user_id, f"enchant|make|enchant_flame|{gen_item_id}", [])
         with patch("bot.narrate_skill_check", return_value="You enchant it carefully."), \
              patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
-            await bot.enchant_menu_callback(FakeCallbackUpdate(user_id, f"enchant|make|enchant_flame|{gen_item_id}", sink), DummyContext())
+            await bot.enchant_menu_callback(update, DummyContext())
         item = items_module.get_item(gen_item_id)
         self.assertEqual(item["damage_type"], "fire")
+
+        # Real live follow-up (2026-09-15, dev-bridge: "put the button
+        # below it so we can re-roll... reforging or whatever it would
+        # be") -- elemental enchants roll their element randomly from
+        # known spells, so the direct reroll button re-runs that same
+        # random roll (enchant|roll), not a fixed recipe.
+        reply_markup = update.effective_chat.sent_photos[-1]["reply_markup"]
+        callback_data = [btn.callback_data for row in reply_markup.inline_keyboard for btn in row]
+        self.assertIn(f"enchant|roll|{gen_item_id}", callback_data)
+
+    async def test_non_elemental_enchant_result_carries_a_real_recast_button(self):
+        """
+        Same real live follow-up as the two tests above, for the third
+        of the three enchant/forge result shapes: a non-elemental
+        ENCHANT_RECIPES entry (enchant_sharpen, kind=elemental_damage_
+        bonus -- stays in _do_enchant_item's own generic path, never
+        delegates to the elemental roll) gets a "Recast" button pointed
+        at the exact same recipe+item, reusing the normal enchant|
+        preview flow (real odds shown again, not a blind re-roll).
+        """
+        from unittest.mock import patch
+        user_id = 951031
+        make_basic_character(user_id, "RecastButtonTester", char_class="Wizard", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "iron_ore", 5)
+        db.add_item(user_id, -999, "sulfur_dust", 5)
+        gen_item_id = db.create_item_instance(
+            item_type="weapon", name="Recast Test Blade", rarity="rare", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+        )
+        db.add_item(user_id, -999, gen_item_id, 1)
+        update = FakeCallbackUpdate(user_id, f"enchant|make|enchant_sharpen|{gen_item_id}", [])
+        with patch("bot.narrate_skill_check", return_value="You enchant it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot.enchant_menu_callback(update, DummyContext())
+        item = items_module.get_item(gen_item_id)
+        self.assertTrue(item.get("elemental_damage_bonus_pct"))
+        reply_markup = update.effective_chat.sent_photos[-1]["reply_markup"]
+        callback_data = [btn.callback_data for row in reply_markup.inline_keyboard for btn in row]
+        self.assertIn(f"enchant|preview|enchant_sharpen|{gen_item_id}", callback_data)
 
     async def test_craft_preview_shows_a_real_computed_success_chance_and_materials_checklist(self):
         """

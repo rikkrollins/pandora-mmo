@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.617] — feature: one-tap reroll button on every forge/enchant result
+
+Direct follow-up in the same dev-bridge session as v1.27.616 (Coffee:
+"After we forged make a magic item or enchant when you show the item,
+can you please put the button below it so we can re-roll for another
+[stat] with reforging or whatever it would be"). v1.27.616 fixed the
+menu path (Blacksmith → Forge Magic Item now lists already-magic
+items); this puts the same action one tap away, directly under the
+result message itself.
+
+`_maybe_send_item_image` now takes an optional `extra_buttons`
+parameter (extra rows shown above the universal View Item row, added
+in v1.27.614) — every buy/gather/equip call site is unaffected, only
+the 3 real forge/enchant result messages pass one:
+
+- **forge_magic_upgrade** (the ability-bonus stat, e.g. "+1
+  Constitution") — "🔄 Reforge (reroll stat)", reusing the exact
+  `forge|preview` flow v1.27.616 already wired up.
+- **Elemental enchants** (Flame/Frost/etc., 9 real recipes) — "🔄
+  Reroll Element", re-running the same random roll-from-known-spells
+  mechanic.
+- **Every other enchant** (Warding, Sharpen, Arcana, the Enchanters'
+  Guild ladder) — "🔄 Recast {Effect}", reusing the normal
+  `enchant|preview` flow (shows real odds again, not a blind reroll).
+
+3 tests added/extended proving each of the 3 result messages actually
+carries its own real reroll button (not just that it's shown as
+text) — direct assertions on the sent photo's real `reply_markup`.
+
 ## [1.27.616] — fix: no menu path to reforge an already-magic item
 
 Real live report (dev-bridge, Coffee, live Forge session: rolled a
