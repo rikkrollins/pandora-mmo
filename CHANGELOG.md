@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.614] — fix: 3 real Forge/Enchant gaps from live dev-bridge reports
+
+Three real reports came in from a live Forge session (dev-bridge,
+Coffee), all fixed:
+
+- **Silent Confirm button.** Tapping Confirm on Craft/Forge/Enchant
+  dispatches straight into a real `narrate_skill_check` Ollama call —
+  genuinely tens of seconds on this CPU-only setup — with nothing sent
+  in between, so it looked like the tap hadn't registered ("I almost
+  clicked it a couple more times because of it"). All 4 Confirm flows
+  (`craft|make`, `forge|make`, `enchant|roll`, `enchant|make`) now send
+  a real, immediate "⏳ Crafting/Forging/Enchanting..." message first.
+- **No View Item button after crafting/forging/enchanting.** Every
+  `_maybe_send_item_image` call site (buy, gather, craft, forge,
+  enchant, equip) sent a bare picture with no way to inspect the item's
+  real stats afterward except retyping "view X" — unlike a loot-drop's
+  own announcement, which already had the button. Now attached
+  everywhere `_maybe_send_item_image` is used, for free.
+- **Forged/enchanted ability-bonus stat invisible everywhere.** Forging
+  an Amulet of Health rolled a real "+1 Constitution" — fully working
+  in combat/ability checks the whole time — but neither the item-view
+  screen NOR the character sheet's own equipped-gear line ever showed
+  it, because `_format_item_stats_line`/`_format_item_detail_block`
+  never read the `ability_bonuses` field `db._apply_affix` actually
+  stores it under. Both now render it; the character sheet inherits the
+  fix automatically since it calls straight into the same function.
+
+5 new tests added covering all three fixes directly; 12 related
+forge/craft/enchant/item-view tests reconfirmed clean (1 unrelated
+pre-existing failure, `test_looted_item_gets_a_view_button_with_
+working_actions`, confirmed via git-stash to already fail identically
+before these changes — not touched here).
+
 ## [1.27.613] — fix: full chapter 1-8 dungeon audit finds a 4th misplaced Remnant
 
 Direct follow-up per Coffee: "check and fix all the dungeons now from

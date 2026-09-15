@@ -5042,6 +5042,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1d6+2", estats)
         self.assertIn("fire damage", estats)
 
+    def test_forged_ability_bonus_now_shows_up_in_both_item_views_and_the_sheet(self):
+        """
+        Real live report (2026-09-15, dev-bridge screenshot, Coffee:
+        forged an Amulet of Health via forge_magic_upgrade, got a real
+        "+1 Constitution" result -- but viewing the item afterward
+        didn't show it, and neither did the character sheet's own
+        equipped-gear line). Root cause: db._apply_affix's
+        "ability_bonus" kind stores each roll as item["ability_bonuses"]
+        (already correctly summed into live combat/ability checks by
+        items.equipped_ability_bonus -- the mechanic itself always
+        worked), but _format_item_stats_line and _format_item_detail_
+        block never read that field at all. _format_equipped_line (the
+        character sheet's own equipped-gear display) calls straight
+        into _format_item_stats_line, so fixing it there fixes the
+        sheet too, with zero separate sheet-specific code needed.
+        """
+        base = items_module.get_item("amulet_of_health")
+        item_id = db.create_item_instance(
+            item_type=base["type"], name="Amulet of Health", rarity=base.get("rarity", "uncommon"),
+            price=base.get("price", 0), base_stats={k: v for k, v in base.items() if k != "affixes"},
+            affixes=[{"kind": "ability_bonus", "ability": "constitution", "value": 1}], source="crafted",
+        )
+        item = items_module.get_item(item_id)
+        self.assertEqual(item.get("ability_bonuses"), [{"ability": "constitution", "value": 1}])
+
+        stats = bot._format_item_stats_line(item)
+        self.assertIn("+1 Constitution", stats)
+        detail = bot._format_item_detail_block(item)
+        self.assertIn("+1 Constitution", detail)
+
+        user_id = 960601
+        make_basic_character(user_id, "ForgedStatSheetTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=5)  # amulet_of_health is rare, requires level 5 to equip
+        db.add_item(user_id, -999, item_id, 1)
+        ok, equip_msg, _ = db.equip_item(user_id, -999, item_id)
+        self.assertTrue(ok, equip_msg)
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("+1 Constitution", sheet)
+
     def test_item_stats_line_shows_real_proficiency_categories(self):
         """
         Real live request (2026-08-14, Coffee: "when we view an
@@ -15987,6 +16027,55 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated = db.get_character(user_id, -999)
         self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in updated["inventory"]))
 
+    async def test_forge_craft_and_enchant_confirms_now_send_an_immediate_processing_ack(self):
+        """
+        Real live report (2026-09-15, dev-bridge screenshot, Coffee: "we
+        had jus entgered..." -- no, wrong report; this one: "When we
+        click confirm, can you tell the character that you are
+        processing the request? It didn't say anything when I clicked
+        it, and I almost clicked it a couple more times because of it").
+        Root cause: every one of these 4 Confirm buttons (craft|make,
+        forge|make, enchant|roll, enchant|make) dispatches straight into
+        a real narrate_skill_check call -- genuinely tens of seconds on
+        this CPU-only Ollama setup -- with nothing sent in between the
+        tap and that eventual result. _safe_answer's own Telegram
+        loading spinner on the button itself only lasts a moment, not
+        anywhere near long enough to cover that gap. Each of the 4
+        dispatch branches now sends a real, immediate "Processing"
+        message first.
+        """
+        from unittest.mock import patch
+        user_id = 951024
+        make_basic_character(user_id, "ProcessingAckTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        db.add_item(user_id, -999, "longsword", 1)
+        db.add_item(user_id, -999, "wooden_shield", 1)
+
+        with patch("bot.narrate_skill_check", return_value="You work carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            sink = []
+            await bot.forge_menu_callback(FakeCallbackUpdate(user_id, "forge|make|longsword", sink), DummyContext())
+            self.assertIn("⏳ Forging...", sink)
+
+            sink2 = []
+            await bot.craft_menu_callback(FakeCallbackUpdate(user_id, "craft|make|wooden_shield", sink2), DummyContext())
+            self.assertIn("⏳ Crafting...", sink2)
+
+            enchant_user_id = 951027
+            make_basic_character(enchant_user_id, "EnchantAckTester", char_class="Wizard", current_location="crossroads_tavern", known_spells=["fire_bolt"])
+            db.add_item(enchant_user_id, -999, "sulfur_dust", 5)
+            db.add_item(enchant_user_id, -999, "moonpetal", 5)
+            gen_item_id = db.create_item_instance(
+                item_type="weapon", name="Ack Test Blade", rarity="rare", price=0,
+                base_stats={"type": "weapon", "damage_dice": "1d8", "ability": "strength", "weapon_category": "martial"},
+            )
+            db.add_item(enchant_user_id, -999, gen_item_id, 1)
+            sink3 = []
+            await bot.enchant_menu_callback(FakeCallbackUpdate(enchant_user_id, f"enchant|make|enchant_flame|{gen_item_id}", sink3), DummyContext())
+            self.assertIn("⏳ Enchanting...", sink3)
+
     async def test_alchemy_category_brew_and_enchant_show_eligible_buttons_and_locked_reasons(self):
         """
         Real feature (2026-09-11, per Coffee: "shud we have the same
@@ -17711,6 +17800,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         real_reply_update.effective_chat = update.effective_chat
         await bot.reimage_command(real_reply_update, DummyContext())
         self.assertEqual(len(update.effective_chat.sent_photos), 2)
+
+    async def test_maybe_send_item_image_now_attaches_a_real_view_button(self):
+        """
+        Real live report (2026-09-15, dev-bridge screenshot, Coffee:
+        "When we craft Forge or enchant, let us view the item with a
+        push button"). Unlike a loot-drop's own announcement
+        (_item_view_keyboard already attached there), every _maybe_
+        send_item_image call site -- buy/gather/craft/forge/enchant/
+        equip -- sent a bare picture with no way to actually inspect the
+        item afterward except typing "view X" from scratch. Now
+        attaches the identical button here too, so every call site gets
+        it for free with no per-site changes needed.
+        """
+        user_id = 995002
+        make_basic_character(user_id, "ForgeViewButtonTester", current_location="crossroads_tavern")
+        item = items_module.get_item("longsword")
+        sink = []
+        update = FakeUpdate(user_id, "forge my longsword", sink)
+        await bot._maybe_send_item_image(update, "longsword", item)
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        reply_markup = update.effective_chat.sent_photos[0]["reply_markup"]
+        self.assertIsNotNone(reply_markup)
+        self.assertEqual(reply_markup.inline_keyboard[0][0].callback_data, "itemview|show|longsword")
 
     async def test_looted_item_gets_a_view_button_with_working_actions(self):
         """

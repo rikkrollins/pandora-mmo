@@ -22084,10 +22084,12 @@ async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     item = items_module.get_item(parts[2])
     if item is not None:
+        await _safe_send(update, "⏳ Crafting...", speak=False)
         await _do_craft(update, f"craft {item['name']}")
         return
     recipe = get_advanced_recipe(parts[2])
     if recipe is not None:
+        await _safe_send(update, "⏳ Crafting...", speak=False)
         await _do_craft(update, f"craft {recipe['name']}")
 
 
@@ -22305,6 +22307,7 @@ async def forge_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     item = items_module.get_item(parts[2])
     if item is None:
         return
+    await _safe_send(update, "⏳ Forging...", speak=False)
     await _do_forge_magic_item(update, f"forge my {item['name']} into a magic item")
 
 
@@ -22573,6 +22576,7 @@ async def enchant_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
         character = db.get_character(update.effective_user.id, update.effective_chat.id)
         item = items_module.get_item(parts[2])
         if character is not None and item is not None:
+            await _safe_send(update, "⏳ Enchanting...", speak=False)
             await _do_enchant_item_elemental_roll(update, character, parts[2], item, f"enchant my {item['name']}")
         return
     if action == "preview" and len(parts) >= 4:
@@ -22585,6 +22589,7 @@ async def enchant_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if recipe is None or item is None:
         return
     label = parts[2].replace("enchant_", "").replace("_", " ")
+    await _safe_send(update, "⏳ Enchanting...", speak=False)
     await _do_enchant_item(update, f"enchant my {item['name']} with {label}")
 
 
@@ -26083,11 +26088,21 @@ async def _maybe_send_item_image(update: Update, item_id: str, item_data: dict) 
     not the bulk loot-drop/inventory-listing moment, which would spam
     many images at once for little value. Same deterministic-per-item
     convention as locations/NPCs/monsters.
+
+    Real live gap (2026-09-15, dev-bridge screenshot, Coffee: "When we
+    craft Forge or enchant, let us view the item with a push button") --
+    every call site of this (buy/gather/craft/forge/enchant/equip) sent
+    the item's own picture with no way to actually inspect its real,
+    current stats afterward except by typing "view X" from scratch,
+    unlike a loot-drop's own announcement (_item_view_keyboard, already
+    attached there). Now attaches the identical button here too, so
+    every one of those call sites gets it for free.
     """
     prompt = _item_image_prompt(item_id, item_data)
     await _send_generated_image(
         update, prompt, f"🎒 {item_data['name']}",
         seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
+        reply_markup=_item_view_keyboard(item_id),
     )
 
 
@@ -27181,6 +27196,19 @@ def _format_item_stats_line(item: dict) -> str | None:
     if item.get("grants_spell"):
         spell_name = item["grants_spell"].replace("_", " ").title()
         parts.append(f"grants {spell_name} ({item.get('grants_spell_uses', 1)}/rest)")
+    # Real display gap found 2026-09-15 (dev-bridge, Coffee: "It's not
+    # showing the new stat when I look at it... make sure it shows the
+    # full properties of the items", confirmed a 2nd time on the
+    # character sheet too) -- forge_magic_upgrade/db._apply_affix's
+    # "ability_bonus" kind stores each roll as a real
+    # item["ability_bonuses"] entry (already correctly summed into live
+    # combat/ability checks by items.equipped_ability_bonus), but this
+    # function never read that field at all, so a forged/enchanted
+    # item's own headline stat was invisible everywhere this is used --
+    # item view, market listings, and the character sheet's equipped
+    # line (_format_equipped_line) alike, all three read from here.
+    for ab in item.get("ability_bonuses") or []:
+        parts.append(f"+{ab['value']} {ab['ability'].title()}")
     for pb in item.get("profession_bonuses") or []:
         parts.append(f"+{pb['value']} {pb['profession']}")
     if item.get("ignores_resistance"):
@@ -27296,6 +27324,10 @@ def _format_item_detail_block(item: dict) -> str:
     if item.get("grants_spell"):
         spell_name = item["grants_spell"].replace("_", " ").title()
         affix_bits.append(f"📜 Grants {spell_name} ({item.get('grants_spell_uses', 1)}/rest)")
+    # See the matching fix in _format_item_stats_line just above -- same
+    # real ability_bonuses display gap, same fix, kept in sync.
+    for ab in item.get("ability_bonuses") or []:
+        affix_bits.append(f"💪 +{ab['value']} {ab['ability'].title()}")
     for pb in item.get("profession_bonuses") or []:
         affix_bits.append(f"🔧 +{pb['value']} {pb['profession']}")
     if item.get("ignores_resistance"):
