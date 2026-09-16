@@ -157,6 +157,7 @@ def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the pla
                 "model": config.DM_NARRATION_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": {"num_thread": config.OLLAMA_NUM_THREAD},
             },
             timeout=200,
         )
@@ -206,7 +207,8 @@ def generate_ambient_line(npc_id: str, character_name: str, situation: str,
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False},
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"num_thread": config.OLLAMA_NUM_THREAD}},
             timeout=200,
         )
         response.raise_for_status()

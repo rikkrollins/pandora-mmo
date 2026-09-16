@@ -124,7 +124,8 @@ def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> 
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={"model": config.BUILD_MODEL, "prompt": prompt, "stream": False},
+            json={"model": config.BUILD_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"num_thread": config.OLLAMA_NUM_THREAD}},
             timeout=200,
         )
         response.raise_for_status()

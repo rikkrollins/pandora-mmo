@@ -33341,6 +33341,107 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             dm_agent_module.narrate_action(character, "attacks Fenwick", result)
         self.assertEqual(captured["options"]["num_predict"], dm_agent_module._NARRATION_OPTIONS["num_predict"])
 
+    def test_every_real_ollama_call_site_caps_its_own_cpu_thread_usage(self):
+        """
+        Real live incident (2026-09-16): this VPS is CPU-only (8
+        vCores) and llama-server has no thread cap of its own, so a
+        real narration call would use as many threads as the box has
+        cores. Confirmed live via vmstat during an active call: run
+        queue at 9-11 on an 8-core box, 94-95% user CPU, 0% idle --
+        bot.py's own asyncio event loop (needs only a sliver of CPU to
+        service Telegram sendMessage/answerCallbackQuery) couldn't
+        reliably get scheduled inside its own 30s timeout, producing a
+        real, growing burst of dropped player-facing messages that had
+        nothing to do with network latency (confirmed fine separately)
+        or any game-code bug. num_thread is a per-request Ollama API
+        option (not a systemd/env-level setting -- OLLAMA_NUM_PARALLEL
+        is a confirmed no-op for this model's architecture), so every
+        real call site across ai/*.py now folds config.OLLAMA_NUM_THREAD
+        into its own request options, leaving real headroom for the
+        bot's own I/O. Confirmed here at the actual request-construction
+        level for every module that talks to Ollama, not just read.
+        """
+        from unittest.mock import patch
+        import config
+        import ai.dm_agent as dm_agent_module
+        import ai.npc_agent as npc_agent_module
+        import ai.intent_parser as intent_parser_module
+        import ai.support_agent as support_agent_module
+        import ai.autonomous_player as autonomous_player_module
+        import ai.dev_agent as dev_agent_module
+        import ai.moltbook_agent as moltbook_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "chat"}'}
+
+        captured = {}
+
+        def fake_post(*a, **k):
+            captured["options"] = k.get("json", {}).get("options")
+            return FakeResponse()
+
+        character = {"name": "Grubnak", "char_class": None, "hp_current": 20, "hp_max": 20}
+        result = {"hit": True, "damage_dealt": 5, "raw_roll": 12}
+        with patch("ai.dm_agent.requests.post", side_effect=fake_post):
+            dm_agent_module.narrate_action(character, "attacks Fenwick", result)
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
+        npc_agent_module.register_npc("num_thread_test_npc", "Test NPC", "A test persona.")
+
+        captured.clear()
+        with patch("ai.npc_agent.requests.post", side_effect=fake_post):
+            npc_agent_module.talk_to_npc("num_thread_test_npc", "hello", "Aldric")
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
+        captured.clear()
+        with patch("ai.npc_agent.requests.post", side_effect=fake_post):
+            npc_agent_module.generate_ambient_line("num_thread_test_npc", "Aldric", "arrives")
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
+        captured.clear()
+        with patch("ai.intent_parser.requests.post", side_effect=fake_post):
+            intent_parser_module.parse_intent("look around", [], force_model=True)
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
+        captured.clear()
+        with patch("ai.autonomous_player.requests.post", side_effect=fake_post):
+            autonomous_player_module.choose_next_action(
+                {"name": "Zara", "race": "Human", "char_class": "Rogue", "level": 1,
+                 "hp_current": 10, "hp_max": 10}, "cautious", "A quiet crossroads.", None,
+            )
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
+        captured.clear()
+        with patch("ai.dev_agent.requests.post", side_effect=fake_post):
+            dev_agent_module.answer_dev_question("is the game working?", [])
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
+        captured.clear()
+        with patch("ai.moltbook_agent.requests.post", side_effect=fake_post):
+            moltbook_agent_module.decide_social_action([], [])
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
+        captured.clear()
+
+        class FakeSupportResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A plain support answer."}
+
+        def fake_support_post(*a, **k):
+            captured["options"] = k.get("json", {}).get("options")
+            return FakeSupportResponse()
+
+        with patch("ai.support_agent.requests.post", side_effect=fake_support_post):
+            support_agent_module.answer_support_question("What can I do in this game?")
+        self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
+
     async def test_enemy_banter_only_rolled_for_enemy_side_attackers(self):
         """
         _post_narrated must only ever ask narrate_action for banter when

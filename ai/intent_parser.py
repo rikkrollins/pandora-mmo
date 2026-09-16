@@ -2933,7 +2933,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 # _NARRATION_OPTIONS -- smaller here since the actual
                 # answer needed is just one short JSON object, not
                 # multi-sentence prose.
-                "options": {"num_predict": 400},
+                "options": {"num_predict": 400, "num_thread": config.OLLAMA_NUM_THREAD},
             },
             timeout=200,
         )

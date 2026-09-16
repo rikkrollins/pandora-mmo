@@ -1563,7 +1563,7 @@ def answer_support_question(
                         # budget but was never updated when that budget
                         # changed, so the two silently drifted apart.
                         # Matched again, for real this time.
-                        "options": {"num_predict": 2400},
+                        "options": {"num_predict": 2400, "num_thread": config.OLLAMA_NUM_THREAD},
                     },
                     timeout=200,
                 )

@@ -230,7 +230,8 @@ def choose_next_action(character: dict, personality: str, situation_facts: str, 
     try:
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
-            json={"model": config.BUILD_MODEL, "prompt": prompt, "stream": False},
+            json={"model": config.BUILD_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"num_thread": config.OLLAMA_NUM_THREAD}},
             timeout=200,
         )
         response.raise_for_status()

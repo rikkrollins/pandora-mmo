@@ -18,6 +18,23 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 BUILD_MODEL = os.getenv("BUILD_MODEL", "lfm2.5-thinking:latest")
 DM_NARRATION_MODEL = os.getenv("DM_NARRATION_MODEL", "lfm2.5-thinking:latest")
 
+# Real incident, 2026-09-16: this VPS is CPU-only (8 vCores) and
+# llama-server has no thread cap of its own, so a real narration call
+# would use as many threads as the box has cores. Confirmed live via
+# vmstat during an active call: run queue at 9-11 on an 8-core box,
+# 94-95% user CPU, 0% idle -- bot.py's own asyncio event loop (needs
+# only a sliver of CPU to service Telegram sendMessage/answerCallback-
+# Query) couldn't reliably get scheduled inside its own 30s timeout,
+# producing a real, growing burst of dropped player-facing messages
+# that had nothing to do with network latency (confirmed fine
+# separately) or any game-code bug. OLLAMA_NUM_PARALLEL is a
+# documented no-op for this model's architecture, so it isn't a lever
+# here -- num_thread is a per-request Ollama API option, not a
+# systemd/env-level setting, so it has to be sent on every real call.
+# Leaves 2 of 8 cores free for bot.py + the OS; every ai/*.py Ollama
+# call site below folds this into its own request options.
+OLLAMA_NUM_THREAD = int(os.getenv("OLLAMA_NUM_THREAD", "6"))
+
 # Voice-message transcription (task #97, 2026-07-22) -- Groq's free
 # Whisper endpoint, see ai/stt_groq.py. Empty/unset means STT is
 # simply off, not an error -- same convention as every other optional

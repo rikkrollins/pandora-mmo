@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.624] — fix: cap Ollama's CPU thread usage so it stops starving the bot's own network I/O
+
+Real live incident (2026-09-16): this VPS is CPU-only (8 vCores) and
+`llama-server` has no thread cap of its own, so a real narration call
+could legitimately use as many threads as the box has cores. Confirmed
+live via `vmstat` during an active call: run queue at 9-11 on an
+8-core box, 94-95% user CPU, 0% idle. `bot.py` itself barely uses any
+CPU, but its asyncio event loop still needs to get scheduled to
+service its own Telegram `sendMessage`/`answerCallbackQuery` calls —
+under this contention it wasn't reliably getting that inside its own
+30s timeout, producing a real, growing burst of dropped player-facing
+messages (36+ in one day) that had nothing to do with network latency
+(confirmed fine separately) or any game-code bug.
+
+`OLLAMA_NUM_PARALLEL` is a documented no-op for this model's
+architecture, so it wasn't a lever here — `num_thread` is a per-request
+Ollama API option, not a systemd/env-level setting, so it has to be
+sent on every real call. Added `config.OLLAMA_NUM_THREAD` (defaults to
+6, leaving 2 of 8 cores free) and folded it into every real Ollama
+call site across `ai/*.py` (dm_agent, npc_agent, intent_parser,
+support_agent, autonomous_player, dev_agent, moltbook_agent) — 8
+distinct call shapes covering all ~30 real request sites.
+
+1 new test confirms every one of those 8 call shapes actually sends
+`num_thread` in its request options, not just that the config constant
+exists; 4 related narration/support/intent-parser tests reconfirmed
+clean.
+
 ## [1.27.623] — fix: dismantle now returns materials from EVERY recipe an item actually went through
 
 Real request (Coffee: "make sure when dismantleing a magic

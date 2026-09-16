@@ -45,7 +45,7 @@ from ai.text_cleanup import strip_think_tags, strip_internal_jargon, is_placehol
 # headroom against this, still bounded (not unlimited) per Coffee's
 # original "execute like lightning" intent -- this is a floor increase,
 # not a removal of the runaway-generation guard.
-_NARRATION_OPTIONS = {"num_predict": 2400}
+_NARRATION_OPTIONS = {"num_predict": 2400, "num_thread": config.OLLAMA_NUM_THREAD}
 
 # Real live feedback (2026-07-16, Coffee, via Development-topic
 # screenshot): "please say who is doing the action -- for example if it

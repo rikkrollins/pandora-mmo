@@ -56,6 +56,7 @@ def answer_dev_question(question: str, recent_context: list[str] | None = None) 
                 "model": config.BUILD_MODEL,
                 "prompt": prompt,
                 "stream": False,
+                "options": {"num_thread": config.OLLAMA_NUM_THREAD},
             },
             timeout=120,
         )
