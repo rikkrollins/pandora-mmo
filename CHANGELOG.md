@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.626] — feature: bulk dismantle
+
+Real dev-bridge report: "Dismantle 20 rusty daggers" / "Make commands
+like this work so i can dismantle a bunch at a time" — dismantle only
+ever handled exactly 1 item per command. Reuses the same
+`_extract_quantity` every buy/sell command already parses a count
+with, clamped to how many are actually owned (a unique generated magic
+item can never own more than 1 of itself, so this clamp alone keeps
+those at exactly 1, no separate check needed). A real count > 1 rolls
+an independent strength check per copy (not one check applied
+uniformly to all of them — `roll_ability_check` is pure, confirmed via
+`rules/dice.py`), aggregates materials across all of them, and reports
+a real per-tier tally (e.g. "14x expert, 5x solid, 1x rough") alongside
+the summed materials. A plain single-item dismantle (the overwhelming
+common case) keeps the exact same confirm text, callback_data shape,
+and result message as before this feature existed.
+
+Also fixed the real root cause of why the report's own exact phrasing
+never worked at all: the deterministic intent classifier only matched
+"dismantle my"/"dismantle the"/"i dismantle" — bare "Dismantle 20 rusty
+daggers" (no "my"/"the") matched none of those, fell through to the
+model, and got misclassified as plain chat. "dismantle" and "salvage"
+are distinctive enough words in this game's vocabulary that a bare
+match is now safe and sufficient.
+
+4 new tests: bulk confirm screen shows the real (and correctly
+clamped) count; the confirm screen's "Yes" button actually destroys
+all N and aggregates real materials; the report's own exact phrasing
+now classifies correctly; 8 related pre-existing dismantle tests
+reconfirmed clean (single-item behavior unchanged).
+
 ## [1.27.625] — feature: guild membership is no longer class-restricted
 
 Real request (Coffee: a Rogue found every class-restricted guild

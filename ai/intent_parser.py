@@ -2463,7 +2463,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # the (item)") -- checked right alongside discard above since it's
     # the same "my inventory item" phrasing family, but a distinct
     # outcome (real materials back, not just gone).
-    if any(w in lowered for w in ["dismantle my", "dismantle the", "i dismantle", "salvage my", "salvage the"]):
+    #
+    # Real gap found 2026-09-16 (dev-bridge report: "Dismantle 20 rusty
+    # daggers" fell all the way through to the model, which misclassified
+    # it as plain "chat") -- the old my/the/i-prefixed phrasing list
+    # never matched a bulk-count phrasing with no "my"/"the" at all.
+    # "dismantle"/"salvage" are distinctive enough words in this game's
+    # own vocabulary (neither is a substring of any other real command
+    # word here) that a bare match is safe, same reasoning already
+    # applied to other single-word gameplay verbs in this file.
+    if "dismantle" in lowered or "salvage" in lowered:
         return {**base, "action": "dismantle_item"}
 
     # "eat" needs a real word-boundary check (not the bare substring style

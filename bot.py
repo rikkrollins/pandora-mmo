@@ -23841,13 +23841,25 @@ async def _do_discard_item(update: Update, text: str) -> None:
 DISMANTLE_ELIGIBLE_TYPES = ("weapon", "armor", "shield", "ring", "amulet")
 
 
-async def _apply_dismantle(update: Update, character: dict, item_id: str, item: dict) -> None:
+async def _apply_dismantle(update: Update, character: dict, item_id: str, item: dict, count: int = 1) -> None:
     """
     Shared by _do_dismantle_item's free-text path and itemview_callback's
     "dismantle" button tap -- both already have a resolved item_id/item
     by the time they call this, so this is pure resolve-and-apply, no
     text parsing. See rules/crafting.py's resolve_dismantle for the real
     three-tier (very_successful/successful/not_successful) outcome logic.
+
+    `count` (2026-09-16, per Coffee dev-bridge report: "Dismantle 20
+    rusty daggers" / "so i can dismantle a bunch at a time") -- rolls a
+    REAL, independent strength check per copy (roll_ability_check is
+    pure, no side effects, confirmed by reading rules/dice.py, so
+    calling resolve_dismantle in a loop is safe) rather than one check
+    applied uniformly to all of them, same "every attempt is its own
+    real roll" spirit as every other multi-action system in this game.
+    count=1 (the default, and the overwhelming common case) produces
+    the exact same single db.remove_item/add_item calls and message
+    text as before this feature existed -- only a real count > 1 takes
+    the new aggregated-tally path.
     """
     profession = "blacksmithing"
     bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, profession)
@@ -23855,23 +23867,43 @@ async def _apply_dismantle(update: Update, character: dict, item_id: str, item: 
     bonus += _equipped_profession_bonus(character, profession)
     bonus += _skill_points(character, f"prof_{profession}")
 
-    result = resolve_dismantle(character, item_id, item, practiced_bonus=bonus)
-    db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
-    for mat_id, qty in result["materials"].items():
+    total_materials: dict[str, int] = {}
+    outcome_tally = {"very_successful": 0, "successful": 0, "not_successful": 0}
+    for _ in range(count):
+        result = resolve_dismantle(character, item_id, item, practiced_bonus=bonus)
+        outcome_tally[result["outcome"]] += 1
+        for mat_id, qty in result["materials"].items():
+            total_materials[mat_id] = total_materials.get(mat_id, 0) + qty
+
+    db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, count)
+    for mat_id, qty in total_materials.items():
         db.add_item(update.effective_user.id, update.effective_chat.id, mat_id, qty)
 
     materials_line = ", ".join(
         f"{qty}x {items_module.get_item(mat_id)['name'] if items_module.get_item(mat_id) else mat_id}"
-        for mat_id, qty in result["materials"].items()
+        for mat_id, qty in total_materials.items()
     )
-    outcome = result["outcome"]
-    if outcome == "very_successful":
-        headline = f"🔧 **{character['name']}** expertly dismantles the {item['name']} — every scrap of material recovered!"
-    elif outcome == "successful":
-        headline = f"🔧 **{character['name']}** dismantles the {item['name']}, salvaging some of its materials."
+    if count == 1:
+        outcome = next(o for o, n in outcome_tally.items() if n)
+        if outcome == "very_successful":
+            headline = f"🔧 **{character['name']}** expertly dismantles the {item['name']} — every scrap of material recovered!"
+        elif outcome == "successful":
+            headline = f"🔧 **{character['name']}** dismantles the {item['name']}, salvaging some of its materials."
+        else:
+            headline = f"🔧 **{character['name']}**'s attempt to dismantle the {item['name']} goes rough — only scraps survive."
+        await _safe_send(update, f"{headline}\nRecovered: {materials_line}")
     else:
-        headline = f"🔧 **{character['name']}**'s attempt to dismantle the {item['name']} goes rough — only scraps survive."
-    await _safe_send(update, f"{headline}\nRecovered: {materials_line}")
+        tally_line = ", ".join(
+            f"{n}x {label}" for n, label in (
+                (outcome_tally["very_successful"], "expert (full materials)"),
+                (outcome_tally["successful"], "solid (partial materials)"),
+                (outcome_tally["not_successful"], "rough (scraps only)"),
+            ) if n
+        )
+        await _safe_send(
+            update,
+            f"🔧 **{character['name']}** dismantles {count}x {item['name']} — {tally_line}.\nRecovered: {materials_line}",
+        )
 
 
 async def _do_dismantle_item(update: Update, text: str) -> None:
@@ -23886,6 +23918,19 @@ async def _do_dismantle_item(update: Update, text: str) -> None:
     item-view button's own Dismantle tap uses, rather than a second,
     diverging confirmation flow -- one real prompt either entry point
     converges on.
+
+    Real follow-up (2026-09-16, per Coffee dev-bridge report: "Dismantle
+    20 rusty daggers" / "Make commands like this work so i can dismantle
+    a bunch at a time") -- reuses the same _extract_quantity every buy/
+    sell command already parses a count with, clamped to how many the
+    player actually owns. A generated ("gi<n>") instance can never own
+    more than 1 of itself, so this clamp alone is enough to keep a
+    unique magic item's dismantle at exactly 1 with no separate check.
+    A plain count of 1 (the overwhelming common case) keeps the exact
+    same confirm text/callback_data shape as before this fix -- only a
+    real bulk request (count > 1) gets the new "Nx" wording and an
+    extra count suffix on the callback so the Yes button can carry it
+    through to the real destructive action in itemview_callback.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -23896,19 +23941,34 @@ async def _do_dismantle_item(update: Update, text: str) -> None:
 
     item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
     item = items_module.get_item(item_id) if item_id else None
-    if item_id is None or item is None or character["inventory"].get(item_id, 0) < 1:
+    owned = character["inventory"].get(item_id, 0) if item_id else 0
+    if item_id is None or item is None or owned < 1:
         await _safe_send(update, "You're not carrying that.")
         return
     if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
         await _safe_send(update, f"The {item['name']} can't be dismantled — only weapons, armor, shields, rings, and amulets can.")
         return
 
+    count = min(_extract_quantity(text), owned)
+    if count <= 1:
+        await _safe_send(
+            update,
+            f"⚠️ Dismantle **{item['name']}**?\n\nThis destroys it permanently for real crafting materials back — "
+            f"there's no undoing it. Are you sure?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Yes, dismantle it", callback_data=f"itemview|dismantle|{item_id}")],
+                [InlineKeyboardButton("◀️ No, keep it", callback_data=f"itemview|show|{item_id}")],
+            ]),
+            speak=False,
+        )
+        return
+
     await _safe_send(
         update,
-        f"⚠️ Dismantle **{item['name']}**?\n\nThis destroys it permanently for real crafting materials back — "
-        f"there's no undoing it. Are you sure?",
+        f"⚠️ Dismantle {count}x **{item['name']}**?\n\nThis destroys all {count} permanently for real crafting materials "
+        f"back — there's no undoing it. Are you sure?",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Yes, dismantle it", callback_data=f"itemview|dismantle|{item_id}")],
+            [InlineKeyboardButton(f"✅ Yes, dismantle all {count}", callback_data=f"itemview|dismantle|{item_id}|{count}")],
             [InlineKeyboardButton("◀️ No, keep it", callback_data=f"itemview|show|{item_id}")],
         ]),
         speak=False,
@@ -27699,7 +27759,15 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
             await _safe_send(update, f"The {item['name']} can't be dismantled.")
             return
-        await _apply_dismantle(update, character, item_id, item)
+        # Real bulk-dismantle follow-up (2026-09-16): _do_dismantle_item's
+        # confirm screen appends a 4th "|<count>" part to this exact
+        # callback only when the real request was for more than 1 --
+        # re-clamped against CURRENT inventory (not the count at confirm
+        # time) in case anything changed in between, same defensive
+        # spirit as the owns_it check just above.
+        count = int(parts[3]) if len(parts) > 3 else 1
+        count = min(count, character["inventory"].get(item_id, 0))
+        await _apply_dismantle(update, character, item_id, item, count=count)
     elif action == "market":
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to list.")

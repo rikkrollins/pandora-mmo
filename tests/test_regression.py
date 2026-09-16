@@ -18807,6 +18807,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("longsword", character["inventory"])  # not touched by the confirm step itself
         self.assertTrue(any("Are you sure" in s for s in sink), sink)
 
+    async def test_bulk_dismantle_confirm_screen_shows_the_real_count(self):
+        """
+        Real dev-bridge report (2026-09-16): "Dismantle 20 rusty
+        daggers" / "Make commands like this work so i can dismantle a
+        bunch at a time" -- dismantle used to only ever handle exactly
+        1 item per command. rusty_dagger's own real recipe (1 iron_ore)
+        makes every one of its 3 dismantle outcome tiers yield exactly
+        1 iron_ore too, so bulk math here is fully deterministic without
+        needing to mock any dice roll.
+        """
+        make_basic_character(996091, "BulkDismantler", current_location="crossroads_tavern")
+        db.add_item(996091, -999, "rusty_dagger", 20)
+        sink = []
+        update = FakeUpdate(996091, "dismantle 20 rusty daggers", sink)
+        await bot._do_dismantle_item(update, "dismantle 20 rusty daggers")
+        character = db.get_character(996091, -999)
+        self.assertEqual(character["inventory"].get("rusty_dagger"), 20)  # not yet destroyed
+        self.assertTrue(any("20x" in s and "Are you sure" in s for s in sink), sink)
+
+        # Requesting more than owned clamps to what's actually owned,
+        # same defensive spirit as every other quantity-bearing command.
+        sink2 = []
+        update2 = FakeUpdate(996091, "dismantle 999 rusty daggers", sink2)
+        await bot._do_dismantle_item(update2, "dismantle 999 rusty daggers")
+        self.assertTrue(any("20x" in s for s in sink2), sink2)
+
+    async def test_bulk_dismantle_yes_button_destroys_all_and_aggregates_materials(self):
+        """
+        The confirm screen's real "Yes, dismantle all N" button carries
+        the count through as a 4th callback_data part -- confirms
+        tapping it actually destroys all N and returns the real summed
+        materials, not just 1.
+        """
+        make_basic_character(996092, "BulkDismantlerConfirm", current_location="crossroads_tavern")
+        db.add_item(996092, -999, "rusty_dagger", 20)
+        sink = []
+        update = FakeCallbackUpdate(996092, "itemview|dismantle|rusty_dagger|20", sink)
+        await bot.itemview_callback(update, DummyContext())
+        character = db.get_character(996092, -999)
+        self.assertEqual(character["inventory"].get("rusty_dagger", 0), 0)
+        self.assertEqual(character["inventory"].get("iron_ore", 0), 20)
+        self.assertTrue(any("20x" in s and "Rusty Dagger" in s for s in sink), sink)
+
+    def test_bulk_dismantle_phrasing_with_no_my_or_the_still_classified_correctly(self):
+        """
+        Root cause of the live gap: the deterministic keyword fallback
+        only ever matched "dismantle my"/"dismantle the"/"i dismantle"
+        -- the real report's own exact phrasing ("Dismantle 20 rusty
+        daggers") has none of those, so it fell through to the model,
+        which also misclassified it as plain "chat". "dismantle" and
+        "salvage" are distinctive enough words in this game's own
+        vocabulary that a bare match is safe.
+        """
+        from ai.intent_parser import _keyword_fallback
+        result = _keyword_fallback("Dismantle 20 rusty daggers", [])
+        self.assertEqual(result["action"], "dismantle_item")
+
     # -- Monster spellcasting (2026-08-13, per Coffee, dev-bridge: "Certain
     #    enemies definitely need to have magic.. lets get this working" --
     #    reported right after hitting Counterspell's own documented "no
