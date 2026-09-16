@@ -22943,6 +22943,22 @@ async def give_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _do_give_item(update, f"give {item['name']} to {target_character['name']}")
 
 
+_ALL_GATHERABLE_MATERIAL_IDS: set[str] | None = None
+
+
+def _all_gatherable_material_ids() -> set[str]:
+    """Every real material id used by ANY resource_nodes entry across the whole campaign, cached (CAMPAIGN never changes at runtime)."""
+    global _ALL_GATHERABLE_MATERIAL_IDS
+    if _ALL_GATHERABLE_MATERIAL_IDS is None:
+        ids = set()
+        for location_id in cl.get_all_location_ids(CAMPAIGN):
+            location = cl.get_location(CAMPAIGN, location_id)
+            for node in (location or {}).get("resource_nodes", []):
+                ids.add(node["material"])
+        _ALL_GATHERABLE_MATERIAL_IDS = ids
+    return _ALL_GATHERABLE_MATERIAL_IDS
+
+
 def _find_resource_node(location: dict, action_text: str) -> dict | None:
     nodes = location.get("resource_nodes", [])
     if not nodes:
@@ -22958,8 +22974,19 @@ def _find_resource_node(location: dict, action_text: str) -> dict | None:
     # match the wood node at all (material id is "wood", display name
     # mentions "timber", and neither contains "lumber"), even though
     # "lumber" is exactly what its skill (lumberjacking) is named for.
+    #
+    # Real live bug (2026-09-16, dev-bridge: "Asked to gather iron ore
+    # not bait") -- confirmed live: the generic action VERB "gather"
+    # (present in nearly every real gather command, since it's the
+    # command's own verb, never a material descriptor) is itself a
+    # substring of the "bait_gathering" skill name, so "Gather iron
+    # ore" false-matched the skill-name check below on the word
+    # "gather" alone, before "iron"/"ore" (the actual material named)
+    # ever got a chance to matter. Excluded here -- a bare gather verb
+    # carries zero information about WHICH material was meant.
     stopwords = {"the", "a", "an", "of", "at", "on", "in", "to", "for", "and"}
-    words = [w for w in lowered.split() if len(w) >= 4]
+    gather_verbs = {"gather", "gathers", "gathering", "collect", "collecting", "harvest", "harvesting"}
+    words = [w for w in lowered.split() if len(w) >= 4 and w not in gather_verbs]
     for node in nodes:
         skill = node.get("skill", "")
         material = node["material"]
@@ -22969,6 +22996,24 @@ def _find_resource_node(location: dict, action_text: str) -> dict | None:
             for w in words
         ):
             return node
+
+    # Real live bug (2026-09-16, dev-bridge: "Asked to gather iron ore
+    # not bait") -- confirmed live: Greymoor Downs (and its own Broken
+    # Watchtower) have exactly ONE resource node (bait), so the old
+    # "only one thing here, just use that" shortcut below silently
+    # substituted it even though "iron ore" clearly named a REAL,
+    # different, gatherable material that simply isn't at this
+    # location. That shortcut only makes sense for a genuinely generic
+    # "gather"/"gather here" with no material named -- never to
+    # override an explicit request for something real that isn't here.
+    # A real material name for a location THIS location doesn't have
+    # means "no", not "here's whatever I do have instead" -- caller
+    # already shows a real "things worth gathering here" hint in that case.
+    named_elsewhere = items_module.find_item_mentioned_in_text(
+        action_text, candidate_ids=list(_all_gatherable_material_ids())
+    )
+    if named_elsewhere and named_elsewhere not in {n["material"] for n in nodes}:
+        return None
 
     if len(nodes) == 1:
         return nodes[0]

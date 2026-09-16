@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.629] — fix: "gather iron ore" no longer silently substitutes bait
+
+Real dev-bridge report: "Asked to gather ore not bait" / "Asked to
+gather iron ore not bait." Confirmed live: Greymoor Downs (and its own
+Broken Watchtower) have exactly one real resource node — bait.
+`_find_resource_node`'s own "only one thing here, just use that"
+shortcut fired even when the player named a real, different,
+gatherable material the location simply doesn't have, silently handing
+back bait instead of saying so.
+
+Root cause went one level deeper than that shortcut, though: the
+generic action VERB "gather" (present in nearly every real gather
+command, since it's the command's own verb, never a material
+descriptor) is itself a substring of the "bait_gathering" skill name,
+so the existing fuzzy word-matching pass — meant to catch things like
+"chop for lumber" → the wood node — was false-matching on "gather"
+alone before "iron ore" (the material actually named) ever got a
+chance to matter. Fixed both: "gather"/"collect"/"harvest" and their
+variants no longer participate in that fuzzy match at all (they carry
+zero information about which material was meant), and a real,
+different material named elsewhere in the campaign now correctly
+blocks the single-node fallback instead of being silently overridden.
+
+2 new tests (the exact live phrasing now correctly returns nothing
+here rather than bait; a genuinely generic bare "gather" still
+correctly falls back to the location's one real node); 8 related
+gather tests reconfirmed clean.
+
 ## [1.27.628] — fix: a generated image no longer silently disappears on a flood-control blip
 
 Real live report: "i didnt see an image for the Remnant we just

@@ -724,6 +724,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(node)
         self.assertEqual(node["id"], "old_timber_stand")
 
+    def test_find_resource_node_never_substitutes_a_different_real_material_asked_by_name(self):
+        """
+        Real live bug (2026-09-16, dev-bridge: "Asked to gather iron ore
+        not bait"). Confirmed live: Greymoor Downs has exactly ONE real
+        resource node (bait) -- the old "only one thing here, just use
+        that" shortcut silently handed back bait even though "iron ore"
+        clearly named a REAL, different, gatherable material (found
+        elsewhere in the campaign) that this location simply doesn't
+        have. The shortcut must still fire for a genuinely generic
+        "gather" with nothing specific named.
+        """
+        location = {"resource_nodes": [
+            {"id": "worm_patch", "name": "a patch of damp soil", "material": "bait", "ability": "wisdom", "skill": "bait_gathering"},
+        ]}
+        self.assertIsNone(bot._find_resource_node(location, "Gather iron ore"))
+        self.assertIsNone(bot._find_resource_node(location, "gather some iron ore please"))
+        node = bot._find_resource_node(location, "gather")
+        self.assertIsNotNone(node)
+        self.assertEqual(node["id"], "worm_patch")
+
     # -- Multi-sheet hallucination (v1.7.7) ----------------------------
     async def test_support_shows_real_sheets_for_multiple_names_no_hallucination(self):
         coffee_id, sera_id = 111111, -1002
