@@ -2,6 +2,68 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.627] — fix: amulets no longer stack, gear stats now shown on the sheet, and a stale Remnant location fixed
+
+Three real, unrelated live reports found and fixed in one pass:
+
+**Amulets stacked instead of replacing.** Real report: "im wearing two
+amuluts, make sure im only wearing the one with +2 Charisma, make sure
+we can carry multi items of the same type." `db.equip_item`'s
+ring/amulet/wondrous branch let unlimited accessories stack — correct
+for rings (real 5E convention, deliberately unchanged) and wondrous
+items (deliberately uncapped since the 2026-09-09 attunement removal),
+but not for amulets, which real 5E-style convention treats as one
+slot. Equipping a new amulet now auto-replaces any currently-worn one,
+correctly reversing the replaced item's own AC bonus. Found and fixed
+the same bug live in 2 already-affected characters (a real player and
+an AI companion), each now correctly wearing only their better amulet.
+
+**Equipped stat bonuses were invisible on the character sheet.** Real
+report: "I am not seeing the stats from the items I hold reflect my
+character stats... my charisma didn't increase" after equipping a
+forged +2 Charisma amulet. Confirmed NOT a mechanical bug —
+`items_module.equipped_ability_bonus` already correctly sums this live
+at every real attack/ability-check call site, same convention every
+other equipped-gear bonus in this game uses (never baked into the
+stored ability score). The real gap: the one screen a player actually
+checks to confirm their gear is working never showed it. The sheet's
+ability-score line now shows the real bonus alongside the raw score
+(e.g. `CHA 15 (+2)`) whenever nonzero.
+
+**The Drowned Choir's Whispers rumor could surface far too early.**
+Found investigating an unrelated stale-test cluster: v1.27.612
+relocated this Remnant from Sunken Root Caverns' own entrance to a
+real hidden dead end, and correctly updated its quest's own location
+field and the new room's monster list — but never updated the
+Remnant's own `location_id` in `remnants.py`, left pointing at the old
+entrance. Since nearly every player who's been anywhere near that
+dungeon has passed through the old entrance, the Whispers "you've
+found something" rumor was triggering long before a player had
+actually found the real, now-hidden location — quietly undoing the
+whole point of that relocation.
+
+4 new tests (amulet auto-replace + AC math, sheet ability-bonus
+display); 12 related equip/sheet/remnant/dungeon-audit tests
+reconfirmed clean, including the full 23-test `DungeonAuditTests`
+suite (all 8 shipped dungeons) since `remnants.py` changed.
+
+**Test-only, alongside the above**: found a real, separate test-hygiene
+issue investigating why a stale-test cluster included one that
+appeared to hang — `_do_summon_remnant`'s real flavor-narration line
+fires as a fire-and-forget `asyncio.create_task` (a deliberate
+2026-08-21 fix so combat doesn't wait on it), which several summon-
+Remnant tests only mocked for the DURATION of their own `with
+patch(...)` block — if that background task hadn't actually started
+running yet by the time the block exited, it fell through to a real,
+unmocked Ollama call, blocking test teardown for up to 200s. Added the
+already-established `await asyncio.sleep(0.2)` fix (proven correct by
+one sibling test that already had it) to 13 of the 15 affected tests.
+2 remain — they leak through a DIFFERENT unmocked function
+(`bot.narrate_action`, the general combat-narration queue, not the
+remnant flavor line) and need the existing `_drain_narration_queue`
+helper instead; not yet applied. No production code involved in any
+of this.
+
 ## [1.27.626] — feature: bulk dismantle
 
 Real dev-bridge report: "Dismantle 20 rusty daggers" / "Make commands

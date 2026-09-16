@@ -5258,6 +5258,74 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         success, message, _ = db.equip_item(user_id, -999, "ring_of_protection")
         self.assertFalse(success)
 
+    def test_equipping_a_second_amulet_auto_replaces_the_first(self):
+        """
+        Real live report (2026-09-16, Coffee): "im wearing two amuluts,
+        make sure im only wearing the one with +2 Charisma, make sure
+        we can carry multi items of the same type." Real 5E-style
+        convention treats an amulet/necklace as one slot, unlike rings
+        (deliberately left able to stack, see the sibling ring tests
+        around this one) -- equipping a second amulet now auto-replaces
+        the first instead of stacking both, including correctly
+        reversing the replaced amulet's own ac_bonus.
+        """
+        use_test_db("tests/tmp/amulet_replace_test.db")
+        user_id = 900409
+        make_basic_character(user_id, "TwoAmulets", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=20)
+        amulet_a = db.create_item_instance(
+            item_type="amulet", name="Trinket of Warding", rarity="rare", price=0,
+            base_stats={"type": "amulet", "ac_bonus": 1}, affixes=[], source="crafted",
+        )
+        amulet_b = db.create_item_instance(
+            item_type="amulet", name="Amulet of the Deep Current", rarity="rare", price=0,
+            base_stats={"type": "amulet", "ac_bonus": 3}, affixes=[], source="crafted",
+        )
+        db.add_item(user_id, -999, amulet_a, 1)
+        db.add_item(user_id, -999, amulet_b, 1)
+        success_a, _, character = db.equip_item(user_id, -999, amulet_a)
+        self.assertTrue(success_a)
+        ac_after_first = character["armor_class"]
+        self.assertIn(amulet_a, character["equipped_accessories"])
+
+        success_b, message_b, character = db.equip_item(user_id, -999, amulet_b)
+        self.assertTrue(success_b)
+        self.assertIn(amulet_b, character["equipped_accessories"])
+        self.assertNotIn(amulet_a, character["equipped_accessories"])  # replaced, not stacked
+        self.assertIn("replacing the Trinket of Warding", message_b)
+        # AC reflects only the SECOND amulet's own +3, not both stacked (+1 then +3 = +2 net delta here).
+        self.assertEqual(character["armor_class"], ac_after_first + 2)
+
+    def test_character_sheet_shows_effective_ability_score_with_equipped_gear_bonus(self):
+        """
+        Real live report (2026-09-16, Coffee dev-bridge): "I am not
+        seeing the stats from the items I hold reflect my character
+        stats... my charisma didn't increase" after equipping a forged
+        +2 Charisma amulet. Confirmed NOT a mechanical bug --
+        items_module.equipped_ability_bonus already correctly sums this
+        live at every real check, same convention every other equipped-
+        gear bonus in this game uses (never baked into the stored
+        ability score). The real gap: the one screen a player actually
+        checks to confirm their gear is working never showed it.
+        """
+        use_test_db("tests/tmp/sheet_ability_bonus_test.db")
+        user_id = 900410
+        character = make_basic_character(
+            user_id, "GearedUp", current_location="crossroads_tavern",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 14},
+        )
+        db.update_character(user_id, -999, level=20)
+        amulet_id = db.create_item_instance(
+            item_type="amulet", name="Amulet of Silver Words", rarity="rare", price=0,
+            base_stats={"type": "amulet"}, affixes=[], source="crafted",
+        )
+        db.enchant_item_instance(amulet_id, {"kind": "ability_bonus", "ability": "charisma", "value": 2})
+        db.add_item(user_id, -999, amulet_id, 1)
+        db.equip_item(user_id, -999, amulet_id)
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("CHA 14 (+2)", sheet)
+
     def test_auto_equip_wears_every_carried_ring_and_amulet(self):
         use_test_db("tests/tmp/auto_equip_accessories_test.db")
         user_id = 900407
@@ -21636,9 +21704,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SummonGoblinA", target_picker)
         self.assertIn(f"bm|summontarget|the_wrathflame_unbound|{-5100052}", target_picker)
 
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             result = await tap(f"bm|summontarget|the_wrathflame_unbound|{-5100052}")
+            # Real test-hygiene fix (2026-09-16, stale-test investigation):
+            # the summon flavor line fires as a real background
+            # asyncio.create_task (see bot._do_summon_remnant's own
+            # 2026-08-21 comment) -- without this sleep, the mock above
+            # unpatches before that task ever runs, and it falls through
+            # to a REAL Ollama call that blocks test teardown for up to
+            # 200s. Same fix already established at line ~36144.
+            await asyncio.sleep(0.2)
         self.assertIn("The Wrathflame Unbound", result)
         self.assertIn("SummonGoblinB", result)
         sessions.end_session(-999)
@@ -21721,12 +21798,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertIn(f"bm|summontarget|the_root_that_remembers|{-5100062}", "\n".join(markup_lines))
 
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="It answers your call."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             result_sink = []
             await bot.battle_menu_callback(
                 FakeCallbackUpdate(user_id, f"bm|summontarget|the_root_that_remembers|{-5100062}", result_sink), DummyContext(),
             )
+            # Real test-hygiene fix (2026-09-16): see the identical
+            # comment a few tests up -- the flavor line's background
+            # asyncio.create_task must run while the mock above is still
+            # active, or it leaks a real, up-to-200s Ollama call.
+            await asyncio.sleep(0.2)
         result = "\n".join(result_sink)
         self.assertIn("The Root That Remembers", result)
         self.assertIn("The High Approach Sentinel 2", result)
@@ -36196,6 +36279,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             await bot._do_summon_remnant(
@@ -36203,6 +36287,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "summon The Cairnbound on the goblin",
                 forced_roll=10,
             )
+            # Real test-hygiene fix (2026-09-16, stale-test investigation):
+            # the summon flavor line fires as a real background
+            # asyncio.create_task (bot._do_summon_remnant's own
+            # 2026-08-21 comment) -- without this sleep, the mock above
+            # unpatches before that task ever runs, and it leaks a real,
+            # up-to-200s Ollama call that blocks test teardown.
+            await asyncio.sleep(0.2)
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
         cairnbound = remnants_module.get_remnant("the_cairnbound")
@@ -36247,6 +36338,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             await bot._do_summon_remnant(
@@ -36254,6 +36346,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "summon The Cairnbound on the goblin",
                 forced_roll=10,
             )
+            # Real test-hygiene fix (2026-09-16): see the identical
+            # comment on the sibling test just above -- lets the
+            # background flavor task run under the still-active mock.
+            await asyncio.sleep(0.2)
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         cairnbound = remnants_module.get_remnant("the_cairnbound")
         cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
@@ -36296,6 +36392,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             await bot._do_summon_remnant(
@@ -36303,6 +36400,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "summon The Cairnbound on the goblin",
                 forced_roll=10,
             )
+            # Real test-hygiene fix (2026-09-16): see the identical
+            # comment on the sibling tests above.
+            await asyncio.sleep(0.2)
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         cairnbound = remnants_module.get_remnant("the_cairnbound")
         cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
@@ -36351,6 +36451,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             await bot._do_summon_remnant(
@@ -36358,6 +36459,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "summon The Cairnbound on the goblin",
                 forced_roll=10,
             )
+            # Real test-hygiene fix (2026-09-16): THIS is the exact test
+            # that surfaced the leak -- without this sleep, the mock
+            # above unpatches before the background flavor task (a real
+            # asyncio.create_task) ever runs, so it falls through to a
+            # REAL Ollama call and blocks test teardown for up to 200s
+            # (confirmed live via faulthandler: the "hang" wasn't in this
+            # test's own logic, which already passes -- it was stuck in
+            # asyncio runner shutdown waiting on that leaked thread).
+            await asyncio.sleep(0.2)
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         cairnbound = remnants_module.get_remnant("the_cairnbound")
         cairnbound_template = bot.CAMPAIGN["monsters"]["the_cairnbound"]
@@ -36397,9 +36507,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.current_turn_index = 0
         sink = []
         update = FakeUpdate(user_id, "summon the root that remembers on the goblin", sink, chat_id=-982)
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="Something ancient stirs."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_generated:
             await bot._do_summon_remnant(update, "summon the root that remembers on the goblin", forced_roll=10)
+            # Real test-hygiene fix (2026-09-16): lets the background
+            # flavor task (a real asyncio.create_task) run under the
+            # still-active mock, or it leaks a real Ollama call.
+            await asyncio.sleep(0.2)
         self.assertEqual(len(update.effective_chat.sent_animations), 1)
         self.assertIn("The Root That Remembers", update.effective_chat.sent_animations[0]["caption"])
         mock_generated.assert_not_called()
@@ -36423,9 +36538,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.current_turn_index = 0
         sink = []
         update = FakeUpdate(user_id, "summon the cairnbound on the goblin", sink, chat_id=-982)
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="Something ancient stirs."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_generated:
             await bot._do_summon_remnant(update, "summon the cairnbound on the goblin", forced_roll=10)
+            # Real test-hygiene fix (2026-09-16): see the identical
+            # comment on the sibling test just above.
+            await asyncio.sleep(0.2)
         self.assertEqual(update.effective_chat.sent_animations, [])
         mock_generated.assert_called_once()
         sessions.end_session(-982)
@@ -36512,6 +36631,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
 
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             sink1 = []
@@ -36530,6 +36650,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "summon The Wrathflame Unbound on the goblin",
             )
             self.assertTrue(any("already called a Remnant" in s for s in sink2))
+            # Real test-hygiene fix (2026-09-16): lets the first call's
+            # background flavor task (a real asyncio.create_task) run
+            # under the still-active mock, or it leaks a real Ollama call.
+            await asyncio.sleep(0.2)
         sessions.end_session(-991)
 
     async def test_summon_remnant_at_mastery_ignores_cap_but_spends_a_spell_slot(self):
@@ -36551,6 +36675,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
 
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             for _ in range(2):
@@ -36570,6 +36695,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 "summon The Wrathflame Unbound on the goblin",
             )
             self.assertTrue(any("none left to spend" in s.lower() for s in sink3))
+            # Real test-hygiene fix (2026-09-16): lets each real summon
+            # call's background flavor task (a real asyncio.create_task)
+            # run under the still-active mock, or it leaks a real
+            # Ollama call.
+            await asyncio.sleep(0.2)
         sessions.end_session(-990)
 
     async def test_summon_remnant_dot_secondary_applies_poisoned_condition(self):
@@ -36588,12 +36718,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             await bot._do_summon_remnant(
                 FakeUpdate(user_id, "summon The Root That Remembers on the goblin", sink, chat_id=-989),
                 "summon The Root That Remembers on the goblin",
             )
+            # Real test-hygiene fix (2026-09-16): lets the background
+            # flavor task (a real asyncio.create_task) run under the
+            # still-active mock, or it leaks a real Ollama call.
+            await asyncio.sleep(0.2)
         goblin = next(p for p in session.participants if p["telegram_user_id"] == enemy_id)
         self.assertIn("poisoned", goblin.get("conditions", []))
         sessions.end_session(-989)
@@ -36614,12 +36749,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [user_id, enemy_id]
         session.current_turn_index = 0
         sink = []
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             await bot._do_summon_remnant(
                 FakeUpdate(user_id, "summon The Cairnbound on the goblin", sink, chat_id=-988),
                 "summon The Cairnbound on the goblin",
             )
+            # Real test-hygiene fix (2026-09-16): lets the background
+            # flavor task (a real asyncio.create_task) run under the
+            # still-active mock, or it leaks a real Ollama call.
+            await asyncio.sleep(0.2)
         caster = next(p for p in session.participants if p["telegram_user_id"] == user_id)
         self.assertGreater(caster["hp_current"], 50)
         sessions.end_session(-988)
@@ -45469,6 +45609,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(session, "combat must have actually started")
 
         sink = []
+        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="It answers your call."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             await bot._dispatch_intent(
@@ -45476,6 +45617,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
                 {"action": "summon_remnant", "raw_text": "summon the wrathflame unbound"},
                 "summon the wrathflame unbound",
             )
+            # Real test-hygiene fix (2026-09-16): lets the background
+            # flavor task (a real asyncio.create_task) run under the
+            # still-active mock, or it leaks a real Ollama call.
+            await asyncio.sleep(0.2)
         self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
         self.assertTrue(any("The Wrathflame Unbound" in s for s in sink), sink)
 

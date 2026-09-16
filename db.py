@@ -2189,7 +2189,21 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
         return True, f"You raise the {item['name']} (AC {new_ac}).", updated
 
     # Ring / amulet / wondrous: added to the accessories list (worn
-    # alongside weapon/armor/shield, not instead of them).
+    # alongside weapon/armor/shield, not instead of them). Amulets are
+    # the one accessory TYPE this game caps to a single slot (2026-09-16,
+    # per Coffee, live: "im wearing two amuluts, make sure im only
+    # wearing the one with +2 Charisma, make sure we can carry multi
+    # items of the same type" -- the last part confirmed the fix
+    # belongs here, at EQUIP time, not a carry/inventory cap). Real
+    # 5E-style convention treats a necklace/amulet as one slot, unlike
+    # rings (this function's own long-standing "wear several of these
+    # at once, e.g. two rings" design, left untouched) or wondrous
+    # items (explicitly uncapped -- see RARITY_LEVEL_REQUIREMENT's own
+    # history, [[project_attunement_replaced_with_level_requirement_v1_27_585]]).
+    # Equipping a new amulet auto-replaces any currently-worn one
+    # instead of stacking, same "swap, don't stack" shape weapon/armor/
+    # shield already use above, just scoped to one item TYPE within the
+    # shared accessories list instead of a single named field.
     accessories = character["equipped_accessories"]
     if item_id in accessories:
         return False, f"You're already wearing the {item['name']}.", character
@@ -2200,19 +2214,37 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
             f"The {item['name']} demands more experience — you need to be level {required} to wear it.",
             character,
         )
+    old_ac_bonus = 0.0
+    replaced_note = ""
+    if item["type"] == "amulet":
+        old_amulet_ids = [
+            aid for aid in accessories
+            if (worn := items_module.get_item(aid)) and worn.get("type") == "amulet"
+        ]
+        if old_amulet_ids:
+            old_amulet = items_module.get_item(old_amulet_ids[0])
+            old_ac_bonus = old_amulet.get("ac_bonus", 0)
+            accessories = [aid for aid in accessories if aid not in old_amulet_ids]
+            replaced_note = f" (replacing the {old_amulet['name']})"
     old_set_bonus = _equipped_set_ac_bonus(character)
     accessories = accessories + [item_id]
     character["equipped_accessories"] = accessories
     updates = {"equipped_accessories": accessories}
-    note_parts = [f"You put on the {item['name']}."]
+    note_parts = [f"You put on the {item['name']}{replaced_note}."]
 
-    # This item's own direct ac_bonus, PLUS whatever set-bonus delta
-    # equipping it just caused (2026-08-02, Phase 5) -- a ring with no
-    # ac_bonus of its own can still be the piece that crosses a set
-    # threshold, so both sources are checked, never just the item's own
-    # field the way this branch originally only did.
+    # This item's own direct ac_bonus (minus any replaced amulet's own
+    # ac_bonus, no longer worn), PLUS whatever set-bonus delta equipping
+    # it just caused (2026-08-02, Phase 5) -- a ring with no ac_bonus of
+    # its own can still be the piece that crosses a set threshold, so
+    # both sources are checked, never just the item's own field the way
+    # this branch originally only did. ability_bonus needs no equivalent
+    # reversal here -- items_module.equipped_ability_bonus sums it live
+    # from the currently-equipped ids every time it's read, never baked
+    # into the character's own stored ability score, so removing the
+    # old amulet from equipped_accessories above already stops it being
+    # counted on the very next check.
     set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
-    ac_delta = item.get("ac_bonus", 0) + set_delta
+    ac_delta = item.get("ac_bonus", 0) - old_ac_bonus + set_delta
     if ac_delta:
         new_ac = character["armor_class"] + ac_delta
         updates["armor_class"] = new_ac

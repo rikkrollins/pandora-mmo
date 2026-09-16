@@ -132,7 +132,21 @@ REMNANTS = {
         "name": "The Drowned Choir",
         "monster_key": "the_drowned_choir",
         "story_tied": True,
-        "location_id": "the_weeping_well",
+        # Real gap found 2026-09-16 (stale-test investigation): v1.27.612
+        # relocated this Remnant from the_weeping_well (the ONLY entrance
+        # into Sunken Root Caverns -- gating it would've blocked the
+        # dungeon's own legitimate early content) to a real hidden dead
+        # end, stonearch_bridge_the_far_markers, and correctly updated
+        # BOTH the quest's own "location" field (remnant_the_drowned_
+        # choir, campaigns/default/campaign.json) AND that new location's
+        # own "monsters" list -- but never updated THIS field. Left
+        # stale, rumors_for_character's own story_tied check treated
+        # "visited the_weeping_well" (something nearly every player who's
+        # gone near this dungeon has done) as "found the Drowned Choir,"
+        # completely undermining the whole point of the relocation --
+        # the Whispers rumor would surface long before a player had
+        # actually found the real, now-hidden location.
+        "location_id": "stonearch_bridge_the_far_markers",
         "element": "poison",
         "summon_secondary": "dot",
         "lore": "It doesn't sing so much as it keeps singing, long after anyone still listening should have stopped being able to.",

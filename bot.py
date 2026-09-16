@@ -21687,10 +21687,32 @@ def _format_character_sheet(character: dict) -> str:
     # shown once, in the one-off creation sheet -- this shared sheet
     # (used by every later "check my sheet"/Support/party-sheet lookup)
     # never included them at all.
+    #
+    # Real live report (2026-09-16, Coffee dev-bridge: "I just put on my
+    # newly forced [forged] amulet that has two charisma and my charisma
+    # didn't increase") -- confirmed NOT a bug: items_module.
+    # equipped_ability_bonus already correctly sums a forged/enchanted
+    # ability_bonus affix live at every real attack/ability-check call
+    # site, same convention every other equipped-gear bonus in this
+    # game uses (never baked into the character's own stored ability
+    # score, so the raw stat here was never going to visibly change).
+    # The real gap was that this sheet -- the one place a player
+    # actually looks to confirm their gear is working -- never showed
+    # the bonus at all, unlike e.g. this same function's own equipped-
+    # resistance block just below. Shown only when nonzero, same
+    # "don't clutter a sheet with a zero" convention the skills line
+    # above already follows.
+    def _ability_display(raw: int, ability: str) -> str:
+        bonus = items_module.equipped_ability_bonus(character, ability)
+        return f"{raw} (+{bonus})" if bonus else str(raw)
+
     ability_line = (
-        f"STR {character['strength']} DEX {character['dexterity']} "
-        f"CON {character['constitution']} INT {character['intelligence']} "
-        f"WIS {character['wisdom']} CHA {character['charisma']}\n"
+        f"STR {_ability_display(character['strength'], 'strength')} "
+        f"DEX {_ability_display(character['dexterity'], 'dexterity')} "
+        f"CON {_ability_display(character['constitution'], 'constitution')} "
+        f"INT {_ability_display(character['intelligence'], 'intelligence')} "
+        f"WIS {_ability_display(character['wisdom'], 'wisdom')} "
+        f"CHA {_ability_display(character['charisma'], 'charisma')}\n"
     )
     next_threshold = XP_THRESHOLDS.get(character["level"] + 1)
     xp_remaining_line = (
