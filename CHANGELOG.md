@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.622] — feature: real "are you sure?" confirmation before dismantling an item
+
+Real request (Coffee: "when dismantleing an item ask the player if
+they are sure ?"). Dismantling permanently destroys an item for
+crafting materials — no undo — but both the free-text ("dismantle my
+X") and item-view button paths fired instantly on a single tap/command
+with zero confirmation.
+
+Both entry points now show the exact same real confirm screen (naming
+the item, explaining what's at stake) with Yes/No buttons before
+anything is touched — reusing the identical "are you sure?" pattern
+already established for cancelling a quest (`_do_confirm_cancel_quest`),
+not a second, diverging confirmation flow. "Yes" routes to the
+existing, unchanged dismantle action; "No" goes back to the plain item
+view. Nothing about the actual dismantle mechanic (materials returned,
+tier odds) changed — only the path to it.
+
+3 new tests added (confirm screen shown without touching the item, the
+item-view button's callback now routes through the confirm step first,
+and the confirm step itself never mutates inventory); 1 pre-existing
+test updated to match the new two-step flow; 3 related dismantle tests
+reconfirmed clean.
+
 ## [1.27.621] — feature: 6 new advanced-mechanic combat potions (speed, dodge, slow, layered defense, power buff/debuff)
 
 Real 5E-style initiative-order combat has no ATB/turn-speed to literally

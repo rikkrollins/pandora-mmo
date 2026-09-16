@@ -5474,7 +5474,7 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
     ])
     if can_dismantle:
-        buttons.append([InlineKeyboardButton("🔧 Dismantle", callback_data=f"itemview|dismantle|{item_id}")])
+        buttons.append([InlineKeyboardButton("🔧 Dismantle", callback_data=f"itemview|dismantleconfirm|{item_id}")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -22104,9 +22104,10 @@ async def _do_show_magic_menu(update: Update) -> None:
 
 async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Handles taps on _craft_keyboard and the Blacksmith/Alchemy category
-    screens -- dispatches through the exact same _do_craft free text
-    already uses.
+    Handles taps on the Blacksmith/Alchemy/Cook category screens
+    (the old backpack _craft_keyboard this also used to serve was
+    removed 2026-09-15, fully redundant with these) -- dispatches
+    through the exact same _do_craft free text already uses.
 
     Real gap fix (2026-09-11, per Coffee: "i dont want to have to type
     'journeyman, or Masterwork'"): this only ever resolved a static
@@ -23874,7 +23875,18 @@ async def _apply_dismantle(update: Update, character: dict, item_id: str, item: 
 
 
 async def _do_dismantle_item(update: Update, text: str) -> None:
-    """Free-text "dismantle the X" path -- see _apply_dismantle for the real resolution logic, shared with the item-view button."""
+    """
+    Free-text "dismantle the X" path -- see _apply_dismantle for the
+    real resolution logic, shared with the item-view button.
+
+    Real request (2026-09-16, per Coffee: "when dismantleing an item
+    ask the player if they are sure ?") -- this used to destroy the
+    item immediately on a single typed command, no undo. Now shows the
+    exact same real "are you sure?" confirm screen (Yes/No buttons) the
+    item-view button's own Dismantle tap uses, rather than a second,
+    diverging confirmation flow -- one real prompt either entry point
+    converges on.
+    """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
         await update.effective_chat.send_message(
@@ -23891,7 +23903,16 @@ async def _do_dismantle_item(update: Update, text: str) -> None:
         await _safe_send(update, f"The {item['name']} can't be dismantled — only weapons, armor, shields, rings, and amulets can.")
         return
 
-    await _apply_dismantle(update, character, item_id, item)
+    await _safe_send(
+        update,
+        f"⚠️ Dismantle **{item['name']}**?\n\nThis destroys it permanently for real crafting materials back — "
+        f"there's no undoing it. Are you sure?",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Yes, dismantle it", callback_data=f"itemview|dismantle|{item_id}")],
+            [InlineKeyboardButton("◀️ No, keep it", callback_data=f"itemview|show|{item_id}")],
+        ]),
+        speak=False,
+    )
 
 
 def _find_advanced_recipe_in_text(text: str) -> str | None:
@@ -27614,6 +27635,31 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         _ok, msg = shop_module.sell_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
         await _safe_send(update, msg)
+    elif action == "dismantleconfirm":
+        # Real request (2026-09-16, per Coffee: "when dismantleing an
+        # item ask the player if they are sure ?") -- dismantling is
+        # permanent and destroys the item for materials, same real
+        # stakes as cancelling a quest, which already gets a real "are
+        # you sure?" step (_do_confirm_cancel_quest) rather than firing
+        # instantly. Same shape reused here: a real confirm screen
+        # naming exactly what's at stake, Yes routes to the actual
+        # "dismantle" action below, No goes back to the plain item view.
+        if not owns_it:
+            await _safe_send(update, f"You don't have the {item['name']} to dismantle.")
+            return
+        if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
+            await _safe_send(update, f"The {item['name']} can't be dismantled.")
+            return
+        await _safe_send(
+            update,
+            f"⚠️ Dismantle **{item['name']}**?\n\nThis destroys it permanently for real crafting materials back — "
+            f"there's no undoing it. Are you sure?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Yes, dismantle it", callback_data=f"itemview|dismantle|{item_id}")],
+                [InlineKeyboardButton("◀️ No, keep it", callback_data=f"itemview|show|{item_id}")],
+            ]),
+            speak=False,
+        )
     elif action == "dismantle":
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to dismantle.")

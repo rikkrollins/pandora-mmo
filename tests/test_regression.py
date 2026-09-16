@@ -18656,14 +18656,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["outcome"], "successful")
         self.assertEqual(result["materials"], {"iron_ore": 2})  # ceil(3/2)
 
-    async def test_do_dismantle_item_removes_item_and_awards_materials(self):
+    async def test_do_dismantle_item_asks_for_confirmation_before_destroying_it(self):
+        """
+        Real request (2026-09-16, per Coffee: "when dismantleing an item
+        ask the player if they are sure ?") -- dismantling is permanent
+        (real materials back, but the item itself is gone for good), so
+        the free-text path now shows a real "are you sure?" confirm
+        screen first, same shape quest-cancel already uses, instead of
+        destroying the item on a single typed command with no undo.
+        """
         from unittest.mock import patch
         make_basic_character(996041, "TextDismantler", current_location="crossroads_tavern")
         db.add_item(996041, -999, "longsword", 1)
         sink = []
         update = FakeUpdate(996041, "dismantle my longsword", sink)
+        await bot._do_dismantle_item(update, "dismantle my longsword")
+        character = db.get_character(996041, -999)
+        self.assertIn("longsword", character["inventory"])  # not yet destroyed
+        self.assertTrue(any("Are you sure" in s for s in sink), sink)
+
+        # Tapping "Yes" (itemview|dismantle|<id>, the exact button the
+        # confirm screen just sent) is the real, unchanged final action.
+        sink2 = []
+        confirm_update = FakeCallbackUpdate(996041, "itemview|dismantle|longsword", sink2)
         with patch("rules.dice.roll_d20", return_value=20):
-            await bot._do_dismantle_item(update, "dismantle my longsword")
+            await bot.itemview_callback(confirm_update, DummyContext())
         character = db.get_character(996041, -999)
         self.assertNotIn("longsword", character["inventory"])
         self.assertEqual(character["inventory"].get("iron_ore", 0), 3)
@@ -18699,6 +18716,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(996043, -999)
         self.assertNotIn("longsword", character["inventory"])
         self.assertEqual(character["inventory"].get("iron_ore", 0), 3)
+
+    def test_item_actions_keyboard_dismantle_button_now_routes_through_a_real_confirm_step(self):
+        """The item-view screen's own Dismantle button no longer fires the destructive action directly -- it opens the real confirm screen first."""
+        keyboard = bot._item_actions_keyboard("longsword")
+        callback_data = [btn.callback_data for row in keyboard.inline_keyboard for btn in row]
+        self.assertIn("itemview|dismantleconfirm|longsword", callback_data)
+        self.assertNotIn("itemview|dismantle|longsword", callback_data)
+
+    async def test_itemview_callback_dismantleconfirm_shows_a_real_are_you_sure_screen(self):
+        make_basic_character(996044, "ConfirmScreenDismantler", current_location="crossroads_tavern")
+        db.add_item(996044, -999, "longsword", 1)
+        sink = []
+        update = FakeCallbackUpdate(996044, "itemview|dismantleconfirm|longsword", sink)
+        await bot.itemview_callback(update, DummyContext())
+        character = db.get_character(996044, -999)
+        self.assertIn("longsword", character["inventory"])  # not touched by the confirm step itself
+        self.assertTrue(any("Are you sure" in s for s in sink), sink)
 
     # -- Monster spellcasting (2026-08-13, per Coffee, dev-bridge: "Certain
     #    enemies definitely need to have magic.. lets get this working" --
