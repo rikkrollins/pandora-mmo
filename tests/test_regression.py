@@ -32607,6 +32607,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok2, "a pre-warm failure must not prevent the actual send_photo attempt")
         self.assertEqual(len(update2.effective_chat.sent_photos), 1)
 
+    async def test_send_generated_image_survives_a_flood_control_blip_instead_of_dropping_the_image(self):
+        """
+        Real live report (2026-09-16, Coffee: "i didnt see an image for
+        the Remnant we just casted"). Confirmed live in bot_live_tmp.log:
+        the real sendPhoto call for that exact summon hit a genuine
+        Telegram 429/RetryAfter (flood control) and the image was simply
+        never seen -- _send_generated_image gave up on the very first
+        failure, unlike _safe_send/_safe_send_photo's own established
+        "retry up to 3x, honor a real RetryAfter's own wait" pattern.
+        Same fix, same shape, applied here. Same real fake-flaky-send
+        pattern as test_labyrinth_map_survives_a_flood_control_blip_
+        instead_of_dropping_the_map.
+        """
+        from unittest.mock import patch
+        from telegram.error import RetryAfter
+        sink = []
+        update = FakeUpdate(700603, "summon the deepest record", sink)
+
+        def fake_get(url, timeout=None):
+            return SimpleNamespace(status_code=200, headers={"content-type": "image/jpeg"})
+
+        real_send_photo = update.effective_chat.send_photo
+        calls = {"n": 0}
+
+        async def flaky_send_photo(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RetryAfter(1)
+            return await real_send_photo(*args, **kwargs)
+
+        update.effective_chat.send_photo = flaky_send_photo
+        with patch("bot.requests.get", side_effect=fake_get):
+            ok = await bot._send_generated_image(update, "The Deepest Record", "caption")
+
+        self.assertTrue(ok, "the image must still reach the player after a real flood-control blip")
+        self.assertEqual(len(update.effective_chat.sent_photos), 1)
+        self.assertGreaterEqual(calls["n"], 2, "the send must have actually been retried, not just swallowed")
+
     async def test_still_working_notice_fires_only_for_a_genuinely_busy_user_in_adventure(self):
         """
         Real live bug (2026-08-06, Coffee via dev-topic screenshot: "the

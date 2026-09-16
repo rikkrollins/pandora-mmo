@@ -26137,31 +26137,51 @@ async def _send_generated_image(
         # Fall through and let Telegram try anyway -- pre-warming is a
         # best-effort latency/reliability improvement, not a hard gate.
 
-    try:
-        sent = await update.effective_chat.send_photo(
-            photo=url,
-            caption=caption,
-            message_thread_id=thread_id if thread_id is not None else topics.thread_id_for(update.effective_chat.id, "adventure"),
-            reply_markup=reply_markup,
-        )
-        message_id = getattr(sent, "message_id", None)
-        if message_id is not None:
-            tracked = _chat_scoped_dict(_SENT_IMAGE_PROMPTS, update.effective_chat.id)
-            # reply_markup is tracked too (real gap caught on self-review,
-            # 2026-08-03) -- otherwise /reimage-ing an item-view screen
-            # (image + Equip/Sell/Market/Give buttons) would regenerate a
-            # plain photo with no buttons at all, silently losing the
-            # whole action-button feature on the new image.
-            tracked[message_id] = {
-                "prompt": prompt, "width": width, "height": height,
-                "caption": caption, "reply_markup": reply_markup,
-            }
-            if len(tracked) > _REIMAGE_TRACKED_MESSAGES_PER_CHAT:
-                tracked.pop(min(tracked), None)
-        return True
-    except Exception as e:
-        logger.warning(f"[images] image send failed for {log_key!r}: {e!r}")
-        return False
+    # Real live report (2026-09-16, Coffee: "i didnt see an image for
+    # the Remnant we just casted") -- confirmed live in bot_live_tmp.log:
+    # the real sendPhoto call for that exact summon hit a genuine
+    # Telegram 429/RetryAfter (flood control), and this function gave up
+    # on the FIRST failure with only a log line, unlike _safe_send/
+    # _safe_send_photo's own established "retry up to 3x, honor a real
+    # RetryAfter's own wait" pattern -- this is the one real image-send
+    # path that never got that treatment. Applied here now, matching
+    # those two exactly.
+    resolved_thread_id = thread_id if thread_id is not None else topics.thread_id_for(update.effective_chat.id, "adventure")
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            sent = await update.effective_chat.send_photo(
+                photo=url, caption=caption, message_thread_id=resolved_thread_id, reply_markup=reply_markup,
+            )
+            message_id = getattr(sent, "message_id", None)
+            if message_id is not None:
+                tracked = _chat_scoped_dict(_SENT_IMAGE_PROMPTS, update.effective_chat.id)
+                # reply_markup is tracked too (real gap caught on self-review,
+                # 2026-08-03) -- otherwise /reimage-ing an item-view screen
+                # (image + Equip/Sell/Market/Give buttons) would regenerate a
+                # plain photo with no buttons at all, silently losing the
+                # whole action-button feature on the new image.
+                tracked[message_id] = {
+                    "prompt": prompt, "width": width, "height": height,
+                    "caption": caption, "reply_markup": reply_markup,
+                }
+                if len(tracked) > _REIMAGE_TRACKED_MESSAGES_PER_CHAT:
+                    tracked.pop(min(tracked), None)
+            return True
+        except TelegramError as e:
+            if attempt == max_attempts - 1:
+                logger.warning(f"[images] image send failed again for {log_key!r}, giving up: {e!r}")
+            elif isinstance(e, RetryAfter):
+                wait = e.retry_after + 1
+                logger.warning(f"[images] flood control hit for {log_key!r}, waiting {wait}s then retrying: {e!r}")
+                await asyncio.sleep(wait)
+            else:
+                logger.warning(f"[images] image send failed for {log_key!r}, retrying: {e!r}")
+                await asyncio.sleep(2)
+        except Exception as e:
+            logger.warning(f"[images] image send failed for {log_key!r}: {e!r}")
+            return False
+    return False
 
 
 async def reimage_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

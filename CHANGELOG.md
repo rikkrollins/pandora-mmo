@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.628] — fix: a generated image no longer silently disappears on a flood-control blip
+
+Real live report: "i didnt see an image for the Remnant we just
+casted." Confirmed live in `bot_live_tmp.log`: the real `sendPhoto`
+call for that exact summon hit a genuine Telegram 429/`RetryAfter`
+(flood control), and `_send_generated_image` gave up on the very first
+failure with only a log line — unlike `_safe_send`/`_safe_send_photo`'s
+own established "retry up to 3x, honor a real `RetryAfter`'s own wait"
+pattern, which this one real image-send path (used by every summon,
+item view, forge/enchant result, ability art, and more) had never
+gotten. Same retry semantics applied here now, matching those two
+exactly — a real flood-control blip no longer costs the player an
+image outright.
+
+1 new test (simulates the exact live blip — first `send_photo` raises
+`RetryAfter`, confirms the image still reaches the player on retry);
+2 related image-send tests reconfirmed clean.
+
 ## [1.27.627] — fix: amulets no longer stack, gear stats now shown on the sheet, and a stale Remnant location fixed
 
 Three real, unrelated live reports found and fixed in one pass:
