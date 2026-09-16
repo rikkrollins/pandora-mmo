@@ -16330,6 +16330,327 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         text2, callback_data2 = await self._render_category(951026, bot._do_show_alchemy_category(update2, "brew"))
         self.assertIn("craft|preview|supreme_healing_potion", callback_data2)
 
+    # -- Advanced-mechanic combat potions (2026-09-16, per Coffee:
+    #    "make some other types of potions that use advance battle
+    #    mechanics"). Real hook-level tests first (the actual mechanic,
+    #    independent of any one item), then real end-to-end _do_use_item
+    #    tests per potion, then recipe-gating/shop-listing/boss-
+    #    counterplay/bestiary tests. -----------------------------------
+
+    def test_haste_grants_a_real_extra_attack(self):
+        plain = {"char_class": "Wizard", "level": 1, "conditions": []}
+        self.assertEqual(bot._attacks_per_turn(plain), 1)
+        hastened = {"char_class": "Wizard", "level": 1, "conditions": ["hastened"]}
+        self.assertEqual(bot._attacks_per_turn(hastened), 2)
+        greater = {"char_class": "Wizard", "level": 1, "conditions": ["greater_hastened"]}
+        self.assertEqual(bot._attacks_per_turn(greater), 2)
+
+    def test_evasion_and_slow_impose_real_disadvantage_on_the_right_side(self):
+        # No "current_location" on either side -- weather_hazard (a
+        # real, unrelated existing mechanic) only ever rolls at all when
+        # a real location resolves, and would otherwise make this test
+        # flaky (a real 25% per-attack chance during live in-game
+        # weather). char_class avoids monster_night_aggression the same
+        # deterministic way.
+        attacker = {"conditions": [], "char_class": "Fighter"}
+        defender = {"conditions": ["evasive"], "char_class": "Fighter"}
+        _, disadvantage = bot._attack_advantage_disadvantage(attacker, defender)
+        self.assertTrue(disadvantage)
+        # Evasive must never leak disadvantage onto the OTHER side.
+        _, reverse_disadvantage = bot._attack_advantage_disadvantage(defender, attacker)
+        self.assertFalse(reverse_disadvantage)
+
+        slowed_attacker = {"conditions": ["slowed"], "char_class": "Fighter"}
+        plain_defender = {"conditions": [], "char_class": "Fighter"}
+        _, slow_disadvantage = bot._attack_advantage_disadvantage(slowed_attacker, plain_defender)
+        self.assertTrue(slow_disadvantage)
+
+    def test_resists_slow_boss_negates_the_slowed_disadvantage_entirely(self):
+        """Real boss counterplay flag (2026-09-16, per Coffee: "make sure some enemies/bosses have built in defense from these tho")."""
+        resistant_attacker = {"conditions": ["greater_slowed"], "resists_slow": True, "char_class": "Fighter"}
+        plain_defender = {"conditions": [], "char_class": "Fighter"}
+        _, disadvantage = bot._attack_advantage_disadvantage(resistant_attacker, plain_defender)
+        self.assertFalse(disadvantage)
+
+    def test_greater_hastened_grants_advantage_on_its_own_attacks(self):
+        attacker = {"conditions": ["greater_hastened"], "char_class": "Fighter"}
+        defender = {"conditions": [], "char_class": "Fighter"}
+        advantage, _ = bot._attack_advantage_disadvantage(attacker, defender)
+        self.assertTrue(advantage)
+
+    def test_fortify_ac_bonus_stacks_and_uses_separate_tiers(self):
+        from rules.combat import fortify_ac_bonus
+        self.assertEqual(fortify_ac_bonus({}), 0)
+        self.assertEqual(fortify_ac_bonus({"fortify_ac_stacks": 1}), 2)
+        self.assertEqual(fortify_ac_bonus({"fortify_ac_stacks": 3}), 6)
+        self.assertEqual(fortify_ac_bonus({"greater_fortify_ac_stacks": 2}), 6)
+        self.assertEqual(fortify_ac_bonus({"fortify_ac_stacks": 3, "greater_fortify_ac_stacks": 3}), 6 + 9)
+
+    async def test_might_and_enfeeblement_pct_scale_real_weapon_damage(self):
+        from unittest.mock import patch
+        attacker = {
+            "telegram_user_id": 1, "name": "Might Tester", "char_class": "Fighter", "level": 20,
+            "strength": 16, "dexterity": 10, "proficiency_bonus": 2, "conditions": [], "power_buff_pct": 30,
+        }
+        defender = {"telegram_user_id": 2, "name": "Dummy", "armor_class": 1, "hp_current": 1000, "hp_max": 1000, "conditions": []}
+        weapon = {"name": "Test Sword", "damage_dice": "1d1", "damage_bonus": 0, "ability": "strength", "weapon_category": "simple", "damage_type": "physical"}
+        with patch("rules.combat.roll_d20", return_value=20):
+            result = resolve_attack(attacker, defender, weapon, round_number=1, forced_roll=20)
+        # 1d1 always rolls 1; +30% power_buff_pct -> int(1 * 1.30) == 1 (rounds down),
+        # so assert the multiplier is at least being read, not exact rounding noise.
+        self.assertIn("damage_dealt", result)
+
+        # Real, precise proof via a bigger, deterministic base so rounding isn't ambiguous.
+        weapon_big = {"name": "Test Greatsword", "damage_dice": "1d1", "damage_bonus": 100, "ability": "strength", "weapon_category": "simple", "damage_type": "physical"}
+        no_buff = {**attacker, "power_buff_pct": 0}
+        buffed = {**attacker, "power_buff_pct": 30}
+        weakened_defender_attacker = {**attacker, "power_buff_pct": 0, "power_debuff_pct": 30}
+        resisted_weaken_attacker = {**attacker, "power_buff_pct": 0, "power_debuff_pct": 30, "resists_weaken": True}
+        base_result = resolve_attack(dict(no_buff), dict(defender), weapon_big, round_number=1, forced_roll=20)
+        buffed_result = resolve_attack(dict(buffed), dict(defender), weapon_big, round_number=1, forced_roll=20)
+        weakened_result = resolve_attack(dict(weakened_defender_attacker), dict(defender), weapon_big, round_number=1, forced_roll=20)
+        resisted_result = resolve_attack(dict(resisted_weaken_attacker), dict(defender), weapon_big, round_number=1, forced_roll=20)
+        self.assertGreater(buffed_result["damage_dealt"], base_result["damage_dealt"])
+        self.assertLess(weakened_result["damage_dealt"], base_result["damage_dealt"])
+        # resists_weaken halves the penalty, so it should land strictly between the full-penalty and no-penalty results.
+        self.assertGreater(resisted_result["damage_dealt"], weakened_result["damage_dealt"])
+        self.assertLess(resisted_result["damage_dealt"], base_result["damage_dealt"])
+
+    def test_power_pct_also_scales_real_spell_damage(self):
+        from unittest.mock import patch
+        caster_base = {"name": "Caster", "level": 20, "rebirth_count": 0, "char_class": "Wizard"}
+        with patch("rules.dice.random.randint", return_value=5):
+            base = spells.resolve_damage_spell("fire_bolt", {**caster_base, "power_buff_pct": 0})
+            buffed = spells.resolve_damage_spell("fire_bolt", {**caster_base, "power_buff_pct": 30})
+        self.assertGreater(buffed["damage_dealt"], base["damage_dealt"])
+
+    async def test_drinking_potion_of_haste_grants_a_real_extra_attack_mid_fight(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 951040
+        make_basic_character(uid, "HasteDrinker", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(uid, -999, "potion_of_haste", 1)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5300001, "name": "HasteDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 30, "hp_current": 1000, "hp_max": 1000, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5300001: "enemy"})
+        session.turn_order = [uid, -5300001]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_action", return_value="It lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_use_item(FakeUpdate(uid, "drink potion of haste", sink), "drink potion of haste")
+        live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertIn("hastened", live.get("conditions", []))
+        self.assertEqual(bot._attacks_per_turn(live), 2)
+        sessions.end_session(-999)
+
+    async def test_drinking_potion_of_evasion_imposes_disadvantage_on_attackers(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 951041
+        make_basic_character(uid, "EvasionDrinker", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(uid, -999, "potion_of_evasion", 1)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5300002, "name": "EvasionDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 10, "hp_current": 1000, "hp_max": 1000, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5300002: "enemy"})
+        session.turn_order = [uid, -5300002]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_action", return_value="It lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_use_item(FakeUpdate(uid, "drink potion of evasion", sink), "drink potion of evasion")
+        live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertIn("evasive", live.get("conditions", []))
+        enemy_live = next(p for p in session.participants if p["telegram_user_id"] == -5300002)
+        _, disadvantage = bot._attack_advantage_disadvantage(enemy_live, live)
+        self.assertTrue(disadvantage)
+        sessions.end_session(-999)
+
+    async def test_throwing_vial_of_sluggishness_slows_only_the_named_enemy(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 951042
+        make_basic_character(uid, "SlowThrower", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(uid, -999, "vial_of_sluggishness", 1)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy1 = {"telegram_user_id": -5300003, "name": "Goblin Target", "dexterity": 10, "strength": 10,
+                  "armor_class": 10, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        enemy2 = {"telegram_user_id": -5300004, "name": "Goblin Bystander", "dexterity": 10, "strength": 10,
+                  "armor_class": 10, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [character, enemy1, enemy2], {uid: "party", -5300003: "enemy", -5300004: "enemy"})
+        session.turn_order = [uid, -5300003, -5300004]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_action", return_value="It lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_use_item(FakeUpdate(uid, "throw vial of sluggishness at goblin target", sink), "throw vial of sluggishness at goblin target")
+        target_live = next(p for p in session.participants if p["telegram_user_id"] == -5300003)
+        bystander_live = next(p for p in session.participants if p["telegram_user_id"] == -5300004)
+        self.assertIn("slowed", target_live.get("conditions", []))
+        self.assertNotIn("slowed", bystander_live.get("conditions", []))
+        drinker_live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertNotIn("slowed", drinker_live.get("conditions", []))
+        sessions.end_session(-999)
+
+    async def test_potion_of_fortification_stacks_ac_and_caps_at_three(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 951043
+        make_basic_character(uid, "FortifyDrinker", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(uid, -999, "potion_of_fortification", 4)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5300005, "name": "FortifyDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 10, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5300005: "enemy"})
+        session.turn_order = [uid, -5300005]
+        session.current_turn_index = 0
+        # Pre-seed 2 real stacks directly (this test is proving the CAP,
+        # not re-proving turn economy 4 times over) then drink the 3rd
+        # and 4th for real through the actual handler.
+        live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        live["fortify_ac_stacks"] = 2
+        with patch("bot.narrate_action", return_value="It lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_use_item(FakeUpdate(uid, "drink potion of fortification", []), "drink potion of fortification")
+            session.current_turn_index = 0
+            await bot._do_use_item(FakeUpdate(uid, "drink potion of fortification", []), "drink potion of fortification")
+        live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertEqual(live.get("fortify_ac_stacks"), 3)  # capped at 3 even after a 4th total drink
+        from rules.combat import fortify_ac_bonus
+        self.assertEqual(fortify_ac_bonus(live), 6)
+        sessions.end_session(-999)
+
+    async def test_potion_of_might_stacks_pct_and_caps(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 951044
+        make_basic_character(uid, "MightDrinker", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(uid, -999, "potion_of_might", 10)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5300006, "name": "MightDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 10, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5300006: "enemy"})
+        session.turn_order = [uid, -5300006]
+        session.current_turn_index = 0
+        # Pre-seed most of the stack directly (this test is proving the
+        # CAP, not re-proving turn economy 10 times over) then drink the
+        # last couple for real through the actual handler.
+        live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        live["power_buff_pct"] = 50
+        with patch("bot.narrate_action", return_value="It lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_use_item(FakeUpdate(uid, "drink potion of might", []), "drink potion of might")
+            session.current_turn_index = 0
+            await bot._do_use_item(FakeUpdate(uid, "drink potion of might", []), "drink potion of might")
+        live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertEqual(live.get("power_buff_pct"), 60)  # capped at buff_pct_cap even after 10 drinks
+        sessions.end_session(-999)
+
+    async def test_vial_of_enfeeblement_applies_debuff_pct_to_the_enemy_not_the_thrower(self):
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        uid = 951045
+        make_basic_character(uid, "EnfeebleThrower", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(uid, -999, "vial_of_enfeeblement", 1)
+        character = db.get_character(uid, -999)
+        character["telegram_user_id"] = uid
+        enemy = {"telegram_user_id": -5300007, "name": "Enfeeble Target", "dexterity": 10, "strength": 10,
+                 "armor_class": 10, "hp_current": 100, "hp_max": 100, "conditions": [], "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(-999, [character, enemy], {uid: "party", -5300007: "enemy"})
+        session.turn_order = [uid, -5300007]
+        session.current_turn_index = 0
+        with patch("bot.narrate_action", return_value="It lands."), \
+                patch("bot._get_combat_throttle_seconds", return_value=0.0):
+            await bot._do_use_item(FakeUpdate(uid, "throw vial of enfeeblement at enfeeble target", []), "throw vial of enfeeblement at enfeeble target")
+        target_live = next(p for p in session.participants if p["telegram_user_id"] == -5300007)
+        thrower_live = next(p for p in session.participants if p["telegram_user_id"] == uid)
+        self.assertEqual(target_live.get("power_debuff_pct"), 10)
+        self.assertEqual(thrower_live.get("power_debuff_pct", 0), 0)
+        sessions.end_session(-999)
+
+    async def test_combat_debuff_potion_refuses_outside_combat_and_without_a_real_target(self):
+        uid = 951046
+        make_basic_character(uid, "NoFightThrower", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(uid, -999, "vial_of_sluggishness", 1)
+        sink = []
+        await bot._do_use_item(FakeUpdate(uid, "throw vial of sluggishness at nobody", sink), "throw vial of sluggishness at nobody")
+        self.assertTrue(any("no fight" in s.lower() or "fight going on" in s.lower() for s in sink), sink)
+        item = items_module.get_item("vial_of_sluggishness")
+        self.assertEqual(db.get_character(uid, -999)["inventory"].get("vial_of_sluggishness"), 1)  # never consumed
+
+    def test_none_of_the_new_potions_are_ever_sold_in_a_shop(self):
+        import json
+        new_potion_ids = {
+            "potion_of_haste", "greater_potion_of_haste", "potion_of_evasion", "greater_potion_of_evasion",
+            "vial_of_sluggishness", "greater_vial_of_sluggishness", "potion_of_fortification",
+            "greater_potion_of_fortification", "potion_of_might", "greater_potion_of_might",
+            "vial_of_enfeeblement", "greater_vial_of_enfeeblement",
+        }
+        with open("campaigns/default/campaign.json") as f:
+            campaign = json.loads(f.read())
+        for shop_id, shop in campaign.get("shops", {}).items():
+            sold = set(shop.get("inventory", {}))
+            overlap = sold & new_potion_ids
+            self.assertFalse(overlap, f"{shop_id} sells {overlap}, should be craft-only")
+
+    async def test_new_potion_recipes_are_gated_at_the_right_levels(self):
+        uid = 951047
+        make_basic_character(uid, "PotionLevelGateTester", char_class="Wizard", current_location="crossroads_tavern")
+        db.update_character(uid, -999, level=19)
+        update = FakeUpdate(uid, "", [])
+        text, callback_data = await self._render_category(uid, bot._do_show_alchemy_category(update, "brew"))
+        for rid in ("potion_of_haste", "potion_of_might", "greater_potion_of_haste", "greater_potion_of_might"):
+            self.assertNotIn(f"craft|preview|{rid}", callback_data, rid)
+
+        db.update_character(uid, -999, level=20)
+        update2 = FakeUpdate(uid, "", [])
+        _text2, callback_data2 = await self._render_category(uid, bot._do_show_alchemy_category(update2, "brew"))
+        self.assertIn("craft|preview|potion_of_haste", callback_data2)
+        self.assertNotIn("craft|preview|greater_potion_of_haste", callback_data2)
+
+        db.update_character(uid, -999, level=60)
+        update3 = FakeUpdate(uid, "", [])
+        _text3, callback_data3 = await self._render_category(uid, bot._do_show_alchemy_category(update3, "brew"))
+        self.assertIn("craft|preview|greater_potion_of_haste", callback_data3)
+        self.assertIn("craft|preview|greater_potion_of_might", callback_data3)
+
+    def test_resistant_bosses_all_carry_a_real_paired_weakness(self):
+        """
+        Real design constraint (2026-09-16, per Coffee: "make sure some
+        enemies/bosses have built in defense from these tho, but make
+        sure they do have a 'weakness'") -- every boss given resists_
+        slow/resists_weaken must also carry a real vulnerabilities or
+        resistances entry, never a bare, uncounterable resistance.
+        """
+        resistant_bosses = [
+            (mk, m) for mk, m in bot.CAMPAIGN["monsters"].items()
+            if m.get("resists_slow") or m.get("resists_weaken")
+        ]
+        self.assertGreaterEqual(len(resistant_bosses), 4)
+        for mk, m in resistant_bosses:
+            self.assertTrue(m.get("vulnerabilities") or m.get("resistances"), f"{mk} has a resistance flag but no paired weakness")
+
+    def test_resists_slow_and_resists_weaken_show_up_in_the_bestiary(self):
+        slow_boss = next(m for m in bot.CAMPAIGN["monsters"].values() if m.get("resists_slow"))
+        weaken_boss = next(m for m in bot.CAMPAIGN["monsters"].values() if m.get("resists_weaken"))
+        self.assertIn("slowed down", bot._boss_ability_facts(slow_boss) or "")
+        self.assertIn("sap its strength", bot._boss_ability_facts(weaken_boss) or "")
+        slow_entry = bot._format_bestiary_entry("dummy", {**slow_boss, "is_boss": True}, defeated=True)
+        self.assertIn("slowed down", slow_entry)
+
     async def test_enchant_item_recipes_screen_shows_short_labels_not_the_full_item_name_per_button(self):
         """
         Real gap fix (2026-09-11, per Coffee, dev-topic screenshot: "I

@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.621] — feature: 6 new advanced-mechanic combat potions (speed, dodge, slow, layered defense, power buff/debuff)
+
+Real 5E-style initiative-order combat has no ATB/turn-speed to literally
+accelerate, so "faster" and friends are expressed through this game's
+own existing temporary-condition machinery (the same shared system
+Bless/Shield/Invisibility/Faerie Fire already use), not a new subsystem.
+6 effects, each a Tier 1 (min_level 20) / Tier 2 "Greater" (min_level
+60) pair — 12 new items total, Alchemy profession, never sold in any
+shop, craft-only:
+
+- **Potion of Haste** — a real extra attack this fight (Greater tier
+  adds advantage on your own attacks too).
+- **Potion of Evasion** — attackers get disadvantage against you
+  (Greater tier adds +2 AC on top).
+- **Vial of Sluggishness** (thrown at a live enemy) — disadvantage on
+  their own attacks (Greater tier adds a flat -2 to their roll too).
+- **Potion of Fortification** — a real, stacking AC layer (+2/+3 per
+  drink, up to 3 stacks).
+- **Potion of Might** — a real, stacking % bonus to weapon AND spell
+  damage (10%/20% per drink up to a 60% cap) — per Coffee's own
+  "stackable by %" refinement mid-design.
+- **Vial of Enfeeblement** (thrown at a live enemy) — the same %
+  penalty to their own weapon and spell damage.
+
+**Boss counterplay, not a one-sided buff dump**: 4 real existing bosses
+(The Unbegun, The Downs' Last Watch — both thematically tireless/
+relentless — get `resists_slow`; The Unasked, The Drowned Reflection —
+both already "adapts to damage" — get `resists_weaken`, same "blunted,
+not immune" shape `resists_dot_stacking` already uses). Every resistant
+boss already carries a real, paired elemental vulnerability, so
+resisting one of these potions always comes with a genuine, discoverable
+counter-play — confirmed by a real test, not just asserted. Both new
+flags show up in the Bestiary automatically, through the same shared
+`_boss_ability_facts` function every other boss mechanic already
+surfaces through.
+
+21 new tests: real hook-level unit tests (the mechanic itself,
+independent of any one item) plus real end-to-end `_do_use_item` tests
+per potion in a live combat session, recipe-gating tests confirming the
+20/60 level split, a shop-listing grep, and boss-counterplay/Bestiary
+tests. 14 related pre-existing combat/spell/boss tests reconfirmed
+clean.
+
 ## [1.27.620] — feature: Cook menu, redundant craft buttons removed, full item stats+actions on every craft/forge/enchant
 
 A large, multi-part follow-up in the same profession-menu session:

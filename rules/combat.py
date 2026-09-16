@@ -32,6 +32,21 @@ def formation_ac_bonus(defender: dict) -> int:
     return config.BACK_ROW_AC_BONUS if defender.get("formation_row") == "back" else 0
 
 
+def fortify_ac_bonus(defender: dict) -> int:
+    """
+    Potion of Fortification / Greater Potion of Fortification (2026-09-16,
+    "increasing defense in layers"). Unlike shield_bonus (a plain boolean
+    condition, always +5), this is a real numeric stack -- each drink
+    adds one layer, capped per tier (bot._do_use_item's "fortify" effect
+    branch enforces the cap when adding a stack; this just reads
+    whatever's already there). Greater potions use a separate field
+    (`greater_fortify_ac_stacks`) at a higher per-stack value rather than
+    sharing the plain one, so a level-60 alchemist's own better brew is a
+    real step up, not the same cap reached in fewer drinks.
+    """
+    return 2 * defender.get("fortify_ac_stacks", 0) + 3 * defender.get("greater_fortify_ac_stacks", 0)
+
+
 def formation_damage_bonus_pct(attacker: dict) -> int:
     """
     Front-row damage bonus (2026-08-14, per Coffee: "front row used for
@@ -334,7 +349,8 @@ def reaction_precheck(attacker: dict, defender: dict, weapon: dict, round_number
     )
     shield_bonus = 5 if "shield_active" in defender.get("conditions", []) else 0
     effective_defender_ac = (
-        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
+        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender)
+        + shield_bonus + fortify_ac_bonus(defender)
     )
     # Same equipped ability-bonus delta resolve_attack itself applies
     # (see its own comment) -- kept in sync so this precheck's "would it
@@ -351,6 +367,16 @@ def reaction_precheck(attacker: dict, defender: dict, weapon: dict, round_number
     )
     if "blessed" in attacker.get("conditions", []) and not attack_result["critical_fail"] and not attack_result["critical_hit"]:
         attack_result["total"] += 2
+        attack_result["hit"] = attack_result["total"] >= effective_defender_ac
+    # Greater Vial of Sluggishness (2026-09-16): the real "genuinely
+    # worse at fighting" stack on top of slowed's own disadvantage (see
+    # _attack_advantage_disadvantage) -- a flat -2 to the roll itself,
+    # same post-roll-adjustment shape blessed's own +2 just above
+    # already uses. resists_slow (a real boss counterplay flag) negates
+    # this the same all-or-nothing way it negates the disadvantage.
+    if ("greater_slowed" in attacker.get("conditions", []) and not attacker.get("resists_slow")
+            and not attack_result["critical_fail"] and not attack_result["critical_hit"]):
+        attack_result["total"] -= 2
         attack_result["hit"] = attack_result["total"] >= effective_defender_ac
 
     reaction_available = defender.get("reaction_used_round") != round_number
@@ -521,7 +547,8 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     # no separate AC-reversal code needed either.
     shield_bonus = 5 if "shield_active" in defender.get("conditions", []) else 0
     effective_defender_ac = (
-        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
+        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender)
+        + shield_bonus + fortify_ac_bonus(defender)
     )
     # Real Fighting Style: Archery (2026-09-04) -- "+2 to attack rolls
     # with ranged weapons," real 5E's exact wording and value.
@@ -559,6 +586,16 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
     # hit or a crit into a miss.
     if "blessed" in attacker.get("conditions", []) and not attack_result["critical_fail"] and not attack_result["critical_hit"]:
         attack_result["total"] += 2
+        attack_result["hit"] = attack_result["total"] >= effective_defender_ac
+    # Greater Vial of Sluggishness (2026-09-16): the real "genuinely
+    # worse at fighting" stack on top of slowed's own disadvantage (see
+    # _attack_advantage_disadvantage) -- a flat -2 to the roll itself,
+    # same post-roll-adjustment shape blessed's own +2 just above
+    # already uses. resists_slow (a real boss counterplay flag) negates
+    # this the same all-or-nothing way it negates the disadvantage.
+    if ("greater_slowed" in attacker.get("conditions", []) and not attacker.get("resists_slow")
+            and not attack_result["critical_fail"] and not attack_result["critical_hit"]):
+        attack_result["total"] -= 2
         attack_result["hit"] = attack_result["total"] >= effective_defender_ac
 
     shield_reaction_triggered = False
@@ -776,6 +813,23 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         front_row_bonus_pct = formation_damage_bonus_pct(attacker)
         if front_row_bonus_pct:
             damage_dealt = int(damage_dealt * (1 + front_row_bonus_pct / 100))
+        # Potion of Might / Vial of Enfeeblement (2026-09-16, "increasing
+        # attack power... and decreasing in enemies") -- a real,
+        # stacking-by-% temporary modifier (bot._do_use_item's
+        # "combat_buff"/"combat_debuff" branches manage the actual %
+        # accumulation and cap; this just reads whatever's already
+        # there), same multiplicative-%-on-top shape front_row_bonus_pct
+        # just above already uses. `resists_weaken` (a real boss counter-
+        # play flag, same "blunted, not immune" shape resists_dot_
+        # stacking already uses) halves the debuff's magnitude rather
+        # than negating it outright -- Might's own buff is never reduced
+        # by anything on the attacker's side.
+        power_debuff_pct = attacker.get("power_debuff_pct", 0)
+        if attacker.get("resists_weaken"):
+            power_debuff_pct /= 2
+        power_pct = attacker.get("power_buff_pct", 0) - power_debuff_pct
+        if power_pct:
+            damage_dealt = max(1, int(damage_dealt * (1 + power_pct / 100)))
         # Synergy Phase 10 punishes_own_condition (2026-08-14, The
         # Unspoken -- a real combo with its own on_hit_condition:
         # "silenced": this boss silences whoever it hits, then hits
@@ -1122,7 +1176,8 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
     )
     shield_bonus = 5 if "shield_active" in defender.get("conditions", []) else 0
     effective_defender_ac = (
-        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender) + shield_bonus
+        defender["armor_class"] + hybrid_features.hybrid_ac_bonus(defender) + formation_ac_bonus(defender)
+        + shield_bonus + fortify_ac_bonus(defender)
     )
 
     if forced_hit:

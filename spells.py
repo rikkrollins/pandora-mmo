@@ -782,6 +782,22 @@ def resolve_damage_spell(spell_id: str, caster: dict, target: dict | None = None
     if caster.get("subclass") in COMBAT_SUBCLASS_NAMES:
         total = int(total * (1 + COMBAT_SUBCLASS_DAMAGE_BONUS_PCT / 100))
 
+    # Potion of Might / Vial of Enfeeblement (2026-09-16, "increasing...
+    # magic power in players, and decreasing in enemies") -- same real,
+    # stacking-by-% temporary modifier rules.combat.resolve_attack's own
+    # power_buff_pct/power_debuff_pct already applies to weapon damage,
+    # mirrored here so a caster's spells get the identical bonus/penalty
+    # a martial's weapon swing does, not a divorced "buffs only help
+    # melee" gap. `resists_weaken` (a real boss counterplay flag) halves
+    # the debuff's magnitude, same "blunted, not immune" shape
+    # resists_dot_stacking already uses -- never reduces Might's own buff.
+    power_debuff_pct = caster.get("power_debuff_pct", 0)
+    if caster.get("resists_weaken"):
+        power_debuff_pct /= 2
+    power_pct = caster.get("power_buff_pct", 0) - power_debuff_pct
+    if power_pct:
+        total = max(1, int(total * (1 + power_pct / 100)))
+
     result = {
         "spell": spell["name"], "caster": caster.get("name", "Unknown"),
         "damage_dealt": total, "rolls": dmg["rolls"],

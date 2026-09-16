@@ -202,6 +202,76 @@ RECIPES = {
         "ability": "intelligence", "dc": 35, "profession": "alchemy",
         "requires_guild": "arcane_circle", "min_rebirth": 3,
     },
+    # Advanced-mechanic combat potions (2026-09-16, per Coffee -- see
+    # items.py's own matching comment for the full request/quote
+    # history). Tier 1 (min_level 20) / Tier 2 "Greater" (min_level 60)
+    # pairs, no requires_guild -- Coffee's own ask was a level gate, not
+    # a guild one, unlike the ascension ladder just above. Materials
+    # scaled the same way greater_scroll_*/supreme_spell_tonic already
+    # step up from this game's own level-20 alchemy baseline; Tier 2
+    # steps up again the same real ratio, no rarer material needed
+    # (godshard stays reserved for the true rebirth-gated capstone
+    # above).
+    "potion_of_haste": {
+        "materials": {"moonpetal": 3, "glimmerdeep_moss": 2},
+        "result_item": "potion_of_haste", "result_qty": 1,
+        "ability": "intelligence", "dc": 22, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_potion_of_haste": {
+        "materials": {"moonpetal": 5, "glimmerdeep_moss": 4},
+        "result_item": "greater_potion_of_haste", "result_qty": 1,
+        "ability": "intelligence", "dc": 28, "profession": "alchemy", "min_level": 60,
+    },
+    "potion_of_evasion": {
+        "materials": {"moonpetal": 3, "glimmerdeep_moss": 2},
+        "result_item": "potion_of_evasion", "result_qty": 1,
+        "ability": "intelligence", "dc": 22, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_potion_of_evasion": {
+        "materials": {"moonpetal": 5, "glimmerdeep_moss": 4},
+        "result_item": "greater_potion_of_evasion", "result_qty": 1,
+        "ability": "intelligence", "dc": 28, "profession": "alchemy", "min_level": 60,
+    },
+    "vial_of_sluggishness": {
+        "materials": {"moonpetal": 3, "sulfur_dust": 2},
+        "result_item": "vial_of_sluggishness", "result_qty": 1,
+        "ability": "intelligence", "dc": 22, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_vial_of_sluggishness": {
+        "materials": {"moonpetal": 5, "sulfur_dust": 4},
+        "result_item": "greater_vial_of_sluggishness", "result_qty": 1,
+        "ability": "intelligence", "dc": 28, "profession": "alchemy", "min_level": 60,
+    },
+    "potion_of_fortification": {
+        "materials": {"silverleaf_herb": 3, "glimmerdeep_moss": 2},
+        "result_item": "potion_of_fortification", "result_qty": 1,
+        "ability": "intelligence", "dc": 22, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_potion_of_fortification": {
+        "materials": {"silverleaf_herb": 5, "glimmerdeep_moss": 4},
+        "result_item": "greater_potion_of_fortification", "result_qty": 1,
+        "ability": "intelligence", "dc": 28, "profession": "alchemy", "min_level": 60,
+    },
+    "potion_of_might": {
+        "materials": {"moonpetal": 3, "silverleaf_herb": 2},
+        "result_item": "potion_of_might", "result_qty": 1,
+        "ability": "intelligence", "dc": 22, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_potion_of_might": {
+        "materials": {"moonpetal": 5, "silverleaf_herb": 4},
+        "result_item": "greater_potion_of_might", "result_qty": 1,
+        "ability": "intelligence", "dc": 28, "profession": "alchemy", "min_level": 60,
+    },
+    "vial_of_enfeeblement": {
+        "materials": {"sulfur_dust": 3, "silverleaf_herb": 2},
+        "result_item": "vial_of_enfeeblement", "result_qty": 1,
+        "ability": "intelligence", "dc": 22, "profession": "alchemy", "min_level": 20,
+    },
+    "greater_vial_of_enfeeblement": {
+        "materials": {"sulfur_dust": 5, "silverleaf_herb": 4},
+        "result_item": "greater_vial_of_enfeeblement", "result_qty": 1,
+        "ability": "intelligence", "dc": 28, "profession": "alchemy", "min_level": 60,
+    },
     # Cooking (2026-07-15): raw_fish was gatherable but no recipe used
     # it at all -- uses wood too (cooking over a fire), producing an
     # actually usable food item now that _do_use_item exists.

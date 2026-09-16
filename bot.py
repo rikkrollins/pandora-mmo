@@ -110,7 +110,7 @@ from models import (
 from rules.combat import (
     resolve_attack, resolve_death_save, UNDEAD_MONSTER_KEYS, apply_damage_type_modifier, elemental_overflow_heal,
     ENRAGE_HP_THRESHOLD, ENRAGE_DAMAGE_BONUS_PCT, ENRAGE_WARNING_ROUND, ENRAGE_ROUND_THRESHOLD,
-    BLOODIED_HP_THRESHOLD, resolve_thrown_attack, reaction_precheck,
+    BLOODIED_HP_THRESHOLD, resolve_thrown_attack, reaction_precheck, fortify_ac_bonus,
 )
 from rules.crafting import (
     RECIPES, get_recipe, has_materials, resolve_craft,
@@ -741,6 +741,15 @@ def _attacks_per_turn(character: dict) -> int:
     # mastery), so this never grants a free extra swing to anyone who
     # hasn't actually earned and equipped one.
     if _offhand_weapon_for_attacker(character) is not None:
+        base_attacks += 1
+    # Potion of Haste / Greater Potion of Haste (2026-09-16) -- this
+    # engine has no ATB/turn-speed to literally accelerate, so "faster"
+    # is expressed the same real way free_extra_attack above already
+    # does: a genuine extra attack this fight. Checked on the live
+    # combat participant's own conditions (never the DB character row --
+    # same "combat-only, resets when the fight ends" rule prone/poisoned
+    # already follow), so this is a no-op outside combat.
+    if any(c in (character.get("conditions") or []) for c in ("hastened", "greater_hastened")):
         base_attacks += 1
     return base_attacks
 
@@ -8976,6 +8985,8 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "echoes_damage_type": slot_template.get("echoes_damage_type", False),
                 "counters_extra_attack": slot_template.get("counters_extra_attack", False),
                 "resists_dot_stacking": slot_template.get("resists_dot_stacking", False),
+                "resists_slow": slot_template.get("resists_slow", False),
+                "resists_weaken": slot_template.get("resists_weaken", False),
                 "counters_rage": slot_template.get("counters_rage", False),
                 "counters_backstab": slot_template.get("counters_backstab", False),
                 "resists_forge_guild": slot_template.get("resists_forge_guild", False),
@@ -9351,6 +9362,8 @@ def _build_echo_enemy(monster_key: str, tier: int, index: int, total: int, chall
         "echoes_damage_type": template.get("echoes_damage_type", False),
         "counters_extra_attack": template.get("counters_extra_attack", False),
         "resists_dot_stacking": template.get("resists_dot_stacking", False),
+        "resists_slow": template.get("resists_slow", False),
+        "resists_weaken": template.get("resists_weaken", False),
         "counters_rage": template.get("counters_rage", False),
         "counters_backstab": template.get("counters_backstab", False),
         "resists_forge_guild": template.get("resists_forge_guild", False),
@@ -9721,6 +9734,8 @@ def _build_labyrinth_enemy(monster_key: str, floor: int, index: int, total: int,
         "echoes_damage_type": template.get("echoes_damage_type", False),
         "counters_extra_attack": template.get("counters_extra_attack", False),
         "resists_dot_stacking": template.get("resists_dot_stacking", False),
+        "resists_slow": template.get("resists_slow", False),
+        "resists_weaken": template.get("resists_weaken", False),
         "counters_rage": template.get("counters_rage", False),
         "counters_backstab": template.get("counters_backstab", False),
         "resists_forge_guild": template.get("resists_forge_guild", False),
@@ -12973,6 +12988,10 @@ def _boss_ability_facts(boss: dict) -> str | None:
         facts.append("strikes back harder the moment its own next attack lands after being critically hit")
     if boss.get("counters_empowered_spell"):
         facts.append("has learned to resist a Sorcerer's Empowered Spell reroll after the first one lands")
+    if boss.get("resists_slow"):
+        facts.append("is never actually slowed down, no matter what's thrown at it")
+    if boss.get("resists_weaken"):
+        facts.append("only feels half the sting of anything meant to sap its strength")
     if not facts:
         return None
     return f"{boss.get('name')} " + "; also ".join(facts) + "."
@@ -15079,10 +15098,28 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
     # an invisible attacker has advantage on its own attacks (below), and
     # anyone attacking it has disadvantage, since they can't see it to
     # aim properly.
+    #
+    # Potion of Evasion / Greater Potion of Evasion (2026-09-16): same
+    # symmetric shape as invisible -- the drinker is never quite where
+    # an attack expects them, so anyone swinging at them has
+    # disadvantage. Vial of Sluggishness / Greater Vial of Sluggishness
+    # (thrown at a live enemy, not drunk): the SLOWED creature's own
+    # attacks get disadvantage instead -- checked on attacker_conditions,
+    # the mirror side of evasive. `resists_slow` (a real boss counter-
+    # play flag, same "counters_X" shape as counters_sneak_attack) fully
+    # negates this specific one, never the others -- Slow is all-or-
+    # nothing by nature (there's no halfway disadvantage to fall back
+    # to), unlike resists_weaken's damage penalty below, which is a real
+    # number and can be blunted instead of negated.
     disadvantage = (
         "prone" in attacker_conditions or "poisoned" in attacker_conditions
         or "blinded" in attacker_conditions or "frightened" in attacker_conditions
         or armor_unproficient or "invisible" in defender_conditions
+        or "evasive" in defender_conditions or "greater_evasive" in defender_conditions
+        or (
+            ("slowed" in attacker_conditions or "greater_slowed" in attacker_conditions)
+            and not attacker.get("resists_slow")
+        )
     )
     # Weather hazard (per Coffee, 2026-07-21: "raining = wet = slippery
     # variable"): a real, per-attack chance of disadvantage while
@@ -15159,12 +15196,16 @@ def _attack_advantage_disadvantage(attacker: dict, defender: dict) -> tuple[bool
         attacker_level is not None and defender_level is not None
         and attacker_level - defender_level >= config.LEVEL_GAP_ADVANTAGE_THRESHOLD
     )
+    # Greater Potion of Haste (2026-09-16): the real edge on top of its
+    # own extra attack (_attacks_per_turn) -- reading the fight a half-
+    # beat ahead of everyone else, same shape as invisible's own
+    # attacker-side advantage just below.
     advantage = (
         "prone" in defender_conditions or "blinded" in defender_conditions
         or "paralyzed" in defender_conditions or favored_enemy or reckless
         or monster_night_aggression or hybrid_favored or hybrid_reckless
         or "invisible" in attacker_conditions or "faerie_fire" in defender_conditions
-        or level_gap_advantage
+        or level_gap_advantage or "greater_hastened" in attacker_conditions
     )
     return advantage, disadvantage
 
@@ -30998,6 +31039,24 @@ async def _do_use_item(update: Update, text: str) -> None:
         if undead_opposing:
             undead_enemy_target = _match_member_by_name_or_username(text, undead_opposing)
 
+    # Vial of Sluggishness / Vial of Enfeeblement (2026-09-16, thrown at
+    # a real enemy rather than drunk) -- same real "resolve a named
+    # hostile participant already in this fight" shape the undead-heal
+    # block just above already established, generalized into a real,
+    # reusable enemy-targeting path instead of a bespoke undead-only
+    # case. Requires an active fight (there's no one to throw it at
+    # otherwise) and a name that actually matches a living enemy.
+    debuff_enemy_target = None
+    if effect == "combat_debuff" and session is not None and user_id in session.turn_order:
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        debuff_enemy_target = _match_member_by_name_or_username(text, opposing)
+        if debuff_enemy_target is None:
+            await _safe_send(update, "Not sure which enemy you mean — name a real, living target in this fight.", speak=False)
+            return
+    elif effect == "combat_debuff":
+        await _safe_send(update, f"The {item['name']} needs a real enemy to throw it at — there's no fight going on.", speak=False)
+        return
+
     # Real dev-bridge report (2026-08-23, Coffee, screenshot: "I just
     # tried to heal one of the lesser spirits, and for some reason it
     # healed me?"): confirmed via the real callback log --
@@ -31016,6 +31075,10 @@ async def _do_use_item(update: Update, text: str) -> None:
         target = undead_enemy_target
         is_self = False
         target_note = f" on **{target['name']}**"
+    elif debuff_enemy_target is not None:
+        target = debuff_enemy_target
+        is_self = False
+        target_note = f" at **{target['name']}**"
     else:
         target = None
         if session is not None and user_id in session.turn_order:
@@ -31327,6 +31390,77 @@ async def _do_use_item(update: Update, text: str) -> None:
             if cured_conditions else
             f"🧪 **{character['name']}** uses a {item['name']}{target_note}, just in case."
         )
+    elif effect == "combat_buff":
+        # Potion of Haste/Evasion/Might and their Greater tiers
+        # (2026-09-16) -- every one of these is a real, existing timed
+        # condition (_apply_timed_condition, the same shared helper
+        # Bless/Shield/Invisibility already use), combat-only by nature
+        # (a temporary combat buff means nothing between fights). `target`
+        # may be a plain DB row (self, the common case) rather than the
+        # live session participant conditions actually live on, so this
+        # re-resolves the real live dict the same way "cure_condition"
+        # just above already does.
+        live_target = None
+        if session is not None:
+            live_target = next(
+                (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+            )
+        if live_target is None:
+            await _safe_send(update, f"The {item['name']} only does anything mid-fight — there's no battle to drink it into.", speak=False)
+            return
+        duration = item.get("buff_duration_rounds", 10)
+        condition = item["buff_condition"]
+        _apply_timed_condition(live_target, condition, duration, session)
+        # Potion of Might / Greater Potion of Might (2026-09-16, "make
+        # some spells [potions] stackable by %"): the ACTUAL magnitude
+        # lives in a real numeric field, power_buff_pct, that stacks
+        # with every dose (refreshing the shared "empowered" timer
+        # above) up to a real per-item cap -- rules.combat.resolve_attack
+        # and spells.resolve_damage_spell both read this field directly.
+        # Haste/Evasion have no numeric magnitude (an extra attack and a
+        # disadvantage-on-attackers are both flat, all-or-nothing
+        # effects), so this only ever fires for Might.
+        pct_amount = item.get("buff_pct_amount")
+        if pct_amount:
+            cap = item.get("buff_pct_cap", pct_amount)
+            live_target["power_buff_pct"] = min(live_target.get("power_buff_pct", 0) + pct_amount, cap)
+        message = f"🧪 **{character['name']}** drinks a {item['name']} — {condition.replace('_', ' ')}!"
+    elif effect == "combat_debuff":
+        # Vial of Sluggishness/Enfeeblement and their Greater tiers
+        # (2026-09-16) -- thrown at a real enemy already resolved as
+        # `target`/`debuff_enemy_target` above (always a live session
+        # participant already, never a DB row, since an enemy has none).
+        duration = item.get("debuff_duration_rounds", 10)
+        condition = item["debuff_condition"]
+        _apply_timed_condition(target, condition, duration, session)
+        pct_amount = item.get("debuff_pct_amount")
+        if pct_amount:
+            cap = item.get("debuff_pct_cap", pct_amount)
+            target["power_debuff_pct"] = min(target.get("power_debuff_pct", 0) + pct_amount, cap)
+        message = f"🧪 **{character['name']}** throws a {item['name']}{target_note} — {condition.replace('_', ' ')}!"
+    elif effect == "fortify":
+        # Potion of Fortification / Greater Potion of Fortification
+        # (2026-09-16, "increasing defense in layers") -- the one
+        # numeric-stack effect with no boolean condition of its own
+        # (rules.combat.fortify_ac_bonus reads the stack fields
+        # directly); "fortified" is a real, shared timed condition
+        # purely so the existing expiry machinery
+        # (Session._end_timed_condition) resets both stack fields to 0
+        # together when it runs out, same as every other timed effect.
+        live_target = None
+        if session is not None:
+            live_target = next(
+                (p for p in session.participants if p["telegram_user_id"] == target["telegram_user_id"]), None,
+            )
+        if live_target is None:
+            await _safe_send(update, f"The {item['name']} only does anything mid-fight — there's no battle to drink it into.", speak=False)
+            return
+        _apply_timed_condition(live_target, "fortified", item.get("buff_duration_rounds", 10), session)
+        stack_field = "greater_fortify_ac_stacks" if item.get("fortify_greater") else "fortify_ac_stacks"
+        max_stacks = item.get("fortify_max_stacks", 3)
+        live_target[stack_field] = min(live_target.get(stack_field, 0) + 1, max_stacks)
+        total_ac = fortify_ac_bonus(live_target)
+        message = f"🧪 **{character['name']}** drinks a {item['name']} — +{total_ac} AC now layered on."
     else:
         # Flavor-only consumables (rations, ale, torch, etc.) -- real 5E
         # items this game has no mechanic for (hunger, light radius), same

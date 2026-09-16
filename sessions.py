@@ -171,6 +171,25 @@ class Session:
             p["conditions"].remove(name)
         if name in ("hex_mark", "hunters_mark"):
             p.pop("marked_target_id", None)
+        # Advanced-mechanic combat potions (2026-09-16): "empowered"/
+        # "weakened"/"fortified" are real conditions like any other
+        # (tracked in `conditions`/`condition_expires_round` the exact
+        # same way), but their actual MAGNITUDE stacks by % (or, for
+        # fortify, a flat AC layer) in a separate numeric field rather
+        # than being a fixed value baked into the condition name itself
+        # -- see bot._do_use_item's "combat_buff"/"combat_debuff"/
+        # "fortify" branches for where these fields accumulate. This is
+        # the other half: when the condition's own timer runs out, the
+        # accumulated number resets to 0 right alongside it, same
+        # "companion field cleared alongside the condition" shape
+        # marked_target_id already uses for hex_mark/hunters_mark below.
+        if name == "empowered":
+            p["power_buff_pct"] = 0
+        if name == "weakened":
+            p["power_debuff_pct"] = 0
+        if name == "fortified":
+            p["fortify_ac_stacks"] = 0
+            p["greater_fortify_ac_stacks"] = 0
         if name == "polymorphed":
             # Real 5E: polymorph ends, real stats return. Backup was
             # captured at cast time (bot.py's polymorph branch);

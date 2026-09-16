@@ -262,6 +262,95 @@ ITEMS = {
         "permanent_stat_guild": "arcane_circle", "permanent_stat_amount": 2,
         "description": "The last real rite the Arcane Circle has left to teach — a shard of something that shouldn't still exist, folded into the brew. Whatever drinks this stops being entirely human.",
     },
+    # Advanced-mechanic combat potions (2026-09-16, per Coffee: "make some
+    # other types of potions that use advance battle mechanics ? like
+    # speed... allowing them to dodge, making the nemies slower,
+    # increasing defense in layers, increasing attack power or magic
+    # power in players, and decreasing in enemies", then "advanced
+    # recipies and potions can be available at 60+", then "dont sell
+    # those potions in shops, make it so u have to be lv 20+ to be able
+    # to craft them"). Six real effects, each a Tier 1 (min_level 20,
+    # rules/crafting.py) / Tier 2 "Greater" (min_level 60) pair --
+    # deliberately never added to any shop's inventory, craft-only.
+    # Every one of these reuses this game's own EXISTING temporary-
+    # condition machinery (bot._apply_timed_condition, the same shared
+    # helper Bless/Shield/Invisibility/Faerie Fire already use) rather
+    # than inventing a new buff system -- see bot.py's
+    # _attacks_per_turn/_attack_advantage_disadvantage/_do_use_item and
+    # rules/combat.py's resolve_attack/effective_defender_ac for the
+    # real mechanical hooks each one lands on.
+    "potion_of_haste": {
+        "name": "Potion of Haste", "type": "consumable", "rarity": "rare",
+        "price": 0, "weight": 0.5, "effect": "combat_buff", "buff_condition": "hastened",
+        "buff_duration_rounds": 10,
+        "description": "Grants a real extra attack this fight — your limbs move like the world just slowed down half a step. Fades after 10 rounds.",
+    },
+    "greater_potion_of_haste": {
+        "name": "Greater Potion of Haste", "type": "consumable", "rarity": "very_rare",
+        "price": 0, "weight": 0.5, "effect": "combat_buff", "buff_condition": "greater_hastened",
+        "buff_duration_rounds": 10,
+        "description": "The extra attack, plus a real edge reading the fight itself — your own attacks land with advantage for 10 rounds, like everyone else is a half-beat behind.",
+    },
+    "potion_of_evasion": {
+        "name": "Potion of Evasion", "type": "consumable", "rarity": "rare",
+        "price": 0, "weight": 0.5, "effect": "combat_buff", "buff_condition": "evasive",
+        "buff_duration_rounds": 10,
+        "description": "Anyone swinging at you fights with disadvantage for 10 rounds — you're never quite where the attack expects you to be.",
+    },
+    "greater_potion_of_evasion": {
+        "name": "Greater Potion of Evasion", "type": "consumable", "rarity": "very_rare",
+        "price": 0, "weight": 0.5, "effect": "combat_buff", "buff_condition": "greater_evasive",
+        "buff_duration_rounds": 10,
+        "description": "The same disadvantage against attackers, plus a real +2 AC on top for 10 rounds — not just hard to hit, hard to even threaten.",
+    },
+    "vial_of_sluggishness": {
+        "name": "Vial of Sluggishness", "type": "consumable", "rarity": "rare",
+        "price": 0, "weight": 0.5, "effect": "combat_debuff", "debuff_condition": "slowed",
+        "debuff_duration_rounds": 10,
+        "description": "Thrown at a real enemy, not drunk — their own attacks roll with disadvantage for 10 rounds. A thick, syrupy liquid that seems to slow down whatever it splashes.",
+    },
+    "greater_vial_of_sluggishness": {
+        "name": "Greater Vial of Sluggishness", "type": "consumable", "rarity": "very_rare",
+        "price": 0, "weight": 0.5, "effect": "combat_debuff", "debuff_condition": "greater_slowed",
+        "debuff_duration_rounds": 10,
+        "description": "The same disadvantage, plus a real flat penalty on top of every attack roll they make for 10 rounds — genuinely, measurably worse in a fight, not just unlucky.",
+    },
+    "potion_of_fortification": {
+        "name": "Potion of Fortification", "type": "consumable", "rarity": "rare",
+        "price": 0, "weight": 0.5, "effect": "fortify", "fortify_ac_amount": 2, "fortify_max_stacks": 3,
+        "buff_duration_rounds": 10,
+        "description": "A real +2 AC for 10 rounds, layered on top of anything already worn — drink more for more layers, up to three (+6 AC total). A thick, mineral draught that seems to settle into the skin.",
+    },
+    "greater_potion_of_fortification": {
+        "name": "Greater Potion of Fortification", "type": "consumable", "rarity": "very_rare",
+        "price": 0, "weight": 0.5, "effect": "fortify", "fortify_ac_amount": 3, "fortify_max_stacks": 3, "fortify_greater": True,
+        "buff_duration_rounds": 10,
+        "description": "The same layered defense, brewed stronger — +3 AC per layer, up to three (+9 AC total) for 10 rounds.",
+    },
+    "potion_of_might": {
+        "name": "Potion of Might", "type": "consumable", "rarity": "rare",
+        "price": 0, "weight": 0.5, "effect": "combat_buff", "buff_condition": "empowered",
+        "buff_pct_amount": 10, "buff_pct_cap": 60, "buff_duration_rounds": 10,
+        "description": "A real +10% to every weapon and spell hit for 10 rounds — drink more for more, up to a real cap. A hot, metallic draught that makes your own strength feel unfamiliar for a moment.",
+    },
+    "greater_potion_of_might": {
+        "name": "Greater Potion of Might", "type": "consumable", "rarity": "very_rare",
+        "price": 0, "weight": 0.5, "effect": "combat_buff", "buff_condition": "empowered",
+        "buff_pct_amount": 20, "buff_pct_cap": 60, "buff_duration_rounds": 10,
+        "description": "The same real damage bonus, brewed to hit twice as hard per dose — +20% per drink toward the same cap.",
+    },
+    "vial_of_enfeeblement": {
+        "name": "Vial of Enfeeblement", "type": "consumable", "rarity": "rare",
+        "price": 0, "weight": 0.5, "effect": "combat_debuff", "debuff_condition": "weakened",
+        "debuff_pct_amount": 10, "debuff_pct_cap": 60, "debuff_duration_rounds": 10,
+        "description": "Thrown at a real enemy — a real -10% to their own weapon and spell damage for 10 rounds, stacking toward a cap the more you throw. A pale, oily liquid that visibly dulls whatever it touches.",
+    },
+    "greater_vial_of_enfeeblement": {
+        "name": "Greater Vial of Enfeeblement", "type": "consumable", "rarity": "very_rare",
+        "price": 0, "weight": 0.5, "effect": "combat_debuff", "debuff_condition": "weakened",
+        "debuff_pct_amount": 20, "debuff_pct_cap": 60, "debuff_duration_rounds": 10,
+        "description": "The same real damage penalty, brewed to bite twice as hard per dose — -20% per throw toward the same cap.",
+    },
     # Per Coffee (2026-07-24): "add items like tents and cabins and
     # houses to reviving and healing characters to full" -- a stronger
     # alternative to Revivify (which only restores 1 HP): these fully

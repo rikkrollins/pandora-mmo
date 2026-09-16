@@ -11649,7 +11649,8 @@
         }
       ],
       "extra_attack_when_enraged": true,
-      "resists_forge_guild": true
+      "resists_forge_guild": true,
+      "resists_slow": true
     },
     "elder_bone_legionnaire": {
       "name": "Elder Bone Legionnaire",
@@ -12471,7 +12472,8 @@
           "weight": 5
         }
       ],
-      "adapts_to_damage": true
+      "adapts_to_damage": true,
+      "resists_weaken": true
     },
     "the_unopened": {
       "name": "The Unopened",
@@ -13134,6 +13136,7 @@
       ],
       "adapts_to_damage": true,
       "extra_attack_when_enraged": true,
+      "resists_weaken": true,
       "vulnerabilities": [
         "fire"
       ],
@@ -13679,6 +13682,7 @@
       ],
       "counters_backstab": true,
       "extra_attack_when_enraged": true,
+      "resists_slow": true,
       "vulnerabilities": [
         "radiant"
       ],
