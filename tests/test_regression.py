@@ -19765,6 +19765,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Champion", reason)
         self.assertIn("Battle Master", reason)
 
+    def test_any_class_can_now_join_a_previously_class_restricted_guild(self):
+        """
+        Real request (2026-09-16, per Coffee: a Rogue found Forge Guild
+        --and every other class-restricted guild-- closed to them, "can
+        u make it so players can join any guild?"). join_requirement_
+        classes used to hard-reject anyone outside its list; it now only
+        gates the subclass-commitment check (a real guild still wants
+        proof of specialization), never guild membership itself. Proves
+        a Rogue -- not in forge_guild's own join_requirement_classes --
+        is fully eligible once the SAME real bars every other applicant
+        faces (level, subclass, proven in combat) are met.
+        """
+        character = make_basic_character(
+            996090, "AnyGuildRogue", char_class="Rogue", current_location="crossroads_tavern",
+        )
+        db.update_character(996090, -999, level=5, subclass="Assassin", proven_in_combat=True)
+        character = db.get_character(996090, -999)
+        eligible, reason = guilds.eligible_for_guild(character, "forge_guild")
+        self.assertTrue(eligible, reason)
+
+        # Still real gates, just no longer class-gated: a Rogue below
+        # forge_guild's own level requirement is rejected same as anyone.
+        db.update_character(996090, -999, level=1)
+        character = db.get_character(996090, -999)
+        eligible, reason = guilds.eligible_for_guild(character, "forge_guild")
+        self.assertFalse(eligible)
+        self.assertIn("level", reason.lower())
+
     def test_promotion_slot_rejection_names_the_guild_already_held(self):
         """
         Real live bug (Coffee, dev-bridge screenshot: "This is not true.
@@ -19930,6 +19958,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Forge Guild", catalog)
         self.assertIn("subclass", catalog)
         self.assertIn("proving yourself in combat", catalog)
+        # Real fix (2026-09-16): guild membership is no longer
+        # class-gated (see guilds.eligible_for_guild) -- Support must
+        # never tell a player a guild is closed to their class.
+        self.assertIn("no real class restriction", catalog)
 
     def test_support_guild_catalog_names_real_benefits_not_vague_filler(self):
         """

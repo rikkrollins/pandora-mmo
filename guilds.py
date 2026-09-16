@@ -440,12 +440,20 @@ def eligible_for_guild(character: dict, guild_id: str) -> tuple[bool, str]:
             )
     if character["level"] < guild["join_requirement_level"]:
         return False, f"Requires level {guild['join_requirement_level']}."
+    # Real request (2026-09-16, per Coffee: a Rogue found every
+    # class-restricted guild closed to them, including Forge Guild --
+    # "doesnt seem to be beneficial for the player... can u make it so
+    # players can join any guild?"). join_requirement_classes used to
+    # hard-reject anyone outside its list; now it only gates the
+    # subclass-commitment check below (still real: a guild wants proof
+    # you've actually specialized, not just hit a level), never the
+    # guild itself. permanent_stat_by_class (see permanent_stat_for)
+    # still grants the right stat per class regardless -- that part was
+    # never about eligibility, so it's untouched. The Adventurers' Guild
+    # and any other guild with no join_requirement_classes at all
+    # already had zero class gating, so this doesn't change those.
     required_classes = guild.get("join_requirement_classes")
     if required_classes:
-        char_class = character["char_class"].lower()
-        hybrid_class = (character.get("hybrid_class") or "").lower()
-        if char_class not in required_classes and hybrid_class not in required_classes:
-            return False, f"Only open to: {', '.join(c.capitalize() for c in required_classes)}."
         if not character.get("subclass"):
             # Real live bug (2026-08-13, Coffee: "It is not letting me
             # join the Forge guild and it is not being clear on how I

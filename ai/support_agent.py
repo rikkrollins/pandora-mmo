@@ -236,7 +236,18 @@ def _guilds_catalog_text() -> str:
     for guild_id, guild in GUILDS.items():
         extra = []
         if guild.get("join_requirement_classes"):
-            extra.append(f"classes: {', '.join(guild['join_requirement_classes'])}")
+            # Real fix (2026-09-16, per Coffee: a Rogue found every
+            # class-restricted guild closed to them -- "can u make it so
+            # players can join any guild?"). guilds.eligible_for_guild no
+            # longer rejects on class at all; this list is now only the
+            # guild's own traditional/thematic classes, not a real
+            # requirement, so Support must never repeat it as a hard
+            # gate or it would tell a Rogue asking about Forge Guild
+            # something no longer true.
+            extra.append(
+                f"traditionally associated with: {', '.join(guild['join_requirement_classes'])} "
+                "(open to ANY class, though — no real class restriction)"
+            )
             extra.append("must have chosen a real subclass first (say \"choose the path of...\")")
         extra.append("must have won at least one real fight (proving yourself in combat)")
         benefit_text = ", ".join(_format_guild_benefit(b) for b in guild.get("benefits", []))

@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.625] — feature: guild membership is no longer class-restricted
+
+Real request (Coffee: a Rogue found every class-restricted guild
+closed to them, including Forge Guild — "doesnt seem to be beneficial
+for the player... can u make it so players can join any guild?").
+`join_requirement_classes` used to hard-reject anyone outside its
+list; it now only gates the existing subclass-commitment check (a
+guild still wants proof you've actually specialized, not just hit a
+level) — never guild membership itself. Level requirement, "already
+proven yourself in combat," and the guild-slot/mastery-for-a-second-
+guild rules are all unchanged.
+
+Checked every guild's real curriculum (`guild_curriculum.py`) before
+shipping this: every step across all 6 class-gated guilds (gather
+material, NPC dialogue, defeat monster, solve puzzle, reach location,
+dice challenge, alignment choice) is already class-agnostic, so any
+class can actually complete any guild's training. `permanent_stat_by_
+class` (which stat a guild grows) and `recipe_requirement_gate`
+(guild-gated recipes, which only ever check real membership via
+`held_guild_ids`) both needed no changes — they already work correctly
+regardless of which class holds the guild.
+
+Support's own guild catalog updated too, so it stops telling players a
+guild is closed to their class — it now says a guild's listed classes
+are "traditionally associated," not a real requirement.
+
+1 new test confirms a Rogue is now fully eligible for Forge Guild
+(and still correctly rejected for a real, unrelated reason like being
+under-level); 4 related guild-eligibility/Support-catalog tests
+reconfirmed clean.
+
 ## [1.27.624] — fix: cap Ollama's CPU thread usage so it stops starving the bot's own network I/O
 
 Real live incident (2026-09-16): this VPS is CPU-only (8 vCores) and
