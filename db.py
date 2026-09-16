@@ -1668,8 +1668,29 @@ def materialize_item_instance(item_id: str) -> dict | None:
         "price": row["price"], "generated": True, "instance_id": instance_id,
         "set_id": row["set_id"], "source": row["source"],
     })
-    for affix in json.loads(row["affixes"]):
+    stored_affixes = json.loads(row["affixes"])
+    for affix in stored_affixes:
         _apply_affix(item, affix)
+    # Real gap found 2026-09-16 (per Coffee: "make sure when
+    # dismantleing a magic item/forged item/or enchanted item, it
+    # returns the proper materials... Craft, Magic Item forged, and
+    # Enchanted shud give all 3 materials from the recipie it took to
+    # make them") -- _apply_affix only ever folds an affix's EFFECT
+    # onto the item (a stat bump, a resistance, etc.), discarding the
+    # raw affix dict once applied, so dismantle_materials_for_item
+    # (rules/crafting.py) had no way to know a real forge_magic_upgrade
+    # or enchant recipe had EVER been used on this item -- only its
+    # original base recipe's materials ever came back, no matter how
+    # many real crafting actions actually went into it. Each affix
+    # dict now optionally carries its own "recipe_id" (set at the
+    # real forge/enchant call sites in bot.py) -- surfaced here,
+    # deduplicated, purely for dismantle's own lookup; nothing else
+    # reads this field, so it's inert everywhere else in the game.
+    recipe_history = list(dict.fromkeys(
+        affix["recipe_id"] for affix in stored_affixes if affix.get("recipe_id")
+    ))
+    if recipe_history:
+        item["_dismantle_recipe_history"] = recipe_history
     return item
 
 

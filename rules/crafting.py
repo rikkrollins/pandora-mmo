@@ -700,8 +700,8 @@ DISMANTLE_FALLBACK_MATERIAL = "iron_ore"
 DISMANTLE_FALLBACK_PRICE_PER_UNIT = 40
 
 
-def dismantle_materials_for_item(item_id: str, item: dict) -> dict[str, int]:
-    """Full (100%) material yield for dismantling `item` -- see the module comment above for the real-recipe-first, price-fallback-second resolution order."""
+def _base_dismantle_materials_for_item(item_id: str, item: dict) -> dict[str, int]:
+    """The ORIGINAL single-recipe lookup, unchanged -- factored out so dismantle_materials_for_item can layer the real forge/enchant history on top of it."""
     generated_base = item.get("generated_base")
     if generated_base:
         tier = item.get("rarity")
@@ -717,6 +717,39 @@ def dismantle_materials_for_item(item_id: str, item: dict) -> dict[str, int]:
             return dict(recipe["materials"])
     price = item.get("price", 0)
     return {DISMANTLE_FALLBACK_MATERIAL: max(1, round(price / DISMANTLE_FALLBACK_PRICE_PER_UNIT))}
+
+
+def dismantle_materials_for_item(item_id: str, item: dict) -> dict[str, int]:
+    """
+    Full (100%) material yield for dismantling `item` -- see the module
+    comment above for the real-recipe-first, price-fallback-second base
+    resolution order.
+
+    Real gap found 2026-09-16 (per Coffee: "when dismantleing a magic
+    item/forged item/or enchanted item, it returns the proper
+    materials... Craft, Magic Item forged, and Enchanted shud give all
+    3 materials from the recipie it took to make them"). The base
+    lookup above only ever accounts for ONE recipe -- the item's
+    original craft -- with zero awareness that a real player action
+    (forge_magic_upgrade, or one or more real enchants) may have been
+    applied on top since. `item["_dismantle_recipe_history"]`
+    (db.materialize_item_instance, from each affix's own real
+    "recipe_id" tag set at the actual forge/enchant call sites in
+    bot.py) records every such real recipe this specific instance
+    actually went through -- their materials are summed in here too,
+    on top of the base yield, once each, regardless of how many
+    affixes any one recipe produced in a single attempt (e.g. a
+    masterwork enchant's own bonus affix shares its parent recipe's id,
+    never double-charged as a second recipe).
+    """
+    materials = _base_dismantle_materials_for_item(item_id, item)
+    for recipe_id in item.get("_dismantle_recipe_history") or []:
+        extra_recipe = get_enchant_recipe(recipe_id)
+        if not extra_recipe:
+            continue
+        for mat_id, qty in extra_recipe["materials"].items():
+            materials[mat_id] = materials.get(mat_id, 0) + qty
+    return materials
 
 
 DISMANTLE_DC = 13

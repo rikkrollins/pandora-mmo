@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.623] — fix: dismantle now returns materials from EVERY recipe an item actually went through
+
+Real request (Coffee: "make sure when dismantleing a magic
+item/forged item/or enchanted item, it returns the proper
+materials... Craft, Magic Item forged, and Enchanted shud give all 3
+materials from the recipie it took to make them"). `dismantle_
+materials_for_item` only ever looked at ONE recipe — the item's
+original base craft — with zero awareness that `forge_magic_upgrade`
+and/or a real enchant had also gone into it since.
+
+Direct testing turned up a deeper root cause than described: promoting
+a PLAIN catalog item (e.g. a hand-authored `longsword`, never
+previously rolled/generated) via `forge_magic_upgrade` silently lost
+even its OWN base recipe — a plain catalog item never carries the
+`generated_base` stamp (`item_generator.py` only ever sets that on
+rolled loot/advanced-craft output), so the promoted instance fell all
+the way through to a generic price-scaled scrap fallback on dismantle,
+losing the base materials too, not just the forge/enchant ones.
+
+Fix, three parts: (1) `_do_forge_magic_item`'s plain-item-promotion
+path now stamps `generated_base` onto the new instance if it doesn't
+already have one, restoring the base-recipe lookup; (2) every affix
+`bot.py` writes via a real forge/enchant call now optionally tags
+itself with the `recipe_id` that produced it; (3) `db.materialize_
+item_instance` surfaces a deduplicated recipe history from those tags,
+and `rules.crafting.dismantle_materials_for_item` sums each recipe's
+materials on top of the base yield. Confirmed with real numbers:
+Longsword (3 iron_ore) + forge_magic_upgrade (4 iron_ore, 2 moonpetal)
++ enchant_sharpen (2 iron_ore, 1 sulfur_dust) now correctly returns 9
+iron_ore, 2 moonpetal, 1 sulfur_dust — not just one of the three.
+
+2 new tests added (recipe-history summing at the db/rules level; a
+full end-to-end run through the real `_do_forge_magic_item` handler
+confirming a promoted plain item keeps its own base recipe); 8 related
+forge/enchant/dismantle tests reconfirmed clean.
+
 ## [1.27.622] — feature: real "are you sure?" confirmation before dismantling an item
 
 Real request (Coffee: "when dismantleing an item ask the player if

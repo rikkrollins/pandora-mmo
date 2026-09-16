@@ -24068,6 +24068,11 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     # above, before this point, so this masterwork branching no longer
     # needs its own case for it.
     affix = dict(recipe["affix"])
+    # Real gap found 2026-09-16 (per Coffee: dismantle materials audit)
+    # -- tags this affix with the real recipe that produced it, purely
+    # for db.materialize_item_instance's own dismantle-history lookup;
+    # _apply_affix never reads this key, so it's inert everywhere else.
+    affix["recipe_id"] = recipe_id
     # Real feature (2026-09-11, per Coffee: "sharpen shud get better %
     # damage bonus based on the blacksmith proficiency"). Sharpen is
     # crafted as an alchemy action (the DC roll/materials/mastery-grind
@@ -24244,10 +24249,15 @@ async def _do_enchant_item_elemental_roll(update: Update, character: dict, item_
     _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
 
     affix = dict(recipe["affix"])
+    # Real gap found 2026-09-16 (per Coffee: dismantle materials audit)
+    # -- same tag as _do_enchant_item's own, so a randomly-rolled
+    # elemental retype is correctly counted toward dismantle's real
+    # material yield too.
+    affix["recipe_id"] = recipe_id
     masterwork_note = ""
     bonus_affix = None
     if masterwork:
-        bonus_affix = {"kind": "elemental_damage_bonus", "value": 20}
+        bonus_affix = {"kind": "elemental_damage_bonus", "value": 20, "recipe_id": recipe_id}
         masterwork_note = " — a masterwork working, biting harder than a plain retype!"
 
     _ok, enchant_msg, enchanted_item = db.enchant_item_instance(
@@ -24361,7 +24371,16 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
     _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
 
     chosen_ability = _roll_forge_magic_upgrade_ability(character, profession)
-    affix = {"kind": "ability_bonus", "ability": chosen_ability, "value": recipe["affix"]["value"]}
+    # Real gap found 2026-09-16 (per Coffee: "when dismantleing a magic
+    # item/forged item/or enchanted item, it returns the proper
+    # materials... Craft, Magic Item forged, and Enchanted shud give
+    # all 3 materials") -- tagging this affix with its own real
+    # recipe_id ("forge_magic_upgrade") lets db.materialize_item_
+    # instance/rules.crafting.dismantle_materials_for_item correctly
+    # add this recipe's own materials on top of the item's original
+    # base recipe when it's later dismantled -- _apply_affix itself
+    # never reads this key, so it's inert everywhere else.
+    affix = {"kind": "ability_bonus", "ability": chosen_ability, "value": recipe["affix"]["value"], "recipe_id": "forge_magic_upgrade"}
     masterwork_note = ""
     if masterwork:
         affix["value"] = round(affix["value"] * 1.5)
@@ -24375,6 +24394,19 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
         target_item_id = item_id
     else:
         base_stats = {k: v for k, v in item.items() if k != "affixes"}
+        # Real gap found 2026-09-16 (per Coffee: dismantle materials
+        # audit) -- a PLAIN catalog item (e.g. "longsword") has no
+        # "generated_base" field of its own (that's an item_generator.py
+        # stamp, only ever set on rolled loot/advanced-craft output),
+        # so promoting one here silently lost the one field rules.
+        # crafting.dismantle_materials_for_item needs to ever find the
+        # item's own real base recipe again -- confirmed live, dismantling
+        # a forge_magic_upgrade'd plain Longsword returned a generic
+        # 1x Iron Ore price-fallback instead of its own real 3x Iron
+        # Ore recipe. setdefault (not overwrite) so an already-rolled
+        # loot item promoted here keeps its own real generated_base
+        # untouched.
+        base_stats.setdefault("generated_base", item_id)
         target_item_id = db.create_item_instance(
             item_type=item["type"], name=item["name"], rarity=item.get("rarity", "common"),
             price=item.get("price", 0), base_stats=base_stats, affixes=[], source="crafted",

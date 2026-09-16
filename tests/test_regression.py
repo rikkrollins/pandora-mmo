@@ -18635,6 +18635,79 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(materials.keys()), [DISMANTLE_FALLBACK_MATERIAL])
         self.assertGreaterEqual(materials[DISMANTLE_FALLBACK_MATERIAL], 1)
 
+    def test_dismantle_materials_now_includes_forge_and_enchant_history_on_top_of_the_base_recipe(self):
+        """
+        Real gap found 2026-09-16 (per Coffee: "when dismantleing a
+        magic item/forged item/or enchanted item, it returns the
+        proper materials... Craft, Magic Item forged, and Enchanted
+        shud give all 3 materials from the recipie it took to make
+        them"). dismantle_materials_for_item used to only ever look at
+        ONE recipe -- the item's original base craft -- with zero
+        awareness that forge_magic_upgrade and/or a real enchant had
+        also gone into it. Confirmed here with the exact real numbers:
+        Longsword (3 iron_ore) + forge_magic_upgrade (4 iron_ore, 2
+        moonpetal) + enchant_sharpen (2 iron_ore, 1 sulfur_dust) = 9
+        iron_ore, 2 moonpetal, 1 sulfur_dust -- not just one of the
+        three.
+        """
+        from rules.crafting import dismantle_materials_for_item, get_enchant_recipe
+        base = items_module.get_item("longsword")
+        base_stats = {k: v for k, v in base.items() if k != "affixes"}
+        base_stats.setdefault("generated_base", "longsword")
+        item_id = db.create_item_instance(
+            item_type=base["type"], name=base["name"], rarity=base.get("rarity", "common"),
+            price=base.get("price", 0), base_stats=base_stats, affixes=[], source="crafted",
+        )
+        db.enchant_item_instance(
+            item_id, {"kind": "ability_bonus", "ability": "wisdom", "value": 1, "recipe_id": "forge_magic_upgrade"},
+            replace_kinds=["ability_bonus"],
+        )
+        db.enchant_item_instance(item_id, {"kind": "elemental_damage_bonus", "value": 15, "recipe_id": "enchant_sharpen"})
+        materialized = items_module.get_item(item_id)
+        self.assertEqual(materialized.get("_dismantle_recipe_history"), ["forge_magic_upgrade", "enchant_sharpen"])
+        expected = {"iron_ore": 3, "moonpetal": 0, "sulfur_dust": 0}
+        for mat_id, qty in get_enchant_recipe("forge_magic_upgrade")["materials"].items():
+            expected[mat_id] = expected.get(mat_id, 0) + qty
+        for mat_id, qty in get_enchant_recipe("enchant_sharpen")["materials"].items():
+            expected[mat_id] = expected.get(mat_id, 0) + qty
+        expected = {k: v for k, v in expected.items() if v > 0}
+        self.assertEqual(dismantle_materials_for_item(item_id, materialized), expected)
+
+    async def test_forge_magic_upgrade_promoting_a_plain_catalog_item_no_longer_loses_its_own_base_recipe(self):
+        """
+        The deeper half of the same gap: promoting a PLAIN catalog item
+        (never previously rolled/generated) via forge_magic_upgrade used
+        to leave the new instance with NO "generated_base" field at all
+        (that field is an item_generator.py stamp, never present on a
+        hand-authored items.py entry to begin with) -- dismantle_
+        materials_for_item had no way back to "longsword" from the new
+        synthetic "gi<n>" id, and fell all the way through to the
+        generic price-scaled scrap fallback, losing even the item's OWN
+        real base materials, before any forge/enchant materials are
+        even considered. Confirmed live via the real _do_forge_magic_item
+        handler, not just the raw db helpers.
+        """
+        from unittest.mock import patch
+        user_id = 996046
+        make_basic_character(user_id, "BaseRecipePreserved", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        db.add_item(user_id, -999, "longsword", 1)
+        with patch("bot.narrate_skill_check", return_value="You forge it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_forge_magic_item(FakeUpdate(user_id, "forge my longsword into a magic item", []), "forge my longsword into a magic item")
+        character = db.get_character(user_id, -999)
+        gen_item_id = next(iid for iid in character["inventory"] if iid.startswith(db.GENERATED_ITEM_ID_PREFIX))
+        from rules.crafting import dismantle_materials_for_item, get_enchant_recipe
+        materialized = items_module.get_item(gen_item_id)
+        self.assertEqual(materialized.get("generated_base"), "longsword")
+        materials = dismantle_materials_for_item(gen_item_id, materialized)
+        expected = {"iron_ore": 3}
+        for mat_id, qty in get_enchant_recipe("forge_magic_upgrade")["materials"].items():
+            expected[mat_id] = expected.get(mat_id, 0) + qty
+        self.assertEqual(materials, expected)
+
     def test_resolve_dismantle_three_tiers(self):
         from rules.crafting import resolve_dismantle
         from unittest.mock import patch
