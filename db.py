@@ -2026,6 +2026,34 @@ def _meets_rarity_level_requirement(character: dict, item: dict) -> bool:
     return character.get("level", 1) >= _item_level_requirement(item)
 
 
+def is_item_equipped(character: dict, item_id: str) -> bool:
+    """
+    Real live request (2026-09-16, per Coffee: "make sure we cant sell
+    equipped items... dont even show them in the sell menu", "make sure
+    we cant give them away either", "or dismantle them, we can reforge
+    and enchant them tho") -- a real, actionable gap: nothing anywhere
+    checked whether an item being sold/given/dismantled was the exact
+    same one currently equipped, which would silently leave the
+    character "wearing" an item they no longer actually own (armor_
+    class/ability bonuses/weapon damage all still computed off an
+    equipped_* field pointing at zero real inventory). Deliberately
+    covers every real equip slot (main weapon, off-hand, armor, shield,
+    every accessory) so this one function is the single source of
+    truth for every caller (shop.sell_item, the free-text give handler,
+    dismantle, and the item-view button visibility) rather than each
+    reimplementing its own slot list. Reforge/enchant are correctly
+    NOT gated by this -- upgrading gear you're actively wearing is
+    normal and expected, per Coffee's own explicit "we can reforge and
+    enchant them tho".
+    """
+    return item_id in (
+        character.get("equipped_weapon"),
+        character.get("equipped_offhand_weapon"),
+        character.get("equipped_armor"),
+        character.get("equipped_shield"),
+    ) or item_id in (character.get("equipped_accessories") or [])
+
+
 def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool, str, dict | None]:
     """
     Equip a weapon, armor, shield, ring, amulet, or wondrous item the

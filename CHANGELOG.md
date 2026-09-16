@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.631] — feature: can no longer sell, give away, or dismantle a currently equipped item
+
+Real request: "make sure we cant sell equipped items. like dont even
+show them in the sell menu" — followed live by "make sure we cant give
+them away either" and "we cant dismantle them either but, we can
+reforge and enchant them tho."
+
+Nothing anywhere previously checked whether an item being sold/given/
+dismantled was the exact one currently equipped, which would silently
+leave the character "equipped" with an item they no longer actually
+own — armor_class/ability bonuses/weapon damage are all computed off
+the equipped_weapon/equipped_armor/equipped_shield/equipped_accessories
+fields, with zero regard for whether that item still exists in the
+inventory.
+
+New `db.is_item_equipped` is the single source of truth (covers main
+weapon, off-hand, armor, shield, and every accessory), now checked at
+every real destructive site: `shop.sell_item`, the free-text Give
+handler, both Dismantle entry points (free-text and the item-view
+confirm flow), and the item-view screen's own action buttons — Sell,
+List on Market, Give, and Dismantle are now hidden outright for
+whichever item is currently equipped, so a player never sees an option
+guaranteed to refuse. Reforge and Enchant are explicitly, deliberately
+untouched — upgrading gear you're actively wearing is normal and stays
+fully available, per Coffee's own explicit carve-out.
+
+7 new tests (direct coverage of the new helper across every equip
+slot; button visibility hides Sell/Market/Give/Dismantle for an
+equipped item while a different carried item still shows them all;
+sell/give/dismantle each reject the exact live scenario; an explicit
+regression guard confirming Forge/Enchant still work on equipped
+gear); 8 related pre-existing sell/give/dismantle/forge/enchant tests
+reconfirmed clean.
+
 ## [1.27.630] — fix: real duplicate items from re-tapping Craft/Forge/Enchant, and cloaks/wondrous items now swap correctly too
 
 Two related real reports, investigated together:

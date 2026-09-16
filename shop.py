@@ -74,6 +74,19 @@ def sell_item(telegram_user_id: int, chat_id: int, item_id: str, quantity: int =
     if character is None:
         return False, "You don't have a character yet."
 
+    # Real live request (2026-09-16, per Coffee: "make sure we cant
+    # sell equipped items") -- selling something currently worn would
+    # leave the character "equipped" with an item they no longer own.
+    # Accessories have a real unequip action; weapon/armor/shield don't
+    # (this game only ever supports SWAPPING those, never a bare
+    # unequip -- see db.equip_item's own history), so the guidance has
+    # to differ by type or it'd point a player at an action that
+    # doesn't exist.
+    if db.is_item_equipped(character, item_id):
+        if item.get("type") in ("ring", "amulet", "wondrous"):
+            return False, f"You're wearing the {item['name']} — unequip it first (say \"unequip {item['name']}\")."
+        return False, f"You're wielding/wearing the {item['name']} — equip something else in its place first."
+
     have = character["inventory"].get(item_id, 0)
     if have < quantity:
         return False, f"You only have {have}x {item['name']}."

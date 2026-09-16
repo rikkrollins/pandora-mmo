@@ -18959,6 +18959,110 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         potion_labels = [btn.text for row in potion_keyboard.inline_keyboard for btn in row]
         self.assertFalse(any("Dismantle" in label for label in potion_labels))
 
+    def test_is_item_equipped_covers_every_real_equip_slot(self):
+        """Direct unit coverage of db.is_item_equipped -- weapon/offhand/armor/shield/accessory, and a plain carried (not equipped) item."""
+        character = {
+            "equipped_weapon": "longsword", "equipped_offhand_weapon": "dagger",
+            "equipped_armor": "chain_shirt", "equipped_shield": "wooden_shield",
+            "equipped_accessories": ["ring_of_protection", "amulet_of_health"],
+        }
+        for equipped_id in ("longsword", "dagger", "chain_shirt", "wooden_shield", "ring_of_protection", "amulet_of_health"):
+            self.assertTrue(db.is_item_equipped(character, equipped_id), equipped_id)
+        self.assertFalse(db.is_item_equipped(character, "rusty_dagger"))
+
+    def test_item_actions_keyboard_hides_sell_give_dismantle_for_an_equipped_item(self):
+        """
+        Real live request (2026-09-16, Coffee: "make sure we cant sell
+        equipped items. like dont even show them in the sell menu",
+        extended live to "give them away either" and "we cant dismantle
+        them either but, we can reforge and enchant them tho"). Sell/
+        List on Market/Give/Dismantle are all hidden for the exact item
+        currently equipped; Equip and Reforge (this game never gates
+        reforge/enchant on equip status, per Coffee's own explicit
+        carve-out) stay visible.
+        """
+        character = {"equipped_weapon": "longsword", "equipped_offhand_weapon": None,
+                     "equipped_armor": None, "equipped_shield": None, "equipped_accessories": []}
+        keyboard = bot._item_actions_keyboard("longsword", character)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("Sell" in label for label in labels), labels)
+        self.assertFalse(any("Market" in label for label in labels), labels)
+        self.assertFalse(any("Give" in label for label in labels), labels)
+        self.assertFalse(any("Dismantle" in label for label in labels), labels)
+        self.assertTrue(any("Equip" in label for label in labels), labels)
+
+        # A DIFFERENT, non-equipped item still shows every real action.
+        not_equipped_keyboard = bot._item_actions_keyboard("rusty_dagger", character)
+        not_equipped_labels = [btn.text for row in not_equipped_keyboard.inline_keyboard for btn in row]
+        self.assertTrue(any("Sell" in label for label in not_equipped_labels), not_equipped_labels)
+        self.assertTrue(any("Give" in label for label in not_equipped_labels), not_equipped_labels)
+
+    async def test_sell_item_rejects_a_currently_equipped_weapon(self):
+        import shop as shop_module
+        make_basic_character(996130, "EquippedSeller", current_location="crossroads_tavern")
+        db.add_item(996130, -999, "longsword", 1)
+        db.equip_item(996130, -999, "longsword")
+        ok, msg = shop_module.sell_item(996130, -999, "longsword", 1)
+        self.assertFalse(ok)
+        self.assertIn("equip something else", msg.lower())
+        self.assertEqual(db.get_character(996130, -999)["inventory"].get("longsword"), 1)  # untouched
+
+    async def test_sell_item_rejects_a_currently_worn_accessory(self):
+        # Every hand-authored ring/amulet in items.py has price=0 (loot-
+        # only, never shop-bought) so items.is_sellable would already
+        # reject it before ever reaching the equipped check -- a real
+        # generated instance with a real positive price isolates the
+        # actual behavior this test targets.
+        import shop as shop_module
+        make_basic_character(996131, "EquippedRingSeller", current_location="crossroads_tavern")
+        db.update_character(996131, -999, level=5)
+        ring_id = db.create_item_instance(
+            item_type="ring", name="Ring of Testing", rarity="rare", price=20,
+            base_stats={"type": "ring"}, affixes=[], source="crafted",
+        )
+        db.add_item(996131, -999, ring_id, 1)
+        db.equip_item(996131, -999, ring_id)
+        ok, msg = shop_module.sell_item(996131, -999, ring_id, 1)
+        self.assertFalse(ok)
+        self.assertIn("unequip it first", msg.lower())
+
+    async def test_do_give_item_rejects_a_currently_equipped_item(self):
+        giver_id, recipient_id = 996132, 996133
+        make_basic_character(giver_id, "EquippedGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "GiftRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "longsword", 1)
+        db.equip_item(giver_id, -999, "longsword")
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give my longsword to GiftRecipient", sink), "give my longsword to GiftRecipient")
+        self.assertTrue(any("wearing/wielding" in s for s in sink), sink)
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get("longsword"), 1)  # never left the giver
+        self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get("longsword", 0), 0)
+
+    async def test_do_dismantle_item_rejects_a_currently_equipped_item(self):
+        make_basic_character(996134, "EquippedDismantler", current_location="crossroads_tavern")
+        db.add_item(996134, -999, "longsword", 1)
+        db.equip_item(996134, -999, "longsword")
+        sink = []
+        await bot._do_dismantle_item(FakeUpdate(996134, "dismantle my longsword", sink), "dismantle my longsword")
+        self.assertTrue(any("wearing/wielding" in s for s in sink), sink)
+        self.assertEqual(db.get_character(996134, -999)["inventory"].get("longsword"), 1)  # never destroyed
+
+    async def test_forge_and_enchant_still_work_on_a_currently_equipped_item(self):
+        """Explicit regression guard per Coffee's own words: 'we can reforge and enchant them tho' -- equip status must never block these two."""
+        from unittest.mock import patch
+        user_id = 996135
+        make_basic_character(user_id, "EquippedForger", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        db.add_item(user_id, -999, "longsword", 1)
+        db.equip_item(user_id, -999, "longsword")
+        with patch("bot.narrate_skill_check", return_value="You forge it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_forge_magic_item(FakeUpdate(user_id, "forge my longsword into a magic item", []), "forge my longsword into a magic item")
+        character = db.get_character(user_id, -999)
+        self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in character["inventory"]))
+
     async def test_itemview_callback_dismantle_action_works(self):
         from unittest.mock import patch
         make_basic_character(996043, "ButtonDismantler", current_location="crossroads_tavern")

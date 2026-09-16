@@ -5434,7 +5434,7 @@ def _item_view_keyboard(item_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("🔍 View Item", callback_data=f"itemview|show|{item_id}")]])
 
 
-def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
+def _item_actions_keyboard(item_id: str, character: dict | None = None) -> InlineKeyboardMarkup:
     """
     Real action buttons on the item-view screen itself (2026-08-03, per
     Coffee: "when viewing the item put a button to sell, put market
@@ -5452,6 +5452,17 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
     it could never succeed for anything but a player-crafted item), so
     the button itself never advertises an option that's guaranteed to
     refuse.
+
+    `character` (2026-09-16, per Coffee: "make sure we cant sell
+    equipped items... dont even show them in the sell menu", extended
+    live to "give them away either" and "dismantle them" -- explicitly
+    NOT Reforge/Enchant, which stay available on equipped gear) --
+    Sell/List on Market/Give/Dismantle are all hidden outright for
+    whichever single item is currently equipped, same eligibility
+    discipline Reforge/Dismantle's own can_reforge/can_dismantle already
+    follow (never advertise a button guaranteed to refuse). Optional and
+    defaults to None (every button still shown, the old behavior) for
+    any caller that genuinely has no character in hand.
     """
     item = items_module.get_item(item_id)
     can_reforge = (
@@ -5465,15 +5476,17 @@ def _item_actions_keyboard(item_id: str) -> InlineKeyboardMarkup:
     # option that's guaranteed to refuse, matching Reforge's own
     # can_reforge convention just above.
     can_dismantle = item is not None and item.get("type") in DISMANTLE_ELIGIBLE_TYPES
+    is_equipped = character is not None and db.is_item_equipped(character, item_id)
     buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]]
     if can_reforge:
         buttons.append([InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")])
-    buttons.extend([
-        [InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")],
-        [InlineKeyboardButton("🏛️ List on Market", callback_data=f"itemview|market|{item_id}")],
-        [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
-    ])
-    if can_dismantle:
+    if not is_equipped:
+        buttons.extend([
+            [InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")],
+            [InlineKeyboardButton("🏛️ List on Market", callback_data=f"itemview|market|{item_id}")],
+            [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
+        ])
+    if can_dismantle and not is_equipped:
         buttons.append([InlineKeyboardButton("🔧 Dismantle", callback_data=f"itemview|dismantleconfirm|{item_id}")])
     return InlineKeyboardMarkup(buttons)
 
@@ -24089,6 +24102,14 @@ async def _do_dismantle_item(update: Update, text: str) -> None:
     if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
         await _safe_send(update, f"The {item['name']} can't be dismantled — only weapons, armor, shields, rings, and amulets can.")
         return
+    # Real live request (2026-09-16, per Coffee: "we cant dismantle
+    # them either but, we can reforge and enchant them" -- explicitly
+    # NOT applied to reforge/enchant, only sell/give/dismantle) --
+    # dismantling something currently worn would leave the character
+    # "equipped" with an item they no longer own.
+    if db.is_item_equipped(character, item_id):
+        await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before dismantling it.")
+        return
 
     count = min(_extract_quantity(text), owned)
     if count <= 1:
@@ -26536,7 +26557,8 @@ async def _maybe_send_item_image(
     if len(caption) > 1024:
         stats_line = _format_item_stats_line(item_data)
         caption = f"🎒 {item_data['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
-    rows = list(extra_buttons or []) + list(_item_actions_keyboard(item_id).inline_keyboard)
+    viewer_character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    rows = list(extra_buttons or []) + list(_item_actions_keyboard(item_id, viewer_character).inline_keyboard)
     await _send_generated_image(
         update, prompt, caption,
         seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
@@ -27857,7 +27879,7 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         prompt = _item_image_prompt(item_id, item)
         sent = await _send_generated_image(
             update, prompt, caption, seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
-            reply_markup=_item_actions_keyboard(item_id),
+            reply_markup=_item_actions_keyboard(item_id, character),
         )
         if not sent:
             # Real live bug (2026-08-05, Coffee: "i clicked to view the
@@ -27867,7 +27889,7 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             # leaving the player with no response at all. This is a real
             # request they just tapped a button for, so it always gets a
             # real reply now, image or not.
-            await _safe_send(update, caption, reply_markup=_item_actions_keyboard(item_id))
+            await _safe_send(update, caption, reply_markup=_item_actions_keyboard(item_id, character))
         return
 
     owns_it = character.get("inventory", {}).get(item_id, 0) > 0
@@ -27903,6 +27925,9 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
             await _safe_send(update, f"The {item['name']} can't be dismantled.")
             return
+        if db.is_item_equipped(character, item_id):
+            await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before dismantling it.")
+            return
         await _safe_send(
             update,
             f"⚠️ Dismantle **{item['name']}**?\n\nThis destroys it permanently for real crafting materials back — "
@@ -27919,6 +27944,9 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         if item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
             await _safe_send(update, f"The {item['name']} can't be dismantled.")
+            return
+        if db.is_item_equipped(character, item_id):
+            await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before dismantling it.")
             return
         # Real bulk-dismantle follow-up (2026-09-16): _do_dismantle_item's
         # confirm screen appends a 4th "|<count>" part to this exact
@@ -27951,6 +27979,12 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to give.")
             return
+        # Real live request (2026-09-16, per Coffee: "make sure we
+        # cant give them away either") -- same reasoning as the Sell
+        # button just above.
+        if db.is_item_equipped(character, item_id):
+            await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before giving it away.")
+            return
         candidates = [
             p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
             if p["telegram_user_id"] != character["telegram_user_id"]
@@ -27966,6 +28000,9 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     elif action == "giveto":
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to give anymore.")
+            return
+        if db.is_item_equipped(character, item_id):
+            await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before giving it away.")
             return
         recipient_id = int(parts[3])
         removed, _updated = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
@@ -31225,8 +31262,15 @@ async def _do_give_item(update: Update, text: str) -> None:
 
     given = []
     for item_id, quantity in items_wanted:
-        removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, quantity)
         item_name = items_module.get_item(item_id)["name"]
+        # Real live request (2026-09-16, per Coffee: "make sure we cant
+        # give them away either") -- giving away something currently
+        # worn would leave the character "equipped" with an item they
+        # no longer own.
+        if db.is_item_equipped(character, item_id):
+            given.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before giving it away.")
+            continue
+        removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, quantity)
         if not removed:
             have = character["inventory"].get(item_id, 0)
             given.append(f"You don't have {quantity}x {item_name} to give — you only have {have}.")
