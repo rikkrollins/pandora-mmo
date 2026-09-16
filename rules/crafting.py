@@ -44,6 +44,21 @@ RECIPES = {
         "result_item": "greater_healing_potion", "result_qty": 1,
         "ability": "wisdom", "dc": 17, "profession": "alchemy",
     },
+    # Real gap found 2026-09-15 (per Coffee: "make sure all the potions
+    # are included in brew") -- items.py's supreme_healing_potion (a
+    # real, shop-sold item at marens_wares, flat 10,000 HP) had no
+    # recipe at all, unlike its own spell_tonic sibling ladder (base ->
+    # greater -> supreme, all three craftable) and unlike healing_
+    # potion's own lower two tiers, both craftable. Same DC/material
+    # scaling step as greater_healing_potion's own jump from the base
+    # potion; min_level 20 matches the other real "supreme-tier" alchemy
+    # gate (greater_scroll_* below).
+    "supreme_healing_potion": {
+        "materials": {"silverleaf_herb": 5, "moonpetal": 3},
+        "result_item": "supreme_healing_potion", "result_qty": 1,
+        "ability": "wisdom", "dc": 21, "profession": "alchemy",
+        "min_level": 20,
+    },
     # Alchemy's scroll side (2026-07-25): items.py has 8 real scrolls but
     # only scroll_magic_missile was ever craftable. Scroll of Cure Wounds
     # is the other "common" rarity scroll (same tier/price bracket as

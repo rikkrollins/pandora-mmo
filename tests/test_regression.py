@@ -16123,6 +16123,86 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Forge Guild", text)
         self.assertNotIn("the The", text)
 
+    async def test_cooking_menu_lists_real_recipes_and_shows_mastery_pct(self):
+        """
+        Real live request (2026-09-15, dev-bridge, Coffee: "include a
+        'Cook' sub menu in the professions menu with the recipes they
+        can click"). Cooking has no advanced ladder/forge/enchant
+        equivalent -- a single flat screen listing all 5 real cooking
+        recipes as buttons, reusing the exact same craft|preview
+        callback Blacksmith's own base "Craft" category already uses
+        (fully generic across every profession already).
+        """
+        user_id = 951033
+        make_basic_character(user_id, "CookMenuTester", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, profession_mastery_pct={"cooking": 7.5})
+        update = FakeUpdate(user_id, "", [])
+        text, callback_data = await self._render_category(user_id, bot._do_show_cooking_menu(update))
+        self.assertIn("craft|preview|cooked_fish", callback_data)
+        self.assertIn("craft|preview|rations", callback_data)
+        self.assertIn("craft|preview|hearty_stew", callback_data)
+        self.assertIn("7.5% mastery", text)
+
+    async def test_cooking_menu_reachable_via_professions_button_and_menu_dispatch(self):
+        """End-to-end: the Professions screen's real Cook button, and the bare menu|cooking dispatch it uses, both reach the real screen."""
+        from unittest.mock import patch
+        user_id = 951034
+        make_basic_character(user_id, "CookMenuButtonTester", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_check_professions(FakeUpdate(user_id, "check my professions", sink))
+        # Confirmed via _do_check_professions's own real keyboard, not just its text.
+        real_safe_send = bot._safe_send
+        captured_markups = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured_markups.append(kwargs.get("reply_markup"))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_check_professions(FakeUpdate(user_id, "check my professions", []))
+        callback_data = [btn.callback_data for row in captured_markups[0].inline_keyboard for btn in row]
+        self.assertIn("menu|cooking", callback_data)
+
+        sink2 = []
+        await bot.menu_callback(FakeCallbackUpdate(user_id, "menu|cooking", sink2), DummyContext())
+        self.assertTrue(any("Cookfire" in s for s in sink2), sink2)
+
+    def test_open_cooking_menu_intent_routes_to_check_cooking_menu(self):
+        """Phrase-matched, not a bare 'cook' word -- see the intent_parser.py comment for why."""
+        for text in ("open the cooking menu", "show me the cook menu", "check the cookfire"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "check_cooking_menu", text)
+        # An ordinary sentence merely mentioning cooking must NOT misfire.
+        self.assertNotEqual(_keyword_fallback("I cook the fish over the fire", [])["action"], "check_cooking_menu")
+
+    async def test_backpack_screen_no_longer_shows_the_redundant_flat_craft_buttons(self):
+        """
+        Real live cleanup (2026-09-15, per Coffee: "now that we have
+        all these menus here u can remove the push button options for
+        crafting such things in the item menu"). The old _craft_
+        keyboard (one "Craft X" button per affordable recipe, crafting
+        instantly with no preview) is now fully redundant with the
+        Blacksmith/Alchemy/Cook menus' own preview-then-confirm flow --
+        removed from the backpack screen entirely, not left as a worse
+        second way to do the same thing.
+        """
+        from unittest.mock import patch
+        user_id = 951035
+        make_basic_character(user_id, "NoCraftButtonsTester", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 10)
+        real_safe_send = bot._safe_send
+        captured_markups = []
+
+        async def spying_safe_send(upd, text, **kwargs):
+            captured_markups.append(kwargs.get("reply_markup"))
+            return await real_safe_send(upd, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=spying_safe_send):
+            await bot._do_check_inventory(FakeUpdate(user_id, "check my inventory", []))
+        markup = captured_markups[-1]
+        callback_data = [btn.callback_data for row in (markup.inline_keyboard if markup else []) for btn in row]
+        self.assertFalse([cd for cd in callback_data if cd.startswith("craft|make|")], callback_data)
+
     async def test_forge_menu_callback_actually_forges_a_plain_item_end_to_end(self):
         """End-to-end: tapping a Blacksmith menu Forge button actually promotes the plain item to a real magic item."""
         user_id = 951023
@@ -16225,6 +16305,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"enchant|pickitem|{gen_item_id}", callback_data)  # eligible item, at least one enchant it can take
         self.assertIn("🔒", text)
         self.assertIn("spell", text.lower())  # e.g. enchant_lightning: no known lightning spell yet
+
+    async def test_supreme_healing_potion_is_now_a_real_brewable_recipe(self):
+        """
+        Real gap found 2026-09-15 (per Coffee: "make sure all the
+        potions are included in brew"). items.py's supreme_healing_
+        potion (real, shop-sold at marens_wares) had no matching
+        RECIPES entry at all -- unlike its own spell_tonic sibling
+        ladder (base/greater/supreme, all three craftable) and unlike
+        healing_potion's own lower two tiers. Now craftable too, gated
+        at min_level 20 like the other real "supreme-tier" alchemy
+        recipes (greater_scroll_*), so a level-1 alchemist sees it
+        listed-and-locked, not silently missing.
+        """
+        low_level = make_basic_character(951026, "SupremePotionLowLevel", char_class="Wizard", current_location="crossroads_tavern")
+        update = FakeUpdate(951026, "", [])
+        text, callback_data = await self._render_category(951026, bot._do_show_alchemy_category(update, "brew"))
+        self.assertNotIn("craft|preview|supreme_healing_potion", callback_data)
+        self.assertIn("Supreme Healing Potion", text)
+        self.assertIn("🔒", text)
+
+        db.update_character(951026, -999, level=20)
+        update2 = FakeUpdate(951026, "", [])
+        text2, callback_data2 = await self._render_category(951026, bot._do_show_alchemy_category(update2, "brew"))
+        self.assertIn("craft|preview|supreme_healing_potion", callback_data2)
 
     async def test_enchant_item_recipes_screen_shows_short_labels_not_the_full_item_name_per_button(self):
         """
@@ -16596,15 +16700,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         reloaded = db.get_character(950937, -999)
         self.assertAlmostEqual(reloaded["profession_mastery_pct"]["blacksmithing"], bot.PROFICIENCY_STARTING_PCT + bot.PROFICIENCY_GRIND_INCREMENT)
 
-    async def test_advanced_craft_success_attaches_a_view_item_button(self):
+    async def test_advanced_craft_success_attaches_real_action_buttons(self):
         """
         Real feature (2026-08-11, per Coffee, Development topic
         screenshot: "after a player crafts, can you let them view the
         weapon with a push button and give them options below with push
-        buttons like give, marketplace, reforge, equip") -- a successful
-        advanced craft now sends a real follow-up "Tap below to inspect"
-        message with a View Item button attached, same as combat loot
-        already gets (_grant_generated_loot).
+        buttons like give, marketplace, reforge, equip").
+
+        Real live cleanup (2026-09-15, dev-bridge screenshot, Coffee:
+        "it said view item twice, but instead of saying view item, can
+        you put these options from the second screenshot after we
+        craft or forge or enchant an item?... We wanna be able to see
+        the full stats of the item as well") -- a successful advanced
+        craft used to send the crafted item's picture (no button) AND
+        THEN a separate "Tap below to inspect" message with just a
+        View Item button -- a real, reported duplicate once _maybe_
+        send_item_image gained its own button. Fixed at the root: the
+        item's picture now carries its own full stat breakdown as the
+        caption AND the real action-buttons row (Equip/Reforge/Sell/
+        Market/Give) directly -- no second message needed at all.
         """
         from unittest.mock import patch
         user_id = 950950
@@ -16615,44 +16729,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         sink = []
         update = FakeUpdate(user_id, "craft a masterwork longsword", sink)
-        real_safe_send = bot._safe_send
-        captured_markups = []
-
-        async def spying_safe_send(upd, text, **kwargs):
-            if "Tap below to inspect" in text:
-                captured_markups.append(kwargs.get("reply_markup"))
-            return await real_safe_send(upd, text, **kwargs)
-
-        with patch("bot.narrate_skill_check", return_value="You forge it true."), \
-             patch("bot._safe_send", side_effect=spying_safe_send):
+        with patch("bot.narrate_skill_check", return_value="You forge it true."):
             succeeded = False
             for _ in range(20):
-                sink.clear()
                 db.add_item(user_id, -999, "iron_ore", 6)
                 db.add_item(user_id, -999, "moonpetal", 1)
+                photos_before = len(update.effective_chat.sent_photos)
                 await bot._do_craft(update, "craft a masterwork longsword")
-                if any("Tap below to inspect" in s for s in sink):
+                if len(update.effective_chat.sent_photos) > photos_before:
                     succeeded = True
                     break
         self.assertTrue(succeeded)
-        self.assertTrue(len(captured_markups) > 0)
-        self.assertIsInstance(captured_markups[-1], bot.InlineKeyboardMarkup)
+        photo = update.effective_chat.sent_photos[-1]
+        self.assertIn("**Base Stats**", photo["caption"])
+        self.assertIn("⚔️", photo["caption"])  # a real combat-stats section, not just the bare name
+        callback_data = [btn.callback_data for row in photo["reply_markup"].inline_keyboard for btn in row]
+        self.assertTrue(any(cd.startswith("itemview|equip|") for cd in callback_data))
+        self.assertTrue(any(cd.startswith("itemview|sell|") for cd in callback_data))
+        self.assertTrue(any(cd.startswith("itemview|market|") for cd in callback_data))
+        self.assertTrue(any(cd.startswith("itemview|give|") for cd in callback_data))
+        # No leftover second "View Item"/"Tap below to inspect" message.
+        self.assertFalse(any("Tap below to inspect" in s for s in sink))
 
-    async def test_static_craft_of_an_equippable_item_also_attaches_a_view_item_button(self):
+    async def test_static_craft_of_an_equippable_item_also_attaches_real_action_buttons(self):
         """
         Real live gap (2026-08-14, per Coffee, dev-bridge screenshot: "I
         crafted this item, it didn't give me the option to market it,
         sell it, give it, equip it, reforge or dismantle it" -- his real
         example was a plain crafted Longsword). The sibling test above
         only ever covers an ADVANCED (generated, "gi<n>") craft -- this
-        used to be the ONLY case that got the button at all, on the
-        reasoning "a static-catalog craft has nothing to equip/forge/
-        list", which is true for a potion/scroll but flatly wrong for a
-        plain static WEAPON/ARMOR/etc. craft. itemview_callback already
-        handles a static item_id correctly and generically (equip/sell/
-        market/give all work; Reforge/Dismantle already self-gate on
-        real eligibility) -- this only needed the button to actually be
-        offered.
+        confirms a plain static-catalog craft (Longsword) gets the same
+        real action row directly on its own photo now too, same 2026-
+        09-15 consolidation as the test above.
         """
         from unittest.mock import patch
         user_id = 950951
@@ -16663,37 +16771,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         sink = []
         update = FakeUpdate(user_id, "craft a longsword", sink)
-        real_safe_send = bot._safe_send
-        captured_markups = []
-
-        async def spying_safe_send(upd, text, **kwargs):
-            if "Tap below to inspect" in text:
-                captured_markups.append(kwargs.get("reply_markup"))
-            return await real_safe_send(upd, text, **kwargs)
-
-        with patch("bot.narrate_skill_check", return_value="You forge it true."), \
-             patch("bot._safe_send", side_effect=spying_safe_send):
+        with patch("bot.narrate_skill_check", return_value="You forge it true."):
             succeeded = False
             for _ in range(20):
-                sink.clear()
                 db.add_item(user_id, -999, "iron_ore", 3)
+                photos_before = len(update.effective_chat.sent_photos)
                 await bot._do_craft(update, "craft a longsword")
-                if any("Tap below to inspect" in s for s in sink):
+                if len(update.effective_chat.sent_photos) > photos_before:
                     succeeded = True
                     break
         self.assertTrue(succeeded)
-        self.assertTrue(len(captured_markups) > 0)
-        self.assertIsInstance(captured_markups[-1], bot.InlineKeyboardMarkup)
-        # And a pure consumable (a potion) must still correctly get NO
-        # button at all -- nothing these actions would do for one.
-        db.add_item(user_id, -999, "silverleaf_herb", 2)
-        db.add_item(user_id, -999, "moonpetal", 1)
-        captured_markups.clear()
-        sink.clear()
-        with patch("bot.narrate_skill_check", return_value="It bubbles nicely."), \
-             patch("bot._safe_send", side_effect=spying_safe_send):
-            await bot._do_craft(update, "craft a healing potion")
-        self.assertEqual(captured_markups, [])
+        photo = update.effective_chat.sent_photos[-1]
+        callback_data = [btn.callback_data for row in photo["reply_markup"].inline_keyboard for btn in row]
+        self.assertTrue(any(cd.startswith("itemview|equip|") for cd in callback_data))
+        self.assertFalse(any("Tap below to inspect" in s for s in sink))
 
     async def test_itemview_reforge_button_upgrades_item_tier(self):
         """Real feature (2026-08-11): the item-view screen's new "Reforge" button runs the exact same tier-upgrade logic _do_forge_item's free-text path uses."""
@@ -17952,17 +18043,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.reimage_command(real_reply_update, DummyContext())
         self.assertEqual(len(update.effective_chat.sent_photos), 2)
 
-    async def test_maybe_send_item_image_now_attaches_a_real_view_button(self):
+    async def test_maybe_send_item_image_now_attaches_full_stats_and_real_action_buttons(self):
         """
-        Real live report (2026-09-15, dev-bridge screenshot, Coffee:
-        "When we craft Forge or enchant, let us view the item with a
-        push button"). Unlike a loot-drop's own announcement
-        (_item_view_keyboard already attached there), every _maybe_
-        send_item_image call site -- buy/gather/craft/forge/enchant/
-        equip -- sent a bare picture with no way to actually inspect the
-        item afterward except typing "view X" from scratch. Now
-        attaches the identical button here too, so every call site gets
-        it for free with no per-site changes needed.
+        Real live report (2026-09-15, dev-bridge screenshots, Coffee):
+        first "let us view the item with a push button" (v1.27.614,
+        attached a single View Item button), then a direct follow-up
+        once that shipped: "it said view item twice, but instead of
+        saying view item, can you put these options from the second
+        screenshot after we craft or forge or enchant an item?... We
+        wanna be able to see the full stats of the item as well".
+        _maybe_send_item_image now shows the real full stat breakdown
+        as the photo's own caption (same _format_item_detail_block the
+        dedicated item-view screen uses) and the real action-buttons
+        row (Equip/Reforge/Sell/Market/Give, each self-gating on real
+        eligibility) directly -- no second "go tap View Item" message
+        needed at all, for every one of buy/gather/craft/forge/enchant/
+        equip.
         """
         user_id = 995002
         make_basic_character(user_id, "ForgeViewButtonTester", current_location="crossroads_tavern")
@@ -17971,9 +18067,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         update = FakeUpdate(user_id, "forge my longsword", sink)
         await bot._maybe_send_item_image(update, "longsword", item)
         self.assertEqual(len(update.effective_chat.sent_photos), 1)
-        reply_markup = update.effective_chat.sent_photos[0]["reply_markup"]
+        photo = update.effective_chat.sent_photos[0]
+        self.assertIn("Longsword", photo["caption"])
+        self.assertIn("**Base Stats**", photo["caption"])
+        self.assertIn("1d8", photo["caption"])
+        reply_markup = photo["reply_markup"]
         self.assertIsNotNone(reply_markup)
-        self.assertEqual(reply_markup.inline_keyboard[0][0].callback_data, "itemview|show|longsword")
+        callback_data = [btn.callback_data for row in reply_markup.inline_keyboard for btn in row]
+        self.assertIn("itemview|equip|longsword", callback_data)
+        self.assertIn("itemview|sell|longsword", callback_data)
+        self.assertIn("itemview|market|longsword", callback_data)
+        self.assertIn("itemview|give|longsword", callback_data)
 
     async def test_looted_item_gets_a_view_button_with_working_actions(self):
         """

@@ -392,6 +392,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(p in lowered for p in ("enchanting menu", "enchant menu", "potion menu", "alchemist")) \
             or re.search(r"\balchemy\b", lowered):
         return {**base, "action": "check_alchemy_menu"}
+    # Cooking menu (2026-09-15, per Coffee: "include a 'Cook' sub menu
+    # in the professions menu"). Deliberately phrase-matched, NOT a
+    # bare "cook(ing)" word like blacksmith/alchemy get -- "cook"/
+    # "cooking" are ordinary English verbs that show up in unrelated
+    # roleplay/narration text far more than "blacksmith"/"alchemy"
+    # ever would, so a bare match here would risk misfiring on genuine
+    # conversation instead of a real menu request.
+    if any(p in lowered for p in ("cooking menu", "cook menu", "the cookfire", "cookfire menu")):
+        return {**base, "action": "check_cooking_menu"}
 
     if re.search(r"\bmenu\b", lowered):
         return {**base, "action": "check_menu"}
@@ -2967,7 +2976,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "enter_labyrinth", "leave_labyrinth", "descend_labyrinth",
                 "check_labyrinth_seed", "load_labyrinth_seed",
                 "check_menu", "check_formation", "check_waypoints", "check_equip_menu",
-                "check_blacksmith_menu", "check_alchemy_menu",
+                "check_blacksmith_menu", "check_alchemy_menu", "check_cooking_menu",
                 "check_remnants", "check_story", "check_magic", "check_affinity",
                 "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
             )

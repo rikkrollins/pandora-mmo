@@ -21886,7 +21886,6 @@ async def _do_check_inventory(update: Update) -> None:
             name = item["name"] if item else item_id
             lines.append(f"  {name} x{qty}")
     item_rows = _item_keyboard(character)
-    craft_rows = _craft_keyboard(character)
     # Scroll-cast buttons (2026-07-25, per Coffee: "No button for
     # scrolls?" -- reported from exactly this backpack screen). Known
     # spells already have their own buttons on the character sheet, so
@@ -21905,13 +21904,23 @@ async def _do_check_inventory(update: Update) -> None:
     # installed python-telegram-bot), while _scroll_spell_buttons
     # returns a plain list -- concatenating a tuple to a list raises
     # TypeError, crashing this screen outright for any character with
-    # actual usable consumables or craftable recipes (item_rows/
-    # craft_rows non-None), which is the common case. list(...) on each
-    # piece normalizes everything to the same type before combining.
+    # actual usable consumables (item_rows non-None), which is the
+    # common case. list(...) on each piece normalizes everything to the
+    # same type before combining.
+    #
+    # Real live cleanup (2026-09-15, per Coffee: "now that we have all
+    # these menus here u can remove the push button options for
+    # crafting such things in the item menu") -- this used to also
+    # concatenate _craft_keyboard's own flat "Craft X" button per
+    # affordable recipe across every profession, crafting the instant
+    # it was tapped with no preview. Fully redundant now that the
+    # Blacksmith/Alchemy/Cook menus cover the exact same recipes with a
+    # real preview-then-confirm flow (real DC/odds/materials shown
+    # first) -- removed here rather than left as a second, worse way to
+    # do the same thing.
     combined_rows = (
         _inventory_sort_keyboard(character)
         + list(item_rows.inline_keyboard if item_rows else [])
-        + list(craft_rows.inline_keyboard if craft_rows else [])
         + scroll_rows
         + list(give_rows.inline_keyboard if give_rows else [])
     )
@@ -22050,27 +22059,6 @@ async def _do_show_magic_menu(update: Update) -> None:
     await _safe_send(
         update, text, reply_markup=_with_menu_button(_spell_keyboard(character)), speak=False,
     )
-
-
-def _craft_keyboard(character: dict) -> InlineKeyboardMarkup | None:
-    """
-    Per Coffee (2026-07-24, right after the new named-professions split:
-    "make sure characters have buttons for all that stuff too"): a real
-    tap per recipe this character can actually afford to attempt right
-    now (has_materials), same "only show what's actually usable"
-    discipline as _item_keyboard. Tapping dispatches through the exact
-    same _do_craft free text already uses.
-    """
-    craftable = [
-        recipe_id for recipe_id, recipe in RECIPES.items()
-        if has_materials(character.get("inventory", {}), recipe)
-    ]
-    if not craftable:
-        return None
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"⚗️ Craft {items_module.get_item(rid)['name']}", callback_data=f"craft|make|{rid}")]
-        for rid in craftable
-    ])
 
 
 async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -22450,6 +22438,51 @@ async def _do_show_alchemy_menu(update: Update) -> None:
         [InlineKeyboardButton("✨ Enchant", callback_data="almenu|enchant")],
     ])
     await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
+
+
+async def _do_show_cooking_menu(update: Update) -> None:
+    """
+    Real live request (2026-09-15, dev-bridge, Coffee: "include a
+    'Cook' sub menu in the professions menu with the recipes they can
+    click"). Cooking only ever has 5 real, plain RECIPES entries and no
+    advanced ladder/forge/enchant equivalent, so unlike Blacksmith/
+    Alchemy this is a single flat screen, not a landing-page-plus-
+    categories -- reuses the exact same craft|preview/craft|make
+    callback shape (already fully generic across every profession, see
+    craft_menu_callback) rather than inventing a new dispatch path.
+    Ungated, same as Blacksmith's own base "Craft" category and
+    Alchemy's own base "Brew" category -- owning the real Cook Book
+    item (teaches_profession: "cooking") is flavor/reference text via
+    _do_read_recipe_book, never an actual gate on any of this game's
+    other base recipes, so cooking isn't singled out to work
+    differently.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    button_rows: list[list[InlineKeyboardButton]] = []
+    locked_lines: list[str] = []
+    for rid, recipe in RECIPES.items():
+        if recipe.get("profession") != "cooking":
+            continue
+        name = items_module.get_item(rid)["name"]
+        gate = recipe_requirement_gate(character, recipe)
+        if gate:
+            locked_lines.append(f"🔒 {name} — {gate}")
+        else:
+            button_rows.append([InlineKeyboardButton(f"🍳 {name}", callback_data=f"craft|preview|{rid}")])
+    text = (
+        "🍳 **The Cookfire**\n"
+        f"{_profession_status_line(character, 'cooking')}\n\n"
+        "Turn gathered food into real meals, rations, and feasts. Tap one to see the odds and what it needs."
+    )
+    if locked_lines:
+        text += "\n\n" + "\n".join(locked_lines)
+    keyboard_rows = button_rows + [[InlineKeyboardButton("🔙 Back", callback_data="menu|professions")]]
+    await _safe_send(update, text, reply_markup=_with_menu_button(InlineKeyboardMarkup(keyboard_rows)), speak=False)
 
 
 async def _do_show_alchemy_category(update: Update, category: str) -> None:
@@ -23245,6 +23278,7 @@ async def _do_check_professions(update: Update) -> None:
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔨 Blacksmith", callback_data="menu|blacksmith")],
         [InlineKeyboardButton("⚗️ Alchemy", callback_data="menu|alchemy")],
+        [InlineKeyboardButton("🍳 Cook", callback_data="menu|cooking")],
     ])
     await _safe_send(update, "\n".join(lines), reply_markup=_with_menu_button(keyboard), speak=False)
 
@@ -23608,38 +23642,17 @@ async def _do_craft(update: Update, text: str) -> None:
         # Real image of what was actually crafted (2026-07-25/26, per
         # Coffee: images for professions/actions too) -- same reuse of
         # the existing item-icon convention as the gather fix above.
+        # Full stats + real action buttons (Equip/Reforge/Sell/Market/
+        # Give/Dismantle, each self-gating on real eligibility) are
+        # attached directly by _maybe_send_item_image now (2026-09-15
+        # fix) -- a separate "Tap below to inspect... View Item"
+        # follow-up used to be sent here too (2026-08-11/08-14 asks),
+        # but that predates _maybe_send_item_image having a button of
+        # its own at all and became a genuine duplicate once it did
+        # (Coffee, dev-bridge: "it said view item twice"). Removed
+        # rather than left as dead-redundant code.
         image_item_id = generated_item_id if is_advanced else result["result_item"]
         await _maybe_send_item_image(update, image_item_id, result_item)
-        # Real action buttons on a freshly crafted item (2026-08-11, per
-        # Coffee: "after a player crafts, can you let them view the
-        # weapon with a push button and give them options below with
-        # push buttons like give, marketplace, reforge, equip") -- same
-        # "🔍 Tap below to inspect" follow-up combat loot already gets
-        # (see _grant_generated_loot), so crafting a magic item isn't
-        # treated any differently from finding one.
-        #
-        # Real live gap (2026-08-14, per Coffee, dev-bridge screenshot:
-        # "After I crafted this item, it didn't give me the option to
-        # market it, sell it, give it, equip it, reforge or dismantle
-        # it"): this used to be advanced-craft only, on the reasoning
-        # that "a static-catalog craft has nothing to equip/forge/
-        # list" -- true for a potion or scroll, but flatly wrong for a
-        # plain static-catalog WEAPON/ARMOR craft (his own real example
-        # was a plain crafted Longsword), which itemview_callback
-        # already handles correctly and generically for equip/sell/
-        # market/give (Reforge/Dismantle already gate themselves
-        # correctly on real eligibility -- can_reforge requires
-        # source == "crafted", which a static item never has, so the
-        # button itself never shows for one; can_dismantle already
-        # checks DISMANTLE_ELIGIBLE_TYPES). Scoped to real equippable
-        # types only -- a crafted potion/scroll genuinely has nothing
-        # these buttons would do, so it's still correctly excluded.
-        view_item_id = generated_item_id if is_advanced else result["result_item"]
-        if is_advanced or result_item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
-            await _safe_send(
-                update, f"🔍 Tap below to inspect the {result_item['name']} you just crafted.",
-                reply_markup=_item_view_keyboard(view_item_id), speak=False,
-            )
 
 
 # Magic item system Phase 7 (2026-08-02): forging bumps a real generated
@@ -26174,22 +26187,43 @@ async def _maybe_send_item_image(
     the item's own picture with no way to actually inspect its real,
     current stats afterward except by typing "view X" from scratch,
     unlike a loot-drop's own announcement (_item_view_keyboard, already
-    attached there). Now attaches the identical button here too, so
-    every one of those call sites gets it for free.
+    attached there).
 
     `extra_buttons` (2026-09-15, same dev-bridge session, direct
     follow-up: "After we forged make a magic item or enchant when you
     show the item, can you please put the button below it so we can
     re-roll... reforging or whatever it would be") -- an optional list
-    of extra button ROWS shown above the universal View Item row.
-    Forge/enchant call sites pass a real one-tap "reroll this exact
-    result again" button here; every other caller (buy/gather/equip,
-    nothing to reroll) leaves it None and is completely unaffected.
+    of extra button ROWS shown above the action row below. Forge/
+    enchant call sites pass a real one-tap "reroll this exact result
+    again" button here; every other caller (buy/gather/equip, nothing
+    to reroll) leaves it None and is completely unaffected.
+
+    Real live follow-up, same session (2026-09-15, dev-bridge
+    screenshot: crafting a Rusty Dagger showed a real "View Item"
+    button on the photo AND a second, separate "Tap below to inspect...
+    View Item" message right after it -- a genuine duplicate, since
+    _do_craft's own old follow-up message predates this function ever
+    having a button of its own. Coffee: "it said view item twice, but
+    instead of saying view item, can you put these options from the
+    second screenshot after we craft or forge or enchant an item?...
+    We wanna be able to see the full stats of the item as well").
+    Fixed at the root, not by patching the duplicate: this now sends
+    the SAME full stats+action-buttons view the dedicated item-view
+    screen does (_format_item_detail_block caption,
+    _item_actions_keyboard buttons) directly on the first message, so
+    a second "go tap View Item to see more" prompt is never needed at
+    all -- _do_craft's own old duplicate message was removed as part of
+    this same fix, not left as dead-redundant code.
     """
     prompt = _item_image_prompt(item_id, item_data)
-    rows = list(extra_buttons or []) + [[InlineKeyboardButton("🔍 View Item", callback_data=f"itemview|show|{item_id}")]]
+    detail_block = _format_item_detail_block(item_data)
+    caption = f"🎒 **{item_data['name']}**\n{detail_block}" if detail_block else f"🎒 {item_data['name']}"
+    if len(caption) > 1024:
+        stats_line = _format_item_stats_line(item_data)
+        caption = f"🎒 {item_data['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
+    rows = list(extra_buttons or []) + list(_item_actions_keyboard(item_id).inline_keyboard)
     await _send_generated_image(
-        update, prompt, f"🎒 {item_data['name']}",
+        update, prompt, caption,
         seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
         reply_markup=InlineKeyboardMarkup(rows),
     )
@@ -32925,6 +32959,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _do_show_blacksmith_menu(update)
     elif section == "alchemy":
         await _do_show_alchemy_menu(update)
+    elif section == "cooking":
+        await _do_show_cooking_menu(update)
     elif section == "visualmap":
         await _do_show_visual_map(update)
     elif section == "rebirth":
@@ -36506,7 +36542,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "auto_equip", "equip_item", "unequip_item", "set_front_row", "set_back_row",
         "bench_party_member", "unbench_party_member", "check_sheet", "check_menu",
         "check_equip_menu", "check_magic", "check_remnants", "check_story", "steal", "buy",
-        "check_blacksmith_menu", "check_alchemy_menu",
+        "check_blacksmith_menu", "check_alchemy_menu", "check_cooking_menu",
         "check_quests", "check_achievements", "check_professions", "check_affinity",
     ):
         await update.effective_chat.send_message(
@@ -36647,6 +36683,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_show_blacksmith_menu(update)
     elif action == "check_alchemy_menu":
         await _do_show_alchemy_menu(update)
+    elif action == "check_cooking_menu":
+        await _do_show_cooking_menu(update)
     elif action == "check_magic":
         await _do_show_magic_menu(update)
     elif action == "check_remnants":

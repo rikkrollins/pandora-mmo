@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.620] — feature: Cook menu, redundant craft buttons removed, full item stats+actions on every craft/forge/enchant
+
+A large, multi-part follow-up in the same profession-menu session:
+
+- **New Cook menu.** Professions screen gets a real "🍳 Cook" button
+  (alongside Blacksmith/Alchemy), listing all 5 real cooking recipes
+  as tappable buttons with the same preview-then-confirm flow every
+  other profession already has — reuses the fully-generic craft|
+  preview/craft|make callback, no new dispatch logic needed.
+- **Removed the old flat "Craft X" button list from the backpack
+  screen.** Now fully redundant with the Blacksmith/Alchemy/Cook
+  menus' own preview flow (which shows real DC/odds/materials before
+  committing, unlike the old instant-craft buttons).
+- **Fixed a real reported duplicate: "it said view item twice."**
+  `_do_craft`'s own old "Tap below to inspect... View Item" follow-up
+  message predated `_maybe_send_item_image` ever having a button of
+  its own (v1.27.614) and became a genuine duplicate once it did.
+  Removed at the root.
+- **Full item stats + real action buttons directly on every craft/
+  forge/enchant result**, not a second tap away. `_maybe_send_item_
+  image`'s photo caption now shows the same full stat breakdown the
+  dedicated item-view screen does, and its buttons are now the real
+  action row (Equip/Reforge/Sell/Market/Give/Dismantle, each
+  self-gating on real eligibility) instead of a single "View Item"
+  link — covers buy/gather/craft/forge/enchant/equip all at once.
+- **Supreme Healing Potion is now a real brewable recipe.** Found
+  while double-checking Brew's own completeness: a real, shop-sold
+  item with no matching RECIPES entry at all, unlike its own
+  spell_tonic sibling ladder (all 3 tiers craftable). Added at
+  min_level 20, matching the other real "supreme-tier" alchemy gate.
+
+4 pre-existing tests rewritten to match the new consolidated behavior
+(the "Tap below to inspect" message they checked for no longer
+exists); 4 new tests added for the Cook menu + intent routing +
+backpack cleanup; 1 new test for the Supreme Healing Potion recipe.
+11 related tests reconfirmed clean (1 unrelated, already-known-flaky
+loot test re-confirmed flaky via 3 isolated reruns, not a regression).
+
 ## [1.27.619] — feature: real mastery % now shown in the profession menus
 
 Direct follow-up to v1.27.618 (Coffee: "can u show the % on the
