@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.630] — fix: real duplicate items from re-tapping Craft/Forge/Enchant, and cloaks/wondrous items now swap correctly too
+
+Two related real reports, investigated together:
+
+**"is it glitching and making duplicate items? i seem to be ending up
+with more."** Confirmed the real mechanism: `craft_menu_callback`,
+`forge_menu_callback`, and `enchant_menu_callback`'s own Confirm/roll
+buttons were never routed through this game's own established per-user
+dedup (`_run_in_user_order`), unlike the battle menu — fixed for the
+exact same shape of bug back in v1.27.464 (`battle_menu_callback`,
+after a real "Fireball" image flood-control burst from rapid re-taps).
+A real narration call after Confirm genuinely takes 30-160s+ on this
+hardware, and it's already documented, live-confirmed player behavior
+to re-tap a still-visible button during that wait (the "Steal" button
+incident `_run_in_user_order` itself was built for). A second
+concurrent tap raced through the SAME pre-deduction material check,
+and if it also passed, forged/enchanted/crafted a genuinely separate
+item and consumed materials a second time. All three menus now serialize
+per-user exactly like the battle menu already does — a rapid re-tap
+gets "Already working on that one" instead of a second real execution.
+
+**"i jus equiped my cloak and it didnt replace the one i was
+wearing... it shud be a swap of that item to the equipped slots."**
+Generalized the amulet-swap fix from v1.27.627: two accessories
+sharing the exact same real NAME (a plain item and its own forged
+version, or two separately-owned copies) now swap instead of stacking,
+covering cloaks, boots, bracers, crowns, and rings — while genuinely
+different-named items (a cloak AND bracers, or two different rings)
+still correctly coexist, unchanged.
+
+3 new tests (concurrent duplicate-tap protection for forge, confirmed
+only one real forge happens; same-name wondrous swap; two different-
+named wondrous items still both stay equipped); 8 related pre-existing
+craft/forge/enchant/equip tests reconfirmed clean. One unrelated,
+pre-existing test failure found and confirmed NOT caused by this work
+(`test_battle_menu_callback_serializes_rapid_duplicate_taps_per_user`
+fails identically on `main` before these changes — flagged, not fixed,
+out of scope here).
+
 ## [1.27.629] — fix: "gather iron ore" no longer silently substitutes bait
 
 Real dev-bridge report: "Asked to gather ore not bait" / "Asked to

@@ -22126,6 +22126,44 @@ async def _do_show_magic_menu(update: Update) -> None:
 
 async def craft_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
+    Thin per-user-ordering wrapper around _craft_menu_callback_inner --
+    see battle_menu_callback's own docstring for the real 2026-08-25
+    incident this exact pattern was built for (rapid re-taps of the
+    same still-visible button dispatch concurrently under python-
+    telegram-bot's concurrent_updates=True, each one independently
+    re-executing the same action before the first one's result could
+    ever make the button/turn state look different).
+
+    Real live report (2026-09-16, Coffee: "when we forge a makic item
+    or enchant is it glitching and making duplicate items ? i seem to
+    be ending up with more") -- confirmed live: craft/forge/enchant's
+    own Confirm buttons (this function, forge_menu_callback,
+    enchant_menu_callback) were never wired through this same
+    protection the battle menu already got, despite sharing the exact
+    same risk shape -- a real narration call after Confirm is tapped
+    can take 30-160s+ on this hardware (see CLAUDE.md), and it's
+    already documented, live-confirmed player behavior to re-tap a
+    still-visible button during that wait (the "Steal" button
+    incident this whole mechanism was originally built for). A second
+    concurrent tap would independently re-check materials against the
+    SAME pre-deduction inventory count and, if it also passed, create
+    a genuinely separate crafted/forged/enchanted item and consume
+    materials a second time -- a real duplicate, not a display glitch.
+    """
+    user_id = update.effective_user.id
+    if user_id in _USER_BUSY:
+        await _safe_answer(
+            update.callback_query, "⏳ Still working on your last action — I'll get to this one right after.", show_alert=False,
+        )
+    enqueued = await _run_in_user_order(
+        user_id, lambda: _craft_menu_callback_inner(update, context), signature=update.callback_query.data,
+    )
+    if not enqueued:
+        await _safe_answer(update.callback_query, "⏳ Already working on that one — no need to tap it again.", show_alert=False)
+
+
+async def _craft_menu_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
     Handles taps on the Blacksmith/Alchemy/Cook category screens
     (the old backpack _craft_keyboard this also used to serve was
     removed 2026-09-15, fully redundant with these) -- dispatches
@@ -22418,6 +22456,24 @@ async def _do_show_craft_preview(update: Update, recipe_id: str) -> None:
 
 
 async def forge_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Thin per-user-ordering wrapper around _forge_menu_callback_inner --
+    see craft_menu_callback's own docstring for the real 2026-09-16
+    "ending up with more" duplicate-item report this protects against.
+    """
+    user_id = update.effective_user.id
+    if user_id in _USER_BUSY:
+        await _safe_answer(
+            update.callback_query, "⏳ Still working on your last action — I'll get to this one right after.", show_alert=False,
+        )
+    enqueued = await _run_in_user_order(
+        user_id, lambda: _forge_menu_callback_inner(update, context), signature=update.callback_query.data,
+    )
+    if not enqueued:
+        await _safe_answer(update.callback_query, "⏳ Already working on that one — no need to tap it again.", show_alert=False)
+
+
+async def _forge_menu_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles taps on the Forge category's buttons -- "preview" opens _do_show_forge_preview, "make" (the preview's own Confirm) dispatches through the exact same _do_forge_magic_item free text already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")
@@ -22730,6 +22786,24 @@ async def _do_show_enchant_roll_preview(update: Update, item_id: str) -> None:
 
 
 async def enchant_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Thin per-user-ordering wrapper around _enchant_menu_callback_inner
+    -- see craft_menu_callback's own docstring for the real 2026-09-16
+    "ending up with more" duplicate-item report this protects against.
+    """
+    user_id = update.effective_user.id
+    if user_id in _USER_BUSY:
+        await _safe_answer(
+            update.callback_query, "⏳ Still working on your last action — I'll get to this one right after.", show_alert=False,
+        )
+    enqueued = await _run_in_user_order(
+        user_id, lambda: _enchant_menu_callback_inner(update, context), signature=update.callback_query.data,
+    )
+    if not enqueued:
+        await _safe_answer(update.callback_query, "⏳ Already working on that one — no need to tap it again.", show_alert=False)
+
+
+async def _enchant_menu_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles taps on the Enchant category's buttons -- "pickitem" opens _do_show_enchant_item_recipes, "preview" opens _do_show_enchant_preview, "make" (the preview's own Confirm) dispatches through the exact same _do_enchant_item free text already uses."""
     query = update.callback_query
     parts = (query.data or "").split("|")

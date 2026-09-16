@@ -2226,6 +2226,35 @@ def equip_item(telegram_user_id: int, chat_id: int, item_id: str) -> tuple[bool,
             old_ac_bonus = old_amulet.get("ac_bonus", 0)
             accessories = [aid for aid in accessories if aid not in old_amulet_ids]
             replaced_note = f" (replacing the {old_amulet['name']})"
+    else:
+        # Real live report (2026-09-16, per Coffee: "i jus equiped my
+        # cloak and it didnt replace the one i was wearing with the new
+        # one also... make sure when we equip it takes the other one
+        # off. it shud be a swap of that item to the equipped slots.")
+        # -- "wondrous" is one flat type covering several genuinely
+        # different real slots (cloak, boots, bracers, a held lantern,
+        # a crown, one-off mythic trinkets), so capping the whole TYPE
+        # the way amulet is above would wrongly block wearing a cloak
+        # AND bracers AND a lantern together, which already works
+        # correctly today. The real, narrower bug: a PLAIN item and its
+        # own forged/re-rolled version (or two separately-owned copies)
+        # share the exact same real name ("Cloak of Elvenkind" both
+        # times) -- nothing conceptually distinguishes them as two
+        # different pieces of gear, so wearing both is never meaningful,
+        # only confusing. Same swap-not-stack rule now also covers
+        # rings for the same reason (2 literal copies of the identical
+        # Ring of Protection was never the intended "wear two rings"
+        # 5E allowance -- that's about two DIFFERENT rings, still fully
+        # preserved here since only a NAME match triggers a swap).
+        old_same_name_ids = [
+            aid for aid in accessories
+            if (worn := items_module.get_item(aid)) and worn.get("name") == item["name"]
+        ]
+        if old_same_name_ids:
+            old_item = items_module.get_item(old_same_name_ids[0])
+            old_ac_bonus = old_item.get("ac_bonus", 0)
+            accessories = [aid for aid in accessories if aid not in old_same_name_ids]
+            replaced_note = f" (replacing the other {old_item['name']})"
     old_set_bonus = _equipped_set_ac_bonus(character)
     accessories = accessories + [item_id]
     character["equipped_accessories"] = accessories

@@ -5316,6 +5316,56 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # AC reflects only the SECOND amulet's own +3, not both stacked (+1 then +3 = +2 net delta here).
         self.assertEqual(character["armor_class"], ac_after_first + 2)
 
+    def test_equipping_the_same_named_wondrous_item_twice_swaps_not_stacks(self):
+        """
+        Real live report (2026-09-16, Coffee): "i jus equiped my cloak
+        and it didnt replace the one i was wearing with the new one
+        also... it shud be a swap of that item to the equipped slots."
+        "Wondrous" is one flat type covering several real slots (cloak,
+        boots, bracers, a lantern, a crown) -- capping the whole TYPE
+        the way amulet is would wrongly block wearing a cloak AND
+        bracers together, which must keep working. The real, narrower
+        fix: two items sharing the exact same real NAME (a plain item
+        and its own forged version, or two separately-owned copies) now
+        swap instead of stacking, since nothing conceptually
+        distinguishes them as different gear.
+        """
+        use_test_db("tests/tmp/wondrous_swap_test.db")
+        user_id = 900411
+        make_basic_character(user_id, "TwoCloaks", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=20)
+        plain_cloak_id = "cloak_of_elvenkind"
+        db.add_item(user_id, -999, plain_cloak_id, 1)
+        forged_cloak_id = db.create_item_instance(
+            item_type="wondrous", name="Cloak of Elvenkind", rarity="uncommon", price=0,
+            base_stats={"type": "wondrous"}, affixes=[], source="crafted",
+        )
+        db.enchant_item_instance(forged_cloak_id, {"kind": "ability_bonus", "ability": "dexterity", "value": 2})
+        db.add_item(user_id, -999, forged_cloak_id, 1)
+
+        success_a, _, character = db.equip_item(user_id, -999, plain_cloak_id)
+        self.assertTrue(success_a)
+        self.assertIn(plain_cloak_id, character["equipped_accessories"])
+
+        success_b, message_b, character = db.equip_item(user_id, -999, forged_cloak_id)
+        self.assertTrue(success_b)
+        self.assertIn(forged_cloak_id, character["equipped_accessories"])
+        self.assertNotIn(plain_cloak_id, character["equipped_accessories"])  # replaced, not stacked
+        self.assertIn("replacing the other Cloak of Elvenkind", message_b)
+
+    def test_two_differently_named_wondrous_items_still_both_stay_equipped(self):
+        """Regression guard: a cloak AND bracers (genuinely different real gear) must keep coexisting, same as before this fix."""
+        use_test_db("tests/tmp/wondrous_coexist_test.db")
+        user_id = 900412
+        make_basic_character(user_id, "CloakAndBracers", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=20)
+        db.add_item(user_id, -999, "cloak_of_elvenkind", 1)
+        db.add_item(user_id, -999, "bracers_of_the_steady_hand", 1)
+        db.equip_item(user_id, -999, "cloak_of_elvenkind")
+        _, _, character = db.equip_item(user_id, -999, "bracers_of_the_steady_hand")
+        self.assertIn("cloak_of_elvenkind", character["equipped_accessories"])
+        self.assertIn("bracers_of_the_steady_hand", character["equipped_accessories"])
+
     def test_character_sheet_shows_effective_ability_score_with_equipped_gear_bonus(self):
         """
         Real live report (2026-09-16, Coffee dev-bridge): "I am not
@@ -16306,6 +16356,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot.forge_menu_callback(FakeCallbackUpdate(user_id, "forge|make|longsword", sink), DummyContext())
         updated = db.get_character(user_id, -999)
         self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in updated["inventory"]))
+
+    async def test_forge_menu_callback_serializes_rapid_duplicate_taps_instead_of_double_forging(self):
+        """
+        Real live report (2026-09-16, Coffee: "when we forge a makic
+        item or enchant is it glitching and making duplicate items ? i
+        seem to be ending up with more"). Root cause: unlike
+        battle_menu_callback (fixed 2026-08-25 for the exact same shape
+        of bug -- see its own docstring), forge/craft/enchant's own
+        Confirm buttons were never routed through _run_in_user_order's
+        per-user dedup. A real narration call after Confirm genuinely
+        takes 30-160s+ on this hardware, and it's already documented,
+        live-confirmed behavior for a player to re-tap a still-visible
+        button during that wait -- a second concurrent tap would
+        independently re-check materials against the SAME pre-
+        deduction inventory count and, if it also passed, forge a
+        second real item and consume materials a second time. Fires
+        two concurrent identical taps of the same Confirm button;
+        confirms only ONE forge actually happened.
+        """
+        import asyncio
+        from unittest.mock import patch
+        user_id = 951024
+        make_basic_character(user_id, "DoubleTapForger", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        db.add_item(user_id, -999, "longsword", 1)
+
+        async def slow_narrate(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return "You forge it carefully."
+
+        sink1, sink2 = [], []
+        with patch("bot.narrate_skill_check", new=slow_narrate), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await asyncio.gather(
+                bot.forge_menu_callback(FakeCallbackUpdate(user_id, "forge|make|longsword", sink1), DummyContext()),
+                bot.forge_menu_callback(FakeCallbackUpdate(user_id, "forge|make|longsword", sink2), DummyContext()),
+            )
+        updated = db.get_character(user_id, -999)
+        forged_ids = [iid for iid in updated["inventory"] if iid.startswith(db.GENERATED_ITEM_ID_PREFIX)]
+        self.assertEqual(len(forged_ids), 1, f"exactly one forge should have happened, got: {forged_ids}")
+        self.assertTrue(any("Already working on that one" in s for s in sink1 + sink2), sink1 + sink2)
 
     async def test_forge_craft_and_enchant_confirms_now_send_an_immediate_processing_ack(self):
         """
