@@ -39519,6 +39519,65 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn(b, reachable, f"seed {seed}: loop-back touched a genuinely gated room ({b})")
         self.assertTrue(checked_any, "expected at least one real loop-back edge to actually check across 40 real seeds")
 
+    def test_evolve_dungeon_maze_density_guarantee_always_holds(self):
+        """
+        Real gap found proactively (2026-09-17, per Coffee: "does the
+        labyrinth and dungeons generator/editor need any work?" -> "do
+        both") -- rules/labyrinth.py's own v1.27.601 fix turned "many
+        paths, connected, never a straight line" into a real GUARANTEE
+        for the Labyrinth after loop-back alone was measured to fail
+        ~68% of the time. This generator's own loop-back has the exact
+        identical "only fires by chance" shape and never got the same
+        guarantee -- ported as `_enforce_minimum_maze_density`. Unlike
+        the loop-back tests above (which assert "sometimes"), this is a
+        hard guarantee: must hold on EVERY real seed, across multiple
+        real source dungeons, not just most of them. Directly confirms
+        the real bug caught and fixed while building this (computing
+        the required threshold once against the STARTING room count let
+        a later-added filler room raise the room count without the bar
+        rising to match) can't recur -- the threshold is asserted
+        against the SAME final room count the guarantee itself uses.
+        """
+        import copy
+        sources = [("goblin_warrens", "underground"), ("sunken_root_caverns", "underground"), ("stonearch_bridge", "surface")]
+        for source_id, layer in sources:
+            for seed in range(15):
+                campaign = copy.deepcopy(bot.CAMPAIGN)
+                rng = random.Random(seed + 5000)
+                new_id = f"{source_id}_evolved_density_{seed}"
+                summary = dungeon_evolve.evolve_dungeon(campaign, source_id, new_id, layer, rebirth_gate=1, rng=rng)
+                room_ids = summary["room_ids"]
+                rooms = {rid: dungeon_evolve._find_room(campaign, rid)[1] for rid in room_ids}
+                junctions, cycles = dungeon_evolve._junction_and_cycle_counts(rooms, summary["hub_id"])
+                min_junctions = max(1, len(room_ids) // dungeon_evolve._MIN_JUNCTIONS_ROOM_DIVISOR)
+                self.assertGreaterEqual(
+                    junctions, min_junctions,
+                    f"{source_id} seed {seed}: only {junctions} real junctions, needed {min_junctions} ({len(room_ids)} rooms)",
+                )
+                self.assertGreaterEqual(cycles, 1, f"{source_id} seed {seed}: zero real cycles -- still just a tree, not a maze")
+
+    def test_evolve_dungeon_maze_density_enforcement_never_breaks_the_real_audit(self):
+        """
+        Structural companion to the guarantee test above: every real
+        room/edge `_enforce_minimum_maze_density` adds must still leave
+        the dungeon passing the exact same `dungeon_audit.audit_dungeon`
+        check `evolve_dungeon`'s own retry loop already gates every real
+        commit on -- reciprocity, no dangling warps, no orphaned rooms,
+        no self-referential locks, real lock density, and no bypassed
+        gate all at once, the same holistic safety net a real shipped
+        evolved dungeon already has to clear regardless of this fix.
+        """
+        import copy
+        sources = [("goblin_warrens", "underground"), ("sunken_root_caverns", "underground"), ("stonearch_bridge", "surface")]
+        for source_id, layer in sources:
+            for seed in range(15):
+                campaign = copy.deepcopy(bot.CAMPAIGN)
+                rng = random.Random(seed + 6000)
+                new_id = f"{source_id}_evolved_density_audit_{seed}"
+                dungeon_evolve.evolve_dungeon(campaign, source_id, new_id, layer, rebirth_gate=1, rng=rng)
+                failures = dungeon_audit.audit_dungeon(campaign, new_id)
+                self.assertTrue(all(not f for f in failures.values()), f"{source_id} seed {seed}: {failures}")
+
     def test_evolve_dungeon_sometimes_places_a_real_collapse_puzzle_that_stays_solvable(self):
         """
         Real single-switch collapse-puzzle port (2026-09-04, same
@@ -39876,12 +39935,29 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             trigger_lockable = next(lk for r in rooms.values() for lk in r.get("lockables", []) if lk.get("id") == trigger_id)
             switch_id = trigger_lockable["requires"][0]
             switch_room_id = next(rid for rid, r in rooms.items() if any(lk.get("id") == switch_id for lk in r.get("lockables", [])))
-            shortcut_room_id, shortcut_dest_id, echo_id = next(
-                (rid, dest_id, lk_id)
-                for rid, r in rooms.items()
-                for dest_id, lk_id in r.get("locked_connections", {}).items()
-                if lk_id.startswith(f"{trigger_id}_echo_")
+            # Real fix (2026-09-17, shipping the maze-density guarantee):
+            # dungeon_evolve.py now skips creating this bonus shortcut
+            # on the rare seed where its own two candidate tail rooms
+            # already share an always-open warp in either direction --
+            # doing otherwise would gate a destination bot._do_move
+            # also resolves as an unconditionally-open warp target
+            # (see rules/dungeon_evolve.py's own comment at the fix
+            # site). The seal/switch mechanic itself is unaffected; only
+            # the optional compensating shortcut can be absent now, so
+            # this test moves on to the next seed rather than assuming
+            # one always exists.
+            shortcut_hit = next(
+                (
+                    (rid, dest_id, lk_id)
+                    for rid, r in rooms.items()
+                    for dest_id, lk_id in r.get("locked_connections", {}).items()
+                    if lk_id.startswith(f"{trigger_id}_echo_")
+                ),
+                None,
             )
+            if shortcut_hit is None:
+                continue
+            shortcut_room_id, shortcut_dest_id, echo_id = shortcut_hit
             with patch.object(bot, "CAMPAIGN", campaign), \
                  patch("ai.dm_agent.requests.post", side_effect=requests.RequestException("no Ollama in tests")):
                 user_id = 960930 + seed

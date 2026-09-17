@@ -2,6 +2,53 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.636] — feat: maze-density guarantee ported to the overworld dungeon generator
+
+Coffee: "does the labyrinth and dungeons generator/editor need any
+work?" → "do both". `rules/labyrinth.py`'s v1.27.601 fix gave the
+Labyrinth a hard guarantee against becoming a pure straight-branch
+tree (`_enforce_minimum_maze_density`, forcing real junctions/cycles
+via escalating strategies) — but `rules/dungeon_evolve.py` (the
+offline overworld generator that grows existing dungeons like Goblin
+Warrens into new areas) never got the same guarantee, only its own
+separately-shipped loop-back mechanic. Ported just the density
+guarantee itself (not the Labyrinth's wiggle-placement or internal
+branch-forking, both out of scope — see the function's own docstring
+for why): `_junction_and_cycle_counts` and `_enforce_minimum_maze_density`
+now run in `evolve_dungeon` right after loop-back, forcing a real
+minimum (scaled off room count, since this generator has no floor
+concept) via a direct grid-adjacent edge, an elbow bridge through one
+new connector room, or — last resort — one forced extra room.
+
+Found and fixed a real bug during development: the enforcement loop's
+own convergence threshold was computed once against the STARTING room
+count, so a bridge/filler room added mid-enforcement could raise the
+final room count without the required-junction bar ever rising to
+match. Now recomputed fresh every iteration.
+
+Also found and fixed a second, unrelated but real pre-existing bug
+this work exposed (the new RNG draws shifted which structural choices
+a given seed produces, surfacing a dormant conflict): the generator's
+"echo shortcut" bonus reward (unlocked by solving a collapse-seal
+switch or carry puzzle) could target a destination that was ALSO
+already an always-open warp from the same room — `bot._do_move`
+correctly resolves the move by name, then its own locked-connections
+check blocks it anyway, since a single destination id can't be both
+"open" and "gated" in this data model. Now skipped (not resampled —
+with only 2 real candidate branches most of the time, there's no other
+pair to try) whenever it would collide with an existing warp; the
+seal/switch mechanic itself is unaffected, only the optional bonus
+shortcut can be absent on that rare seed.
+
+Verified directly (not just via tests): 90 real `evolve_dungeon` runs
+across 3 different source dungeons (Goblin Warrens, Sunken Root
+Caverns, Stonearch Bridge) — 0 density failures, 0
+`dungeon_audit.audit_dungeon` failures. 2 new tests (density guarantee
+always holds; enforcement never breaks the real audit); full
+`DungeonEvolveTests` (47 tests) and `DungeonAuditTests` (23 tests)
+classes re-run clean, including the warp/echo-shortcut tests that
+caught both real bugs above.
+
 ## [1.27.635] — fix: a banned player no longer sees a dead shop menu
 
 Found proactively, continuing the same button/menu-eligibility audit

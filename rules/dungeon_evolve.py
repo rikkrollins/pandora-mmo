@@ -176,6 +176,22 @@ _BRANCH_JOG_CHANCE = 0.3
 # is already a meaningful fraction of its room count).
 _LOOP_BACK_CHANCE = 0.5
 _LOOP_BACK_MAX_EDGES = 3
+# Real gap found proactively (2026-09-17, per Coffee: "does the
+# labyrinth and dungeons generator/editor need any work?" -> "do
+# both") -- rules/labyrinth.py's own v1.27.601 fix turned "many paths,
+# connected, never a straight line" into a real GUARANTEE for the
+# Labyrinth (_enforce_minimum_maze_density), after direct measurement
+# found loop-back alone only fires when two branches happen to land
+# grid-adjacent by chance -- ~68% of real Labyrinth floors had ZERO
+# such candidates even after that generator's own wiggle-placement
+# fix. This file's own loop-back (above) has the exact same "only
+# fires by chance" limitation and never got the guarantee. See
+# `_enforce_minimum_maze_density` below for the real port and why
+# wiggle/wing-forks are deliberately NOT ported alongside it. No
+# floor/depth concept exists here to scale off (unlike the Labyrinth's
+# `floor // 15`) -- scaled off real room count instead.
+_MIN_JUNCTIONS_ROOM_DIVISOR = 8
+_MAZE_ENFORCEMENT_MAX_ITERATIONS = 12
 _PERPENDICULAR_DIRECTIONS = {
     "north": ("east", "west"), "south": ("east", "west"),
     "east": ("north", "south"), "west": ("north", "south"),
@@ -1005,12 +1021,31 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                 shortcut_a_branch, shortcut_b_branch = rng.sample(other_branches, 2)
                 shortcut_a, shortcut_b = shortcut_a_branch["tail_id"], shortcut_b_branch["tail_id"]
                 _, shortcut_a_room = _find_room(campaign, shortcut_a)
-                echo_id = f"{trigger_id}_echo_{shortcut_a}"
-                shortcut_a_room.setdefault("lockables", []).append({
-                    "id": echo_id, "kind": "multi_switch_gate", "name": "a newly-opened shortcut",
-                    "requires": [trigger_switch_id],
-                })
-                shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = echo_id
+                _, shortcut_b_room = _find_room(campaign, shortcut_b)
+                # Real bug found via testing (2026-09-17, exposed by the
+                # maze-density guarantee shifting downstream RNG draws
+                # for a seed that had never hit this before): nothing
+                # here checked whether `shortcut_b` was ALREADY an
+                # always-open warp destination of `shortcut_a_room` (or
+                # vice versa) from the earlier warp-placement block
+                # above. When it is, bot._do_move resolves "go to
+                # <name>" to the (correct) destination id, but then its
+                # own locked_connections check ALSO fires for that same
+                # id and blocks the move -- a warp that's secretly
+                # gated, contradicting the warp's whole "always open"
+                # contract. Skipped rather than resampled: this shortcut
+                # is a bonus reward for solving an optional puzzle, not
+                # load-bearing for the puzzle itself (the collapsing_
+                # connections seal above still works with no shortcut
+                # at all), so silently not creating one here is a real,
+                # safe fallback, not a half-finished feature.
+                if shortcut_b not in shortcut_a_room.get("warps", []) and shortcut_a not in shortcut_b_room.get("warps", []):
+                    echo_id = f"{trigger_id}_echo_{shortcut_a}"
+                    shortcut_a_room.setdefault("lockables", []).append({
+                        "id": echo_id, "kind": "multi_switch_gate", "name": "a newly-opened shortcut",
+                        "requires": [trigger_switch_id],
+                    })
+                    shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = echo_id
 
     # Real carry-and-collapse-style TWO-PILLAR puzzle (2026-09-10, "fill
     # all gaps" pass, per Coffee: "do 1 and 2") -- rules/labyrinth.py's
@@ -1080,12 +1115,17 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                 shortcut_a_branch, shortcut_b_branch = rng.sample(carry_other_branches, 2)
                 shortcut_a, shortcut_b = shortcut_a_branch["tail_id"], shortcut_b_branch["tail_id"]
                 _, shortcut_a_room = _find_room(campaign, shortcut_a)
-                carry_echo_id = f"{carry_trigger_id}_echo_{shortcut_a}"
-                shortcut_a_room.setdefault("lockables", []).append({
-                    "id": carry_echo_id, "kind": "multi_switch_gate", "name": "a newly-opened shortcut",
-                    "requires": pillar_ids,
-                })
-                shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = carry_echo_id
+                _, shortcut_b_room = _find_room(campaign, shortcut_b)
+                # Same real fix as the single-switch variant above: never
+                # gate a destination that's already an always-open warp
+                # from this room (or the reverse direction).
+                if shortcut_b not in shortcut_a_room.get("warps", []) and shortcut_a not in shortcut_b_room.get("warps", []):
+                    carry_echo_id = f"{carry_trigger_id}_echo_{shortcut_a}"
+                    shortcut_a_room.setdefault("lockables", []).append({
+                        "id": carry_echo_id, "kind": "multi_switch_gate", "name": "a newly-opened shortcut",
+                        "requires": pillar_ids,
+                    })
+                    shortcut_a_room.setdefault("locked_connections", {})[shortcut_b] = carry_echo_id
 
     # Bonus/optional room (2026-09-01, a classic action-adventure game research: reward exploration
     # off the critical path). Extends a random NON-BOSS branch one room
@@ -1271,6 +1311,191 @@ def _add_loop_back_connections(campaign: dict, layer: str, hub_id: str, entrance
     return added
 
 
+def _junction_and_cycle_counts(rooms: dict, hub_id: str) -> tuple[int, int]:
+    """
+    Ported from rules/labyrinth.py's identical helper -- real junctions
+    (3+ connection rooms, excluding the hub, which already has many
+    connections from the source dungeon plus the entrance edge and
+    would trivially always count) and real cycles (edges beyond a bare
+    spanning tree). See `_enforce_minimum_maze_density`'s own docstring
+    for what this measures and why.
+    """
+    junctions = sum(1 for rid, r in rooms.items() if rid != hub_id and len(r.get("connections", [])) >= 3)
+    edges = set()
+    for rid, r in rooms.items():
+        for nb in r.get("connections", []):
+            if nb in rooms:
+                edges.add(frozenset((rid, nb)))
+    cycles = max(0, len(edges) - (len(rooms) - 1))
+    return junctions, cycles
+
+
+def _first_free_adjacent_cell(x: int, y: int, by_cell: dict) -> tuple[int, int]:
+    """Cardinal directions first, then an expanding ring search -- a small local equivalent of rules/labyrinth.py's `_spiral_cells`, scaled for this generator's much smaller room counts (no evolved dungeon needs more than a handful of rings)."""
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        if (x + dx, y + dy) not in by_cell:
+            return (x + dx, y + dy)
+    radius = 2
+    while True:
+        ring = [(cx, cy) for cx in range(-radius, radius + 1) for cy in range(-radius, radius + 1) if max(abs(cx), abs(cy)) == radius]
+        for dx, dy in ring:
+            if (x + dx, y + dy) not in by_cell:
+                return (x + dx, y + dy)
+        radius += 1
+
+
+def _enforce_minimum_maze_density(
+    campaign: dict, layer: str, new_dungeon_id: str, hub_id: str, entrance_id: str,
+    room_ids: list[str], rng: random.Random,
+) -> None:
+    """
+    Real gap found proactively (2026-09-17, per Coffee: "does the
+    labyrinth and dungeons generator/editor need any work?" -> "do
+    both") -- see this file's own `_MIN_JUNCTIONS_ROOM_DIVISOR` comment
+    above for the full "why." Same 3-strategy escalation as rules/
+    labyrinth.py's own `_enforce_minimum_maze_density` (direct grid-
+    adjacent edge; an "elbow" bridge via one brand-new connector room;
+    last-resort forced extra room preferring one with 2+ connections
+    already), reusing this file's own `add_room`/`connect` (real
+    reciprocity by construction) and `_rooms_shadowed_by_a_real_gate`
+    for the identical safety exclusion `_add_loop_back_connections`
+    already relies on -- every candidate/new edge only ever ADDS a
+    redundant path, never removes or locks one, so none of the three
+    strategies need their own solvability check.
+
+    Every new room this creates is appended to `room_ids` IN PLACE --
+    the same list object `evolve_dungeon`'s own `summary["room_ids"]`
+    points at, required for a new room to actually survive into the
+    real campaign on a successful commit (that commit loop only ever
+    copies `summary["room_ids"]`), not just pass the audit as part of
+    the discarded `trial` copy.
+
+    Deliberately NOT porting the Labyrinth's wiggle-placement or wing-
+    fork mechanics alongside this guarantee: grid placement here is
+    delegated entirely to the shared, campaign-wide `scripts.
+    build_location_grid.build_layer()` (places every overworld
+    location, not just evolved-dungeon rooms) -- changing IT to wiggle
+    risks visibly altering hand-authored geography everywhere, for a
+    fix that only needs to help evolved dungeons. Wing-forks were also
+    tuned specifically for the Labyrinth's much larger floor scale (10s
+    to 100+ rooms per floor); an evolved dungeon's own `min_rooms` is a
+    small, flat `len(source_rooms) + 1 + rng.randint(2, 6)` with no
+    floor/depth concept at all, so forking would need its own separate
+    tuning pass this fix doesn't need.
+    """
+    bridge_index = 0
+    for _ in range(_MAZE_ENFORCEMENT_MAX_ITERATIONS):
+        rooms = {rid: _find_room(campaign, rid)[1] for rid in room_ids}
+        junctions, cycles = _junction_and_cycle_counts(rooms, hub_id)
+        # Real bug found via direct measurement before shipping (not
+        # assumed): computing this ONCE, before the loop, against the
+        # STARTING room count let a filler/bridge room added by a later
+        # iteration raise the room count without the required-junctions
+        # bar ever rising to match -- e.g. 38 rooms -> threshold 4,
+        # converges at exactly 4 junctions, but by then 2 more rooms had
+        # already been added (40 total, which should demand 5). Unlike
+        # rules/labyrinth.py's own version (scaled off `floor`, a fixed
+        # number that never changes mid-enforcement), this generator's
+        # threshold is scaled off room count specifically BECAUSE that
+        # count moves during enforcement -- so it has to be recomputed
+        # fresh every iteration to actually track the dungeon's real
+        # final size, not its size at the moment enforcement started.
+        min_junctions = max(1, len(room_ids) // _MIN_JUNCTIONS_ROOM_DIVISOR)
+        if junctions >= min_junctions and cycles >= 1:
+            return
+        excluded = _rooms_shadowed_by_a_real_gate(rooms, hub_id, entrance_id)
+        by_cell = {
+            (r["grid_position"]["x"], r["grid_position"]["y"]): rid
+            for rid, r in rooms.items() if "grid_position" in r
+        }
+        eligible = [rid for rid in room_ids if rid not in excluded and "grid_position" in rooms[rid]]
+        if not eligible:
+            # Same real edge case rules/labyrinth.py's own version
+            # already found and handles: if every real branch off the
+            # hub happens to be gated, _rooms_shadowed_by_a_real_gate's
+            # own (deliberately conservative, open-connections-only)
+            # BFS marks literally everything else unreachable, leaving
+            # nothing eligible for either strategy below. A brand-new
+            # room straight off the hub is always safe regardless (a
+            # fresh edge to a fresh room can never bypass an existing
+            # gate).
+            hx, hy = rooms[hub_id]["grid_position"]["x"], rooms[hub_id]["grid_position"]["y"]
+            fx, fy = _first_free_adjacent_cell(hx, hy, by_cell)
+            new_id = f"{new_dungeon_id}_density{bridge_index}"
+            bridge_index += 1
+            add_room(
+                campaign, layer, new_dungeon_id, new_id, f"{new_dungeon_id.replace('_', ' ').title()} -- A Rough-Hewn Alcove",
+                "Bare stone, recently disturbed.", grid_position={"x": fx, "y": fy},
+            )
+            connect(campaign, hub_id, new_id)
+            room_ids.append(new_id)
+            continue
+
+        direct_candidates = []
+        for rid in eligible:
+            room = rooms[rid]
+            x, y = room["grid_position"]["x"], room["grid_position"]["y"]
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nb = by_cell.get((x + dx, y + dy))
+                if nb is None or nb in excluded:
+                    continue
+                if (
+                    nb in room.get("connections", []) or nb in room.get("warps", [])
+                    or nb in room.get("locked_connections", {}) or rid in rooms[nb].get("locked_connections", {})
+                ):
+                    continue
+                direct_candidates.append((rid, nb))
+        if direct_candidates:
+            a, b = rng.choice(direct_candidates)
+            connect(campaign, a, b)
+            continue
+
+        placed_bridge = False
+        shuffled = list(eligible)
+        rng.shuffle(shuffled)
+        for a in shuffled:
+            ax, ay = rooms[a]["grid_position"]["x"], rooms[a]["grid_position"]["y"]
+            for dxA, dyA in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                mid = (ax + dxA, ay + dyA)
+                if mid in by_cell:
+                    continue
+                for dxB, dyB in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    b = by_cell.get((mid[0] + dxB, mid[1] + dyB))
+                    if b is None or b == a or b in excluded or b in rooms[a].get("connections", []):
+                        continue
+                    bridge_id = f"{new_dungeon_id}_bridge{bridge_index}"
+                    bridge_index += 1
+                    add_room(
+                        campaign, layer, new_dungeon_id, bridge_id, f"{new_dungeon_id.replace('_', ' ').title()} -- A Narrow Cut-Through",
+                        "A rough, unplanned passage -- like something forced its own way between two older halls.",
+                        grid_position={"x": mid[0], "y": mid[1]},
+                    )
+                    connect(campaign, a, bridge_id)
+                    connect(campaign, b, bridge_id)
+                    room_ids.append(bridge_id)
+                    placed_bridge = True
+                    break
+                if placed_bridge:
+                    break
+            if placed_bridge:
+                break
+        if placed_bridge:
+            continue
+
+        preferred = [rid for rid in eligible if len(rooms[rid].get("connections", [])) >= 2] or eligible
+        parent_id = rng.choice(preferred)
+        px, py = rooms[parent_id]["grid_position"]["x"], rooms[parent_id]["grid_position"]["y"]
+        fx, fy = _first_free_adjacent_cell(px, py, by_cell)
+        new_id = f"{new_dungeon_id}_density{bridge_index}"
+        bridge_index += 1
+        add_room(
+            campaign, layer, new_dungeon_id, new_id, f"{new_dungeon_id.replace('_', ' ').title()} -- A Rough-Hewn Alcove",
+            "Bare stone, recently disturbed.", grid_position={"x": fx, "y": fy},
+        )
+        connect(campaign, parent_id, new_id)
+        room_ids.append(new_id)
+
+
 def evolve_dungeon(
     campaign: dict, source_dungeon_id: str, new_dungeon_id: str, layer: str, rebirth_gate: int,
     target_band: tuple[int, int] | None = None, rng: random.Random | None = None, max_retries: int = 20,
@@ -1341,6 +1566,19 @@ def evolve_dungeon(
             # validated by the exact same retry-on-failure safety net
             # every other optional mechanic here already relies on.
             _add_loop_back_connections(trial, layer, summary["hub_id"], summary["entrance_id"], summary["room_ids"], rng)
+            # Maze-density GUARANTEE (2026-09-17, per Coffee: "does the
+            # labyrinth and dungeons generator/editor need any work?"
+            # -> "do both") -- see _enforce_minimum_maze_density's own
+            # docstring for the full "why." Same insertion slot as
+            # loop-back just above (after grid placement, before the
+            # audit) for the identical reason: any room/edge it adds
+            # gets validated by the same retry-on-failure safety net.
+            # May itself append new ids to summary["room_ids"] (the
+            # same list object, mutated in place) -- required for a
+            # new room to survive into the real campaign on commit.
+            _enforce_minimum_maze_density(
+                trial, layer, new_dungeon_id, summary["hub_id"], summary["entrance_id"], summary["room_ids"], rng,
+            )
 
         failures = dungeon_audit.audit_dungeon(trial, new_dungeon_id)
         if grid_ok and all(not f for f in failures.values()):
