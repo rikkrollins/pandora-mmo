@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.634] — fix: no more leveled-spell buttons on the battle Skills menu at 0 spell slots
+
+Found proactively, continuing the same "never advertise a button
+guaranteed to refuse" audit (v1.27.632/633): the battle menu's
+"✨ Skills" submenu listed every known spell unconditionally, even a
+leveled spell (level > 0) at 0 `spell_slots_current` — tapping it was
+guaranteed to fail with `_pay_spell_cast_cost`'s own "no spell slots
+remaining... Rest to recover them" rejection. Cantrips (this game has
+12 real ones) never cost a slot at all, so they correctly stay visible
+regardless of the character's current slot count — only leveled
+spells are now hidden, and only while slots are actually at 0.
+
+1 new test (a Wizard with a cantrip + a leveled spell at 0 slots sees
+only the cantrip; restoring 1 slot brings the leveled spell's button
+back); 2 related Skills-menu tests reconfirmed clean.
+
 ## [1.27.633] — fix: no more "Sell" button on items that can't actually be sold
 
 Found proactively, same "never advertise a button guaranteed to

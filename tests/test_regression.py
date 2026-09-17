@@ -11786,6 +11786,42 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Second Wind" in s for s in sink2))
         sessions.end_session(-999)
 
+    async def test_battle_menu_skills_hides_a_leveled_spell_at_zero_slots_but_keeps_cantrips(self):
+        """
+        Real gap found proactively (2026-09-17, same "never advertise a
+        button guaranteed to refuse" audit that already caught the
+        item-view screen's Equip/Sell gaps): a leveled spell (level > 0)
+        always showed here even at 0 spell_slots_current, where casting
+        it is guaranteed to fail (_pay_spell_cast_cost's own "no spell
+        slots remaining... Rest to recover them" rejection). Cantrips
+        never cost a slot at all, so they must stay visible regardless.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950962
+        make_basic_character(
+            user_id, "EmptySlotsCaster", char_class="Wizard", current_location="crossroads_tavern",
+            known_spells=["fire_bolt", "magic_missile"],
+        )
+        db.update_character(user_id, -999, spell_slots_current=0)
+        enemy = {"telegram_user_id": -5200962, "name": "EmptySlotsGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20, "is_ai": 1}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -5200962: "enemy"})
+        session.turn_order = [user_id, -5200962]
+        session.current_turn_index = 0
+
+        sink = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|skills", sink), DummyContext())
+        self.assertTrue(any("Fire Bolt" in s for s in sink), "a real cantrip must stay visible at 0 slots")
+        self.assertFalse(any("Magic Missile" in s for s in sink), "a leveled spell at 0 slots is guaranteed to fail and must be hidden")
+
+        db.update_character(user_id, -999, spell_slots_current=1)
+        sink2 = []
+        await bot.battle_menu_callback(FakeCallbackUpdate(user_id, "bm|skills", sink2), DummyContext())
+        self.assertTrue(any("Magic Missile" in s for s in sink2), "a real spell slot restores the leveled spell's own button")
+        sessions.end_session(-999)
+
     async def test_second_wind_button_actually_heals(self):
         import sessions
         sessions.end_session(-999)

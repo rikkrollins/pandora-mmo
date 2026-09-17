@@ -3760,9 +3760,21 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
 
     if action == "skills":
         known = character.get("known_spells", []) if character else []
+        # Real gap found proactively (2026-09-17, same "never advertise
+        # a button guaranteed to refuse" audit that already caught the
+        # item-view Equip/Sell gaps) -- a leveled spell (level > 0)
+        # always showed here even at 0 spell_slots_current, where
+        # casting it is guaranteed to fail (_pay_spell_cast_cost's own
+        # "no spell slots remaining... Rest to recover them" rejection).
+        # Cantrips (level 0, this game has 12 real ones) never cost a
+        # slot at all -- see _pay_spell_cast_cost's own "spell['level']
+        # > 0" gate -- so they correctly stay visible regardless of the
+        # character's current slot count.
+        slots_available = bool(character) and character.get("spell_slots_current", 0) > 0
         spell_buttons = [
             [InlineKeyboardButton(spells_module.get_spell(sid)["name"], callback_data=f"bm|cast|{sid}")]
-            for sid in known if spells_module.get_spell(sid)
+            for sid in known
+            if (spell := spells_module.get_spell(sid)) and (spell["level"] == 0 or slots_available)
         ]
         # Second Wind (2026-08-26, per Coffee: "add it to the skills
         # menu") -- same "only shown if genuinely usable right now"
