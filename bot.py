@@ -5465,6 +5465,17 @@ def _item_actions_keyboard(item_id: str, character: dict | None = None) -> Inlin
     any caller that genuinely has no character in hand.
     """
     item = items_module.get_item(item_id)
+    # Real live report (2026-09-17, dev-bridge, Coffee: "When we are
+    # gathering, please don't put an equip button") -- confirmed live:
+    # this button was unconditional, so gathering a raw material (Iron
+    # Ore, a Moonpetal Flower, anything else db.equip_item's own real
+    # equippable-type check would instantly refuse) still showed a
+    # real "Equip" button that could only ever fail. Same real
+    # equippable-type tuple db.equip_item itself gates on, so this can
+    # never drift out of sync with what tapping it would actually do --
+    # matches the exact "never advertise a button guaranteed to
+    # refuse" discipline can_reforge/can_dismantle already follow below.
+    can_equip = item is not None and item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous")
     can_reforge = (
         item is not None and item.get("source") == "crafted"
         and item.get("type") in ("weapon", "armor", "shield")
@@ -5477,7 +5488,7 @@ def _item_actions_keyboard(item_id: str, character: dict | None = None) -> Inlin
     # can_reforge convention just above.
     can_dismantle = item is not None and item.get("type") in DISMANTLE_ELIGIBLE_TYPES
     is_equipped = character is not None and db.is_item_equipped(character, item_id)
-    buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]]
+    buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]] if can_equip else []
     if can_reforge:
         buttons.append([InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")])
     if not is_equipped:

@@ -18959,6 +18959,25 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         potion_labels = [btn.text for row in potion_keyboard.inline_keyboard for btn in row]
         self.assertFalse(any("Dismantle" in label for label in potion_labels))
 
+    def test_item_actions_keyboard_hides_equip_for_a_raw_gathered_material(self):
+        """
+        Real live report (2026-09-17, dev-bridge, Coffee: "When we are
+        gathering, please don't put an equip button") -- confirmed
+        live: the Equip button was unconditional, so gathering a real
+        raw material (Iron Ore, type "material" -- db.equip_item's own
+        equippable-type check would instantly refuse it) still showed a
+        button that could only ever fail. Same real equippable-type
+        gate db.equip_item itself uses, so a real weapon/armor/ring/
+        amulet/wondrous item still correctly shows it.
+        """
+        ore_keyboard = bot._item_actions_keyboard("iron_ore")
+        ore_labels = [btn.text for row in ore_keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("Equip" in label for label in ore_labels), ore_labels)
+
+        sword_keyboard = bot._item_actions_keyboard("longsword")
+        sword_labels = [btn.text for row in sword_keyboard.inline_keyboard for btn in row]
+        self.assertTrue(any("Equip" in label for label in sword_labels), sword_labels)
+
     def test_is_item_equipped_covers_every_real_equip_slot(self):
         """Direct unit coverage of db.is_item_equipped -- weapon/offhand/armor/shield/accessory, and a plain carried (not equipped) item."""
         character = {

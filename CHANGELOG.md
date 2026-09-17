@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.632] — fix: no more "Equip" button on raw gathered materials
+
+Real dev-bridge report: "When we are gathering, please don't put an
+equip button." Confirmed live: `_item_actions_keyboard`'s Equip button
+was unconditional, so gathering Iron Ore, a Moonpetal Flower, or any
+other real raw material still showed a button that could only ever
+fail — `db.equip_item` would instantly refuse it (materials aren't a
+weapon/armor/shield/ring/amulet/wondrous item). Now gated on the exact
+same equippable-type check `db.equip_item` itself uses, matching the
+same "never advertise a button guaranteed to refuse" discipline
+Reforge/Dismantle already follow — a real weapon/armor/accessory still
+shows Equip exactly as before.
+
+1 new test (Iron Ore hides Equip, a Longsword still shows it); 3
+related item-action-keyboard tests reconfirmed clean.
+
 ## [1.27.631] — feature: can no longer sell, give away, or dismantle a currently equipped item
 
 Real request: "make sure we cant sell equipped items. like dont even
