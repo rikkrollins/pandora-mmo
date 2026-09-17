@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.637] — dev tool: Labyrinth seed-viewer can now look up a real past run by chat/party
+
+Part 2 of "do both" (see v1.27.636). No live game-code changes — this
+is a standalone dev tool (`scripts/preview_labyrinth_floor.py`, never
+imported by `bot.py`), so no redeploy needed.
+
+Previously the tool could only regenerate a floor/segment from a raw
+`--seed` number you already had to know. Every real party's real past
+run is durably logged in `labyrinth_seed_log` (chat_id, party_key,
+segment, seed, theme, party_names, created_at — append-only, never
+deleted, unlike the ephemeral `labyrinth_runs` row a "leave" clears).
+Added `--chat-id`/`--party-key` (optionally `--log-segment` to pick an
+older logged run instead of the most recent) as an alternative to
+`--seed`: looks up the real row via `db.get_labyrinth_seed_log`,
+prints what it found, then feeds that real seed into the exact same
+`generate_segment` → render/dump pipeline the tool already had — zero
+duplication of generation or rendering logic. `--floor` still lets you
+pick which of the segment's 5 floors to render.
+
+Refactored the core "resolve a seed, then generate+render+dump" logic
+out of `main()` into real, directly-callable functions
+(`resolve_logged_run`, `render_segment`, `render_single_floor`,
+`preview_from_logged_run`) so it's unit-testable, not just
+CLI-invocable — matching this project's own testing convention. 1 new
+test: seeds a fake log row, confirms the lookup resolves the most
+recent entry (and an explicit `--log-segment` reaches an older one),
+confirms two independent regenerations from the resolved seed produce
+byte-identical room data AND byte-identical PNG output, and confirms
+a `--floor` override targets a different floor within the same
+segment. Both original `--seed` paths (single floor, whole segment)
+manually re-verified unchanged.
+
 ## [1.27.636] — feat: maze-density guarantee ported to the overworld dungeon generator
 
 Coffee: "does the labyrinth and dungeons generator/editor need any

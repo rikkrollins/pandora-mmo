@@ -44,6 +44,7 @@ import rules.dungeon_audit as dungeon_audit
 import rules.dungeon_evolve as dungeon_evolve
 import rules.labyrinth as labyrinth_module
 import scripts.build_location_grid as build_location_grid
+import scripts.preview_labyrinth_floor as preview_labyrinth_floor
 from tests.helpers import (
     DummyContext, DummyMessage, FakeBot, FakeCallbackUpdate, FakeChat, FakeUpdate, FakeUser,
     make_basic_character, use_test_db, complete_arcs_1_through_7,
@@ -40789,6 +40790,72 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(room_a.get("monsters"), room_b.get("monsters"))
             self.assertEqual(room_a.get("lockables"), room_b.get("lockables"))
             self.assertEqual(room_a.get("hazard"), room_b.get("hazard"))
+
+    def test_preview_labyrinth_floor_resolves_a_real_logged_seed_and_regenerates_it_identically(self):
+        """
+        Part 2 of "do both" (2026-09-17, following the maze-density
+        port above): scripts/preview_labyrinth_floor.py's own prototype
+        already regenerated a floor/segment from a raw --seed, but
+        required already knowing the raw seed number. The real seed for
+        every past run a party actually played is durably logged in
+        labyrinth_seed_log (db.log_labyrinth_seed, append-only, never
+        deleted -- unlike the ephemeral labyrinth_runs row this
+        replaces once a party leaves). This test seeds a fake log row
+        the same way bot.py's own enter_labyrinth code path does, then
+        confirms the new resolve_logged_run/preview_from_logged_run
+        functions (refactored out of main() so they're directly
+        testable, not just CLI-invocable) find the exact logged seed
+        and regenerate BYTE-IDENTICAL room data from it -- reusing the
+        same determinism guarantee test_generate_segment_is_
+        deterministic_with_the_same_seed above already proves for
+        generate_segment itself, since this is just that same pipeline
+        fed a resolved seed instead of a hand-typed one.
+        """
+        chat_id, party_key = -960555, "preview_test_party"
+        db.log_labyrinth_seed(chat_id, party_key, 2, 111222, "Sunken Sanctum", ["Zara"])
+        db.log_labyrinth_seed(chat_id, party_key, 4, 333444, "Frostbound Wastes", ["Zara", "Milo"])
+
+        entry = preview_labyrinth_floor.resolve_logged_run(chat_id, party_key)
+        self.assertEqual(entry["segment"], 4, "expected the MOST RECENT logged row, not the first one inserted")
+        self.assertEqual(entry["seed"], 333444)
+        self.assertEqual(entry["theme"], "Frostbound Wastes")
+        self.assertEqual(entry["party_names"], ["Zara", "Milo"])
+
+        older_entry = preview_labyrinth_floor.resolve_logged_run(chat_id, party_key, segment=2)
+        self.assertEqual(older_entry["seed"], 111222, "expected the --log-segment filter to reach past the most recent row")
+
+        with self.assertRaises(ValueError):
+            preview_labyrinth_floor.resolve_logged_run(chat_id, "no_such_party")
+
+        png_a, rooms_a, hub_id_a, floor_a, entry_a = preview_labyrinth_floor.preview_from_logged_run(
+            chat_id, party_key, campaign=bot.CAMPAIGN,
+        )
+        png_b, rooms_b, hub_id_b, floor_b, entry_b = preview_labyrinth_floor.preview_from_logged_run(
+            chat_id, party_key, campaign=bot.CAMPAIGN,
+        )
+        self.assertEqual(entry_a["seed"], entry_b["seed"], 333444)
+        self.assertEqual(hub_id_a, hub_id_b)
+        self.assertEqual(floor_a, floor_b)
+        self.assertEqual(set(rooms_a.keys()), set(rooms_b.keys()))
+        for room_id, room_a in rooms_a.items():
+            room_b = rooms_b[room_id]
+            self.assertEqual(room_a.get("connections"), room_b.get("connections"))
+            self.assertEqual(room_a.get("monsters"), room_b.get("monsters"))
+            self.assertEqual(room_a.get("lockables"), room_b.get("lockables"))
+        self.assertGreater(len(png_a), 0, "expected real, non-empty PNG bytes")
+        self.assertEqual(png_a[:8], b"\x89PNG\r\n\x1a\n", "expected a real PNG file signature")
+        self.assertEqual(png_a, png_b, "expected byte-identical rendered maps from the same resolved seed")
+
+        # A --floor override within the resolved segment must still be
+        # the same real segment (same seed/room graph), just targeting
+        # a different one of its SEGMENT_SIZE floors for the map render.
+        other_floor = labyrinth_module.segment_start_floor(entry["segment"]) + 1
+        png_c, rooms_c, hub_id_c, floor_c, entry_c = preview_labyrinth_floor.preview_from_logged_run(
+            chat_id, party_key, floor=other_floor, campaign=bot.CAMPAIGN,
+        )
+        self.assertEqual(floor_c, other_floor)
+        self.assertEqual(set(rooms_c.keys()), set(rooms_a.keys()), "expected the same full segment room set regardless of which floor is targeted")
+        self.assertNotEqual(png_c, png_a, "expected a different floor's render to actually differ")
 
     async def test_labyrinth_move_blocked_past_live_monsters_but_retreat_always_open(self):
         """
