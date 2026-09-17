@@ -32828,6 +32828,22 @@ async def _do_list_shop(update: Update) -> None:
         )
         return
     shop_data = cl.get_shop(CAMPAIGN, shop_id)
+    # Real gap found proactively (2026-09-17, continuing the same
+    # "never advertise something guaranteed to refuse" audit that
+    # already caught the item-view Equip/Sell gaps and the battle
+    # Skills menu) -- shop.buy_item's own FIRST check rejects every
+    # single purchase outright for a player this shopkeeper has
+    # is_banned_by_npc'd (a real, persistent consequence of a caught
+    # theft), but this screen never checked that at all: a banned
+    # player still saw the full price list, their own real gold total,
+    # and a live Buy button for every item, none of which could ever
+    # actually work. Shown the real, honest reason instead, matching
+    # buy_item's own exact rejection message so the two never drift
+    # out of sync.
+    owner_npc = shop_data.get("owner_npc") if shop_data else None
+    if owner_npc and db.is_banned_by_npc(update.effective_user.id, update.effective_chat.id, owner_npc):
+        await _safe_send(update, "The shopkeeper won't sell you anything — not after what you did last time.", speak=False)
+        return
     # Real gap (2026-08-20, per Coffee: "when we visit shops show how
     # much gold we have somewhere (its not shown as far as i know)")
     # -- confirmed true: this screen listed every real price but never

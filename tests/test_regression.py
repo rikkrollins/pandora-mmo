@@ -31207,6 +31207,28 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_faction_standing(user_id, chat_a, "some_isolated_faction"), 40)
         self.assertEqual(db.get_faction_standing(user_id, chat_b, "some_isolated_faction"), -40)
 
+    async def test_do_list_shop_refuses_a_banned_player_instead_of_showing_a_dead_menu(self):
+        """
+        Real gap found proactively (2026-09-17, continuing the same
+        "never advertise something guaranteed to refuse" audit that
+        already caught the item-view Equip/Sell gaps and the battle
+        Skills menu): shop.buy_item's own FIRST check rejects every
+        purchase outright for a player is_banned_by_npc by this shop's
+        owner (a real, persistent consequence of a caught theft), but
+        _do_list_shop never checked that at all -- a banned player
+        still saw the full price list, their own gold, and a live Buy
+        button for every item, none of which could ever work. Same
+        real rejection message buy_item itself uses, so the two can
+        never drift out of sync.
+        """
+        user_id = 996140
+        make_basic_character(user_id, "BannedShopper", current_location="crossroads_tavern")
+        db.set_banned_by_npc(user_id, -999, "grimsby", True)
+        sink = []
+        await bot._do_list_shop(FakeUpdate(user_id, "", sink))
+        self.assertTrue(any("won't sell you anything" in s for s in sink), sink)
+        self.assertFalse(any("Your gold" in s for s in sink), sink)
+
     # -- Dev-topic edited-message crash (2026-08-03, Coffee) -----------
     async def test_dev_topic_photo_handler_survives_an_edited_message(self):
         """

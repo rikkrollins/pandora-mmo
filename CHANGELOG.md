@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.635] — fix: a banned player no longer sees a dead shop menu
+
+Found proactively, continuing the same button/menu-eligibility audit
+(v1.27.632-634): `shop.buy_item`'s own first check rejects every
+single purchase outright for a player a shopkeeper has banned
+(`is_banned_by_npc`, a real, persistent consequence of a caught
+theft) — but `_do_list_shop` never checked that at all. A banned
+player still saw the full price list, their own real gold total, and
+a live Buy button for every item, none of which could ever actually
+work (`_do_steal` already independently refuses a banned player too,
+so there was genuinely nothing left for them to do at that shop).
+Now shown the real, honest reason instead, using the exact same
+rejection message `buy_item` itself uses so the two can never drift
+apart.
+
+1 new test (a banned player gets the real refusal message instead of
+the price list); 4 related shop/list tests reconfirmed clean. One
+more unrelated, pre-existing test hang found and confirmed NOT caused
+by this work (`test_battle_menu_steal_button_offers_a_target_picker_and_steals`
+hangs identically on `main` before any of today's changes — flagged,
+not fixed, same leaked-narration-call class of issue documented
+earlier this session for the summon-Remnant test cluster).
+
 ## [1.27.634] — fix: no more leveled-spell buttons on the battle Skills menu at 0 spell slots
 
 Found proactively, continuing the same "never advertise a button
