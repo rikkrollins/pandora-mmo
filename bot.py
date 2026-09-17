@@ -5487,13 +5487,25 @@ def _item_actions_keyboard(item_id: str, character: dict | None = None) -> Inlin
     # option that's guaranteed to refuse, matching Reforge's own
     # can_reforge convention just above.
     can_dismantle = item is not None and item.get("type") in DISMANTLE_ELIGIBLE_TYPES
+    # Real gap found proactively (2026-09-17, same "never advertise a
+    # button guaranteed to refuse" audit that caught the Equip button
+    # above): every hand-authored ring/amulet/wondrous item (Ring of
+    # Protection, Amulet of Health, Cloak of Elvenkind, etc. -- real
+    # loot, never shop-bought, price 0) still showed a "Sell" button
+    # that shop.sell_item's own items.is_sellable check would instantly
+    # refuse with "can't be sold." List on Market has no such gate (a
+    # player names their own price there, so even a price-0 item can
+    # genuinely be listed) -- confirmed by reading itemview_callback's
+    # own "market" action before assuming it needed the same fix.
+    can_sell = item is not None and items_module.is_sellable(item_id)
     is_equipped = character is not None and db.is_item_equipped(character, item_id)
     buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]] if can_equip else []
     if can_reforge:
         buttons.append([InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")])
     if not is_equipped:
+        if can_sell:
+            buttons.append([InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")])
         buttons.extend([
-            [InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")],
             [InlineKeyboardButton("🏛️ List on Market", callback_data=f"itemview|market|{item_id}")],
             [InlineKeyboardButton("🤝 Give", callback_data=f"itemview|give|{item_id}")],
         ])

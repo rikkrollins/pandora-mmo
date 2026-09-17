@@ -18978,6 +18978,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sword_labels = [btn.text for row in sword_keyboard.inline_keyboard for btn in row]
         self.assertTrue(any("Equip" in label for label in sword_labels), sword_labels)
 
+    def test_item_actions_keyboard_hides_sell_for_an_unsellable_item(self):
+        """
+        Real gap found proactively (2026-09-17, same audit that caught
+        the Equip-button bug just above): every hand-authored ring/
+        amulet/wondrous item (real loot, never shop-bought, price 0)
+        still showed a "Sell" button shop.sell_item's own
+        items.is_sellable check would instantly refuse with "can't be
+        sold." List on Market has no such gate (a player names their
+        own price there) so it must still show even for a price-0 item.
+        """
+        ring_keyboard = bot._item_actions_keyboard("ring_of_protection")
+        ring_labels = [btn.text for row in ring_keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("Sell" in label and "Market" not in label for label in ring_labels), ring_labels)
+        self.assertTrue(any("Market" in label for label in ring_labels), ring_labels)
+        self.assertTrue(any("Give" in label for label in ring_labels), ring_labels)
+
+        sword_keyboard = bot._item_actions_keyboard("longsword")
+        sword_labels = [btn.text for row in sword_keyboard.inline_keyboard for btn in row]
+        self.assertTrue(any("Sell" in label for label in sword_labels), sword_labels)
+
     def test_is_item_equipped_covers_every_real_equip_slot(self):
         """Direct unit coverage of db.is_item_equipped -- weapon/offhand/armor/shield/accessory, and a plain carried (not equipped) item."""
         character = {

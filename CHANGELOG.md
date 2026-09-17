@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.633] — fix: no more "Sell" button on items that can't actually be sold
+
+Found proactively, same "never advertise a button guaranteed to
+refuse" audit that caught v1.27.632's Equip-button gap: every hand-
+authored ring/amulet/wondrous item (Ring of Protection, Amulet of
+Health, Cloak of Elvenkind, and every other real loot-only item —
+never shop-bought, `price: 0`) still showed a "💰 Sell" button that
+`shop.sell_item`'s own `items.is_sellable` check would instantly
+refuse with "can't be sold." Now gated on that exact same check.
+"List on Market" is untouched — a player names their own price there,
+so it's a genuinely different mechanic with no equivalent gate, and
+still correctly shows even for a price-0 item.
+
+1 new test (Ring of Protection hides Sell but keeps List on
+Market/Give; a Longsword still shows Sell); 6 related item-action-
+keyboard/dismantle/forge tests reconfirmed clean.
+
 ## [1.27.632] — fix: no more "Equip" button on raw gathered materials
 
 Real dev-bridge report: "When we are gathering, please don't put an
