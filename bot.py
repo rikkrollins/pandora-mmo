@@ -5789,6 +5789,14 @@ def _trade_item_picker_keyboard(trade_id: str, mode: str, character: dict, side:
     backpack and no gold, or removing from an empty offer) so the
     caller can give a real "nothing to add" message instead of an
     empty keyboard.
+
+    Equipped items excluded from "add" (2026-09-18, continuing the
+    same audit as v1.27.631/639): _mutate_trade_offer itself now
+    refuses to add a currently-equipped item, so this picker no longer
+    advertises a guaranteed rejection. Not applied to "remove" -- an
+    item already sitting in a trade's own offer was, by construction,
+    unequipped at the moment it was added (this exact check), so it
+    can never be equipped again while removed from inventory.
     """
     candidate_ids = list(character["inventory"].keys()) if mode == "add" else list(side["items"].keys())
     gold_available = character["gold"] if mode == "add" else side["gold"]
@@ -5796,6 +5804,8 @@ def _trade_item_picker_keyboard(trade_id: str, mode: str, character: dict, side:
     for item_id in candidate_ids:
         qty = character["inventory"].get(item_id, 0) if mode == "add" else side["items"].get(item_id, 0)
         if qty <= 0:
+            continue
+        if mode == "add" and db.is_item_equipped(character, item_id):
             continue
         item = items_module.get_item(item_id)
         name = item["name"] if item else item_id
@@ -6005,6 +6015,20 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
     for item_id, quantity in items_wanted:
         item_name = items_module.get_item(item_id)["name"]
         if adding:
+            # Real gap found continuing the equipped-item audit
+            # (2026-09-18, Coffee: "check the trade and loot-vote hand-
+            # off for the same gap") -- same duplication shape just
+            # fixed for the market (v1.27.639): db.remove_item only
+            # ever touches `inventory`, never an equip slot, and this
+            # removal happens the INSTANT an item is added to a trade
+            # offer (see this function's own docstring), well before
+            # either side accepts. Adding a worn item would leave the
+            # offerer still fully equipped with it while it sat in the
+            # trade record, ready to be handed to the other party on
+            # accept -- a real dupe window, not just a dead-end button.
+            if db.is_item_equipped(character, item_id):
+                changed_lines.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before trading it away.")
+                continue
             removed, _ = db.remove_item(telegram_user_id, chat_id, item_id, quantity)
             if not removed:
                 have = character["inventory"].get(item_id, 0)

@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.640] — fix: equipped items could still be added to a player-to-player trade
+
+Coffee: "check the trade and loot-vote hand-off for the same gap" —
+following v1.27.639's market fix. Loot-vote hand-off checked out
+clean (confirmed by reading, not assumed): a loot vote's item is a
+brand-new drop nobody has ever owned or equipped yet, so this whole
+bug class structurally can't apply there.
+
+The trade system had the exact same gap as the market, and it's the
+same real duplication shape, not just a dead-end button:
+`_mutate_trade_offer`'s "adding" branch called `db.remove_item` with
+no equipped check at all — and that removal happens the INSTANT an
+item is added to a trade offer, well before either side accepts. A
+player could add a currently-worn item to a trade, keep wearing it
+(and its stats) while it sat in the pending offer, and hand a real
+copy to the other party the moment both sides accepted.
+
+Fixed at the source (`_mutate_trade_offer`, covering both the button
+flow and the free-text "add X to the trade" path, which already
+shares it) and hid the option before it's ever tapped
+(`_trade_item_picker_keyboard`'s "add" mode).
+
+2 new tests; isolated re-run clean. One unrelated, pre-existing test
+found and confirmed NOT caused by this work
+(`test_trade_times_out_and_refunds_both_sides` fails identically on
+`main` when run in the same `-k trade` batch — two older tests reuse
+hardcoded user ids 951011/951012 across chat -999, leaking state
+between them; flagged, not fixed, out of scope here).
+
 ## [1.27.639] — fix: equipped items could still be listed on the player market
 
 Found proactively (Coffee: "keep looking for gaps"), continuing the

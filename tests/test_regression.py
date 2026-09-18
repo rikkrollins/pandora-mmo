@@ -2807,6 +2807,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         record = bot._find_trade_for_user(-999, a_id)
         self.assertEqual(record["party_a"]["items"].get("healing_potion"), 1)
 
+    async def test_trade_add_rejects_a_currently_equipped_item(self):
+        """
+        Real gap found continuing the equipped-item audit (2026-09-18,
+        Coffee: "check the trade and loot-vote hand-off for the same
+        gap") -- same duplication shape just fixed for the market
+        (v1.27.639): _mutate_trade_offer's "adding" branch called
+        db.remove_item with no equipped check at all, and that removal
+        happens the INSTANT an item is added to an offer, well before
+        either side accepts (see test_trade_add_locks_the_item_out_of_
+        the_offerers_inventory_immediately just above). Adding a worn
+        item would have left the offerer still fully equipped with it
+        while a real, separate copy sat in the trade record, ready to
+        be handed to the other party on accept.
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951007, 951008
+        make_basic_character(a_id, "EquippedTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "EquippedTraderB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "longsword", 1)
+        db.equip_item(a_id, -999, "longsword")
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with EquippedTraderB", sink), "trade with EquippedTraderB")
+        sink.clear()
+        await bot._do_trade_add(FakeUpdate(a_id, "add my longsword to the trade", sink), "add my longsword to the trade")
+
+        self.assertTrue(any("wearing/wielding" in s for s in sink), sink)
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("longsword"), 1)  # never left the offerer
+        self.assertTrue(db.is_item_equipped(after, "longsword"))  # still equipped
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["items"].get("longsword", 0), 0)  # never entered the offer
+
+    def test_trade_item_picker_keyboard_hides_an_equipped_item(self):
+        """Same gap, same audit, for the trade's own 'Add to Trade' button picker (_trade_item_picker_keyboard)."""
+        character = {
+            "equipped_weapon": "longsword", "equipped_offhand_weapon": None,
+            "equipped_armor": None, "equipped_shield": None, "equipped_accessories": [],
+            "inventory": {"longsword": 1, "rusty_dagger": 1}, "gold": 0,
+        }
+        side = {"items": {}, "gold": 0}
+        keyboard = bot._trade_item_picker_keyboard("trade1", "add", character, side)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("longsword" in label.lower() for label in labels), labels)
+        self.assertTrue(any("dagger" in label.lower() for label in labels), labels)
+
     async def test_trade_button_flow_add_item_pick_quantity(self):
         """
         Real live request (2026-08-27, Coffee: "can u add a button
