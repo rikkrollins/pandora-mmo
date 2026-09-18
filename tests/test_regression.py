@@ -9162,6 +9162,87 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "glimmerdeep_grotto -> glimmering_pool should open once the_deep_root_chambers_warden is completed",
         )
 
+    def test_sunken_root_caverns_deep_tunnels_gates_only_its_own_deeper_subarea(self):
+        """
+        Real dev-bridge report (2026-09-18, Coffee, screenshot: "This is
+        a dungeon later on in the game. We shudnt be able to access it
+        until its time for us to be there"), reported at exactly the
+        "North: The Deep Tunnels" exit from The Sunken Root Caverns
+        hub. Confirmed Sunken Root Caverns is ANOTHER real shared zone
+        (same shape as test_shared_zone_dungeons_gate_only_their_own_
+        deeper_subarea above): its hub and Deep Tunnels host 2 genuine
+        early/side quests (wrens_root_worry reaching the hub,
+        the_deeper_seam's Forge Guild quest reaching Deep Tunnels
+        itself), while arc_6's own real content starts only PAST Deep
+        Tunnels. The first fix attempt gated the outer goblin_warrens ->
+        sunken_root_caverns edge directly -- confirmed via this file's
+        own test_later_chapter_dungeons_are_blocked_until_the_prior_
+        chapters_climax_is_done (that edge is asserted OPEN there,
+        deliberately, after an earlier real total soft-lock from doing
+        exactly this) that this would have both broken the 2 early
+        quests above AND reproduced that same historical class of bug.
+        Corrected to gate Deep Tunnels' own 3 forward edges into real
+        arc_6 rooms instead (Flooded Gallery, The Cleared Choke, The
+        Silt Hollow) -- min_level 50 (arc_6's real band floor) plus
+        the_true_paymasters_reckoning (arc_5's own climax, completable
+        entirely within Goblin Warrens' own already-gated deep interior,
+        never requiring a trip through Sunken Root Caverns first, so
+        this can never reproduce the same circular-unlock soft-lock).
+        The Forgotten Cistern (a Remnant superboss room, deliberately
+        min_level 14 already) is untouched -- Remnants are intentionally
+        reachable well below their monster's own level, not story-arc
+        content.
+        """
+        dt = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_deep_tunnels")
+        for dest in ("sunken_root_caverns_flooded_gallery", "sunken_root_caverns_the_cleared_choke", "sunken_root_caverns_the_silt_hollow"):
+            dest_loc = cl.get_location(bot.CAMPAIGN, dest)
+            self.assertEqual(dest_loc.get("min_level"), 50, f"{dest} should require level 50")
+            self.assertFalse(
+                bot._meets_location_level({"level": 49}, dest_loc), f"{dest} should reject a level-49 character"
+            )
+            self.assertTrue(
+                bot._meets_location_level({"level": 50}, dest_loc), f"{dest} should accept a level-50 character"
+            )
+            self.assertIsNotNone(
+                bot._check_story_gate({"completed_quests": [], "cleared_locations": ["sunken_root_caverns_deep_tunnels"]}, dt, dest),
+                f"sunken_root_caverns_deep_tunnels -> {dest} should be blocked before arc_5 is done",
+            )
+            self.assertIsNone(
+                bot._check_story_gate(
+                    {"completed_quests": ["the_true_paymasters_reckoning"], "cleared_locations": ["sunken_root_caverns_deep_tunnels"]},
+                    dt, dest,
+                ),
+                f"sunken_root_caverns_deep_tunnels -> {dest} should open once the_true_paymasters_reckoning is completed",
+            )
+
+        # The Forgotten Cistern (Remnant) stays untouched by this fix.
+        cistern = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns_forgotten_cistern")
+        self.assertEqual(cistern.get("min_level"), 14)
+        self.assertIsNone(
+            bot._check_story_gate({"completed_quests": [], "cleared_locations": ["sunken_root_caverns_deep_tunnels"]}, dt, "sunken_root_caverns_forgotten_cistern"),
+            "the Remnant room must stay open on its own existing min_level gate, not a new story gate",
+        )
+
+        # The 2 real early/shared-zone quests must still be reachable at
+        # low level with nothing completed -- the whole reason the fix
+        # landed on Deep Tunnels' OWN forward edges, not the outer
+        # goblin_warrens -> sunken_root_caverns entrance.
+        hub = cl.get_location(bot.CAMPAIGN, "sunken_root_caverns")
+        gw = cl.get_location(bot.CAMPAIGN, "goblin_warrens")
+        fresh_character = {"level": 1, "completed_quests": [], "cleared_locations": []}
+        self.assertTrue(bot._meets_location_level(fresh_character, hub))
+        self.assertIsNone(bot._check_story_gate(fresh_character, gw, "sunken_root_caverns"))
+        self.assertTrue(bot._meets_location_level(fresh_character, dt))
+        self.assertIsNone(
+            bot._check_story_gate({**fresh_character, "cleared_locations": ["sunken_root_caverns"]}, hub, "sunken_root_caverns_deep_tunnels"),
+        )
+        self.assertEqual(
+            bot.CAMPAIGN["quests"]["wrens_root_worry"]["trigger"]["location"], "sunken_root_caverns",
+        )
+        self.assertEqual(
+            bot.CAMPAIGN["quests"]["the_deeper_seam"]["trigger"]["location"], "sunken_root_caverns_deep_tunnels",
+        )
+
     async def test_goblin_warrens_has_a_real_arc_1_entrance_from_the_hollow_stump_shrine(self):
         """
         Real, separate gap noted alongside the v1.27.519 soft-lock fix:

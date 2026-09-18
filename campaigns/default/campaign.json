@@ -2055,7 +2055,14 @@
         },
         "story_gates": {
           "sunken_root_caverns_flooded_gallery": {
-            "requires_cleared_location": "sunken_root_caverns_deep_tunnels"
+            "requires_cleared_location": "sunken_root_caverns_deep_tunnels",
+            "requires_completed_quest": "the_true_paymasters_reckoning"
+          },
+          "sunken_root_caverns_the_cleared_choke": {
+            "requires_completed_quest": "the_true_paymasters_reckoning"
+          },
+          "sunken_root_caverns_the_silt_hollow": {
+            "requires_completed_quest": "the_true_paymasters_reckoning"
           }
         },
         "grid_position": {
@@ -3106,7 +3113,8 @@
           "y": -56
         },
         "dungeon_id": "sunken_root_caverns",
-        "dungeon_interior": true
+        "dungeon_interior": true,
+        "min_level": 50
       },
       "sunken_root_caverns_hollow_wellspring": {
         "name": "The Hollow Wellspring",
@@ -5138,7 +5146,8 @@
           "sunken_root_caverns_the_choked_reliquary": {
             "requires_completed_quest": "the_choked_reliquarys_answer"
           }
-        }
+        },
+        "min_level": 50
       },
       "sunken_root_caverns_the_smugglers_cut": {
         "name": "The Smuggler's Cut",
@@ -6669,7 +6678,8 @@
           "y": 2
         },
         "dungeon_interior": true,
-        "dungeon_id": "sunken_root_caverns"
+        "dungeon_id": "sunken_root_caverns",
+        "min_level": 50
       },
       "sunken_root_caverns_the_silt_vault": {
         "name": "The Silt Vault",

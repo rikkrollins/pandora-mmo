@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.641] — fix: The Sunken Root Caverns' real arc_6 content was reachable early
+
+Real dev-bridge report (Coffee, screenshot): "This is a dungeon later
+on in the game. We shudnt be able to access it until its time for us
+to be there" — pointing at "North: The Deep Tunnels" from The Sunken
+Root Caverns hub.
+
+Investigated carefully before touching anything, since this zone
+turned out to be another real "shared zone" (same shape this
+project already fixed once for Goblin Warrens): the hub and Deep
+Tunnels host 2 genuine early/side quests (`wrens_root_worry` reaching
+the hub, the Forge Guild's `the_deeper_seam` reaching Deep Tunnels
+itself) — arc_6's own real content (Flooded Gallery, The Cleared
+Choke, The Silt Hollow: level 50-60 monsters) only starts PAST Deep
+Tunnels.
+
+A first fix attempt (gating the outer goblin_warrens ->
+sunken_root_caverns entrance directly) was built, then reverted
+before shipping once a review of the existing test suite surfaced a
+documented prior incident: an earlier attempt at exactly this kind of
+fix caused a real, total soft-lock (only 6 of 290 locations reachable
+from a fresh character), and would have also broken the 2 legitimate
+early quests above.
+
+Corrected fix: gated Deep Tunnels' own 3 forward edges into the real
+arc_6 rooms — `min_level: 50` (arc_6's real band floor) plus
+`the_true_paymasters_reckoning` (arc_5's own climax quest, completable
+entirely within Goblin Warrens' own already-gated deep interior,
+never requiring a trip through Sunken Root Caverns first, so this
+can never reproduce the earlier circular-unlock soft-lock). The
+Forgotten Cistern (a Remnant superboss room, deliberately min_level 14
+already) is untouched.
+
+1 new test, matching the existing chapter-gating test cluster's exact
+shape; the whole existing cluster (chapter gating, shared-zone,
+circular-dependency guard) + a 28-test keyword sweep re-run clean.
+One unrelated, pre-existing failure found and confirmed NOT caused by
+this work via git stash (`test_new_goblin_warrens_npc_is_real_and_non_recruitable`
+— a location missing its own `npcs` key — flagged, not fixed).
+
 ## [1.27.640] — fix: equipped items could still be added to a player-to-player trade
 
 Coffee: "check the trade and loot-vote hand-off for the same gap" —
