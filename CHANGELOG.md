@@ -2,6 +2,41 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.638] — content: Wrathflame Vault, Unbound Deeper regenerated with real maze density
+
+Coffee: "check the dungeons now to see if they match the new
+generation" — following v1.27.636's maze-density guarantee port,
+checked the one dungeon ever baked by `evolve_dungeon` before that
+guarantee existed. `wrathflame_vault_evolved` measured 0 real
+junctions and 0 real cycles (needed 2 and 1) — a pure tree, exactly
+the flat-topology problem the guarantee exists to prevent, even though
+it passed every existing structural audit check.
+
+No live character was inside it (confirmed via a real DB check before
+touching anything). Removed its old room data, the source dungeon's
+one connection to it, and its `evolved_dungeon_ids` registry entry,
+then regenerated it via `evolve_dungeon` with the exact same original
+parameters (source `wrathflame_vault`, rebirth-gate 1, target band
+35-50) and a new seed — the density guarantee is now unconditional
+inside `evolve_dungeon` itself, so any successful seed already
+satisfies it (this one: 22 rooms, 2 real junctions, 2 real cycles,
+clean audit).
+
+The original 2026-09-01 shipping (v1.27.448) was hand-polished with
+unique room names/descriptions after generation, not left as generic
+auto-generated text — regenerating the topology would have silently
+thrown that away. Hand-wrote fresh flavor names/descriptions for all
+22 rooms of the new layout in the same voice (same boss, **The Last
+Glyph**, now in **The Last Glyph's Sanctum**; the new maze-density
+connector room named **The Collapsed Shortcut**, in-fiction as an
+unplanned passage forced between two older halls).
+
+Verified: full `DungeonEvolveTests` + `DungeonAuditTests` (70 tests)
+re-run clean against the regenerated campaign; a real character
+walked the new layout end-to-end through `bot._do_move` by every new
+room's real name, confirming both the graph and the flavor text
+actually resolve in play, not just in the generator's own output.
+
 ## [1.27.637] — dev tool: Labyrinth seed-viewer can now look up a real past run by chat/party
 
 Part 2 of "do both" (see v1.27.636). No live game-code changes — this
