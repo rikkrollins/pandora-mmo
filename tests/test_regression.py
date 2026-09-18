@@ -19139,6 +19139,93 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in character["inventory"]))
 
+    def test_give_item_keyboard_hides_an_equipped_item(self):
+        """
+        Real gap found continuing the same audit (2026-09-18, Coffee:
+        "keep looking for gaps"): _do_give_item has refused a currently-
+        equipped item since v1.27.631, but _give_item_keyboard -- the
+        top-level "Give" menu picker, a SEPARATE entry point from
+        _item_actions_keyboard's own per-item Give button that already
+        got that exclusion -- still listed every carried item
+        unconditionally, guaranteeing a real rejection two taps later.
+        """
+        giver_id, other_id = 996140, 996141
+        make_basic_character(giver_id, "GiveMenuOwner", current_location="crossroads_tavern")
+        make_basic_character(other_id, "GiveMenuRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "longsword", 1)
+        db.add_item(giver_id, -999, "rusty_dagger", 1)
+        db.equip_item(giver_id, -999, "longsword")
+        character = db.get_character(giver_id, -999)
+        keyboard = bot._give_item_keyboard(character)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("longsword" in label.lower() for label in labels), labels)
+        self.assertTrue(any("dagger" in label.lower() for label in labels), labels)
+
+    def test_market_sell_picker_keyboard_hides_an_equipped_item(self):
+        """Same gap, same audit, for the market's own 'Sell an Item' picker (_market_sell_picker_keyboard)."""
+        make_basic_character(996142, "MarketPickerOwner", current_location="crossroads_tavern")
+        db.add_item(996142, -999, "longsword", 1)
+        db.add_item(996142, -999, "rusty_dagger", 1)
+        db.equip_item(996142, -999, "longsword")
+        character = db.get_character(996142, -999)
+        keyboard = bot._market_sell_picker_keyboard(character)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("longsword" in label.lower() for label in labels), labels)
+        self.assertTrue(any("dagger" in label.lower() for label in labels), labels)
+
+    async def test_do_sell_market_rejects_a_currently_equipped_item(self):
+        """
+        Real gap, more severe than the button-visibility ones above
+        (2026-09-18): _do_sell_market -- the actual player-to-player
+        market listing handler, a completely separate code path from
+        shop.sell_item -- had NO equipped check at all until now.
+        db.remove_item only ever touches `inventory`, never an equip
+        slot, so this used to let a seller list a currently-worn item,
+        keep every stat benefit of still wearing it, AND hand a real
+        working copy to whoever bought the listing -- a genuine
+        duplication for a unique generated item instance.
+        """
+        make_basic_character(996143, "MarketEquipSeller", current_location="crossroads_tavern")
+        db.add_item(996143, -999, "longsword", 1)
+        db.equip_item(996143, -999, "longsword")
+        sink = []
+        await bot._do_sell_market(FakeUpdate(996143, "", sink), ["1", "50", "longsword"])
+        self.assertTrue(any("wearing/wielding" in s for s in sink), sink)
+        character = db.get_character(996143, -999)
+        self.assertEqual(character["inventory"].get("longsword"), 1)  # never removed
+        self.assertTrue(db.is_item_equipped(character, "longsword"))  # still equipped
+        # Scoped to this seller/item, not the whole board -- FastRegressionTests
+        # shares one chat_id (-999) across every test method in the class.
+        self.assertFalse(
+            [l for l in db.get_market_listings(-999) if l["seller_id"] == 996143 and l["item_id"] == "longsword"]
+        )
+
+    async def test_itemview_callback_market_action_rejects_a_currently_equipped_item(self):
+        """
+        Same real duplication risk as _do_sell_market above, for the
+        THIRD, independent market-listing code path (itemview_
+        callback's own "market" action, reached by the item-view
+        screen's "List on Market" button) -- that button is already
+        hidden while equipped (_item_actions_keyboard's is_equipped
+        gate), but a stale button from a screen opened before equipping
+        the same item would still dispatch here with no check at all
+        before this fix.
+        """
+        make_basic_character(996144, "ItemViewMarketEquipSeller", current_location="crossroads_tavern")
+        db.add_item(996144, -999, "longsword", 1)
+        db.equip_item(996144, -999, "longsword")
+        sink = []
+        update = FakeCallbackUpdate(996144, "itemview|market|longsword", sink)
+        await bot.itemview_callback(update, DummyContext())
+        self.assertTrue(any("wearing/wielding" in s for s in sink), sink)
+        character = db.get_character(996144, -999)
+        self.assertEqual(character["inventory"].get("longsword"), 1)  # never removed
+        # Scoped to this seller/item, not the whole board -- FastRegressionTests
+        # shares one chat_id (-999) across every test method in the class.
+        self.assertFalse(
+            [l for l in db.get_market_listings(-999) if l["seller_id"] == 996144 and l["item_id"] == "longsword"]
+        )
+
     async def test_itemview_callback_dismantle_action_works(self):
         from unittest.mock import patch
         make_basic_character(996043, "ButtonDismantler", current_location="crossroads_tavern")

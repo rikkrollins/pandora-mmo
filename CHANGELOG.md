@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.639] — fix: equipped items could still be listed on the player market
+
+Found proactively (Coffee: "keep looking for gaps"), continuing the
+same equipped-item audit as v1.27.631 (shop sell/give/dismantle). The
+player-to-player **market** was a completely separate code path from
+`shop.sell_item` and had never gotten that fix — worse than the
+earlier button-visibility gaps, this was a real functional bug, not
+just a dead-end button: `_do_sell_market` had NO equipped check
+at all. `db.remove_item` only ever touches `inventory`, never an
+equip slot, so a player could list a currently-worn item, keep every
+stat benefit of still wearing it, AND hand a real working copy to
+whoever bought the listing — a genuine duplication for a unique
+generated item instance, not just a UX rough edge.
+
+Fixed at all three real code paths: `_do_sell_market` itself (covers
+both the slash command and the natural-language "sell X for Y gold"
+intent, which already dispatches through it), the standalone
+`itemview_callback` "market" action (a third, independent listing
+implementation reached by the item-view screen's own "List on
+Market" button — already hidden while equipped, but a stale button
+opened before equipping the same item could still reach it with no
+check), and hid the option before it's ever tapped in the two picker
+menus that offer it (`_give_item_keyboard`'s top-level "Give" picker,
+`_market_sell_picker_keyboard`'s "Sell an Item" picker) — both listed
+every carried item unconditionally, including equipped ones.
+
+4 new tests (2 picker-hides-equipped-item, 2 real-handler-rejects,
+matching the exact v1.27.631 test shape); full market/give test
+sweep (64 tests) re-run clean.
+
 ## [1.27.638] — content: Wrathflame Vault, Unbound Deeper regenerated with real maze density
 
 Coffee: "check the dungeons now to see if they match the new

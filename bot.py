@@ -19396,6 +19396,23 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
             f"You only have {held}.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
+    # Real gap found continuing the same equipped-item audit as
+    # v1.27.631 (shop sell/give/dismantle) -- this player-to-player
+    # market listing path is a completely separate handler from
+    # shop.sell_item and was never covered by that fix. db.remove_item
+    # only ever touches `inventory`, never an equip slot, so listing a
+    # currently-worn item would leave the seller still fully equipped
+    # with (and benefiting from the stats of) an item they no longer
+    # own, WHILE handing a real, working copy to whoever buys the
+    # listing -- a genuine duplication for a unique generated item
+    # instance, not just a UI gap.
+    item_name = items_module.get_item(item_id)["name"]
+    if db.is_item_equipped(character, item_id):
+        await update.effective_chat.send_message(
+            f"You're wearing/wielding the {item_name} — unequip or swap it out before listing it on the market.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
     removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, quantity)
     if not removed:
         return
@@ -23013,6 +23030,15 @@ def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     own free-text path already uses) -- an empty room means no give
     buttons at all, same as _target_picker_keyboard's own "nothing to
     pick" case.
+
+    Equipped items excluded (2026-09-18, continuing the same button/
+    menu-eligibility audit as v1.27.631-635): _do_give_item itself has
+    refused a currently-equipped item since v1.27.631 ("make sure we
+    cant give them away either"), but this menu -- a SEPARATE entry
+    point from _item_actions_keyboard's own per-item Give button,
+    which already got that exclusion -- still listed every carried
+    item unconditionally, guaranteeing a real rejection two taps later
+    (pick item, pick recipient) for anything currently worn/wielded.
     """
     others = [
         p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
@@ -23022,7 +23048,8 @@ def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
         return None
     buttons = [
         [InlineKeyboardButton(f"🤝 Give {items_module.get_item(i)['name']}", callback_data=f"give|pick|{i}")]
-        for i, qty in character["inventory"].items() if qty > 0 and items_module.get_item(i)
+        for i, qty in character["inventory"].items()
+        if qty > 0 and items_module.get_item(i) and not db.is_item_equipped(character, i)
     ]
     return InlineKeyboardMarkup(buttons) if buttons else None
 
@@ -27996,6 +28023,19 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to list.")
             return
+        # Real gap found continuing the same equipped-item audit as
+        # v1.27.631/the dismantle branch just above -- the button that
+        # reaches this action is already hidden while equipped
+        # (_item_actions_keyboard's own is_equipped gate), but a stale
+        # button from a screen opened BEFORE equipping the same item
+        # would still dispatch here with no check at all. Same
+        # duplication risk _do_sell_market just picked up its own
+        # equipped guard for: db.remove_item never touches an equip
+        # slot, so listing this would leave the seller still fully
+        # equipped with an item a buyer also now owns.
+        if db.is_item_equipped(character, item_id):
+            await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before listing it on the market.")
+            return
         price = max(int(item.get("price", 0) * 1.5), 1)
         removed, _updated = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
         if not removed:
@@ -32653,6 +32693,13 @@ def _market_sell_picker_keyboard(character: dict) -> InlineKeyboardMarkup | None
     widths -- there's no way to guarantee zero truncation for an
     arbitrarily long generated name inside a fixed-width Telegram
     button, so this is a real, meaningful reduction, not a full fix.
+
+    Equipped items excluded (2026-09-18, continuing the same button/
+    menu-eligibility audit as v1.27.631-635): _do_sell_market itself
+    now refuses a currently-equipped item (a real gap found alongside
+    this one -- that handler had NO equipped check at all until now,
+    unlike shop.sell_item), so this picker no longer advertises a
+    guaranteed rejection.
     """
     if not character.get("inventory"):
         return None
@@ -32661,7 +32708,8 @@ def _market_sell_picker_keyboard(character: dict) -> InlineKeyboardMarkup | None
             f"{items_module.get_item(item_id)['name']}" + (f" (have {qty})" if qty > 1 else ""),
             callback_data=f"market|sellpick|{item_id}",
         )]
-        for item_id, qty in character["inventory"].items() if qty > 0 and items_module.get_item(item_id)
+        for item_id, qty in character["inventory"].items()
+        if qty > 0 and items_module.get_item(item_id) and not db.is_item_equipped(character, item_id)
     ]
     return InlineKeyboardMarkup(buttons) if buttons else None
 
