@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.650] — content: a real uploaded animation for The Deepest Record's attack
+
+Real request (Coffee, dev-bridge): sent a real GIF and asked to use
+it for The Deepest Record's attack. No code change needed —
+`_maybe_send_remnant_summon_animation` (built for The Root That
+Remembers, v1.27.442) already picks up any file dropped at
+`assets/remnant_summons/{remnant_id}.mp4` automatically. Added
+`assets/remnant_summons/the_deepest_record.mp4`; verified directly
+(not just read) that the function finds and sends this exact file for
+this Remnant. No restart needed — the file is checked fresh from disk
+on every summon.
+
 ## [1.27.649] — fix: a real, total dead-end trap in The First City
 
 Real live incident (Coffee, live, screenshots: "I'm stuck in this
