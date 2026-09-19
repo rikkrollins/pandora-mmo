@@ -274,7 +274,8 @@
         "descends_to": "whispering_wood_root_hollow",
         "directions": {
           "north": "whispering_wood_deep_glade",
-          "east": "whispering_wood_elder_glen"
+          "east": "whispering_wood_elder_glen",
+          "down": "whispering_wood_root_hollow"
         },
         "monsters": [
           "bramble_thicket_goblin"
@@ -380,7 +381,8 @@
         },
         "monsters": [],
         "directions": {
-          "south": "whispering_wood"
+          "south": "whispering_wood",
+          "down": "goblin_warrens"
         },
         "grid_position": {
           "x": 1,
@@ -405,7 +407,8 @@
         "descends_to": "greymoor_downs_sunken_barrow",
         "directions": {
           "west": "whispering_wood",
-          "north": "greymoor_downs_windswept_ridge"
+          "north": "greymoor_downs_windswept_ridge",
+          "down": "greymoor_downs_sunken_barrow"
         },
         "monsters": [
           "greymoor_downs_wolf"
@@ -494,7 +497,8 @@
         ],
         "descends_to": "greymoor_downs_below_the_cairn",
         "directions": {
-          "south": "greymoor_downs_windswept_ridge"
+          "south": "greymoor_downs_windswept_ridge",
+          "down": "greymoor_downs_below_the_cairn"
         },
         "interactables": {
           "the_cairn_itself": {
@@ -573,7 +577,8 @@
         "directions": {
           "north": "crossroads_tavern",
           "west": "the_weeping_well",
-          "south": "stonearch_bridge_far_end"
+          "south": "stonearch_bridge_far_end",
+          "down": "stonearch_bridge_gorge_depths"
         },
         "npcs": [
           "pip_thistledown"
@@ -706,7 +711,8 @@
           }
         },
         "directions": {
-          "east": "stonearch_bridge"
+          "east": "stonearch_bridge",
+          "down": "sunken_root_caverns"
         },
         "grid_position": {
           "x": -1,
@@ -1855,7 +1861,8 @@
         "directions": {
           "west": "goblin_warrens",
           "east": "glimmerdeep_grotto",
-          "north": "sunken_root_caverns_deep_tunnels"
+          "north": "sunken_root_caverns_deep_tunnels",
+          "up": "the_weeping_well"
         },
         "monsters": [
           "goblin",
@@ -1917,7 +1924,8 @@
         "directions": {
           "east": "sunken_root_caverns",
           "north": "goblin_warrens_supply_tunnel",
-          "west": "goblin_warrens_collapsed_tunnel"
+          "west": "goblin_warrens_collapsed_tunnel",
+          "up": "hollow_stump_shrine"
         },
         "ascends_to": "hollow_stump_shrine",
         "npcs": [
@@ -2318,7 +2326,9 @@
           "west": "the_hush_below",
           "north": "the_first_city_outer_ward",
           "east": "the_first_city_spire_reaches",
-          "south": "the_first_city_the_old_archive"
+          "south": "the_first_city_the_old_archive",
+          "down": "the_first_city_sunken_archive",
+          "up": "the_unmoored_isle"
         },
         "monsters": [
           "the_waking_ember"
@@ -2448,7 +2458,8 @@
           "the_first_city_deepest_record"
         ],
         "directions": {
-          "down": "the_first_city_deepest_record"
+          "down": "the_first_city_deepest_record",
+          "up": "the_first_city"
         },
         "ascends_to": "the_first_city",
         "lockables": [
@@ -2562,7 +2573,8 @@
         ],
         "ascends_to": "whispering_wood_bramble_thicket",
         "directions": {
-          "east": "whispering_wood_sunken_den"
+          "east": "whispering_wood_sunken_den",
+          "up": "whispering_wood_bramble_thicket"
         },
         "resource_nodes": [
           {
@@ -2680,7 +2692,7 @@
           }
         },
         "directions": {
-          "up": "greymoor_downs_barrow_depths"
+          "up": "greymoor_downs"
         },
         "story_gates": {
           "greymoor_downs_barrow_depths": {
@@ -2703,7 +2715,8 @@
         ],
         "ascends_to": "stonearch_bridge",
         "directions": {
-          "east": "stonearch_bridge_web_hollow"
+          "east": "stonearch_bridge_web_hollow",
+          "up": "stonearch_bridge"
         },
         "lockables": [
           {
@@ -3304,7 +3317,8 @@
           }
         },
         "directions": {
-          "down": "greymoor_downs_the_unopened_seal"
+          "down": "greymoor_downs_the_unopened_seal",
+          "up": "greymoor_downs_lonely_cairn"
         },
         "story_gates": {
           "greymoor_downs_the_unopened_seal": {
@@ -7505,7 +7519,7 @@
           }
         },
         "directions": {
-          "down": "unmoored_isle_hollow",
+          "down": "the_first_city",
           "north": "unmoored_isle_drifting_threshold",
           "east": "unmoored_isle_the_mirrored_threshold",
           "west": "unmoored_isle_the_radiant_stair"

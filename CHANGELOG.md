@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.647] — fix: dungeon maps could render as a giant, near-blank canvas
+
+Real live incident (Coffee, live, screenshot: "What is going on with
+the map for the sunken archives? Is this correct or intended?").
+Reproduced exactly: The First City's own real 8-floor vertical descent
+chain (Sunken Archive → Deepest Record → ... → The Original Spire)
+sits at grid coordinates far from the main city cluster
+(`scripts/build_location_grid.py` lays out a long `descends_to` chain
+as its own lateral strip, not stacked under the floor above it).
+Sizing the map canvas from every visited room regardless of floor let
+this one chain balloon a single-floor map view into a real, reproduced
+1800×5500 mostly-black canvas with actual content crammed into one
+tiny corner. Fixed in `map_render.py`: the canvas bounding box is now
+scoped to the requested floor's own rooms when a `floor_filter` is
+given.
+
+Root cause underneath that: `the_first_city`'s own connection to the
+Sunken Archive used `descends_to`/`ascends_to` (for real movement) but
+was missing the parallel `directions` up/down entries the floor-
+classification logic actually reads — so it could never be recognized
+as its own floor, no matter how much of the dungeon was explored.
+Audited the whole campaign for the same gap: found and fixed 7 MORE
+real dungeon vertical boundaries with the identical missing entries
+(Goblin Warrens, Greymoor Downs ×2, Stonearch Bridge, Sunken Root
+Caverns, The Unmoored Isle, Whispering Wood). Purely additive —
+movement was never affected, only the map's own floor display.
+
+2 new tests (the exact reproduced scenario, now rendering a small
+correct canvas; a full-campaign structural guard against this gap
+reappearing). Dungeon audit (23 tests) and a 10-test map-render sweep
+re-run clean.
+
 ## [1.27.646] — fix: a real out-of-order arc_8 quest, stuck active since 2026-08-30
 
 Real live incident (Coffee, live: "why is it showing us quests from

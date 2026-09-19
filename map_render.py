@@ -536,9 +536,35 @@ def render_layer_map(
     floor_levels = _floor_levels(layer_locations, visited_set)
     owners = _grid_cell_owners(layer_locations, visited_here)
 
-    if owners:
-        xs = [xy[0] for xy in owners]
-        ys = [xy[1] for xy in owners]
+    # Real bug found live (2026-09-19, Coffee: "what is going on with
+    # the map for the sunken archives?"): a real, deep vertical descent
+    # chain (The First City's own Sunken Archive -> Deepest Record ->
+    # ... -> The Original Spire, 8 real floors) can sit at grid_
+    # position coordinates FAR from the floor actually being viewed --
+    # scripts/build_location_grid.py lays out a long descends_to chain
+    # as its own separate lateral strip, not stacked directly under the
+    # floor above it. Sizing the canvas from EVERY visited room
+    # regardless of floor (the original behavior) let one such chain
+    # balloon a single-floor view into a mostly-black, 70+-row canvas
+    # with real content crammed into one tiny corner. When a real
+    # floor_filter is given, the canvas is now sized from just that
+    # floor's own rooms -- any other-floor room that genuinely DOES
+    # share a cell with one of them (a true directly-stacked multi-
+    # story building) still draws its real dashed-grey marker exactly
+    # as before (the per-cell loop below still reads the full, un-
+    # filtered `owners`), just no longer inflates the canvas for a room
+    # nowhere near the current view.
+    if floor_filter is not None:
+        floor_owners = {
+            xy: ids for xy, ids in owners.items()
+            if any(floor_levels.get(lid, 0) == floor_filter for lid in ids)
+        }
+    else:
+        floor_owners = owners
+
+    if floor_owners:
+        xs = [xy[0] for xy in floor_owners]
+        ys = [xy[1] for xy in floor_owners]
         min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
     else:
         min_x = max_x = min_y = max_y = 0

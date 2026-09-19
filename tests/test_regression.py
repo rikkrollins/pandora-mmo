@@ -35693,6 +35693,74 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(big_image.size[0], map_render._MAX_CANVAS_WIDTH)
         self.assertLessEqual(big_image.size[1], map_render._MAX_CANVAS_HEIGHT)
 
+    def test_render_dungeon_map_floor_filter_scopes_canvas_to_the_requested_floor(self):
+        """
+        Real live incident (2026-09-19, Coffee, live: "what is going on
+        with the map for the sunken archives?"). The First City's own
+        real 8-floor vertical descent chain (Sunken Archive -> Deepest
+        Record -> ... -> The Original Spire) sits at grid_position
+        coordinates FAR from the main city cluster (scripts/build_
+        location_grid.py lays out a long descends_to chain as its own
+        separate lateral strip, not stacked directly under the floor
+        above it). Sizing the canvas from every VISITED room regardless
+        of floor let one such chain balloon a single-floor view into a
+        real, reproduced 1800x5500 mostly-black canvas with real
+        content crammed into one tiny corner -- confirmed by rendering
+        the exact real scenario before fixing anything. Fixed by
+        scoping the bounding box to just the requested floor's own
+        rooms when floor_filter is given.
+        """
+        import io
+        from unittest.mock import patch
+        import map_render
+        from PIL import Image
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        rooms = {rid: r for rid, r in underground.items() if r.get("dungeon_id") == "the_first_city"}
+        # Real live character's own actual visited set at the time of
+        # the report: just the hub and the Sunken Archive one floor
+        # below it -- the minimal case that reproduced the bug.
+        visited = {"the_first_city", "the_first_city_sunken_archive"}
+        floor_filter = map_render.floor_of(rooms, visited, "the_first_city_sunken_archive")
+        self.assertEqual(floor_filter, -1, "Sunken Archive must resolve to a real floor below the city, not share its floor 0")
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_dungeon_map(
+                "the_first_city", "The First City", rooms, visited, set(),
+                "the_first_city_sunken_archive", bot.CAMPAIGN["monsters"], bot.CAMPAIGN["quests"], floor_filter,
+            )
+        image = Image.open(io.BytesIO(png))
+        self.assertLess(image.size[1], 1000, f"expected a small, single-floor canvas, got {image.size}")
+
+    def test_every_real_ascends_descends_pair_has_a_matching_directions_entry(self):
+        """
+        Companion structural guard for the same real incident above --
+        confirmed via a full campaign scan (not just The First City) 7
+        MORE real dungeon vertical boundaries had the identical gap
+        (a real descends_to/ascends_to movement link with no matching
+        directions up/down entry), all fixed in the same pass. Guards
+        against this class of authoring gap reappearing: _floor_levels
+        (map_render.py) only ever reads `directions`, never descends_to/
+        ascends_to directly, so any future dungeon boundary authored
+        with only the latter would silently reproduce this exact bug.
+        """
+        locs: dict = {}
+        for layer_locations in bot.CAMPAIGN["locations"].values():
+            locs.update(layer_locations)
+        missing = []
+        for lid, loc in locs.items():
+            dt = loc.get("descends_to")
+            if dt and dt in locs:
+                if (loc.get("directions") or {}).get("down") != dt:
+                    missing.append((lid, "down", dt))
+                if (locs[dt].get("directions") or {}).get("up") != lid:
+                    missing.append((dt, "up", lid))
+            at = loc.get("ascends_to")
+            if at and at in locs:
+                if (loc.get("directions") or {}).get("up") != at:
+                    missing.append((lid, "up", at))
+                if (locs[at].get("directions") or {}).get("down") != lid:
+                    missing.append((at, "down", lid))
+        self.assertEqual(missing, [], f"real ascends_to/descends_to pairs missing a matching directions entry: {missing}")
+
     def test_grid_cell_owners_reads_real_grid_position(self):
         """The actual placement logic, tested directly against real campaign.json data: a visited location's cell is exactly its own real grid_position, no layout guessing involved."""
         import map_render
