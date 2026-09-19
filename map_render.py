@@ -480,6 +480,7 @@ def render_layer_map(
     title_override: str | None = None,
     exclude_dungeon_interiors: bool = False,
     floor_filter: int | None = None,
+    draw_walls: bool = False,
 ) -> bytes:
     """
     layer_locations: CAMPAIGN["locations"][layer_name] verbatim.
@@ -520,6 +521,23 @@ def render_layer_map(
     this parameter existed -- only real callers that know a location
     has more than one attained floor (bot.py's own available_floors
     check) ever pass a real value.
+
+    draw_walls (2026-09-19, per Coffee: "can u make the dungeons maps
+    follow the same format at the labyrinth map system? i really like
+    how it shows the floors and layout"): when True, each cell's border
+    is drawn with the SAME real per-side wall/doorway logic
+    render_labyrinth_map already uses (_draw_labyrinth_room_walls -- a
+    gap where a real `connections` entry exists, a gate-colored wall
+    where a `locked_connections` entry exists, a plain wall otherwise),
+    plus the same boss/miniboss outline hierarchy, instead of the
+    default flat rectangle. Only render_dungeon_map below ever passes
+    True -- the real overworld map (bot.py's _send_layer_map) never
+    does, so its own output is completely unaffected by this parameter
+    existing. Requires each location to carry a real `grid_position`;
+    any location missing one is silently left out of the wall-adjacency
+    map and keeps the plain rectangle fallback (confirmed live: one
+    real hand-authored dungeon room, greymoor_downs_the_wardens_hollow,
+    has no grid_position).
     """
     monsters = monsters or {}
     quests = quests or {}
@@ -571,7 +589,42 @@ def render_layer_map(
 
     cols = max_x - min_x + 1
     rows = max_y - min_y + 1
-    legend_lines = _build_legend_lines(revealed_here, layer_locations, bool(floor_levels))
+    by_cell: dict[tuple[int, int], str] = {}
+    off_grid_counts: dict[str, int] = {}
+    if draw_walls:
+        for lid, loc in layer_locations.items():
+            gp = loc.get("grid_position")
+            if gp:
+                by_cell[(gp["x"], gp["y"])] = lid
+        # Real gap found via testing (2026-09-19): a hand-authored
+        # dungeon's own grid_position layout (scripts/build_location_
+        # grid.py) isn't guaranteed to keep every real connection's two
+        # endpoints grid-adjacent, unlike the Labyrinth's own generator
+        # (which places connected rooms adjacently by construction,
+        # _assign_grid_positions) -- measured 74-92% adjacency across
+        # the 9 real dungeons. Left alone, a real connection whose
+        # neighbor sits elsewhere on the grid would draw as a false
+        # solid wall on all 4 sides once BOTH ends are visited (the
+        # existing unexplored_counts below only flags a destination
+        # that's not yet visited). Folded into that same "+N" badge
+        # rather than inventing a second one -- same real signal
+        # ("there's more real passage here than these 4 walls show"),
+        # just no longer blind to the both-visited case.
+        for lid, loc in layer_locations.items():
+            gp = loc.get("grid_position")
+            if not gp:
+                continue
+            neighbor_ids = set(loc.get("connections", [])) | set(loc.get("locked_connections", {}).keys())
+            adjacent_ids = {
+                by_cell.get((gp["x"] + dx, gp["y"] + dy))
+                for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0))
+            }
+            off_grid = len(neighbor_ids - adjacent_ids)
+            if off_grid:
+                off_grid_counts[lid] = off_grid
+    legend_lines = _build_legend_lines(revealed_here, layer_locations, bool(floor_levels), draw_walls=draw_walls)
+    if draw_walls and off_grid_counts:
+        legend_lines.append("gold +N can also count a real passage this floor's walls don't show (it leads off this grid)")
     if floor_filter is not None:
         legend_lines.append("dashed grey = a real room here, on another floor you've reached")
     legend_row_count = len(legend_lines) + 1  # +1 for the icon-swatch line, drawn separately
@@ -614,14 +667,16 @@ def render_layer_map(
                     continue
                 cell_ids = on_floor
             primary = _pick_primary(cell_ids, floor_levels, current_location_id)
+            badge_count = unexplored_counts.get(primary, 0) + off_grid_counts.get(primary, 0)
             _draw_cell(
                 draw, image, layer_name, primary, layer_locations[primary], px, py,
                 is_current=(current_location_id in cell_ids),
                 name_font=name_font, badge_font=badge_font,
-                unexplored=unexplored_counts.get(primary),
+                unexplored=badge_count or None,
                 floor_level=floor_levels.get(primary),
                 stacked_levels=sorted({floor_levels.get(lid, 0) for lid in cell_ids} - {floor_levels.get(primary, 0)}),
                 icons=_location_icons(layer_locations[primary], monsters, quests, primary, layer_locations),
+                draw_walls=draw_walls, position=(x, y), by_cell=by_cell, all_locations=layer_locations,
             )
 
     legend_font = _load_font(13)
@@ -652,12 +707,37 @@ def _draw_icon_legend_line(draw: ImageDraw.ImageDraw, x: int, y: int, font: Imag
         cursor_x += bbox[2] - bbox[0]
 
 
-def _build_legend_lines(revealed_here: list[str], layer_locations: dict, has_floor_badges: bool) -> list[str]:
+def _build_legend_lines(revealed_here: list[str], layer_locations: dict, has_floor_badges: bool, draw_walls: bool = False) -> list[str]:
     lines = [
         "red outline = you are here  •  gold +N = unexplored paths",
     ]
     if has_floor_badges:
         lines.append("blue F/B = floor above/below the entry point")
+    if draw_walls:
+        # Same real per-gate-kind visual identity as render_labyrinth_map's
+        # own legend (see _draw_labyrinth_room_walls/_labyrinth_locked_door_
+        # color) -- only a kind actually present on this dungeon's real
+        # rooms gets a line, never a generic catch-all.
+        lines.append("gap in the wall = a real doorway, solid wall = no connection")
+        all_lockables = [lk for loc in layer_locations.values() for lk in loc.get("lockables", [])]
+        if any(lk.get("requires_key_item") for lk in all_lockables):
+            lines.append("amber wall = a key-gated door")
+        if any(lk.get("requires_rune_item") for lk in all_lockables):
+            lines.append("violet wall = a rune-gated doorway")
+        if any(lk.get("kind") == "pressure_plate" for lk in all_lockables):
+            lines.append("tan wall = a real pressure-plate gate")
+        if any(
+            loc.get("locked_connections") and not any(
+                lk.get("requires_key_item") or lk.get("requires_rune_item") or lk.get("kind") == "pressure_plate"
+                for lk in loc.get("lockables", [])
+            )
+            for loc in layer_locations.values()
+        ):
+            lines.append("gold wall = a locked/gated connection")
+        if any(loc.get("is_boss_room") for loc in layer_locations.values()):
+            lines.append("thick red double border = a real boss room")
+        if any(loc.get("is_miniboss_room") for loc in layer_locations.values()):
+            lines.append("thick purple border = a real mini-boss room")
     if revealed_here:
         shown = revealed_here[:_MAX_REVEALED_IN_LEGEND]
         revealed_names = ", ".join(layer_locations[loc_id]["name"] for loc_id in shown)
@@ -676,6 +756,8 @@ def _draw_cell(
     is_current: bool, name_font: ImageFont.FreeTypeFont, badge_font: ImageFont.FreeTypeFont,
     unexplored: int | None, floor_level: int | None,
     stacked_levels: list[int], icons: list[str],
+    draw_walls: bool = False, position: tuple[int, int] | None = None,
+    by_cell: dict | None = None, all_locations: dict | None = None,
 ) -> None:
     tile = _fetch_location_tile(layer_name, loc_id, location)
     if tile is not None:
@@ -685,9 +767,35 @@ def _draw_cell(
     else:
         draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], fill=(60, 55, 48))
 
-    outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
-    width = 4 if is_current else 2
-    draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=outline, width=width)
+    # Real per-side wall/doorway rendering (2026-09-19, per Coffee: "can
+    # u make the dungeons maps follow the same format at the labyrinth
+    # map system") -- only active when the caller (render_dungeon_map)
+    # opts in via draw_walls AND this location actually has a real grid
+    # position registered in by_cell; falls back to the original plain
+    # rectangle otherwise (the overworld map never sets draw_walls, so
+    # its own output is byte-for-byte unchanged).
+    if draw_walls and position is not None and by_cell is not None and position in by_cell:
+        is_boss_room = bool(location.get("is_boss_room"))
+        is_miniboss_room = bool(location.get("is_miniboss_room"))
+        if is_current:
+            outline, width = _CELL_OUTLINE_CURRENT, 4
+        elif is_boss_room:
+            outline, width = _BOSS_ROOM_OUTLINE, 5
+        elif is_miniboss_room:
+            outline, width = _MINIBOSS_ROOM_OUTLINE, 3
+        else:
+            outline, width = _CELL_OUTLINE, 2
+        _draw_labyrinth_room_walls(draw, px, py, CELL_SIZE, loc_id, all_locations, position, by_cell, outline, width)
+        if is_boss_room and not is_current:
+            inset = width + 3
+            draw.rectangle(
+                [px + inset, py + inset, px + CELL_SIZE - inset, py + CELL_SIZE - inset],
+                outline=_BOSS_ROOM_ACCENT, width=2,
+            )
+    else:
+        outline = _CELL_OUTLINE_CURRENT if is_current else _CELL_OUTLINE
+        width = 4 if is_current else 2
+        draw.rectangle([px, py, px + CELL_SIZE, py + CELL_SIZE], outline=outline, width=width)
 
     label = _fit_label_to_width(draw, location["name"], name_font, CELL_SIZE - 8)
     label_bbox = draw.textbbox((0, 0), label, font=name_font)
@@ -745,11 +853,20 @@ def render_dungeon_map(
     layers by the caller -- a dungeon can span more than one real layer
     (Stonearch Gorge: surface + underground), and location ids are
     globally unique so a plain merge is safe. Reuses render_layer_map's
-    exact grid/fog-of-war/floor-badge/icon pipeline unchanged -- a
-    dungeon's own local grid_position coordinates only need to be
-    collision-free among each other (confirmed for all 8 real dungeons),
-    not against the rest of that dungeon's real layer, which is exactly
-    what scoping the render to just this dungeon's rooms buys.
+    exact grid/fog-of-war/floor-badge/icon pipeline -- a dungeon's own
+    local grid_position coordinates only need to be collision-free
+    among each other (confirmed for all 9 real dungeons), not against
+    the rest of that dungeon's real layer, which is exactly what
+    scoping the render to just this dungeon's rooms buys.
+
+    Always passes draw_walls=True (2026-09-19, per Coffee: "can u make
+    the dungeons maps follow the same format at the labyrinth map
+    system? i really like how it shows the floors and layout") -- every
+    dungeon map now draws real per-side walls/doorways and a boss/
+    miniboss border hierarchy off this dungeon's own real connections/
+    locked_connections/lockables data, the same way render_labyrinth_map
+    always has. The overworld's own _send_layer_map never sets this, so
+    its map is unaffected.
 
     floor_filter: see render_layer_map's own docstring -- bot.py's
     _send_dungeon_map only ever passes a real value once it's confirmed
@@ -759,6 +876,7 @@ def render_dungeon_map(
     return render_layer_map(
         dungeon_id, dungeon_locations, visited_ids, revealed_ids, current_location_id,
         monsters=monsters, quests=quests, title_override=f"MAP — {display_name}", floor_filter=floor_filter,
+        draw_walls=True,
     )
 
 

@@ -2,6 +2,48 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.652] — feature: dungeon maps now draw real walls/doorways like the Labyrinth
+
+Real request (Coffee: "can u make the dungeons maps follow the same
+format at the labyrinth map system? i really like how it shows the
+floors and layout"). `render_dungeon_map` drew every room as one
+uniform rectangle regardless of its real `connections`/`locked_
+connections` data — a dungeon map showed *that* rooms existed, never
+*how* they actually connect. It now reuses `render_labyrinth_map`'s
+own real per-side wall renderer (`_draw_labyrinth_room_walls`,
+already generic — only reads `connections`/`locked_connections`/
+`lockables`): a gap in the wall where a real open connection exists, a
+gate-colored wall (amber key/violet rune/tan pressure-plate/gold
+generic) where a locked one does, a plain solid wall otherwise. Also
+ported the same boss/miniboss border hierarchy (thick gold double
+border / thick purple) and a matching conditional legend. The
+overworld's own map (`_send_layer_map`) never opts into this — a new
+`draw_walls` parameter on `render_layer_map`, off by default, only
+ever set by `render_dungeon_map` — confirmed byte-identical before/
+after for the overworld path.
+
+Two real things found and fixed via testing, not assumed:
+- **A wiring bug that silently no-op'd the whole feature at first**:
+  the opt-in check was `loc_id in by_cell` — `by_cell` is keyed by
+  `(x, y)` grid tuples, so a location id string could never match,
+  and every cell silently fell back to the old plain rectangle. Fixed
+  to `position in by_cell`; pinned by a new pixel-level regression
+  test asserting a real doorway gap actually renders.
+- **Hand-authored dungeons' grid layout doesn't guarantee every real
+  connection is grid-adjacent** (unlike the Labyrinth's own generator,
+  which places connected rooms adjacently by construction) — measured
+  74-92% adjacency across the 9 real dungeons. Left alone, a real
+  connection to an already-visited, non-adjacent room would draw as a
+  false solid wall on all sides. Folded into the existing "+N"
+  unexplored-paths badge instead of inventing a second indicator — it
+  now also counts a real connection the walls can't show, regardless
+  of whether the destination's been visited yet.
+
+5 new regression tests (real doorway gap vs. solid wall by direct
+pixel sampling, the off-grid badge, the missing-`grid_position` room
+fallback, the boss-border flag path, and the overworld byte-identity
+guarantee). Existing 26 map-render tests re-run clean.
+
 ## [1.27.651] — tune: evolved dungeons now match the Labyrinth's own real density
 
 Real request (Coffee: "use this info to TUNE the generator", after

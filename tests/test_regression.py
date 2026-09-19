@@ -36153,6 +36153,141 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         image = Image.open(io.BytesIO(png))
         self.assertEqual(image.format, "PNG")
 
+    def test_render_dungeon_map_draws_a_real_doorway_gap_only_where_a_connection_exists(self):
+        """
+        Real live request (2026-09-19, per Coffee: "can u make the
+        dungeons maps follow the same format at the labyrinth map
+        system? i really like how it shows the floors and layout") --
+        render_dungeon_map now reuses render_labyrinth_map's own real
+        per-side wall renderer (_draw_labyrinth_room_walls) instead of a
+        plain uniform rectangle. This directly caught a real wiring bug
+        during testing: the opt-in check was `loc_id in by_cell` (a
+        dict keyed by (x, y) tuples -- a location id string can never
+        be a key of it, so the check was always False and walls never
+        actually drew in the full render, only in an isolated direct
+        call). Fixed to `position in by_cell`. This test pins the fix:
+        a real, grid-adjacent open connection (goblin_warrens_the_old_
+        seam <-> goblin_warrens_the_forgotten_bore, both at y=0, x=-4/
+        -5) must show a real gap (the flat fallback fill color, since
+        the tile fetch is mocked out) at the middle of their shared
+        edge, while a real, grid-adjacent pair with NO connection
+        (goblin_warrens_the_second_stash at (-1,5) <-> goblin_warrens_
+        grasks_old_cage at (-1,6)) must show a solid wall there instead.
+        """
+        from unittest.mock import patch
+        import map_render
+        dungeon_locations = bot._dungeon_locations("goblin_warrens")
+        visited = set(dungeon_locations.keys())
+        xs = [loc["grid_position"]["x"] for loc in dungeon_locations.values() if loc.get("grid_position")]
+        ys = [loc["grid_position"]["y"] for loc in dungeon_locations.values() if loc.get("grid_position")]
+        min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+        grid_top = map_render._MARGIN + map_render._TITLE_HEIGHT
+
+        def cell_px_py(loc_id):
+            gp = dungeon_locations[loc_id]["grid_position"]
+            gx = gp["x"] - min_x
+            gy = max_y - gp["y"]
+            return map_render._MARGIN + gx * map_render.CELL_SIZE, grid_top + gy * map_render.CELL_SIZE
+
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_dungeon_map(
+                "goblin_warrens", "Goblin Warrens", dungeon_locations, visited, set(),
+                "goblin_warrens_the_old_seam",
+            )
+        from PIL import Image
+        import io
+        image = Image.open(io.BytesIO(png)).convert("RGB")
+
+        # Shared WEST edge of the_old_seam (-4, 0) / east edge of
+        # the_forgotten_bore (-5, 0) -- a real open connection.
+        seam_px, seam_py = cell_px_py("goblin_warrens_the_old_seam")
+        connected_edge_pixel = image.getpixel((seam_px + 1, seam_py + map_render.CELL_SIZE // 2))
+        self.assertEqual(
+            connected_edge_pixel, (60, 55, 48),
+            "a real open connection must leave a real gap (the flat fallback fill), not a solid wall",
+        )
+
+        # Shared NORTH/SOUTH edge of the_second_stash (-1, 5) / grasks_
+        # old_cage (-1, 6) -- grid-adjacent but genuinely NOT connected.
+        stash_px, stash_py = cell_px_py("goblin_warrens_the_second_stash")
+        unconnected_edge_pixel = image.getpixel((stash_px + map_render.CELL_SIZE // 2, stash_py + 1))
+        self.assertNotEqual(
+            unconnected_edge_pixel, (60, 55, 48),
+            "two grid-adjacent rooms with no real connection must draw a solid wall, not a gap",
+        )
+
+    def test_render_dungeon_map_flags_a_real_connection_the_walls_dont_show(self):
+        """
+        A hand-authored dungeon's grid_position layout (scripts/build_
+        location_grid.py) isn't guaranteed to keep every real connection
+        grid-adjacent (measured 74-92% adjacency across the 9 real
+        dungeons this session) -- unlike the Labyrinth's own generator,
+        which places connected rooms adjacently by construction. Left
+        alone, a real connection to an already-visited, non-adjacent
+        room would draw as a false solid wall on all 4 sides once both
+        ends are visited. goblin_warrens_the_old_seam's real key-gated
+        connection to goblin_warrens_the_deep_stash (x=4, y=-10) is a
+        real example -- nowhere near grid-adjacent -- so it must still
+        surface via the existing "+N" unexplored/off-grid badge instead
+        of silently vanishing.
+        """
+        from unittest.mock import patch
+        import map_render
+        import inspect
+        source = inspect.getsource(map_render.render_layer_map)
+        self.assertIn("off_grid_counts", source)
+        dungeon_locations = bot._dungeon_locations("goblin_warrens")
+        visited = set(dungeon_locations.keys())
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_dungeon_map(
+                "goblin_warrens", "Goblin Warrens", dungeon_locations, visited, set(),
+                "goblin_warrens_the_old_seam",
+            )
+        self.assertGreater(len(png), 0)
+
+    def test_render_dungeon_map_draw_walls_never_crashes_on_a_room_missing_grid_position(self):
+        """Real live data gap found via this session's own audit: greymoor_downs_the_wardens_hollow has dungeon_id/connections but no grid_position at all -- the new wall-drawing's by_cell lookup must skip it (plain-rectangle fallback), never crash the whole render."""
+        from unittest.mock import patch
+        import map_render
+        dungeon_locations = bot._dungeon_locations("greymoor_downs")
+        self.assertIsNone(dungeon_locations["greymoor_downs_the_wardens_hollow"].get("grid_position"))
+        visited = set(dungeon_locations.keys())
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_dungeon_map(
+                "greymoor_downs", "Greymoor Downs", dungeon_locations, visited, set(),
+                "greymoor_downs_the_wardens_hollow",
+            )
+        self.assertGreater(len(png), 0)
+
+    def test_render_dungeon_map_boss_room_border_fires_for_a_real_flagged_room(self):
+        """wrathflame_vault_evolved is the one real dungeon with real is_boss_room/is_miniboss_room flags (set by rules/dungeon_evolve.py) -- confirms the new boss/miniboss border hierarchy (ported from render_labyrinth_map) actually reads them instead of silently never firing."""
+        from unittest.mock import patch
+        import map_render
+        dungeon_locations = bot._dungeon_locations("wrathflame_vault_evolved")
+        self.assertTrue(any(loc.get("is_boss_room") for loc in dungeon_locations.values()))
+        visited = set(dungeon_locations.keys())
+        current = next(iter(dungeon_locations))
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_dungeon_map(
+                "wrathflame_vault_evolved", "Wrathflame Vault", dungeon_locations, visited, set(), current,
+            )
+        self.assertGreater(len(png), 0)
+
+    def test_render_layer_map_overworld_output_is_unaffected_by_draw_walls_default(self):
+        """The overworld's own _send_layer_map call site never passes draw_walls -- this pins that the default (False) produces byte-identical output to explicitly passing False, so the new dungeon-only wall rendering can never leak into the world map."""
+        import hashlib
+        from unittest.mock import patch
+        import map_render
+        layer_locations = bot.CAMPAIGN["locations"]["surface"]
+        visited = set(list(layer_locations.keys())[:15])
+        current = next(iter(visited))
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png_default = map_render.render_layer_map("surface", layer_locations, visited, set(), current)
+            png_explicit_false = map_render.render_layer_map(
+                "surface", layer_locations, visited, set(), current, draw_walls=False,
+            )
+        self.assertEqual(hashlib.sha256(png_default).hexdigest(), hashlib.sha256(png_explicit_false).hexdigest())
+
     async def test_visual_map_inside_a_dungeon_renders_the_dungeon_scoped_map_not_the_whole_layer(self):
         from unittest.mock import patch
         import sessions
