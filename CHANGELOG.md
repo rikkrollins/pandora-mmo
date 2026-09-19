@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.651] — tune: evolved dungeons now match the Labyrinth's own real density
+
+Real request (Coffee: "use this info to TUNE the generator", after
+directly measuring the Labyrinth's own real maze density across 111
+real floor/seed samples spanning floors 1-100 — median 0.273
+junctions/room and ~5.68 real cycles per floor, the exact design just
+praised). `dungeon_evolve.py`'s own minimum guarantee (v1.27.636) was
+a real, measured under-shoot against that reference: a flat 1-per-8
+junction floor and a flat "cycles >= 1 regardless of size" ceiling —
+confirmed live, the one real shipped output (Wrathflame Vault
+Evolved) sat at exactly the old minimum on both axes, zero headroom.
+
+Raised `_MIN_JUNCTIONS_ROOM_DIVISOR` from 8 to 5 (0.125 → 0.20
+junctions/room) and added a new, room-scaled `_MIN_CYCLES_ROOM_DIVISOR`
+(12) replacing the old flat floor of 1 — doesn't copy the Labyrinth's
+own ratios verbatim (evolved dungeons are much smaller, 13-40 rooms
+vs. a full floor's 30-270+), but raises both bars by a comparable,
+real step.
+
+Found and fixed a real, separate bug surfaced by the new, more
+aggressive tuning shifting downstream RNG draws for a seed that had
+never hit it before: the collapse-puzzle seal mechanic never checked
+whether its own target edge had already been converted into a
+`locked_connections` gate by the independent mid-branch-gate
+mechanic — an edge could end up simultaneously locked (never open at
+all) and "sealed" (meant to close only after being open), which
+`bot._do_move` resolves as permanently blocked. Now skipped (not
+forced) when the edge isn't still a genuine open connection, same
+precedent as the earlier warp/echo-shortcut collision fix (v1.27.636).
+
+Verified directly: 120 real `evolve_dungeon` runs across 3 source
+dungeons at the new, higher bar — 0 runtime failures, 0 audit
+failures, 0 density under-shoots. 2 new tests (the new collision
+guard, and the density test updated to the new scaled cycle
+threshold). Full `DungeonEvolveTests` (71 tests) + `DungeonAuditTests`
+(23 tests) re-run clean.
+
 ## [1.27.650] — content: a real uploaded animation for The Deepest Record's attack
 
 Real request (Coffee, dev-bridge): sent a real GIF and asked to use

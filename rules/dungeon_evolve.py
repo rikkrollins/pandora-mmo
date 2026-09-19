@@ -190,7 +190,26 @@ _LOOP_BACK_MAX_EDGES = 3
 # wiggle/wing-forks are deliberately NOT ported alongside it. No
 # floor/depth concept exists here to scale off (unlike the Labyrinth's
 # `floor // 15`) -- scaled off real room count instead.
-_MIN_JUNCTIONS_ROOM_DIVISOR = 8
+#
+# Re-tuned (2026-09-19, per Coffee: "use this info to TUNE the
+# generator", after directly measuring the Labyrinth's own real
+# density across 111 real floor/seed samples spanning floors 1-100 --
+# median 0.273 junctions/room and ~5.68 real cycles per floor, the
+# exact design Coffee had just praised living in). The original divisor
+# (8, i.e. 0.125 junctions/room) and flat "cycles >= 1 regardless of
+# size" floor were both real, measured under-shoots against that
+# reference -- confirmed live, Wrathflame Vault Evolved (the one real
+# shipped output) landed at EXACTLY the old minimum on both axes (2
+# junctions needed 2, 2 cycles needed 1), zero headroom. Evolved
+# dungeons are much smaller than a full Labyrinth floor (13-40 rooms
+# here vs. 30-270+ there), so this doesn't copy the Labyrinth's own
+# ratios verbatim -- it raises both bars by a comparable, real step
+# instead: junctions from 1-per-8 to 1-per-5 rooms, and cycles from a
+# flat 1 to a real, room-scaled 1-per-12 (still floors at 1 for the
+# smallest evolved dungeons, same as before, but now actually grows
+# for a larger one instead of staying flat forever).
+_MIN_JUNCTIONS_ROOM_DIVISOR = 5
+_MIN_CYCLES_ROOM_DIVISOR = 12
 _MAZE_ENFORCEMENT_MAX_ITERATIONS = 12
 _PERPENDICULAR_DIRECTIONS = {
     "north": ("east", "west"), "south": ("east", "west"),
@@ -974,6 +993,28 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
         seal_branch = rng.choice(seal_eligible)
         seal_leaf = seal_branch["tail_id"]
         seal_parent = hub_id if seal_branch["next_step"] <= 1 else f"{new_dungeon_id}_b{seal_branch['idx']}_r{seal_branch['next_step'] - 2}"
+        _, seal_parent_room = _find_room(campaign, seal_parent)
+    else:
+        seal_parent_room = None
+    # Real bug found via testing (2026-09-19, exposed by the density-
+    # tuning pass shifting downstream RNG draws for a seed that had
+    # never hit this before): the mid-branch gate mechanic above can
+    # ALREADY have converted this exact seal_parent -> seal_leaf edge
+    # from a plain `connections` entry into a `locked_connections` one
+    # (nothing here previously excluded that branch, only the whole-
+    # hub-locked branches above). collapsing_connections is documented
+    # as "the inverse of locked_connections, starts open," but nothing
+    # verified that precondition before this fix, so a real player
+    # could hit an edge that's simultaneously locked (never open at
+    # all) AND "sealed" (meant to close after being open) --
+    # bot._do_move resolves that as permanently blocked, not the
+    # intended "open, then a real trade-off closes it" contract.
+    # Skipped (not retried) when the edge isn't a genuine open
+    # connection, same "skip rather than force" precedent as the
+    # warp/echo-shortcut collision fix (v1.27.636).
+    if seal_parent_room is not None and seal_leaf not in seal_parent_room.get("connections", []):
+        seal_parent_room = None
+    if seal_parent_room is not None:
         # Real regression found and fixed shipping the mid-branch gate/
         # key-mesh mechanics (2026-09-06): those can ALSO place a real
         # switch at a branch root, and this block runs after them --
@@ -998,7 +1039,6 @@ def _generate_once(campaign: dict, source_hub_id: str, source_layer: str, new_du
                 "id": trigger_switch_id, "kind": "switch", "name": f"a shuddering {element} crystal", "element": element,
             })
             trigger_id = f"{new_dungeon_id}_collapse_trigger"
-            _, seal_parent_room = _find_room(campaign, seal_parent)
             seal_parent_room.setdefault("lockables", []).append({
                 "id": trigger_id, "kind": "multi_switch_gate", "name": "a real structural trigger",
                 "requires": [trigger_switch_id],
@@ -1401,7 +1441,8 @@ def _enforce_minimum_maze_density(
         # fresh every iteration to actually track the dungeon's real
         # final size, not its size at the moment enforcement started.
         min_junctions = max(1, len(room_ids) // _MIN_JUNCTIONS_ROOM_DIVISOR)
-        if junctions >= min_junctions and cycles >= 1:
+        min_cycles = max(1, len(room_ids) // _MIN_CYCLES_ROOM_DIVISOR)
+        if junctions >= min_junctions and cycles >= min_cycles:
             return
         excluded = _rooms_shadowed_by_a_real_gate(rooms, hub_id, entrance_id)
         by_cell = {

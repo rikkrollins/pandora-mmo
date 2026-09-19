@@ -40145,11 +40145,15 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
                 rooms = {rid: dungeon_evolve._find_room(campaign, rid)[1] for rid in room_ids}
                 junctions, cycles = dungeon_evolve._junction_and_cycle_counts(rooms, summary["hub_id"])
                 min_junctions = max(1, len(room_ids) // dungeon_evolve._MIN_JUNCTIONS_ROOM_DIVISOR)
+                min_cycles = max(1, len(room_ids) // dungeon_evolve._MIN_CYCLES_ROOM_DIVISOR)
                 self.assertGreaterEqual(
                     junctions, min_junctions,
                     f"{source_id} seed {seed}: only {junctions} real junctions, needed {min_junctions} ({len(room_ids)} rooms)",
                 )
-                self.assertGreaterEqual(cycles, 1, f"{source_id} seed {seed}: zero real cycles -- still just a tree, not a maze")
+                self.assertGreaterEqual(
+                    cycles, min_cycles,
+                    f"{source_id} seed {seed}: only {cycles} real cycles, needed {min_cycles} ({len(room_ids)} rooms) -- still too tree-like",
+                )
 
     def test_evolve_dungeon_maze_density_enforcement_never_breaks_the_real_audit(self):
         """
@@ -40486,6 +40490,41 @@ class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_move(FakeUpdate(user_id, "", sink), "go to untouched reach")
             self.assertFalse(any("Enemies bar the other paths" in s for s in sink))
             self.assertEqual(db.get_character(user_id, -999)["current_location"], "fx_trash_far")
+
+    def test_evolve_dungeon_collapse_seal_never_targets_an_already_locked_edge(self):
+        """
+        Real bug found via testing (2026-09-19, exposed by the density-
+        tuning pass -- see _MIN_JUNCTIONS_ROOM_DIVISOR's own comment --
+        shifting downstream RNG draws for goblin_warrens seed=0, which
+        had never hit this before): the mid-branch gate mechanic can
+        convert a plain seal_parent -> seal_leaf edge into a
+        locked_connections one before the collapse-puzzle mechanic
+        (which runs later) ever checks it -- collapsing_connections is
+        documented as "the inverse of locked_connections, starts open,"
+        but nothing verified that before this fix, so an edge could end
+        up simultaneously locked (never open at all) and "sealed"
+        (meant to close only after being open), which bot._do_move
+        resolves as permanently blocked. General guard, not just the
+        one seed that first caught it: scans real generated output
+        across many seeds for any collapsing_connections target that's
+        ALSO a locked_connections entry on the same source room.
+        """
+        import copy
+        sources = [("goblin_warrens", "underground"), ("sunken_root_caverns", "underground"), ("stonearch_bridge", "surface")]
+        checked = 0
+        for source_id, layer in sources:
+            for seed in range(40):
+                campaign = copy.deepcopy(bot.CAMPAIGN)
+                rng = random.Random(seed)
+                new_id = f"{source_id}_collapse_lock_collision_{seed}"
+                dungeon_evolve.evolve_dungeon(campaign, source_id, new_id, layer, rebirth_gate=1, rng=rng)
+                rooms = dungeon_audit._dungeon_rooms(campaign, new_id)
+                for rid, r in rooms.items():
+                    for dest in r.get("collapsing_connections", {}):
+                        checked += 1
+                        self.assertIn(dest, r.get("connections", []), f"{source_id} seed {seed}: {rid} -> {dest} is sealed but not a real open connection")
+                        self.assertNotIn(dest, r.get("locked_connections", {}), f"{source_id} seed {seed}: {rid} -> {dest} is both sealed AND already locked")
+        self.assertGreater(checked, 0, "expected at least one real collapsing_connections entry across 120 real seeds to actually check")
 
     async def test_evolve_dungeon_collapse_trigger_blocks_then_opens_the_shortcut_end_to_end(self):
         """
