@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.646] — fix: a real out-of-order arc_8 quest, stuck active since 2026-08-30
+
+Real live incident (Coffee, live: "why is it showing us quests from
+chapter 12 when we arent even in chapter 12" / "WE ARE CHAPTER 3!!!").
+`_meets_quest_current_arc_requirement` (added 2026-08-30, specifically
+for `borins_blackthorn_warning` — an arc_8/Greymoor Downs quest gating
+Kess's real entry point) only ever gates a quest at OFFER time.
+Confirmed live: one real character accepted this quest at the exact
+timestamp the gate shipped (2026-08-30T01:19:54) and has been sitting
+on a genuine endgame quest ever since while actually on arc_3 — the
+gate itself already correctly refuses to re-offer it today, proving
+the check works; only the already-accepted data was never
+retroactively corrected.
+
+Added `db._backfill_premature_current_arc_quests`, a one-time,
+idempotent backfill (same shape as the existing
+`_backfill_cleared_location_gates`) called from `init_db()`. Not
+hardcoded to this one quest — scans every real `requires_current_arc`
+quest against every character's own real current arc, so any future
+quest of this same shape self-heals the same way.
+
+2 new tests (removes a real out-of-order quest; leaves a genuinely
+valid one alone). Verified directly against a full copy of the live
+database before applying: exactly one real row affected, idempotent
+on a second run, no other character or quest touched.
+
 ## [1.27.645] — fix: quest-critical items could be permanently, unrecoverably lost
 
 Found proactively (Coffee: "keep looking for gaps"), continuing the

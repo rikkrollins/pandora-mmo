@@ -28506,6 +28506,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn("sunken_root_caverns", db.get_character(no_proof_id, -999)["cleared_locations"])
 
+    def test_premature_current_arc_quest_backfill_removes_a_real_out_of_order_quest(self):
+        """
+        Real live incident (2026-09-19, Coffee, live: "why is it
+        showing us quests from chapter 12 when we arent even in
+        chapter 12"). bot.py's _meets_quest_current_arc_requirement
+        (added 2026-08-30, for borins_blackthorn_warning -- an arc_8/
+        Greymoor Downs quest, Kess's real entry point) only ever gates
+        a quest at OFFER time -- confirmed live, a real character who
+        accepted it in the exact window before the gate shipped kept
+        it active forever afterward, with the gate itself correctly
+        refusing to re-offer it (proving the gate works; only the
+        already-accepted data needed a retroactive fix).
+        """
+        user_id = make_basic_character(900704, "OutOfOrderQuestTester")["telegram_user_id"]
+        db.update_character(
+            user_id, -999,
+            completed_quests=["welcome_to_the_crossroads"],  # nowhere near arc_8
+            active_quests={"borins_blackthorn_warning": {"accepted_at": "2026-08-30T01:19:54.600707+00:00"}},
+        )
+
+        db.init_db()
+
+        self.assertNotIn("borins_blackthorn_warning", db.get_character(user_id, -999)["active_quests"])
+
+    def test_premature_current_arc_quest_backfill_leaves_a_real_valid_quest_alone(self):
+        """Companion regression guard: a character genuinely IN the required arc must keep the quest."""
+        user_id = make_basic_character(900705, "ValidCurrentArcQuestTester")["telegram_user_id"]
+        all_earlier_quests = [
+            qid for arc in list(bot.CAMPAIGN["story_arcs"].values())[:7] for qid in arc.get("quests", [])
+        ]
+        db.update_character(
+            user_id, -999,
+            completed_quests=all_earlier_quests,  # every arc through arc_7 done -> current arc is really arc_8
+            active_quests={"borins_blackthorn_warning": {"accepted_at": "2026-09-19T00:00:00+00:00"}},
+        )
+
+        db.init_db()
+
+        self.assertIn("borins_blackthorn_warning", db.get_character(user_id, -999)["active_quests"])
+
     # -- Real player-driven ASI level-up (2026-07-16, per Coffee) -------
     def test_level_up_phrasing_classified_correctly(self):
         for text in ("level up", "I want to level up", "Level up!"):

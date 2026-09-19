@@ -437,6 +437,71 @@ def _backfill_cleared_location_gates(conn) -> None:
         )
 
 
+def _backfill_premature_current_arc_quests(conn) -> None:
+    """
+    Real live incident (2026-09-19, Coffee, live: "why is it showing us
+    quests from chapter 12 when we arent even in chapter 12... WE ARE
+    CHAPTER 3"). bot.py's _meets_quest_current_arc_requirement (added
+    2026-08-30, specifically for borins_blackthorn_warning -- Kess's
+    real entry point, an arc_8/Greymoor Downs quest gated so it can't
+    be reached before arc_8 is actually current) only ever gates a
+    quest at OFFER time. It was never re-validated against a quest
+    already sitting in a character's own active_quests, so anyone who
+    happened to accept it in the exact window before this gate went
+    live kept a real, permanently out-of-order endgame quest.
+
+    Confirmed via direct live query, not assumed: exactly 2 real
+    characters (both accepted borins_blackthorn_warning at the
+    identical timestamp, 2026-08-30T01:19:54 -- the moment this whole
+    quest/gate pair shipped) are still sitting on arc_3 with this
+    arc_8 quest active, and bot.py's own gate function ALREADY
+    correctly rejects re-offering it to them today -- proving the gate
+    itself works, and only this one retroactive cleanup was missing.
+
+    Generalized rather than hardcoded to this one quest id -- scans
+    every real requires_current_arc quest against every character's
+    own real current arc (same "earliest arc with an incomplete
+    quest" rule as bot.py's _current_story_arc), so any future quest
+    with this same shape self-heals the same way if it's ever raced
+    the same way again. One-time, idempotent (naturally a no-op once
+    applied): never touches a quest that's actually valid for its
+    holder.
+    """
+    campaign = campaign_loader.load_campaign(config.ACTIVE_CAMPAIGN)
+    arcs = campaign.get("story_arcs", {})
+    quest_to_arc: dict[str, str] = {}
+    for arc_id, arc in arcs.items():
+        for qid in arc.get("quests", []):
+            quest_to_arc.setdefault(qid, arc_id)
+    gated_quest_ids = {
+        qid for qid, q in campaign.get("quests", {}).items() if q.get("requires_current_arc")
+    }
+    if not gated_quest_ids:
+        return
+
+    for row in conn.execute("SELECT character_id, completed_quests, active_quests FROM characters").fetchall():
+        active = json.loads(row["active_quests"])
+        active_gated = gated_quest_ids & set(active.keys())
+        if not active_gated:
+            continue
+        completed = set(json.loads(row["completed_quests"]))
+        current_arc_id = next(
+            (arc_id for arc_id, arc in arcs.items() if not set(arc.get("quests", [])).issubset(completed)),
+            None,
+        )
+        removed = False
+        for qid in active_gated:
+            required_arc_id = quest_to_arc.get(qid)
+            if required_arc_id is not None and required_arc_id != current_arc_id:
+                del active[qid]
+                removed = True
+        if removed:
+            conn.execute(
+                "UPDATE characters SET active_quests = ? WHERE character_id = ?",
+                (json.dumps(active), row["character_id"]),
+            )
+
+
 def init_db() -> None:
     """
     Create tables if they don't already exist. If an OLDER schema is
@@ -1236,6 +1301,9 @@ def init_db() -> None:
         # fight that didn't happen, only credits characters who already
         # have real, downstream proof.
         _backfill_cleared_location_gates(conn)
+        # One-time, idempotent (see the function's own docstring for
+        # the full real live incident this fixes, 2026-09-19).
+        _backfill_premature_current_arc_quests(conn)
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
