@@ -5511,10 +5511,18 @@ def _item_actions_keyboard(item_id: str, character: dict | None = None) -> Inlin
     # own "market" action before assuming it needed the same fix.
     can_sell = item is not None and items_module.is_sellable(item_id)
     is_equipped = character is not None and db.is_item_equipped(character, item_id)
+    # Real gap found continuing the same audit (2026-09-19, Coffee:
+    # "keep looking for gaps"): List on Market/Give were deliberately
+    # left open for a price-0 item (see the comment just above) but
+    # that never separately considered quest_item -- a category that
+    # can be genuinely load-bearing for story progression (e.g.
+    # shard_of_dim_light gates the_unmoored_isle via a real, live
+    # requires_item check). See items.is_quest_item.
+    is_quest_item = item is not None and items_module.is_quest_item(item_id)
     buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]] if can_equip else []
     if can_reforge:
         buttons.append([InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")])
-    if not is_equipped:
+    if not is_equipped and not is_quest_item:
         if can_sell:
             buttons.append([InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")])
         buttons.extend([
@@ -5807,6 +5815,8 @@ def _trade_item_picker_keyboard(trade_id: str, mode: str, character: dict, side:
             continue
         if mode == "add" and db.is_item_equipped(character, item_id):
             continue
+        if mode == "add" and items_module.is_quest_item(item_id):
+            continue
         item = items_module.get_item(item_id)
         name = item["name"] if item else item_id
         buttons.append([InlineKeyboardButton(f"{name} (have {qty})", callback_data=f"trade|{trade_id}|pick|{mode}|{item_id}")])
@@ -6028,6 +6038,18 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
             # accept -- a real dupe window, not just a dead-end button.
             if db.is_item_equipped(character, item_id):
                 changed_lines.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before trading it away.")
+                continue
+            # Real gap found continuing the same audit (2026-09-19,
+            # Coffee: "keep looking for gaps"): a quest_item can be
+            # genuinely load-bearing for story progression (e.g.
+            # shard_of_dim_light gates the_unmoored_isle via a real,
+            # live requires_item check) -- trading one away could
+            # permanently, unrecoverably lock a player out of that
+            # content. See items.is_quest_item's own docstring for why
+            # this can't just reuse is_sellable (that also excludes
+            # ordinary price-0 loot, which should stay tradeable).
+            if items_module.is_quest_item(item_id):
+                changed_lines.append(f"The {item_name} is important for something you're still working on — it can't be traded away.")
                 continue
             removed, _ = db.remove_item(telegram_user_id, chat_id, item_id, quantity)
             if not removed:
@@ -19437,6 +19459,20 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
+    # Real gap found continuing the same audit (2026-09-19, Coffee:
+    # "keep looking for gaps"): a quest_item can be genuinely load-
+    # bearing for story progression (e.g. shard_of_dim_light gates
+    # the_unmoored_isle via a real, live requires_item check) --
+    # listing one on the market could permanently, unrecoverably lock
+    # a player out of that content. Deliberately NOT reusing
+    # is_sellable here (that also excludes ordinary price-0 loot,
+    # which should stay marketable) -- see items.is_quest_item.
+    if items_module.is_quest_item(item_id):
+        await update.effective_chat.send_message(
+            f"The {item_name} is important for something you're still working on — it can't be listed on the market.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
     removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, quantity)
     if not removed:
         return
@@ -23074,6 +23110,7 @@ def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
         [InlineKeyboardButton(f"🤝 Give {items_module.get_item(i)['name']}", callback_data=f"give|pick|{i}")]
         for i, qty in character["inventory"].items()
         if qty > 0 and items_module.get_item(i) and not db.is_item_equipped(character, i)
+        and not items_module.is_quest_item(i)
     ]
     return InlineKeyboardMarkup(buttons) if buttons else None
 
@@ -28060,6 +28097,15 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if db.is_item_equipped(character, item_id):
             await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before listing it on the market.")
             return
+        # Real gap found continuing the same audit (2026-09-19, Coffee:
+        # "keep looking for gaps"): a quest_item can be genuinely load-
+        # bearing for story progression (e.g. shard_of_dim_light gates
+        # the_unmoored_isle via a real, live requires_item check) --
+        # listing one here could permanently, unrecoverably lock a
+        # player out of that content. See items.is_quest_item.
+        if items_module.is_quest_item(item_id):
+            await _safe_send(update, f"The {item['name']} is important for something you're still working on — it can't be listed on the market.")
+            return
         price = max(int(item.get("price", 0) * 1.5), 1)
         removed, _updated = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
         if not removed:
@@ -28084,6 +28130,11 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         if db.is_item_equipped(character, item_id):
             await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before giving it away.")
             return
+        # Real gap found continuing the same audit (2026-09-19, Coffee:
+        # "keep looking for gaps") -- see items.is_quest_item.
+        if items_module.is_quest_item(item_id):
+            await _safe_send(update, f"The {item['name']} is important for something you're still working on — it can't be given away.")
+            return
         candidates = [
             p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
             if p["telegram_user_id"] != character["telegram_user_id"]
@@ -28102,6 +28153,9 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         if db.is_item_equipped(character, item_id):
             await _safe_send(update, f"You're wearing/wielding the {item['name']} — unequip or swap it out before giving it away.")
+            return
+        if items_module.is_quest_item(item_id):
+            await _safe_send(update, f"The {item['name']} is important for something you're still working on — it can't be given away.")
             return
         recipient_id = int(parts[3])
         removed, _updated = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
@@ -31369,6 +31423,11 @@ async def _do_give_item(update: Update, text: str) -> None:
         if db.is_item_equipped(character, item_id):
             given.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before giving it away.")
             continue
+        # Real gap found continuing the same audit (2026-09-19, Coffee:
+        # "keep looking for gaps") -- see items.is_quest_item.
+        if items_module.is_quest_item(item_id):
+            given.append(f"The {item_name} is important for something you're still working on — it can't be given away.")
+            continue
         removed, _ = db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, quantity)
         if not removed:
             have = character["inventory"].get(item_id, 0)
@@ -32734,6 +32793,7 @@ def _market_sell_picker_keyboard(character: dict) -> InlineKeyboardMarkup | None
         )]
         for item_id, qty in character["inventory"].items()
         if qty > 0 and items_module.get_item(item_id) and not db.is_item_equipped(character, item_id)
+        and not items_module.is_quest_item(item_id)
     ]
     return InlineKeyboardMarkup(buttons) if buttons else None
 

@@ -19289,6 +19289,128 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("wearing/wielding" in s for s in sink), sink)
         self.assertEqual(db.get_character(996134, -999)["inventory"].get("longsword"), 1)  # never destroyed
 
+    def test_is_quest_item_unit_coverage(self):
+        """Direct unit coverage of items.is_quest_item -- a real quest_item, a real ordinary item, and an unknown id."""
+        self.assertTrue(items_module.is_quest_item("shard_of_dim_light"))
+        self.assertFalse(items_module.is_quest_item("longsword"))
+        self.assertFalse(items_module.is_quest_item("not_a_real_item_id"))
+
+    async def test_do_give_item_rejects_a_quest_item(self):
+        """
+        Real gap found continuing the equipped-item audit (2026-09-19,
+        Coffee: "keep looking for gaps"): shard_of_dim_light is a real,
+        one-time, non-repeatable quest reward (the_wrong_color) that
+        the_unmoored_isle's own real requires_item gate checks for LIVE
+        at every attempt -- giving it away would permanently and
+        unrecoverably lock the giver out of that content, with no way
+        to get another. Unlike an equipped item, this needed a whole
+        new category of check (items.is_quest_item), not the existing
+        equip-status one.
+        """
+        giver_id, recipient_id = 996136, 996137
+        make_basic_character(giver_id, "QuestItemGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "QuestItemRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "shard_of_dim_light", 1)
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give my shard of dim light to QuestItemRecipient", sink), "give my shard of dim light to QuestItemRecipient")
+        self.assertTrue(any("still working on" in s for s in sink), sink)
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get("shard_of_dim_light"), 1)  # never left the giver
+        self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get("shard_of_dim_light", 0), 0)
+
+    async def test_do_sell_market_rejects_a_quest_item(self):
+        """Same real gap, the player-to-player market listing path."""
+        make_basic_character(996138, "QuestItemMarketSeller", current_location="crossroads_tavern")
+        db.add_item(996138, -999, "shard_of_dim_light", 1)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(996138, "", sink), ["1", "50", "shard of dim light"])
+        self.assertTrue(any("still working on" in s for s in sink), sink)
+        character = db.get_character(996138, -999)
+        self.assertEqual(character["inventory"].get("shard_of_dim_light"), 1)  # never removed
+        self.assertFalse(
+            [l for l in db.get_market_listings(-999) if l["seller_id"] == 996138 and l["item_id"] == "shard_of_dim_light"]
+        )
+
+    async def test_mutate_trade_offer_rejects_a_quest_item(self):
+        """Same real gap, the player-to-player trade path."""
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 996139, 996140
+        make_basic_character(a_id, "QuestItemTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "QuestItemTraderB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "shard_of_dim_light", 1)
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with QuestItemTraderB", sink), "trade with QuestItemTraderB")
+        sink.clear()
+        await bot._do_trade_add(FakeUpdate(a_id, "add my shard of dim light to the trade", sink), "add my shard of dim light to the trade")
+        self.assertTrue(any("still working on" in s for s in sink), sink)
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("shard_of_dim_light"), 1)  # never left the offerer
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["items"].get("shard_of_dim_light", 0), 0)  # never entered the offer
+        await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
+
+    async def test_itemview_callback_give_and_market_actions_reject_a_quest_item(self):
+        """Same real gap, the two SEPARATE itemview_callback implementations (give/giveto, market) -- neither reuses the real handlers above."""
+        giver_id, recipient_id = 996141, 996142
+        make_basic_character(giver_id, "ItemViewQuestGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "ItemViewQuestRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "shard_of_dim_light", 2)
+
+        sink1 = []
+        update1 = FakeCallbackUpdate(giver_id, "itemview|giveto|shard_of_dim_light|" + str(recipient_id), sink1)
+        await bot.itemview_callback(update1, DummyContext())
+        self.assertTrue(any("still working on" in s for s in sink1), sink1)
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get("shard_of_dim_light"), 2)  # never removed
+
+        sink2 = []
+        update2 = FakeCallbackUpdate(giver_id, "itemview|market|shard_of_dim_light", sink2)
+        await bot.itemview_callback(update2, DummyContext())
+        self.assertTrue(any("still working on" in s for s in sink2), sink2)
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get("shard_of_dim_light"), 2)  # still never removed
+        self.assertFalse(
+            [l for l in db.get_market_listings(-999) if l["seller_id"] == giver_id and l["item_id"] == "shard_of_dim_light"]
+        )
+
+    def test_quest_item_hidden_from_every_transfer_picker(self):
+        """
+        Button-visibility half of the same fix: _item_actions_keyboard,
+        _give_item_keyboard, _market_sell_picker_keyboard, and
+        _trade_item_picker_keyboard's "add" mode must all hide a
+        quest_item, matching the equipped-item precedent -- never
+        advertise an option guaranteed to refuse.
+        """
+        character = {
+            "equipped_weapon": None, "equipped_offhand_weapon": None, "equipped_armor": None,
+            "equipped_shield": None, "equipped_accessories": [],
+            "inventory": {"shard_of_dim_light": 1, "rusty_dagger": 1}, "gold": 0,
+            "current_location": "crossroads_tavern", "chat_id": -999, "telegram_user_id": 1,
+        }
+        item_labels = [btn.text for row in bot._item_actions_keyboard("shard_of_dim_light", character).inline_keyboard for btn in row]
+        self.assertFalse(any("Market" in label for label in item_labels), item_labels)
+        self.assertFalse(any("Give" in label for label in item_labels), item_labels)
+
+        market_keyboard = bot._market_sell_picker_keyboard(character)
+        market_labels = [btn.text for row in (market_keyboard.inline_keyboard if market_keyboard else []) for btn in row]
+        self.assertFalse(any("dim light" in label.lower() for label in market_labels), market_labels)
+
+        side = {"items": {}, "gold": 0}
+        trade_keyboard = bot._trade_item_picker_keyboard("trade1", "add", character, side)
+        trade_labels = [btn.text for row in trade_keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("dim light" in label.lower() for label in trade_labels), trade_labels)
+
+    def test_give_item_keyboard_hides_a_quest_item(self):
+        """_give_item_keyboard needs a real DB-backed party member present to build any buttons at all, unlike the raw-dict pickers above."""
+        giver_id, other_id = 996143, 996144
+        make_basic_character(giver_id, "GiveMenuQuestOwner", current_location="crossroads_tavern")
+        make_basic_character(other_id, "GiveMenuQuestOther", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "shard_of_dim_light", 1)
+        db.add_item(giver_id, -999, "rusty_dagger", 1)
+        character = db.get_character(giver_id, -999)
+        keyboard = bot._give_item_keyboard(character)
+        labels = [btn.text for row in keyboard.inline_keyboard for btn in row]
+        self.assertFalse(any("dim light" in label.lower() for label in labels), labels)
+        self.assertTrue(any("dagger" in label.lower() for label in labels), labels)
+
     async def test_forge_and_enchant_still_work_on_a_currently_equipped_item(self):
         """Explicit regression guard per Coffee's own words: 'we can reforge and enchant them tho' -- equip status must never block these two."""
         from unittest.mock import patch

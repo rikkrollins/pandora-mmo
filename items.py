@@ -1330,6 +1330,28 @@ def equipped_ability_bonus(character: dict, ability: str) -> int:
     return total
 
 
+def is_quest_item(item_id: str) -> bool:
+    """
+    Real gap found continuing the equipped-item transfer audit
+    (2026-09-19, Coffee: "keep looking for gaps"): a quest_item can be
+    genuinely load-bearing for story progression -- e.g.
+    shard_of_dim_light, a one-time, non-repeatable quest reward
+    (the_wrong_color) that a location's own real requires_item gate
+    (the_unmoored_isle) checks for LIVE, at every attempt, not just
+    once at pickup. Giving one away, market-listing it, or trading it
+    off would permanently and unrecoverably lock a player out of that
+    content. is_sellable() already excludes quest_item from the shop
+    path, but that check ALSO excludes every ordinary price-0 loot
+    item (Ring of Protection, etc.), which genuinely SHOULD stay
+    giveable/tradeable/marketable by design (see _item_actions_
+    keyboard's own comment on List on Market) -- so give/market/trade
+    need this narrower, quest_item-only check instead of reusing
+    is_sellable.
+    """
+    item = get_item(item_id)
+    return item is not None and item.get("type") == "quest_item"
+
+
 def is_sellable(item_id: str) -> bool:
     """
     Real live bug (2026-08-02, caught investigating a Development-topic

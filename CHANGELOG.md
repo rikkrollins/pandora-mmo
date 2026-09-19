@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.645] — fix: quest-critical items could be permanently, unrecoverably lost
+
+Found proactively (Coffee: "keep looking for gaps"), continuing the
+equipped-item transfer audit (v1.27.631/639/640) into a new, more
+severe category. `shard_of_dim_light` is a real, one-time,
+non-repeatable quest reward (`the_wrong_color`) that `the_unmoored_
+isle`'s own real `requires_item` gate checks for LIVE at every entry
+attempt, not just once at pickup. Giving it away, listing it on the
+market, or trading it off — all previously allowed — would have
+permanently and unrecoverably locked a player out of that entire
+story zone, with no way to ever get another. `items.is_sellable`
+already excluded `quest_item` type from the NPC shop path, but
+nothing else did; this is the first bug in this whole audit that
+risked permanent story-progression loss rather than an economic
+exploit or a dead-end button.
+
+Added `items.is_quest_item` (deliberately separate from
+`is_sellable`, which also excludes ordinary price-0 loot that SHOULD
+stay giveable/tradeable/marketable by design) and applied it
+everywhere an item can leave a character's hands: `_do_give_item`,
+`_do_sell_market`, `_mutate_trade_offer`'s "adding" branch, and the
+two SEPARATE `itemview_callback` implementations (`give`/`giveto`,
+`market`) that don't reuse those handlers. Hid the option before it's
+ever tapped in `_item_actions_keyboard`, `_give_item_keyboard`,
+`_market_sell_picker_keyboard`, and `_trade_item_picker_keyboard`'s
+"add" mode.
+
+8 new tests (unit coverage, all 4 real-handler rejections, both
+itemview_callback actions, and every picker's button-visibility);
+broader 93-test sweep across market/give/trade/itemview tests re-run
+clean.
+
 ## [1.27.644] — test-only: fix the last 2 flagged pre-existing battle-menu test failures
 
 Closes out the remaining backlog from this "keep looking for gaps"
