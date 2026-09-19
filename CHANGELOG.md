@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.649] — fix: a real, total dead-end trap in The First City
+
+Real live incident (Coffee, live, screenshots: "I'm stuck in this
+location. I have no way to leave." / "Remove this location and make
+sure it's not available until chapter 12... We end up locked and
+cant leave."). This was a genuine, unrecoverable soft-lock, not a
+display bug.
+
+**The Forgotten Depth**'s only real exit (down to the Wordless Choir
+Gate) was story-gated behind `the_verge_wardens_toll` — a quest whose
+own trigger (defeating The Verge Warden) lives entirely inside Hollow
+Verge, a completely different, unrelated dungeon with no path back
+into this one. The room's own real boss, The Unrepeating (level 20,
+4630 HP), already had a real, correctly-anchored quest for exactly
+this fight — `the_unrepeating_depth`, "What Finally Speaks" — the
+gate was just pointed at the wrong quest id entirely. Anyone who
+entered had no way to ever satisfy the actual gate and no other exit
+at all.
+
+No character was found still trapped there at the time of the fix
+(confirmed via direct live query) — whoever hit this had already
+recovered some other way. Fixed by pointing the gate at the real,
+locally-completable quest. Verified end-to-end via the actual game
+logic: blocked before defeating the boss, open immediately after.
+
+Audited the whole campaign for the same shape (a genuine dead end —
+every exit gated — behind a quest anchored in a totally unrelated
+zone): confirmed this was the only real instance. Added a permanent
+structural regression test guarding against this exact class of
+authoring bug reappearing anywhere in the campaign. Full
+`DungeonAuditTests` (23 tests) re-run clean.
+
 ## [1.27.648] — feat: "check quests" now tells you where to go when nothing is active
 
 Real live gap, found directly from a live conversation (Coffee: "How

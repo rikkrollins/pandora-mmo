@@ -35795,6 +35795,67 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                     missing.append((at, "down", lid))
         self.assertEqual(missing, [], f"real ascends_to/descends_to pairs missing a matching directions entry: {missing}")
 
+    def test_no_real_dead_end_room_is_gated_behind_an_unrelated_zones_quest(self):
+        """
+        Real, live, total soft-lock (2026-09-19, Coffee, live screenshots
+        + "I'm stuck in this location. I have no way to leave."):
+        the_first_city_forgotten_depth's only real exit (wordless_choir_
+        gate) was gated behind the_verge_wardens_toll -- a quest whose
+        own trigger (defeat the_verge_warden) lives entirely inside
+        Hollow Verge, a completely different, unrelated dungeon with no
+        path back into The First City's own archive/spire shaft. A
+        player who entered this room (the room's OWN monster, the_
+        unrepeating, is real, local, boss-tier content -- clearly meant
+        to be the actual requirement) had no way to ever satisfy the
+        gate and no other exit at all -- a genuine, unrecoverable trap.
+        The real fix pointed the gate at the_unrepeating_depth, the
+        quest actually anchored to defeating the_unrepeating in this
+        exact room. Corrected via id-prefix "zone" grouping rather than
+        dungeon_id (confirmed some real rooms, including this one,
+        don't carry dungeon_id at all -- a zone-tag gap in its own
+        right, not fixed here since it's not what caused the trap).
+
+        General structural guard, not hardcoded to this one room: flags
+        any real location where EVERY exit is story-gated (a genuine
+        dead end with zero free way out) and at least one of those
+        gates requires a quest anchored in a totally different zone.
+        """
+        locs: dict = {}
+        for layer_locations in bot.CAMPAIGN["locations"].values():
+            locs.update(layer_locations)
+        quests = bot.CAMPAIGN["quests"]
+        all_ids = set(locs.keys())
+        zone_roots = sorted(lid for lid in all_ids if not any(other != lid and lid.startswith(other + "_") for other in all_ids))
+
+        def zone_of(loc_id: str) -> str:
+            matches = [z for z in zone_roots if loc_id == z or loc_id.startswith(z + "_")]
+            return max(matches, key=len) if matches else loc_id
+
+        suspicious = []
+        for lid, loc in locs.items():
+            all_exits = set(loc.get("connections", []))
+            if loc.get("ascends_to"):
+                all_exits.add(loc["ascends_to"])
+            if loc.get("descends_to"):
+                all_exits.add(loc["descends_to"])
+            if not all_exits:
+                continue
+            gates = loc.get("story_gates", {})
+            ungated_exits = [e for e in all_exits if e not in gates or not gates[e].get("requires_completed_quest")]
+            if ungated_exits:
+                continue  # a real free way out exists -- not a dead end at all
+            for target, gate in gates.items():
+                qid = gate.get("requires_completed_quest")
+                if not qid:
+                    continue
+                quest = quests.get(qid, {})
+                quest_loc = quest.get("location") or quest.get("trigger", {}).get("location")
+                if not quest_loc or quest_loc not in locs:
+                    continue
+                if zone_of(lid) != zone_of(quest_loc):
+                    suspicious.append((lid, target, qid))
+        self.assertEqual(suspicious, [], f"real dead-end room(s) gated behind an unrelated zone's quest: {suspicious}")
+
     def test_grid_cell_owners_reads_real_grid_position(self):
         """The actual placement logic, tested directly against real campaign.json data: a visited location's cell is exactly its own real grid_position, no layout guessing involved."""
         import map_render

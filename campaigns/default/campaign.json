@@ -2560,7 +2560,7 @@
         },
         "story_gates": {
           "wordless_choir_gate": {
-            "requires_completed_quest": "the_verge_wardens_toll"
+            "requires_completed_quest": "the_unrepeating_depth"
           }
         }
       },
