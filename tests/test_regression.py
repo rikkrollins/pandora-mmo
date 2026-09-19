@@ -2895,6 +2895,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character(a_id, -999)
         self.assertEqual(after["inventory"].get("healing_potion", 0), 5)
 
+        # Real test-hygiene fix (2026-09-19, found continuing the "keep
+        # looking for gaps" audit): unlike every other test in this
+        # cluster, this one never resolved its own trade (no accept/
+        # cancel), leaving it lingering in the shared module-level
+        # _ACTIVE_TRADES/_USER_ACTIVE_TRADE dicts. This user id pair
+        # (951011/951012) is deliberately reused later in this same
+        # file (same pattern as every other pair here) by
+        # test_trade_times_out_and_refunds_both_sides, which silently
+        # inherited this leftover open trade and its 5 held potions --
+        # confirmed via git stash to be a real, pre-existing, batch-
+        # only failure (passes alone, fails once both tests run
+        # together). Cleaned up here rather than reassigning ids,
+        # matching how every sibling test in this cluster already
+        # properly resolves its own trade before finishing.
+        await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
+
     async def test_trade_button_flow_add_and_remove_gold(self):
         """Same button flow, for gold -- percentage-based amounts since gold totals vary wildly across characters."""
         import sessions

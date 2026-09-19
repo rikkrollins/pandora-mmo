@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.643] — test-only: fix a real batch-only trade test failure
+
+Picks up the second confirmed pre-existing failure flagged (not
+fixed) earlier in this "keep looking for gaps" pass:
+`test_trade_times_out_and_refunds_both_sides` failed ("6 != 1") only
+when run alongside `test_trade_button_flow_add_item_pick_quantity` —
+both deliberately reuse the same user-id pair (951011/951012, matching
+every other test in this trade cluster, which reuses each pair
+exactly twice). Root cause: unlike every sibling test in the cluster,
+the button-flow test never resolved its own trade (no accept/cancel)
+before finishing, leaving it open in the shared module-level
+`_ACTIVE_TRADES`/`_USER_ACTIVE_TRADE` dicts — the later test reusing
+the same ids silently inherited the leftover open trade and its 5
+held potions. Fixed by having the button-flow test cancel its own
+trade at the end, matching how every other test in the cluster
+already behaves, rather than reassigning ids. Full 17-test trade
+sweep re-run clean. Test-only; no production code touched, no
+redeploy needed.
+
 ## [1.27.642] — test-only: fix a stale NPC-location test (`the_silent_bookkeeper`)
 
 Found continuing the "keep looking for gaps" audit, picking up a
