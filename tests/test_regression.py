@@ -8124,9 +8124,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(chest["loot"])
 
     def test_new_goblin_warrens_npc_is_real_and_non_recruitable(self):
+        """
+        Real stale-test fix (2026-09-19, found continuing the "keep
+        looking for gaps" audit): this test predates the 2026-09-10
+        Kess-threading pass that moved the_silent_bookkeeper from
+        Buried Threshold to the Ledger Vault (see test_silent_
+        bookkeeper_now_registered_at_the_ledger_vault's own comment,
+        right below, for the real reason -- her original room had
+        nothing to do with the ledger-vault quest that names her) and
+        was never updated, so it's been failing on a stale room id ever
+        since. Corrected to match the now-real location.
+        """
         npc = bot.CAMPAIGN["npcs"]["the_silent_bookkeeper"]
         self.assertFalse(npc.get("recruitable"))
-        self.assertIn("the_silent_bookkeeper", cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_buried_threshold")["npcs"])
+        self.assertIn("the_silent_bookkeeper", cl.get_location(bot.CAMPAIGN, "goblin_warrens_the_ledger_vault")["npcs"])
 
     # -- Chapter 6 expansion, Phase 4 (2026-08-30): Sunken Root Caverns
     #    grows from 7 real rooms/4 quests to 32 rooms/10 quests, and

@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.642] — test-only: fix a stale NPC-location test (`the_silent_bookkeeper`)
+
+Found continuing the "keep looking for gaps" audit, picking up a
+confirmed pre-existing failure flagged (not fixed) in v1.27.641's own
+CHANGELOG entry. `test_new_goblin_warrens_npc_is_real_and_non_
+recruitable` predates the 2026-09-10 Kess-threading pass that moved
+`the_silent_bookkeeper` from Buried Threshold to the Ledger Vault
+(her original room had nothing to do with the ledger-vault quest
+that names her; a dedicated, later test — `test_silent_bookkeeper_
+now_registered_at_the_ledger_vault` — already covers the corrected
+real location) and was simply never updated. Corrected the stale room
+id. Test-only; no production code touched, no redeploy needed.
+
 ## [1.27.641] — fix: The Sunken Root Caverns' real arc_6 content was reachable early
 
 Real dev-bridge report (Coffee, screenshot): "This is a dungeon later
