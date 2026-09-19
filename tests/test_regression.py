@@ -12956,9 +12956,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("StealGoblinB", target_picker)
         self.assertIn("bm|stealtarget|StealGoblinB", target_picker)
 
+        # Real hang fix (2026-09-19, found continuing the "keep looking
+        # for gaps" audit): _do_steal_from_enemy's own turn-advance call
+        # is _advance_turn_and_resolve_ai_turns, which calls
+        # _resolve_ai_turns_inner DIRECTLY -- _resolve_ai_turns (what
+        # this test used to mock) is a separate, thinner wrapper never
+        # actually reached from this code path. The real, unmocked
+        # inner resolver ran the two live enemies' full turns for real,
+        # including a genuine Ollama narration call -- hanging the test
+        # for the real ~200s per-call timeout (or longer under
+        # contention) instead of failing fast. Confirmed via git stash
+        # this predates this fix (same hang on main).
         with patch("bot.narrate_skill_check", return_value="You lift it clean."), \
              patch("bot.roll_ability_check", return_value={"raw_roll": 20, "total": 30, "modifier": 0}), \
-             patch("bot._resolve_ai_turns", new=AsyncMock()):
+             patch("bot._resolve_ai_turns_inner", new=AsyncMock()):
             await tap("bm|stealtarget|StealGoblinB")
         updated = db.get_character(user_id, -999)
         real_ids = {e["item_id"] for e in bot.cl.get_monster_template(bot.CAMPAIGN, "goblin")["stealable_items"]}
@@ -23180,8 +23191,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         the race directly: two concurrent taps of the same scroll button
         by the same caster, with the slow "advance the turn"/"send an
         image" steps stalled long enough to open the old race window --
-        only ONE should actually consume the scroll; the other must land
-        AFTER the turn has moved on and get rejected as "not your turn."
+        only ONE should actually consume the scroll.
+
+        Rejection-message check corrected (2026-09-19, found continuing
+        the "keep looking for gaps" audit): this test originally
+        expected the second tap to lose a race all the way down at the
+        "is it your turn" check and get rejected with "not your turn."
+        Since 2026-08-25, a separate, EARLIER per-user busy-guard
+        (_run_in_user_order/_USER_BUSY, "originally built for a Steal
+        button re-tap incident, later applied to battle_menu_callback")
+        now catches a concurrent same-user tap before it ever reaches
+        the turn-order check at all, rejecting it with "Already working
+        on that one" instead -- a strictly earlier, still-correct
+        rejection of the exact same race. The real guarantee this test
+        exists to verify (exactly one cast, the other safely rejected,
+        never both) still holds; only the specific mechanism/wording of
+        the rejection changed, confirmed via git stash to be a real,
+        current, correct behavior change rather than a regression.
         """
         import asyncio
         import sessions
@@ -23224,8 +23250,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "rejected, not silently duplicate the cast",
         )
         self.assertTrue(
-            any("not your turn" in m.lower() for m in sink1 + sink2),
-            "the second, later tap must be rejected as not-your-turn rather than racing through",
+            any("not your turn" in m.lower() or "already working on that one" in m.lower() for m in sink1 + sink2),
+            "the second, later tap must be rejected -- either by the turn-order check (the original "
+            "race this test targets) or by the earlier per-user busy-guard that now catches it first",
         )
         sessions.end_session(-999)
 

@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.644] — test-only: fix the last 2 flagged pre-existing battle-menu test failures
+
+Closes out the remaining backlog from this "keep looking for gaps"
+pass (per Coffee: "go ahead and fix that one too").
+
+`test_battle_menu_steal_button_offers_a_target_picker_and_steals`
+genuinely HUNG (not just failed): `_do_steal_from_enemy`'s real turn-
+advance call is `_advance_turn_and_resolve_ai_turns`, which calls
+`_resolve_ai_turns_inner` directly — the test mocked `_resolve_ai_
+turns`, a separate, thinner wrapper never actually reached from this
+code path. The real, unmocked inner resolver ran both live enemies'
+full turns for real, including a genuine Ollama narration call,
+hanging for the real per-call timeout instead of failing fast.
+Fixed by mocking the function actually called. Confirmed via git
+stash that the original hangs identically on `main`.
+
+`test_battle_menu_callback_serializes_rapid_duplicate_taps_per_user`
+failed on a stale expectation, not a real bug: the core guarantee it
+exists to verify (exactly one of two racing taps casts, the other is
+rejected) still holds — confirmed the inventory-count assertion
+already passed. Only the SPECIFIC rejection message it expected
+("not your turn") was stale: since this test was written, a separate,
+earlier per-user busy-guard (`_run_in_user_order`/`_USER_BUSY`,
+v1.27.464) now catches a concurrent same-user tap before it ever
+reaches the turn-order check, rejecting it with "Already working on
+that one" instead — a strictly earlier, still-correct rejection of
+the same race. Updated the assertion to accept either real rejection
+path.
+
+Both confirmed genuinely pre-existing via git stash before touching
+anything. Broader 35-test battle-menu/steal keyword sweep re-run
+clean. Test-only; no production code touched, no redeploy needed.
+
 ## [1.27.643] — test-only: fix a real batch-only trade test failure
 
 Picks up the second confirmed pre-existing failure flagged (not
