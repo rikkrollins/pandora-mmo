@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.648] — feat: "check quests" now tells you where to go when nothing is active
+
+Real live gap, found directly from a live conversation (Coffee: "How
+were we supposed to know" — a party genuinely stuck in a real,
+reachable room whose own quest was correctly withheld by arc order,
+with no signal anywhere they'd naturally look for one). Checked
+honestly: `bot._next_step_hint_facts` already existed for exactly
+this ("what's next, and where"), but was only ever surfaced via the
+separate "Story So Far" screen or an AI companion's own ambient
+dialogue — never the quest journal itself, the one screen a stuck
+player actually checks first. `/hint` doesn't help either — it's
+scoped to the character's current room, not "where should I actually
+be."
+
+`_do_check_quests` now shows a real "🧭 Next" section (or "🌀 Next: A
+Riddle" for puzzle quests) whenever the character's current story arc
+has nothing already active — the real next quest's name, location,
+and its own non-spoiler clue, using the exact same grounded facts
+Story So Far already shows. No AI narration call added — this screen
+was already fully deterministic, and stays that way. Never shown when
+a real current-arc quest is already listed above it, and never fires
+once the whole 8-arc story is complete.
+
+2 new tests (the hint appears when nothing is active; it's correctly
+omitted once a real quest is). Broader 10-test check_quests sweep
+re-run clean.
+
 ## [1.27.647] — fix: dungeon maps could render as a giant, near-blank canvas
 
 Real live incident (Coffee, live, screenshot: "What is going on with

@@ -19152,6 +19152,39 @@ async def _do_check_quests(update: Update) -> None:
     else:
         lines.append("\nNo active story quests.")
 
+    # Real live gap found continuing the same audit (2026-09-19, Coffee,
+    # live: "how were we supposed to know" -- a party genuinely stuck
+    # deep in a real, reachable room whose own quest was correctly
+    # withheld by arc order, with no signal anywhere they'd naturally
+    # look). _next_step_hint_facts already existed for exactly this,
+    # but was only ever surfaced via the separate Story So Far screen
+    # and an AI companion's own ambient dialogue -- never here, the one
+    # screen a stuck player actually checks first. Shown only when the
+    # character's current arc has nothing already active (checked by
+    # real arc membership via _story_arc_for_quest, not a fragile
+    # title-string match) -- an already-active arc quest is already
+    # listed above, and this never fires once the whole 8-arc story is
+    # done (current_arc is None then, same as _next_step_hint_facts
+    # itself). Deterministic, no AI narration call, matching this
+    # screen's own existing all-instant style -- the exact same real,
+    # already-non-spoiling clue text Story So Far/companion dialogue
+    # already show verbatim.
+    has_active_current_arc_quest = current_arc is not None and any(
+        (info := _story_arc_for_quest(qid)) and info[0] == current_arc[0]
+        for qid in character["active_quests"]
+    )
+    if not has_active_current_arc_quest:
+        next_step = _next_step_hint_facts(character)
+        if next_step:
+            header = "🌀 **Next: A Riddle**" if next_step["is_puzzle"] else "🧭 **Next**"
+            lines.append(f"\n{header}")
+            if next_step.get("quest_name"):
+                lines.append(f"• {next_step['quest_name']}")
+            if next_step.get("location_name"):
+                lines.append(f"Head to: {next_step['location_name']}")
+            if next_step.get("clue"):
+                lines.append(f"Clue: {next_step['clue']}")
+
     if character["completed_quests"]:
         titles = [CAMPAIGN["quests"][q]["title"] for q in character["completed_quests"] if q in CAMPAIGN["quests"]]
         lines.append(f"\n**Completed ({len(titles)}):** {', '.join(titles)}")

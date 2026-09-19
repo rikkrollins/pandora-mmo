@@ -1746,6 +1746,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_check_quests(FakeUpdate(user_id, "check my quests", sink))
         self.assertTrue(any("Discovery" in msg for msg in sink))
 
+    async def test_check_quests_shows_a_next_step_hint_when_nothing_is_active(self):
+        """
+        Real live gap (2026-09-19, Coffee, live: "how were we supposed
+        to know" -- a party genuinely stuck in a real, reachable room
+        whose own quest was correctly withheld by arc order, with no
+        signal anywhere they'd naturally look for one). _next_step_
+        hint_facts already existed for exactly this, but was only ever
+        surfaced via the separate Story So Far screen or an AI
+        companion's own ambient dialogue -- never the quest journal
+        itself, the one screen a stuck player actually checks first.
+        """
+        use_test_db("tests/tmp/check_quests_next_step_test.db")
+        user_id = 888910
+        make_basic_character(user_id, "StuckOnChapter1", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_check_quests(FakeUpdate(user_id, "check my quests", sink))
+        combined = "\n".join(sink)
+        self.assertIn("No active story quests.", combined)
+        self.assertIn("Next", combined)
+        self.assertIn("A Favor for Grimsby", combined)
+        self.assertIn("The Crossroads Tavern", combined)
+
+    async def test_check_quests_omits_the_next_step_hint_once_a_real_current_arc_quest_is_active(self):
+        """Companion regression guard: no redundant 'Next' section once the character already has a real, active current-arc quest (already listed above it)."""
+        use_test_db("tests/tmp/check_quests_next_step_test2.db")
+        user_id = 888911
+        make_basic_character(user_id, "ActivelyQuesting", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, active_quests={"welcome_to_the_crossroads": {"accepted_at": "2026-09-19T00:00:00+00:00"}})
+        sink = []
+        await bot._do_check_quests(FakeUpdate(user_id, "check my quests", sink))
+        combined = "\n".join(sink)
+        self.assertIn("A Favor for Grimsby", combined)  # shown once, in Active
+        self.assertNotIn("Next", combined)
+
     # -- Quest Menu (2026-08-20, per Coffee's dev-bridge screenshots +
     #    live conversation): a real browsable "My Quests" list+detail
     #    view, guild curriculum surfaced as a real quest, and proactive
