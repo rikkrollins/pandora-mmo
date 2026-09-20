@@ -2,6 +2,58 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.653] — feature: combat/hazard damage floors at 1 HP; real timed Dodge! button for traps
+
+Real request (Coffee, dev-bridge, same screenshot for both halves):
+"Instead of rendering the players unconscious... how about we make it
+so it brings them down to one HP? This allows the player to still
+heal them without using a revive potion" and "When the traps go off
+give each player an opportunity to react so that they can dodge. 5
+seconds maybe?!... If they do not hit it in time, then the trap
+should hit the player."
+
+**HP floor** — every ordinary combat/hazard damage source that used to
+floor a real player or AI companion's HP at 0 now floors at 1 instead:
+`rules/combat.py`'s `resolve_attack`/`resolve_thrown_attack` (keyed on
+`defender.get("monster_key")` so an actual monster/boss defender still
+dies at 0 — critical, since both functions are now used bidirectionally
+by AI-controlled combatants on either side), 3 monster-on-player sites
+in `bot.py` (`_maybe_monster_cast_spell` x2, `_maybe_use_breath_weapon`
+— also fixed to check the real target's side, since research found
+these fire for AI party members attacking monsters too, not just
+monsters attacking players), and the Labyrinth's `spike_pit`/resisted-
+lava/elemental/generic hazard branches. Relentless Endurance and Death
+Ward keep triggering and narrating exactly as before (now keyed off a
+pre-floor "would this have dropped them to 0" check instead of the
+now-unreachable post-floor check). Deliberately **unchanged, per
+Coffee's explicit confirmation** (even after flagging it's the exact
+hazard behind this request's own screenshot): the Labyrinth's
+`bottomless_pit`/`drowning`/lethal-`lava` hazards keep their real
+`resolve_death_save` chain — falling to your death can still really
+kill you; getting hit, spiked, or burned no longer can.
+
+**Real timed Dodge! button** — every real human party member facing a
+Labyrinth hazard now gets a genuine ~5s window (a real inline "🏃
+Dodge!" button, modeled on the existing single-player reaction-prompt
+pattern) to react before any DC13 save rolls; tapping in time rolls
+the check as before, missing the window is a real automatic fail, no
+roll at all. Every human's window runs concurrently (`asyncio.gather`)
+so a hazard hitting the whole party stays one ~5s window, never
+5s-per-member. AI companions skip the button entirely and keep
+rolling immediately, unchanged.
+
+Two real bugs found via testing, not assumed: a latent test-fixture
+gap (a hand-built AI companion using a "real party member" id range
+with no actual DB row, previously safe only because it never happened
+to land the killing blow — surfaced once companions could survive
+longer) and a stale pre-existing test asserting the pre-v1.27.618
+proficiency grind rate (unrelated to this change, fixed in passing).
+
+9 new regression tests plus updates to every existing hazard test that
+now needs `DODGE_WINDOW_SECONDS` patched short (the dodge button made
+them each wait a real ~5s otherwise). Full attack/combat/hazard/
+reaction test slice (99+ tests across two batches) re-run clean.
+
 ## [1.27.652] — feature: dungeon maps now draw real walls/doorways like the Labyrinth
 
 Real request (Coffee: "can u make the dungeons maps follow the same

@@ -1017,8 +1017,25 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
             damage_dealt -= absorbed
 
         hp_before = defender["hp_current"]
-        hp_after = max(hp_before - damage_dealt, 0)
-        if (hp_after == 0 and hp_before > 0 and defender.get("race") == "Half-Orc"
+        # Real request (2026-09-19, per Coffee: "instead of rendering
+        # the players unconscious... bring them down to one HP" --
+        # confirmed to apply to both real players and AI companions,
+        # for ordinary combat damage). A monster/boss defender (always
+        # carries a real monster_key -- see bot.py's own established
+        # convention for this same check, e.g. bot.py:18099/15239)
+        # keeps flooring at 0 exactly as before, so enemies still die
+        # normally. A party-side defender never drops below 1 from a
+        # weapon hit anymore. `would_have_dropped` uses the PRE-floor
+        # value so Relentless Endurance/Death Ward below keep firing
+        # (and narrating) under the exact same real condition as
+        # before -- they just can no longer be distinguished from the
+        # new generic floor by their outcome alone, only by their flag.
+        would_have_dropped = hp_before - damage_dealt <= 0
+        if defender.get("monster_key"):
+            hp_after = max(hp_before - damage_dealt, 0)
+        else:
+            hp_after = max(hp_before - damage_dealt, 1)
+        if (would_have_dropped and hp_before > 0 and defender.get("race") == "Half-Orc"
                 and defender_relentless_endurance_available):
             hp_after = 1
             relentless_endurance_triggered = True
@@ -1029,7 +1046,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # engine already modeled this exact way), gated on the
         # "death_warded" condition instead of race, and consumed
         # (removed) on trigger since real Death Ward only saves you once.
-        elif hp_after == 0 and hp_before > 0 and "death_warded" in defender.get("conditions", []):
+        elif would_have_dropped and hp_before > 0 and "death_warded" in defender.get("conditions", []):
             hp_after = 1
             death_ward_triggered = True
             defender["conditions"].remove("death_warded")
@@ -1225,12 +1242,19 @@ def resolve_thrown_attack(attacker: dict, defender: dict, weapon: dict, forced_h
             damage_dealt -= absorbed
 
         hp_before = defender["hp_current"]
-        hp_after = max(hp_before - damage_dealt, 0)
-        if (hp_after == 0 and hp_before > 0 and defender.get("race") == "Half-Orc"
+        # See resolve_attack's own matching comment (2026-09-19) -- same
+        # monster-vs-party floor split, same pre-floor trigger check for
+        # Relentless Endurance/Death Ward.
+        would_have_dropped = hp_before - damage_dealt <= 0
+        if defender.get("monster_key"):
+            hp_after = max(hp_before - damage_dealt, 0)
+        else:
+            hp_after = max(hp_before - damage_dealt, 1)
+        if (would_have_dropped and hp_before > 0 and defender.get("race") == "Half-Orc"
                 and defender_relentless_endurance_available):
             hp_after = 1
             relentless_endurance_triggered = True
-        elif hp_after == 0 and hp_before > 0 and "death_warded" in defender.get("conditions", []):
+        elif would_have_dropped and hp_before > 0 and "death_warded" in defender.get("conditions", []):
             hp_after = 1
             death_ward_triggered = True
             defender["conditions"].remove("death_warded")

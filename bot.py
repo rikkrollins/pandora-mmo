@@ -10828,6 +10828,26 @@ async def _resolve_labyrinth_hazard(update: Update, character: dict, room: dict,
     own branch instead of the generic scaled-damage roll every other
     hazard uses -- see rules.labyrinth's own HAZARD_KINDS docstring for
     exactly what each does and why.
+
+    Damage floor (2026-09-19, per Coffee: "bring them down to one HP"
+    instead of unconscious): every branch here that reduces HP now
+    floors at 1, never 0 -- `bottomless_pit`/`drowning`/lethal `lava`
+    are the one deliberate exception, unchanged, since they route
+    through `_resolve_labyrinth_pit_fall` instead of touching HP here
+    directly, and Coffee explicitly confirmed those should keep their
+    real death-save risk even after seeing that they're the exact
+    hazard behind this request's own screenshot.
+
+    Real dodge button (2026-09-19, per Coffee, same screenshot: "When
+    the traps go off give each player an opportunity to react so that
+    they can dodge. 5 seconds maybe?!... If they do not hit it in
+    time, then the trap should hit the player"): every real human
+    party member gets a genuine ~5s window (_prompt_dodge_choice) to
+    tap a real "Dodge!" button before any DC13 roll happens -- all
+    prompted CONCURRENTLY via asyncio.gather so the window stays ~5s
+    regardless of party size. Missing the window is a real automatic
+    fail, no roll at all. AI companions skip the button (nobody to tap
+    for them) and keep rolling immediately, unchanged.
     """
     hazard = room.get("hazard")
     if not hazard or room.get("hazard_triggered"):
@@ -10835,22 +10855,49 @@ async def _resolve_labyrinth_hazard(update: Update, character: dict, room: dict,
     room["hazard_triggered"] = True
     floor = room.get("floor", run["floor"])
     members = _labyrinth_active_party_members(character)
+    active_members = [m for m in members if m.get("hp_current", 0) > 0]
+
+    # Real live request (2026-09-19, per Coffee: "When the traps go
+    # off give each player an opportunity to react so that they can
+    # dodge. 5 seconds maybe?!... If they do not hit it in time, then
+    # the trap should hit the player"). Every real human facing this
+    # hazard gets a genuine ~5s window to tap Dodge! BEFORE any roll
+    # happens, all running CONCURRENTLY via asyncio.gather -- a real
+    # window stays ~5s regardless of party size, never 5s * party
+    # size. Missing the window is treated as an automatic fail below,
+    # no roll at all (same "the trap should hit" as the request).
+    # AI companions skip the button entirely (nobody's there to tap)
+    # and keep rolling their own real DC13 check immediately, exactly
+    # as before this feature existed.
+    human_members = [m for m in active_members if not m.get("is_ai")]
+    dodge_results = {}
+    if human_members:
+        outcomes = await asyncio.gather(*(_prompt_dodge_choice(update, m) for m in human_members))
+        dodge_results = {m["telegram_user_id"]: reacted for m, reacted in zip(human_members, outcomes)}
+
     lines = []
-    for member in members:
-        if member.get("hp_current", 0) <= 0:
-            continue
-        dex_mod = ability_modifier(member.get("dexterity", 10))
-        save_roll = roll_d20()
-        save_total = save_roll + dex_mod
-        if save_total >= SKILL_CHECK_DC:
-            lines.append(f"**{member['name']}** dodges clear ({save_roll}+{dex_mod}={save_total} vs DC {SKILL_CHECK_DC}).")
-            continue
+    for member in active_members:
+        reacted = dodge_results.get(member["telegram_user_id"], True)
+        if not reacted:
+            lines.append(f"**{member['name']}** doesn't react in time!")
+            roll_suffix = ""
+        else:
+            dex_mod = ability_modifier(member.get("dexterity", 10))
+            save_roll = roll_d20()
+            save_total = save_roll + dex_mod
+            if save_total >= SKILL_CHECK_DC:
+                lines.append(f"**{member['name']}** dodges clear ({save_roll}+{dex_mod}={save_total} vs DC {SKILL_CHECK_DC}).")
+                continue
+            roll_suffix = f" ({save_roll}+{dex_mod}={save_total} vs DC {SKILL_CHECK_DC})"
         if hazard == "spike_pit":
-            db.update_character_by_id(member["character_id"], hp_current=0)
-            lines.append(
-                f"**{member['name']}** lands square on the spikes and drops to 0 HP, unconscious "
-                f"({save_roll}+{dex_mod}={save_total} vs DC {SKILL_CHECK_DC})."
-            )
+            # Real request (2026-09-19, per Coffee: "bring them down to
+            # one HP" instead of unconscious) -- spike_pit is an
+            # ordinary hazard hit, not a fall/plunge (see
+            # _resolve_labyrinth_pit_fall's own docstring for which
+            # hazards keep the real death-save risk; spike_pit isn't
+            # one of them). No more death-save chain from this branch.
+            db.update_character_by_id(member["character_id"], hp_current=1)
+            lines.append(f"**{member['name']}** lands square on the spikes and is battered down to 1 HP{roll_suffix}.")
             continue
         if hazard == "bottomless_pit":
             lines.append(await _resolve_labyrinth_pit_fall(update, member))
@@ -10864,7 +10911,7 @@ async def _resolve_labyrinth_hazard(update: Update, character: dict, room: dict,
             if reduced <= 0:
                 lines.append(f"**{member['name']}** steps into the lava's edge -- and their fire resistance shrugs it off entirely.")
             elif reduced < base:
-                db.update_character_by_id(member["character_id"], hp_current=max(0, member["hp_current"] - reduced))
+                db.update_character_by_id(member["character_id"], hp_current=max(1, member["hp_current"] - reduced))
                 lines.append(f"**{member['name']}** takes {reduced} fire damage -- real fire resistance is the only reason that wasn't fatal.")
             else:
                 lines.append(await _resolve_labyrinth_pit_fall(update, member))
@@ -10876,12 +10923,12 @@ async def _resolve_labyrinth_hazard(update: Update, character: dict, room: dict,
             if damage <= 0:
                 lines.append(f"**{member['name']}** shrugs off the {damage_type} entirely -- real resistance at work.")
             else:
-                db.update_character_by_id(member["character_id"], hp_current=max(0, member["hp_current"] - damage))
-                lines.append(f"**{member['name']}** takes {damage} {damage_type} damage ({save_roll}+{dex_mod}={save_total} vs DC {SKILL_CHECK_DC}).")
+                db.update_character_by_id(member["character_id"], hp_current=max(1, member["hp_current"] - damage))
+                lines.append(f"**{member['name']}** takes {damage} {damage_type} damage{roll_suffix}.")
             continue
         damage = round(roll_damage("2d6")["total"] * labyrinth_depth_multiplier(floor))
-        db.update_character_by_id(member["character_id"], hp_current=max(0, member["hp_current"] - damage))
-        lines.append(f"**{member['name']}** takes {damage} damage ({save_roll}+{dex_mod}={save_total} vs DC {SKILL_CHECK_DC}).")
+        db.update_character_by_id(member["character_id"], hp_current=max(1, member["hp_current"] - damage))
+        lines.append(f"**{member['name']}** takes {damage} damage{roll_suffix}.")
     db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
     return ("\n\n⚠️ " + "\n".join(lines)) if lines else ""
 
@@ -12472,6 +12519,66 @@ async def reaction_prompt_callback(update: Update, context: ContextTypes.DEFAULT
     await _safe_edit_markup(query)
 
 
+# Real live request (2026-09-19, per Coffee, dev-bridge screenshot of a
+# Labyrinth trap sequence: "When the traps go off give each player an
+# opportunity to react so that they can dodge. 5 seconds maybe?!
+# Similar the dodge reflex. If they do not hit it in time, then the
+# trap should hit the player"). Same real in-memory-only, resets-on-
+# restart shape as _PENDING_REACTIONS above -- a genuine single-action
+# button (there's no real "choose not to dodge"), not a yes/no choice,
+# so it gets its own small pending-state dict rather than reusing
+# _prompt_reaction_choice's two-button shape.
+_PENDING_DODGE_PROMPTS: dict[str, dict] = {}
+DODGE_WINDOW_SECONDS = 5
+
+
+async def _prompt_dodge_choice(update: Update, member: dict) -> bool:
+    """
+    One real human party member's own ~5s window to tap Dodge! before
+    a hazard resolves against them. See _resolve_labyrinth_hazard's own
+    docstring for how multiple real members facing the same trigger are
+    prompted CONCURRENTLY (asyncio.gather over this coroutine), never
+    sequentially. Returns True if they tapped in time, False on a real
+    timeout -- never raises either way.
+    """
+    dodge_id = f"{random.getrandbits(64):x}"
+    event = asyncio.Event()
+    _PENDING_DODGE_PROMPTS[dodge_id] = {
+        "event": event, "tapped": False, "telegram_user_id": member["telegram_user_id"],
+    }
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🏃 Dodge!", callback_data=f"dodge|{dodge_id}"),
+    ]])
+    await update.effective_chat.send_message(
+        f"⚠️ **{member['name']}**, a trap triggers! Tap to dodge!", reply_markup=keyboard,
+        message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+    )
+    try:
+        await asyncio.wait_for(event.wait(), timeout=DODGE_WINDOW_SECONDS)
+    except asyncio.TimeoutError:
+        pass
+    pending = _PENDING_DODGE_PROMPTS.pop(dodge_id, None)
+    return bool(pending["tapped"]) if pending else False
+
+
+async def dodge_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles taps on _prompt_dodge_choice's Dodge! button -- gated to the one real eligible player, never anyone else in the shared group chat."""
+    query = update.callback_query
+    parts = (query.data or "").split("|")
+    dodge_id = parts[1] if len(parts) > 1 else ""
+    pending = _PENDING_DODGE_PROMPTS.get(dodge_id)
+    if pending is None:
+        await _safe_answer(query, "That dodge window has already closed.", show_alert=True)
+        return
+    if update.effective_user.id != pending["telegram_user_id"]:
+        await _safe_answer(query, "This isn't your trap to dodge.", show_alert=True)
+        return
+    pending["tapped"] = True
+    pending["event"].set()
+    await _safe_answer(query, "🏃 Dodging!")
+    await _safe_edit_markup(query)
+
+
 async def _maybe_confirm_reaction(update: Update, defender: dict, kind: str) -> bool:
     """
     Shield/Uncanny Dodge redesign (2026-08-22, per Coffee, dev-bridge:
@@ -12688,7 +12795,15 @@ async def _maybe_monster_cast_spell(
     if elemental_heal_gained:
         caster_hp_max = caster.get("hp_max", caster["hp_current"])
         caster["hp_current"] = min(caster["hp_current"] + elemental_heal_gained, caster_hp_max)
-    target["hp_current"] = max(target["hp_current"] - pre_elemental_dmg, 0)
+    # Real request (2026-09-19, per Coffee: "bring them down to one HP"
+    # instead of unconscious) -- this function now casts for EITHER
+    # side ("any combatant with real known_spells can cast here, not
+    # just enemy monsters", 2026-08-13 above), so target could be a
+    # monster (a party member's own known_spells cast) or a real party
+    # member (a monster's cast) -- same monster_key floor split as
+    # rules.combat.resolve_attack, never a blanket floor.
+    floor = 0 if target.get("monster_key") else 1
+    target["hp_current"] = max(target["hp_current"] - pre_elemental_dmg, floor)
     _check_concentration(target, pre_elemental_dmg, session)
 
     # Spell Mastery for monsters/bosses (2026-08-22, per Coffee: "give
@@ -12723,7 +12838,8 @@ async def _maybe_monster_cast_spell(
             extra_heal_gained = elemental_overflow_heal(extra_dmg, spell.get("damage_type", "physical"), extra, caster)
             if extra_heal_gained:
                 caster["hp_current"] = min(caster["hp_current"] + extra_heal_gained, caster.get("hp_max", caster["hp_current"]))
-            extra["hp_current"] = max(extra["hp_current"] - extra_dmg, 0)
+            extra_floor = 0 if extra.get("monster_key") else 1
+            extra["hp_current"] = max(extra["hp_current"] - extra_dmg, extra_floor)
             _check_concentration(extra, extra_dmg, session)
             _sync_player_to_db(extra)
             await _safe_send(
@@ -12942,7 +13058,14 @@ async def _maybe_use_breath_weapon(
     save_roll = roll_d20() + ability_modifier(target.get("dexterity", 10))
     save_success = save_roll >= save_dc
     damage_dealt = scaled_total // 2 if save_success else scaled_total
-    target["hp_current"] = max(target["hp_current"] - damage_dealt, 0)
+    # Real request (2026-09-19, per Coffee: "bring them down to one HP"
+    # instead of unconscious) -- an AI-controlled Dragonborn can be
+    # EITHER side (a party companion breathing on a monster, or an
+    # AI-controlled monster/NPC breathing on the party), so this floors
+    # conditionally on the real target, same as resolve_attack/
+    # _maybe_monster_cast_spell above -- never a blanket floor.
+    floor = 0 if target.get("monster_key") else 1
+    target["hp_current"] = max(target["hp_current"] - damage_dealt, floor)
     db.use_feature(telegram_user_id, chat_id, "breath_weapon")
 
     return {
@@ -41368,6 +41491,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(map_menu_callback, pattern=r"^map\|"))
     application.add_handler(CallbackQueryHandler(dungeon_map_menu_callback, pattern=r"^dungeonmap\|"))
     application.add_handler(CallbackQueryHandler(reaction_prompt_callback, pattern=r"^reaction\|"))
+    application.add_handler(CallbackQueryHandler(dodge_prompt_callback, pattern=r"^dodge\|"))
 
     application.add_error_handler(_log_unhandled_error)
 

@@ -13161,9 +13161,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         dummy_hp = next(p for p in session.participants if p["telegram_user_id"] == -2_500_065)["hp_current"]
         self.assertGreater(dummy_hp, 500 - 150, "0% proficiency must fall back to a normal x1 attack, not x10")
         sessions.end_session(-999)
-        # Grinding still happened despite the failed roll.
+        # Grinding still happened despite the failed roll. Stale value
+        # fixed (2026-09-19, found via unrelated testing): this asserted
+        # the pre-v1.27.618 grind rate (0.01) -- PROFICIENCY_GRIND_
+        # INCREMENT was raised 10x to 0.1 in that rebalance and this
+        # test was never updated to match.
         after = db.get_character(user_id, -999)
-        self.assertAlmostEqual(after["backstab_proficiency_pct"], 0.01, places=5)
+        self.assertAlmostEqual(after["backstab_proficiency_pct"], 0.1, places=5)
 
     # -- Inactive party members' XP share (2026-07-16, per Coffee) ----
     async def test_absent_party_member_gets_partial_xp_share(self):
@@ -18307,14 +18311,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             character = db.get_character(player_id, -999500)
             if player_hp is not None:
                 character["hp_current"] = player_hp
-            companion = {"telegram_user_id": -700001, "name": "TestCompanion", "hp_current": 50, "hp_max": 50,
+            # Real latent bug found via this session's own HP-floor work
+            # (2026-09-19): a companion floors at 1 HP now instead of
+            # dying at 0, so it can survive long enough to land the
+            # killing blow on the foe in this test's un-mocked combat --
+            # _award_victory_xp then crashes calling db.add_xp on this
+            # id, since -700001 is a "real party member" id by bot.py's
+            # own `pid > -1_000_000` convention (real_party_ids_all)
+            # but has no actual DB row, only ever safe before as long as
+            # it never happened to be the one landing the kill. Using a
+            # genuinely synthetic id (<= -1_000_000, same convention)
+            # correctly excludes it from that XP-award loop regardless
+            # of who wins the fight.
+            companion = {"telegram_user_id": -1700001, "name": "TestCompanion", "hp_current": 50, "hp_max": 50,
                          "is_ai": True, "strength": 12, "dexterity": 12, "armor_class": 12,
                          "damage_dice": "1d6", "damage_bonus": 0, "damage_type": "physical", "proficiency_bonus": 2}
             foe = {"telegram_user_id": -700002, "name": "TestDummy", "hp_current": 200, "hp_max": 200,
                    "is_ai": True, "strength": 10, "dexterity": 10, "armor_class": 8,
                    "damage_dice": "1d4", "damage_bonus": 0, "damage_type": "physical",
                    "proficiency_bonus": 2, "xp_reward": 10, "monster_key": "test_dummy"}
-            sides = {player_id: "party", -700001: "party", -700002: "enemy"}
+            sides = {player_id: "party", -1700001: "party", -700002: "enemy"}
             session = sessions.start_session(-999500, [character, companion, foe], sides=sides)
             idx = session.turn_order.index(player_id)
             session.current_turn_index = idx
@@ -19963,6 +19979,92 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             timeout_result = await bot._prompt_reaction_choice(update, 996100, "Counter it?", "Yes", "No")
         self.assertFalse(timeout_result)
         self.assertEqual(len(bot._PENDING_REACTIONS), 0)
+
+    async def test_prompt_dodge_choice_real_asyncio_tap_and_timeout(self):
+        """
+        Real live request (2026-09-19, per Coffee: "give each player an
+        opportunity to react so that they can dodge. 5 seconds
+        maybe?!... If they do not hit it in time, then the trap should
+        hit the player"). Same real, unmocked asyncio pause/resume
+        mechanism test as _prompt_reaction_choice's own test above --
+        one run resolves via a real dodge_prompt_callback tap, one run
+        lets the real window elapse (patched short) with no tap.
+        """
+        import asyncio
+        from unittest.mock import patch
+        sink = []
+        update = FakeUpdate(996200, "look", sink)
+        task = asyncio.create_task(bot._prompt_dodge_choice(update, {"telegram_user_id": 996200, "name": "Tapper"}))
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(bot._PENDING_DODGE_PROMPTS), 1)
+        dodge_id = next(iter(bot._PENDING_DODGE_PROMPTS))
+        tap_sink = []
+        await bot.dodge_prompt_callback(FakeCallbackUpdate(996200, f"dodge|{dodge_id}", tap_sink), DummyContext())
+        result = await asyncio.wait_for(task, timeout=5)
+        self.assertTrue(result)
+        self.assertEqual(len(bot._PENDING_DODGE_PROMPTS), 0)
+
+        with patch("bot.DODGE_WINDOW_SECONDS", 0.05):
+            timeout_result = await bot._prompt_dodge_choice(update, {"telegram_user_id": 996200, "name": "Slowpoke"})
+        self.assertFalse(timeout_result)
+        self.assertEqual(len(bot._PENDING_DODGE_PROMPTS), 0)
+
+    async def test_dodge_prompts_for_multiple_humans_run_concurrently_not_sequentially(self):
+        """A hazard hitting the whole party must prompt every real human's dodge window AT THE SAME TIME (asyncio.gather) -- a real window stays ~1 window long regardless of party size, never window * humans."""
+        import asyncio
+        import time as time_module
+        from unittest.mock import patch
+        sink = []
+        update = FakeUpdate(996201, "look", sink)
+        with patch("bot.DODGE_WINDOW_SECONDS", 0.2):
+            started = time_module.monotonic()
+            results = await asyncio.gather(
+                bot._prompt_dodge_choice(update, {"telegram_user_id": 996201, "name": "First"}),
+                bot._prompt_dodge_choice(update, {"telegram_user_id": 996202, "name": "Second"}),
+            )
+            elapsed = time_module.monotonic() - started
+        self.assertEqual(results, [False, False])
+        self.assertLess(elapsed, 0.35, "two concurrent dodge prompts took roughly 2 windows -- they ran sequentially, not concurrently")
+
+    async def test_resolve_labyrinth_hazard_auto_fails_a_human_who_never_taps(self):
+        """Full integration: a real human who never taps the Dodge! button within the (patched-short) window is treated as an automatic fail -- no roll at all -- and still gets the real spike_pit floor-at-1 consequence from Part 1."""
+        from unittest.mock import patch
+        user_id, chat_id = 962020, -962020
+        make_basic_character(user_id, "DodgeTimeoutTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200, dexterity=8)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hazard_room_id = rooms[run["current_room_id"]]["connections"][0]
+        rooms[hazard_room_id]["hazard"] = "spike_pit"
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        hazard_room_name = rooms[hazard_room_id]["name"]
+
+        with patch("bot.DODGE_WINDOW_SECONDS", 0.05):
+            sink = []
+            await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["hp_current"], 1)
+        self.assertTrue(any("doesn't react in time" in s for s in sink))
+        self.assertEqual(len(bot._PENDING_DODGE_PROMPTS), 0)
+
+    async def test_resolve_labyrinth_hazard_ai_companion_skips_the_dodge_button(self):
+        """An AI-controlled party member never gets a Dodge! button (nobody's there to tap) and keeps resolving its own DC13 roll immediately, unaffected by the new human-only prompt."""
+        from unittest.mock import patch
+        with patch("bot._labyrinth_active_party_members", return_value=[
+            {"telegram_user_id": -1800001, "character_id": -1800001, "name": "AICompanion",
+             "is_ai": True, "hp_current": 50, "hp_max": 50, "dexterity": 8},
+        ]), patch("bot.db.update_character_by_id"), patch("bot.db.update_labyrinth_run"), \
+             patch("bot.roll_d20", return_value=1):
+            sink = []
+            update = FakeUpdate(996203, "look", sink)
+            result = await bot._resolve_labyrinth_hazard(
+                update, {"telegram_user_id": 996203}, {"hazard": "spike_pit"}, {"floor": 1, "rooms": {}}, -996203, "solo:996203",
+            )
+        self.assertEqual(len(bot._PENDING_DODGE_PROMPTS), 0)
+        self.assertNotIn("doesn't react in time", result)
+        self.assertIn("battered down to 1 HP", result)
 
     async def test_pending_reaction_answered_by_plain_text_not_just_a_button_tap(self):
         """
@@ -32415,6 +32517,78 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("death_warded", player["conditions"])
         sessions.end_session(-999, session)
 
+    async def test_resolve_attack_floors_party_side_defender_at_1_but_monster_still_dies_at_0(self):
+        """
+        Real request (2026-09-19, per Coffee: "instead of rendering the
+        players unconscious... bring them down to one HP" -- confirmed
+        to apply to both real players and AI companions, for ordinary
+        combat damage). A monster/boss defender (real monster_key) must
+        keep dying at 0 HP from the exact same lethal hit that now
+        floors a party-side defender at 1 -- otherwise enemies would
+        become unkillable through this same code path.
+        """
+        weapon = {"damage_dice": "20d8", "damage_bonus": 0, "ability": "strength", "damage_type": "physical"}
+        attacker = {"name": "Attacker", "strength": 20, "dexterity": 10, "conditions": []}
+
+        party_defender = {"name": "Hero", "hp_current": 10, "hp_max": 10, "armor_class": 1, "dexterity": 10, "conditions": []}
+        resolve_attack(attacker, party_defender, weapon, forced_roll=20, forced_damage_roll=200)
+        self.assertEqual(party_defender["hp_current"], 1)
+
+        monster_defender = {"name": "Goblin", "hp_current": 10, "hp_max": 10, "armor_class": 1, "dexterity": 10, "monster_key": "goblin", "conditions": []}
+        resolve_attack(attacker, monster_defender, weapon, forced_roll=20, forced_damage_roll=200)
+        self.assertEqual(monster_defender["hp_current"], 0)
+
+    async def test_resolve_thrown_attack_floors_party_side_defender_at_1_but_monster_still_dies_at_0(self):
+        """Same real floor split as resolve_attack above, for the separate thrown-weapon pipeline."""
+        from rules.combat import resolve_thrown_attack
+        weapon = {"damage_dice": "20d8", "damage_bonus": 0, "ability": "strength", "damage_type": "physical", "range": 20}
+        attacker = {"name": "Attacker", "strength": 20, "dexterity": 10, "conditions": []}
+
+        party_defender = {"name": "Hero", "hp_current": 10, "hp_max": 10, "armor_class": 1, "dexterity": 10, "conditions": []}
+        resolve_thrown_attack(attacker, party_defender, weapon, forced_roll=20, forced_damage_roll=200)
+        self.assertEqual(party_defender["hp_current"], 1)
+
+        monster_defender = {"name": "Goblin", "hp_current": 10, "hp_max": 10, "armor_class": 1, "dexterity": 10, "monster_key": "goblin", "conditions": []}
+        resolve_thrown_attack(attacker, monster_defender, weapon, forced_roll=20, forced_damage_roll=200)
+        self.assertEqual(monster_defender["hp_current"], 0)
+
+    async def test_resolve_attack_relentless_endurance_and_death_ward_still_trigger_and_narrate(self):
+        """Regression guard: the new generic 1-HP floor must not silently swallow Relentless Endurance/Death Ward's own real trigger flags -- both are keyed off the pre-floor 'would have dropped to 0' check specifically so they keep firing (and narrating) exactly as before."""
+        weapon = {"damage_dice": "20d8", "damage_bonus": 0, "ability": "strength", "damage_type": "physical"}
+        attacker = {"name": "Attacker", "strength": 20, "dexterity": 10, "conditions": []}
+
+        orc = {"name": "Orc", "hp_current": 10, "hp_max": 10, "armor_class": 1, "dexterity": 10, "race": "Half-Orc", "conditions": []}
+        result = resolve_attack(attacker, orc, weapon, forced_roll=20, forced_damage_roll=200, defender_relentless_endurance_available=True)
+        self.assertEqual(orc["hp_current"], 1)
+        self.assertTrue(result["relentless_endurance_triggered"])
+
+        warded = {"name": "Warded", "hp_current": 10, "hp_max": 10, "armor_class": 1, "dexterity": 10, "conditions": ["death_warded"]}
+        result2 = resolve_attack(attacker, warded, weapon, forced_roll=20, forced_damage_roll=200)
+        self.assertEqual(warded["hp_current"], 1)
+        self.assertTrue(result2["death_ward_triggered"])
+        self.assertNotIn("death_warded", warded["conditions"])
+
+    async def test_monster_cast_spell_floors_a_real_party_target_at_1_hp(self):
+        """_maybe_monster_cast_spell can now cast for either side (2026-08-13 note in bot.py) -- a monster's own cast against a real party member floors at 1 HP (the new request), while the same function casting FOR a party member against a monster still lets the monster die at 0."""
+        from unittest.mock import patch
+        import sessions
+        boss_id, party_id, chat_id = -800200, 800200, -999
+        make_basic_character(party_id, "SpellTarget", hp_max=200)
+        target = db.get_character(party_id, chat_id)
+        target["hp_current"] = 200
+        caster = {
+            "telegram_user_id": boss_id, "name": "Test Boss", "hp_current": 100, "hp_max": 100,
+            "monster_key": "test_boss", "is_ai": 1, "is_boss": True, "conditions": [], "dexterity": 10,
+            "known_spells": ["fire_bolt"], "spell_slots": {}, "level": 20,
+        }
+        session = sessions.start_session(chat_id, [caster, target], {boss_id: "enemy", party_id: "party"})
+        with patch("bot._decide_monster_spell", return_value="fire_bolt"), \
+             patch("bot.spells_module.resolve_damage_spell", return_value={"damage_dealt": 100000}):
+            result = await bot._maybe_monster_cast_spell(FakeUpdate(party_id, "", [], chat_id=chat_id), session, caster, target)
+        self.assertIsNotNone(result)
+        self.assertEqual(target["hp_current"], 1)
+        sessions.end_session(chat_id, session)
+
     async def test_bless_hex_and_shield_have_real_combat_effects(self):
         caster_id, ally_id, enemy_id = 800102, 800103, -800102
         make_basic_character(caster_id, "Blesser", char_class="Cleric")
@@ -43001,7 +43175,12 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
 
-        with patch("bot.roll_d20", return_value=1):
+        # DODGE_WINDOW_SECONDS patched short (2026-09-19 dodge-button
+        # feature): a real solo human always gets a real ~5s Dodge!
+        # window before the roll below -- patched short so this stays a
+        # fast test; not tapping it is an automatic fail, same real
+        # damage outcome either way.
+        with patch("bot.roll_d20", return_value=1), patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink = []
             await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
         character_after = db.get_character(user_id, chat_id)
@@ -43011,15 +43190,15 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # Move away and back -- the same hazard must not fire twice.
         hp_after_first = character_after["hp_current"]
         db.update_labyrinth_run(chat_id, party_key, current_room_id=hub_id)
-        with patch("bot.roll_d20", return_value=1):
+        with patch("bot.roll_d20", return_value=1), patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink2 = []
             await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), f"go to {hazard_room_name}")
         character_after2 = db.get_character(user_id, chat_id)
         self.assertEqual(character_after2["hp_current"], hp_after_first)
         self.assertFalse(any("damage" in s for s in sink2))
 
-    async def test_spike_pit_hazard_kos_without_permanent_death(self):
-        """Phase L3, per Coffee: "spikes we can land on... KO" -- a failed save drops HP to 0 (the same real, recoverable unconscious state combat already uses), never is_dead."""
+    async def test_spike_pit_hazard_floors_at_1_hp_never_unconscious(self):
+        """Real request (2026-09-19, per Coffee: "bring them down to one HP" instead of unconscious) -- spike_pit is an ordinary hazard hit (not a fall/plunge), so a failed save now floors at 1 HP, never 0, and never triggers the unconscious/death-save state."""
         from unittest.mock import patch
         user_id, chat_id = 962017, -962017
         make_basic_character(user_id, "LabyrinthSpikeTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
@@ -43036,13 +43215,19 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
 
-        with patch("bot.roll_d20", return_value=1):
+        # DODGE_WINDOW_SECONDS patched short (2026-09-19 dodge-button
+        # feature): otherwise this solo human would wait a real ~5s for
+        # their own dodge prompt to time out before the roll_d20 mock
+        # below is ever even reached (a human always gets the button;
+        # not tapping it is an automatic fail, no roll at all).
+        with patch("bot.roll_d20", return_value=1), patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink = []
             await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
         character_after = db.get_character(user_id, chat_id)
-        self.assertEqual(character_after["hp_current"], 0)
+        self.assertEqual(character_after["hp_current"], 1)
         self.assertEqual(character_after.get("is_dead", 0), 0)
-        self.assertTrue(any("unconscious" in s for s in sink))
+        self.assertFalse(any("unconscious" in s for s in sink))
+        self.assertTrue(any("battered down to 1 HP" in s for s in sink))
 
     async def test_bottomless_pit_hazard_can_really_kill_via_the_same_death_save_odds(self):
         """Phase L3, per Coffee: "pits with holes we can plunge to our death" -- a failed save runs the exact real rules.combat.resolve_death_save sequence a downed combatant already faces, not an unavoidable instant kill."""
@@ -43062,7 +43247,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
 
-        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=1):
+        # DODGE_WINDOW_SECONDS patched short -- see the spike_pit test's
+        # own matching comment above for why this is needed for every
+        # solo-human hazard trigger now.
+        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=1), \
+             patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink = []
             await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
         character_after = db.get_character(user_id, chat_id)
@@ -43088,7 +43277,11 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
 
-        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=15):
+        # DODGE_WINDOW_SECONDS patched short -- see the spike_pit test's
+        # own matching comment above for why this is needed for every
+        # solo-human hazard trigger now.
+        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=15), \
+             patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink = []
             await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
         character_after = db.get_character(user_id, chat_id)
@@ -46212,7 +46405,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         # prove resistance halves it (a real flaky failure found this
         # way: a low unresisted roll can beat a high resisted one).
         # Pinned to a fixed roll so only the resistance math itself varies.
-        with patch("bot.roll_d20", return_value=1), patch("bot.roll_damage", return_value={"total": 12}):
+        with patch("bot.roll_d20", return_value=1), patch("bot.roll_damage", return_value={"total": 12}), \
+             patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             db.update_character(user_id, chat_id, hp_current=500)
             sink = []
             await bot._do_labyrinth_move(FakeUpdate(user_id, "Cold Room A", sink, chat_id=chat_id), "Cold Room A")
@@ -46248,7 +46442,8 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         rooms["test_lava"] = {"id": "test_lava", "floor": 1, "name": "Lava Room", "description": "x", "connections": [hub_id], "monsters": [], "hazard": "lava"}
         rooms[hub_id]["connections"].append("test_lava")
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
-        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=1):
+        with patch("bot.roll_d20", return_value=1), patch("rules.combat.roll_d20", return_value=1), \
+             patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink = []
             await bot._do_labyrinth_move(FakeUpdate(user_id, "Lava Room", sink, chat_id=chat_id), "Lava Room")
         character = db.get_character(user_id, chat_id)
@@ -46266,7 +46461,7 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         rooms2["test_lava"] = {"id": "test_lava", "floor": 1, "name": "Lava Room", "description": "x", "connections": [hub_id2], "monsters": [], "hazard": "lava"}
         rooms2[hub_id2]["connections"].append("test_lava")
         db.update_labyrinth_run(chat_id2, party_key2, rooms=rooms2)
-        with patch("bot.roll_d20", return_value=1):
+        with patch("bot.roll_d20", return_value=1), patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink2 = []
             await bot._do_labyrinth_move(FakeUpdate(user_id2, "Lava Room", sink2, chat_id=chat_id2), "Lava Room")
         character2 = db.get_character(user_id2, chat_id2)
@@ -46959,7 +47154,10 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
         hazard_room_name = rooms[hazard_room_id]["name"]
 
-        with patch("bot.roll_d20", return_value=1):
+        # DODGE_WINDOW_SECONDS patched short -- two real humans (leader
+        # + AltNew) face this hazard, each getting their own real ~5s
+        # Dodge! window; patched short so this stays a fast test.
+        with patch("bot.roll_d20", return_value=1), patch("bot.DODGE_WINDOW_SECONDS", 0.05):
             sink = []
             await bot._do_labyrinth_move(FakeUpdate(leader_id, "", sink, chat_id=chat_id), f"go to {hazard_room_name}")
 
