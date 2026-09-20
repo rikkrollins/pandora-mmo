@@ -7021,7 +7021,7 @@
       },
       "wrathflame_vault_evolved_hub": {
         "name": "The Ember Confluence",
-        "description": "Passages meet here around a slow-burning seam in the rock -- the vault's true heart, older than anything built above it.",
+        "description": "Passages meet here around a slow-burning seam in the rock -- the vault's true heart, older than the entrance ever let on. A worn statue watches from one wall, one eye missing.",
         "connections": [
           "wrathflame_vault_evolved_approach_3",
           "wrathflame_vault_evolved_b1_r0",
@@ -7073,7 +7073,7 @@
       },
       "wrathflame_vault_evolved_b1_r0": {
         "name": "The Sentinel's Landing",
-        "description": "A worn guard-post, long abandoned, facing the only way down.",
+        "description": "A worn guard-post, long abandoned, facing the only way down -- except something still keeps the watch.",
         "connections": [
           "wrathflame_vault_evolved_hub",
           "wrathflame_vault_evolved_b1_r1",
@@ -7096,10 +7096,11 @@
       },
       "wrathflame_vault_evolved_b1_r1": {
         "name": "The Turning Stair",
-        "description": "The stair spirals back on itself, chasing its own heat.",
+        "description": "The stair spirals back on itself, chasing its own heat, threads of old web strung corner to corner.",
         "connections": [
           "wrathflame_vault_evolved_b1_r0",
-          "wrathflame_vault_evolved_b1_r2"
+          "wrathflame_vault_evolved_b1_r2",
+          "wrathflame_vault_evolved_bridge1"
         ],
         "directions": {
           "south": "wrathflame_vault_evolved_b1_r0",
@@ -7118,7 +7119,7 @@
       },
       "wrathflame_vault_evolved_b1_r2": {
         "name": "The Toll Landing",
-        "description": "Coin and bone alike litter the floor -- whatever toll was owed here was paid in full, and violently.",
+        "description": "Coin and bone alike litter the floor -- whatever toll was owed here was paid in full, and something still collects.",
         "connections": [
           "wrathflame_vault_evolved_b1_r1"
         ],
@@ -7139,7 +7140,7 @@
       },
       "wrathflame_vault_evolved_b2_r0": {
         "name": "The Wolf Run",
-        "description": "Claw-marks score the walls in long, deliberate lines.",
+        "description": "Claw-marks score the walls in long, deliberate lines, old bone dust still settled in the grooves.",
         "connections": [
           "wrathflame_vault_evolved_b2_r1",
           "wrathflame_vault_evolved_hub"
@@ -7184,7 +7185,7 @@
       },
       "wrathflame_vault_evolved_b2_r2": {
         "name": "The Choir Landing",
-        "description": "An echo lives here that isn't quite an echo -- it answers half a beat late, in a voice that isn't yours.",
+        "description": "An echo lives here that isn't quite an echo -- it answers half a beat late, in a voice that isn't quite anyone's.",
         "connections": [
           "wrathflame_vault_evolved_b2_r1",
           "wrathflame_vault_evolved_b2_r3"
@@ -7207,7 +7208,7 @@
       },
       "wrathflame_vault_evolved_b2_r3": {
         "name": "The Buried Lever Nook",
-        "description": "A rusted lever juts from the wall, half-swallowed by drifted ash.",
+        "description": "A rusted lever juts from the wall, half-swallowed by drifted ash, an old remnant of the choir humming faintly nearby.",
         "connections": [
           "wrathflame_vault_evolved_b2_r2",
           "wrathflame_vault_evolved_b2_r4"
@@ -7262,7 +7263,7 @@
       },
       "wrathflame_vault_evolved_b3_r1": {
         "name": "The Vein Seam",
-        "description": "A seam of raw ore runs through the rock here, warm to the touch.",
+        "description": "A seam of raw ore runs through the rock here, warm to the touch, guarded by something that's made its home in the warmth.",
         "connections": [
           "wrathflame_vault_evolved_b3_r0"
         ],
@@ -7295,7 +7296,7 @@
       },
       "wrathflame_vault_evolved_b4_r0": {
         "name": "The Vault Behind the Vault",
-        "description": "A second door, hidden behind the first -- whoever built this never meant for it to be found.",
+        "description": "A second door, hidden behind the first -- whoever built this never meant for it to be found, and posted a real, watchful crystal to make sure of it.",
         "connections": [
           "wrathflame_vault_evolved_b4_r1",
           "wrathflame_vault_evolved_hub"
@@ -7325,7 +7326,7 @@
       },
       "wrathflame_vault_evolved_b4_r1": {
         "name": "The Channel Cistern",
-        "description": "Runoff from somewhere far above collects here, hissing faintly where it meets the hot stone.",
+        "description": "Runoff from somewhere far above collects here, hissing faintly where it meets the hot stone -- and something waits in the dark at the edge of it.",
         "connections": [
           "wrathflame_vault_evolved_b4_r0",
           "wrathflame_vault_evolved_b4_r2"
@@ -7381,7 +7382,7 @@
       },
       "wrathflame_vault_evolved_b4_r3": {
         "name": "The Last Glyph's Sanctum",
-        "description": "Fire that was never natural burns without fuel here, circling a glyph that shouldn't still be lit.",
+        "description": "Fire that was never natural burns without fuel here, circling a glyph that shouldn't still be lit -- and isn't alone.",
         "connections": [
           "wrathflame_vault_evolved_b4_r2",
           "wrathflame_vault_evolved_hub"
@@ -7410,7 +7411,7 @@
       },
       "wrathflame_vault_evolved_b3_r2": {
         "name": "The Elder Seam",
-        "description": "The vein widens into a hollow -- and something old has made its home in the warmth.",
+        "description": "The vein widens into a hollow -- and something far older than the rest of this place has made its home in it.",
         "connections": [
           "wrathflame_vault_evolved_b3_r1"
         ],
@@ -7474,7 +7475,8 @@
         "description": "A crude opening forced between two older halls -- not part of the original design, but useful all the same.",
         "connections": [
           "wrathflame_vault_evolved_b3_r0",
-          "wrathflame_vault_evolved_b1_r0"
+          "wrathflame_vault_evolved_b1_r0",
+          "wrathflame_vault_evolved_bridge1"
         ],
         "directions": {},
         "dungeon_id": "wrathflame_vault_evolved",
@@ -7482,6 +7484,22 @@
         "grid_position": {
           "x": 0,
           "y": -73
+        },
+        "layer": "underground"
+      },
+      "wrathflame_vault_evolved_bridge1": {
+        "name": "The Second Collapse",
+        "description": "A narrower echo of the break nearby -- the same old strain finally giving way in a second spot, just wide enough to squeeze through.",
+        "connections": [
+          "wrathflame_vault_evolved_b1_r1",
+          "wrathflame_vault_evolved_bridge0"
+        ],
+        "directions": {},
+        "dungeon_id": "wrathflame_vault_evolved",
+        "dungeon_interior": true,
+        "grid_position": {
+          "x": 0,
+          "y": -72
         },
         "layer": "underground"
       }

@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.654] — content: Wrathflame Vault Evolved regenerated to meet v1.27.651's real density bar
+
+Follow-up to v1.27.651's Labyrinth-calibrated density retune, which
+raised the bar the one shipped evolved dungeon was tuned against — it
+fell short again (4 junctions/room needed, had 2). Regenerated via
+`scripts/evolve_dungeon.py` with the exact original parameters
+(source `wrathflame_vault`, `underground`, rebirth gate 1, target band
+35-50) and a new seed (2): 23 rooms, 4 real junctions, 3 real cycles,
+same boss (`the_last_glyph`) as the prior regen. Confirmed no live
+character was inside it before touching anything.
+
+Same real complication as the last time this dungeon needed
+regenerating (v1.27.638): the shipped content was hand-polished, not
+generic generator output, so regenerating the topology alone would
+have silently reverted every room to a generic "Chamber X-Y" name —
+hand-wrote fresh names/descriptions for all 23 rooms in the same
+ember/vault voice as before, including the two new maze-density
+connector rooms ("The Collapsed Shortcut" / "The Second Collapse").
+
+Verified via the full `DungeonEvolveTests` + `DungeonAuditTests` (94
+tests) and a real, unmocked walkthrough of the ENTIRE new layout via
+`bot._do_move` (23/23 rooms, full backtracking, zero failures) —
+confirmed the actual graph and flavor text resolve correctly in real
+play, not just that the generator's own output looks right on paper.
+
 ## [1.27.653] — feature: combat/hazard damage floors at 1 HP; real timed Dodge! button for traps
 
 Real request (Coffee, dev-bridge, same screenshot for both halves):
