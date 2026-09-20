@@ -41827,6 +41827,51 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink2, chat_id=chat_id), "go to cleared landing")
         self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_r0")
 
+    async def test_labyrinth_stairs_down_blocked_by_an_ordinary_trash_monster_too(self):
+        """
+        Real live report (2026-09-20, Coffee, dev-bridge: "there was
+        nothing stopping us from going to the next floor. There was an
+        enemy, but nothing stopping us from entering the last room").
+        Confirmed the room in question was a plain trash monster, NOT a
+        miniboss/boss/gated-encounter room, so _is_gated_combat_room
+        correctly left LATERAL movement open (that's the deliberate
+        2026-09-04 design, unchanged). Confirmed scope for this fix:
+        descending specifically (never lateral movement, never
+        ascending back to an already-cleared floor) now requires the
+        current room's own monster(s) to be dealt with first,
+        regardless of monster type.
+        """
+        user_id, chat_id = 962045, -962045
+        make_basic_character(user_id, "StairsGateTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL)
+        party_key = f"solo:{user_id}"
+        rooms = {
+            "f1_hub": {
+                "id": "f1_hub", "floor": 1, "name": "The Hub", "description": "A test room.",
+                "connections": ["f1_r0"], "monsters": ["goblin"], "descends_to": "f2_hub", "visited": True,
+            },
+            "f1_r0": {"id": "f1_r0", "floor": 1, "name": "Side Room", "description": "A test room.", "connections": ["f1_hub"], "monsters": []},
+            "f2_hub": {"id": "f2_hub", "floor": 2, "name": "Floor 2 Hub", "description": "A test room.", "connections": [], "monsters": []},
+        }
+        db.create_labyrinth_run(chat_id, party_key, floor=1, seed=1, current_room_id="f1_hub", rooms=rooms)
+
+        # Lateral movement into an unvisited side room stays free -- an
+        # ordinary trash monster, not a gated encounter, is unchanged.
+        sink_lateral = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink_lateral, chat_id=chat_id), "go to side room")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_r0", "lateral movement past an ordinary monster must stay unaffected by this fix")
+
+        db.update_labyrinth_run(chat_id, party_key, current_room_id="f1_hub")
+        sink_down = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "go down", sink_down, chat_id=chat_id), "go down")
+        self.assertTrue(any("still bars the way down" in s for s in sink_down), sink_down)
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_hub", "descending past a live monster must be blocked")
+
+        rooms["f1_hub"]["monsters"] = []
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms)
+        sink_down2 = []
+        await bot._do_labyrinth_move(FakeUpdate(user_id, "go down", sink_down2, chat_id=chat_id), "go down")
+        self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f2_hub", f"expected descending to work once the room's monster is cleared, got: {sink_down2}")
+
     async def test_labyrinth_move_gate_lifts_only_after_a_real_victory(self):
         """The gate holds while a fight is merely started/unresolved, and only lifts once _check_labyrinth_progress actually clears the room's real monsters on a genuine party win -- never just because combat was attempted."""
         import sessions

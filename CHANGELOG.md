@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.655] — fix: Labyrinth stairs down now genuinely blocked by a live monster
+
+Real live report (Coffee, dev-bridge, screenshot of a real 8/10-rated
+floor: "there was nothing stopping us from going to the next floor.
+There was an enemy, but nothing stopping us from entering the last
+room"). Checked directly against the live game state first: the room
+in question held a plain trash monster (`vantage_reach_alpha`, no
+miniboss/boss/`is_gated_encounter` flag), so the existing 2026-09-04
+movement gate (`_is_gated_combat_room`) correctly left lateral
+movement open — that decision was deliberate (gating on any monster
+turns exploration into a forced fight-every-room gauntlet) and stays
+unchanged.
+
+Confirmed scope for this fix: descending specifically (never lateral
+movement, never ascending back to an already-cleared floor) now
+requires the current room's own monster(s) to be dealt with first,
+regardless of monster type. `_do_labyrinth_move` checks
+`destination_id == room.get("descends_to") and room.get("monsters")`
+right after the existing gate check. Regular (non-Labyrinth) dungeons
+have no equivalent change — they have no distinct "stairs" field
+separate from ordinary connections, so the same narrow rule isn't
+structurally applicable there, and no live report asked for it.
+
+New regression test covers all three cases in one real end-to-end
+run: lateral movement past the same monster stays free, descending is
+blocked while it's alive, descending succeeds once it's cleared.
+Existing gate/pressure-plate-stairs/checkpoint/waypoint test slice (11
+tests) re-run clean.
+
 ## [1.27.654] — content: Wrathflame Vault Evolved regenerated to meet v1.27.651's real density bar
 
 Follow-up to v1.27.651's Labyrinth-calibrated density retune, which

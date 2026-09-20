@@ -11048,6 +11048,23 @@ async def _do_labyrinth_move(update: Update, text: str) -> None:
             message_thread_id=topics.thread_id_for(chat_id, "adventure"),
         )
         return
+    # Real live report (2026-09-20, Coffee, dev-bridge: "there was
+    # nothing stopping us from going to the next floor. There was an
+    # enemy, but nothing stopping us from entering the last room" --
+    # a plain trash monster, confirmed NOT a miniboss/boss/gated-
+    # encounter room, so _is_gated_combat_room above correctly left
+    # lateral movement open). Confirmed scope: descending specifically
+    # (never lateral movement, never ascending back to an already-
+    # cleared floor) now requires the CURRENT room's own monster(s) to
+    # be dealt with first, regardless of monster type -- taking the
+    # stairs down with a live enemy still at your back reads as a real
+    # gap, even where skipping a side room doesn't.
+    if destination_id == room.get("descends_to") and room.get("monsters"):
+        await update.effective_chat.send_message(
+            "An enemy still bars the way down — deal with it first.",
+            message_thread_id=topics.thread_id_for(chat_id, "adventure"),
+        )
+        return
     lockable_id = locked_connections.get(destination_id)
     if lockable_id:
         destination = run["rooms"][destination_id]
