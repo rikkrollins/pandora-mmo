@@ -39436,6 +39436,70 @@ class DungeonAuditTests(unittest.TestCase):
             for check_name, failures in results.items():
                 self.assertEqual(failures, [], f"{dungeon_id}/{check_name}: {failures}")
 
+    def test_seven_hand_authored_dungeons_now_have_a_real_loop_back_cycle(self):
+        """
+        Real request (2026-09-19/20, per Coffee: "no more single
+        pathways" / "and yes fix it all please"), the hand-authored
+        half of the same real Labyrinth-density audit that produced
+        v1.27.651's generator retune. 7 of the 8 hand-authored dungeons
+        (sunken_root_caverns already had 1 real cycle) measured 0 real
+        cycles each -- real branching existed, but every one was a pure
+        hub-and-spoke tree with no loop-back at all. v1.27.656 added
+        exactly one safe shortcut per dungeon (scripts/add_loop_back_
+        shortcuts.py), each hand-picked against the exact same
+        _rooms_shadowed_by_a_real_gate safety invariant dungeon_evolve's
+        own auto-generated loop-back mechanic already guarantees for
+        evolved dungeons: neither room touches the hub/entrance, both
+        are reachable from the hub via plain connections only (so
+        anything behind a real lock -- including a lock belonging to a
+        DIFFERENT dungeon, confirmed the hard way for stonearch_bridge's
+        own gorge/web cluster -- is excluded), and both already had a
+        real grid_position, cardinal-adjacent to each other (so the new
+        edge renders as a real doorway on the map, not an invisible "+1"
+        badge).
+
+        Real cycles are measured on the subgraph actually reachable
+        from the hub via plain connections, NOT dungeon_evolve.
+        _junction_and_cycle_counts's own whole-dungeon formula -- that
+        formula assumes one single connected component (true by
+        construction for every generator-evolved dungeon, but NOT true
+        for 3 of these 7: greymoor_downs, stonearch_bridge, and
+        the_first_city each tag a real sub-cluster only reachable via a
+        lock -- sometimes from a different dungeon entirely -- under
+        the same dungeon_id), and silently reads a misleading 0 even
+        after a real edge is added when the room set spans more than
+        one component.
+        """
+        import json
+        campaign_path = os.path.join(os.path.dirname(__file__), "..", "campaigns", "default", "campaign.json")
+        with open(campaign_path) as f:
+            real_campaign = json.load(f)
+
+        def real_cycles_from_hub(rooms, hub_id):
+            reach = {hub_id}
+            frontier = [hub_id]
+            while frontier:
+                cur = frontier.pop()
+                for nb in rooms[cur].get("connections", []):
+                    if nb in rooms and nb not in reach:
+                        reach.add(nb)
+                        frontier.append(nb)
+            edges = set()
+            for rid in reach:
+                for nb in rooms[rid].get("connections", []):
+                    if nb in reach:
+                        edges.add(frozenset((rid, nb)))
+            return len(edges) - (len(reach) - 1)
+
+        for dungeon_id in (
+            "deep_root_vault", "goblin_warrens", "greymoor_downs", "stonearch_bridge",
+            "the_first_city", "unmoored_isle", "wrathflame_vault",
+        ):
+            rooms = dungeon_audit._dungeon_rooms(real_campaign, dungeon_id)
+            hub_id = max(rooms, key=lambda rid: len(rooms[rid].get("connections", [])))
+            cycles = real_cycles_from_hub(rooms, hub_id)
+            self.assertGreaterEqual(cycles, 1, f"{dungeon_id}: expected a real hub-reachable loop-back cycle, found {cycles}")
+
 
 class DungeonEvolveTests(unittest.IsolatedAsyncioTestCase):
     """

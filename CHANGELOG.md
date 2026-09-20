@@ -2,6 +2,50 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.656] — content: real loop-back shortcuts for the 7 hand-authored dungeons
+
+Second, final half of the real Labyrinth-density audit from earlier
+this session ("does the labyrinth and dungeons generator/editor need
+any work?" → "and yes fix it all please"). The generator-side gap
+shipped as v1.27.651; this closes the hand-authored side: 7 of the 8
+hand-authored dungeons (`deep_root_vault`, `goblin_warrens`,
+`greymoor_downs`, `stonearch_bridge`, `the_first_city`,
+`unmoored_isle`, `wrathflame_vault`) measured 0 real cycles each —
+real branching existed, never a literal single pathway, but every one
+was a pure hub-and-spoke tree with zero loop-back. (`sunken_root_caverns`
+already had 1 real cycle and needed nothing.)
+
+New dev tool, `scripts/add_loop_back_shortcuts.py` (modeled on
+`scripts/evolve_dungeon.py`'s own load/mutate/report/dry-run/`--apply`
+shape): added exactly one hand-picked, verified-safe shortcut
+connection per dungeon, reusing `dungeon_evolve.py`'s own
+`_rooms_shadowed_by_a_real_gate` safety invariant (already guaranteed
+for evolved dungeons' auto-generated loop-backs) — neither room
+touches the hub/entrance, both are reachable from the hub via plain
+connections only (so anything behind a real lock is excluded), and
+both are cardinal-grid-adjacent (so the new edge renders as a real
+doorway on the map, not an invisible "+1" badge).
+
+Two real things found via testing, not assumed: `stonearch_bridge`'s
+first candidate pair turned out to be excluded by the real safety
+function — a whole sub-cluster only reachable via a lock belonging to
+a *different* dungeon (`sunken_root_caverns`) — caught by directly
+running the safety BFS rather than trusting the raw graph read;
+re-picked a genuinely valid pair. Separately, 3 of the 7 dungeons
+(`greymoor_downs`, `stonearch_bridge`, `the_first_city`) tag a real
+disconnected/externally-gated sub-cluster under the same `dungeon_id`,
+which makes `dungeon_evolve._junction_and_cycle_counts`'s whole-
+dungeon formula silently misreport 0→0 even after a real cycle is
+added — fixed by measuring cycles on the actual hub-reachable subgraph
+instead, confirmed correct for all 7 (0→1 each).
+
+All 9 `dungeon_audit` checks re-verified clean for all 9 real dungeons
+after the edit. New permanent regression test asserts all 7 have a
+real hub-reachable cycle. Spot-checked one shortcut's actual map
+render via direct pixel sampling — confirmed it draws as a real
+doorway gap (wall color at the corners, open in the middle), not a
+solid wall or an off-grid badge.
+
 ## [1.27.655] — fix: Labyrinth stairs down now genuinely blocked by a live monster
 
 Real live report (Coffee, dev-bridge, screenshot of a real 8/10-rated

@@ -1088,7 +1088,8 @@
         "description": "Real fortification, cut into the gorge wall above the bridge -- whoever built this crossing meant to defend it.",
         "connections": [
           "stonearch_bridge",
-          "stonearch_bridge_the_watch_stair"
+          "stonearch_bridge_the_watch_stair",
+          "stonearch_bridge_the_armory_annex"
         ],
         "directions": {
           "west": "stonearch_bridge_the_watch_stair"
@@ -1387,7 +1388,8 @@
         "layer": "surface",
         "description": "A small side room off the sealed armory, real weapon racks still standing, mostly empty now.",
         "connections": [
-          "stonearch_bridge_the_sealed_armory"
+          "stonearch_bridge_the_sealed_armory",
+          "stonearch_bridge_the_lower_battlement"
         ],
         "directions": {
           "west": "stonearch_bridge_the_sealed_armory"
@@ -1705,7 +1707,8 @@
         "layer": "surface",
         "description": "A real lee off the windswept hollow, sheltered enough that something small has been left here.",
         "connections": [
-          "greymoor_downs_the_windswept_hollow"
+          "greymoor_downs_the_windswept_hollow",
+          "greymoor_downs_the_markers_shadow"
         ],
         "directions": {
           "north": "greymoor_downs_the_windswept_hollow"
@@ -1733,7 +1736,8 @@
         "layer": "surface",
         "description": "A small patch of real, permanent shade behind the far marker, out of place on an otherwise open ridge.",
         "connections": [
-          "greymoor_downs_the_far_marker"
+          "greymoor_downs_the_far_marker",
+          "greymoor_downs_the_hollows_lee"
         ],
         "directions": {
           "north": "greymoor_downs_the_far_marker"
@@ -3596,7 +3600,8 @@
         "layer": "underground",
         "description": "A side chamber built around a huge, ancient bellows that hasn't drawn breath in a very long time. Something was left here in a hurry.",
         "connections": [
-          "wrathflame_vault_ember_hall"
+          "wrathflame_vault_ember_hall",
+          "wrathflame_vault_sealed_reliquary"
         ],
         "directions": {
           "west": "wrathflame_vault_ember_hall"
@@ -3894,7 +3899,8 @@
         "layer": "underground",
         "description": "A tight side pocket, thick with spores -- something was dragged in here and never dragged back out.",
         "connections": [
-          "deep_root_vault_spore_hollow"
+          "deep_root_vault_spore_hollow",
+          "deep_root_vault_root_bound_alcove"
         ],
         "directions": {
           "west": "deep_root_vault_spore_hollow"
@@ -4191,7 +4197,8 @@
         "layer": "underground",
         "description": "A short row of what used to be storerooms, one of them still sealed shut against everything that's happened since.",
         "connections": [
-          "the_first_city_collapsed_row"
+          "the_first_city_collapsed_row",
+          "the_first_city_spire_overlook"
         ],
         "directions": {
           "west": "the_first_city_collapsed_row"
@@ -4303,7 +4310,8 @@
         "description": "High enough to see the shape of the whole buried city at once -- it was clearly a real city, once, laid out with real intent.",
         "connections": [
           "the_first_city_spire_stair",
-          "the_first_city_spire_crown"
+          "the_first_city_spire_crown",
+          "the_first_city_sealed_vault_row"
         ],
         "directions": {
           "down": "the_first_city_spire_stair",
@@ -4857,7 +4865,8 @@
         "layer": "underground",
         "description": "A stash better hidden than the one in the Deep Larder, meant for someone who was never going to be a goblin.",
         "connections": [
-          "goblin_warrens_the_counting_hall"
+          "goblin_warrens_the_counting_hall",
+          "goblin_warrens_grasks_old_cage"
         ],
         "directions": {
           "south": "goblin_warrens_the_counting_hall"
@@ -4964,7 +4973,8 @@
         "layer": "underground",
         "description": "A cage, real iron, still standing -- the bars bent outward at the bottom, not cut, like something simply forced its own way through.",
         "connections": [
-          "goblin_warrens_the_grasping_hollow"
+          "goblin_warrens_the_grasping_hollow",
+          "goblin_warrens_the_second_stash"
         ],
         "directions": {
           "west": "goblin_warrens_the_grasping_hollow"
@@ -6521,7 +6531,8 @@
         "layer": "underground",
         "description": "A small stone alcove behind the gallery wall, untouched since whatever sealed it shut. The air here is still, unlike everywhere else in the vault.",
         "connections": [
-          "wrathflame_vault_ash_gallery"
+          "wrathflame_vault_ash_gallery",
+          "wrathflame_vault_bellows_chamber"
         ],
         "directions": {
           "west": "wrathflame_vault_ash_gallery"
@@ -6600,7 +6611,8 @@
         "layer": "underground",
         "description": "A hollow behind the bramble wall, root-tangled floor to ceiling, that something has clearly been keeping deliberately closed off.",
         "connections": [
-          "deep_root_vault_bramble_maze"
+          "deep_root_vault_bramble_maze",
+          "deep_root_vault_choking_hollow"
         ],
         "directions": {
           "west": "deep_root_vault_bramble_maze"
@@ -7814,7 +7826,8 @@
         "connections": [
           "unmoored_isle_drifting_threshold",
           "unmoored_isle_the_repeating_door",
-          "unmoored_isle_the_upside_stair"
+          "unmoored_isle_the_upside_stair",
+          "unmoored_isle_the_warming_hollow"
         ],
         "directions": {
           "south": "unmoored_isle_drifting_threshold",
@@ -8234,7 +8247,8 @@
         "description": "Real warmth pools here, safe and steady -- the calmest spot on the whole radiant side of the isle.",
         "connections": [
           "unmoored_isle_the_sunward_ledge",
-          "unmoored_isle_the_climbing_light"
+          "unmoored_isle_the_climbing_light",
+          "unmoored_isle_the_backward_hall"
         ],
         "directions": {
           "south": "unmoored_isle_the_sunward_ledge",
