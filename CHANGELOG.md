@@ -2,6 +2,62 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.660] — fix: forged-in-place equipped gear no longer loses its equip slot, plus two real UX blind spots closed
+
+Real dev-bridge reports (Coffee, four messages): "I just forged this
+item, but it's not giving me an option to give it to somebody... where
+are the other options like putting it on the market, selling it and
+giving it" and, separately, "Why can't I give Laurienna who's on my
+party this item?"
+
+**Root cause #1 (the missing buttons)**: v1.27.631 already correctly
+hides Sell/List on Market/Give/Dismantle for whichever item a
+character currently has equipped (Reforge/Enchant deliberately still
+work on it). `_do_forge_magic_item`'s "forge_magic_upgrade" recipe
+mutates an item IN PLACE, so forging gear you're already wearing left
+it equipped afterward — exactly per that rule — but nothing ever told
+the player WHY those buttons had vanished, so working-as-designed
+looked broken.
+
+Fixed with a new `_equipped_hint_line(item_id, character)` in bot.py,
+surfaced right in the item card's caption (both the post-forge/enchant
+view and the dedicated item-view screen) whenever an item's buttons
+are hidden specifically because it's equipped: "Currently equipped —
+unequip it first to sell it, list it on the market, or give it away."
+Mirrors `_item_actions_keyboard`'s own exact can_sell/can_dismantle/
+is_quest_item gating so it never claims an option that wasn't going to
+show anyway.
+
+**Root cause #2 (a real correctness bug found in the same
+investigation)**: forging a PLAIN, not-yet-magic item (the OTHER half
+of `_do_forge_magic_item` — one that's never been generated before)
+promotes it into a brand new instance id, removing the old id from
+inventory and adding the new one — but if that plain item was the one
+actually equipped, nothing ever updated equipped_weapon/
+equipped_armor/equipped_shield/equipped_accessories, leaving them
+pointing at an item_id no longer owned at all (a silent "ghost
+equip": the sheet kept claiming to wear the old item forever, while
+the real upgraded instance sat unequipped and inert in the backpack).
+Fixed with a new `db.reequip_after_item_replacement` helper, called
+right after that same remove/add pair — the newly-forged instance now
+correctly takes over the old item's equip slot.
+
+**Root cause #3 (Laurienna)**: same exact bug shape as the 2026-08-16
+Ossian Vane fix, extended from NPCs to real party members. `_do_give_
+item` is deliberately scoped to whoever's physically co-located (not
+a formed party), but the old blanket refusal ("give it to whom? Name
+someone real who's actually here with you") couldn't distinguish "no
+one by that name exists" from "they're a real party member, just not
+standing in this exact room" — which reads as denying a real person's
+existence. Now checks the full chat-wide roster for a name match
+missing only because of the location/resting gate, and names the
+actual reason ("Laurienna is part of your party, but isn't here right
+now — they're elsewhere" / "...is resting right now").
+
+New regression tests cover all three: equip status surviving a
+plain-item forge, the hint line's exact gating, and both new give-item
+refusal messages.
+
 ## [1.27.659] — fix: overworld "Underground" map no longer blown out by an unflagged far quest chain
 
 Real dev-bridge report (Coffee, screenshot): the "MAP — Underground"

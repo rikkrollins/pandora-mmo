@@ -2094,6 +2094,38 @@ def _meets_rarity_level_requirement(character: dict, item: dict) -> bool:
     return character.get("level", 1) >= _item_level_requirement(item)
 
 
+def reequip_after_item_replacement(telegram_user_id: int, chat_id: int, old_item_id: str, new_item_id: str) -> None:
+    """
+    Real gap found investigating a dev-bridge report (2026-09-21,
+    Coffee, two screenshots about a forged item's missing Give/Sell/
+    Market options): bot._do_forge_magic_item promotes a PLAIN,
+    not-yet-magic item into a brand new generated instance (a
+    different item_id) by removing the old id from inventory and
+    adding the new one -- but if the old plain item was the one
+    actually EQUIPPED, nothing ever updated equipped_weapon/
+    equipped_armor/equipped_shield/equipped_accessories, leaving them
+    pointing at an item_id no longer in the character's inventory at
+    all (a silent "ghost equip": the sheet keeps claiming to wear the
+    old item forever, while the real, newly-upgraded instance sits
+    unequipped in the backpack doing nothing). Called right after that
+    same remove/add pair -- a genuine no-op for the overwhelmingly
+    common case (an unequipped item being upgraded), since none of the
+    equip fields will match old_item_id then.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return
+    updates = {}
+    for field in ("equipped_weapon", "equipped_armor", "equipped_shield"):
+        if character.get(field) == old_item_id:
+            updates[field] = new_item_id
+    accessories = character.get("equipped_accessories") or []
+    if old_item_id in accessories:
+        updates["equipped_accessories"] = [new_item_id if aid == old_item_id else aid for aid in accessories]
+    if updates:
+        update_character(telegram_user_id, chat_id, **updates)
+
+
 def is_item_equipped(character: dict, item_id: str) -> bool:
     """
     Real live request (2026-09-16, per Coffee: "make sure we cant sell

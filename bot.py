@@ -5537,6 +5537,41 @@ def _item_actions_keyboard(item_id: str, character: dict | None = None) -> Inlin
     return InlineKeyboardMarkup(buttons)
 
 
+def _equipped_hint_line(item_id: str, character: dict | None) -> str:
+    """
+    Real UX gap found via dev-bridge (2026-09-21, two screenshots,
+    Coffee: "I just forged this item, but it's not giving me an option
+    to give it to somebody... where are the other options like putting
+    it on the market, selling it and giving it" / "It's not letting me
+    give a player this item that I crafted"). Root cause: v1.27.631
+    deliberately hides Sell/List on Market/Give/Dismantle for whichever
+    item is currently equipped (Reforge/Enchant intentionally still
+    work on it, per Coffee's own explicit rule at the time) -- so
+    forging/enchanting an upgrade IN PLACE on gear already worn (the
+    exact scenario forge_magic_upgrade/reforge produce, since they
+    mutate the same instance id rather than a new one) correctly hid
+    those buttons, but nothing ever told the player why, so a working-
+    as-designed result looked like a bug. Mirrors _item_actions_
+    keyboard's own exact can_sell/can_dismantle/is_quest_item gating so
+    the wording never claims an option that wasn't going to show
+    anyway.
+    """
+    if character is None or not db.is_item_equipped(character, item_id):
+        return ""
+    item = items_module.get_item(item_id)
+    if item is None or items_module.is_quest_item(item_id):
+        return ""
+    actions = []
+    if items_module.is_sellable(item_id):
+        actions.append("sell it")
+    actions.append("list it on the market")
+    actions.append("give it away")
+    if item.get("type") in DISMANTLE_ELIGIBLE_TYPES:
+        actions.append("dismantle it")
+    joined = actions[0] if len(actions) == 1 else ", ".join(actions[:-1]) + f", or {actions[-1]}"
+    return f"\n\n_Currently equipped — unequip it first to {joined}._"
+
+
 # Loot Voting (2026-08-13, per Coffee: "when items are looted or
 # dropped lets have a voting system that the AI characters and the
 # players can vote on, asking if they Want it or not. Grab a tally of
@@ -24961,6 +24996,7 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
         )
         db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
         db.add_item(update.effective_user.id, update.effective_chat.id, target_item_id, 1)
+        db.reequip_after_item_replacement(update.effective_user.id, update.effective_chat.id, item_id, target_item_id)
 
     # Real exploit found 2026-09-13 (same audit pass that found the
     # Warding/guild-ladder restack gap, v1.27.590): this call had NO
@@ -26878,12 +26914,15 @@ async def _maybe_send_item_image(
     this same fix, not left as dead-redundant code.
     """
     prompt = _item_image_prompt(item_id, item_data)
+    viewer_character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    hint = _equipped_hint_line(item_id, viewer_character)
     detail_block = _format_item_detail_block(item_data)
-    caption = f"🎒 **{item_data['name']}**\n{detail_block}" if detail_block else f"🎒 {item_data['name']}"
+    caption = f"🎒 **{item_data['name']}**\n{detail_block}{hint}" if detail_block else f"🎒 {item_data['name']}{hint}"
     if len(caption) > 1024:
         stats_line = _format_item_stats_line(item_data)
-        caption = f"🎒 {item_data['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
-    viewer_character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        caption = f"🎒 {item_data['name']}" + (f"\n📊 {stats_line}" if stats_line else "") + hint
+        if len(caption) > 1024:
+            caption = f"🎒 {item_data['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
     rows = list(extra_buttons or []) + list(_item_actions_keyboard(item_id, viewer_character).inline_keyboard)
     await _send_generated_image(
         update, prompt, caption,
@@ -28241,11 +28280,14 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # single-line summary for the rare maximally-affixed item where
         # the full breakdown wouldn't fit, rather than risking a
         # rejected sendPhoto call.
+        hint = _equipped_hint_line(item_id, character)
         detail_block = _format_item_detail_block(item)
-        caption = f"🎒 **{item['name']}**\n{detail_block}" if detail_block else f"🎒 {item['name']}"
+        caption = f"🎒 **{item['name']}**\n{detail_block}{hint}" if detail_block else f"🎒 {item['name']}{hint}"
         if len(caption) > 1024:
             stats_line = _format_item_stats_line(item)
-            caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
+            caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "") + hint
+            if len(caption) > 1024:
+                caption = f"🎒 {item['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
         prompt = _item_image_prompt(item_id, item)
         sent = await _send_generated_image(
             update, prompt, caption, seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
@@ -31655,6 +31697,39 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
                 f"members (players and companions) only, not NPCs.",
                 message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
             )
+            return
+        # Real live report (2026-09-21, Coffee, four dev-bridge messages
+        # over one incident: "Why can't I give Lorianna/Laurienna who's
+        # on my party this item?") -- same exact shape as the Ossian
+        # Vane fix just above, extended to a real PARTY member instead
+        # of an NPC: this function was always scoped to whoever's
+        # actually co-located (candidates, above), but the old blanket
+        # rejection couldn't tell "no one by that name exists" apart
+        # from "they're real, they're in your party, they're just not
+        # standing in this exact room right now" -- the second case
+        # reads as a denial of the person's own existence, exactly the
+        # failure mode the 2026-08-16 fix already named. Checks the
+        # real, unfiltered chat-wide roster (_get_party_members, not
+        # location-scoped) for a name match missing only because of the
+        # "physically present" gate, so the refusal can name the actual
+        # reason instead.
+        elsewhere = _match_member_by_name_or_username(
+            text,
+            [p for p in _get_party_members(character["chat_id"]) if p["telegram_user_id"] != character["telegram_user_id"]],
+        )
+        if elsewhere is not None:
+            if elsewhere.get("is_inactive"):
+                await update.effective_chat.send_message(
+                    f"**{character['name']}**: {elsewhere['name']} is resting right now, not actually here with "
+                    f"you — item trading only works with someone physically present.",
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+                )
+            else:
+                await update.effective_chat.send_message(
+                    f"**{character['name']}**: {elsewhere['name']} is part of your party, but isn't here right "
+                    f"now — they're elsewhere. Item trading only works with someone standing in the same place as you.",
+                    message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+                )
         else:
             await update.effective_chat.send_message(
                 f"**{character['name']}**: give it to whom? Name someone real who's actually here with you.",

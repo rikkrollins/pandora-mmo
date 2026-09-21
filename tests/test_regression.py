@@ -19259,6 +19259,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             expected[mat_id] = expected.get(mat_id, 0) + qty
         self.assertEqual(materials, expected)
 
+    async def test_forge_magic_upgrade_keeps_a_previously_equipped_plain_item_equipped(self):
+        """
+        Real dev-bridge report (2026-09-21, two screenshots, Coffee: "I
+        just forged this item, but it's not giving me an option to give
+        it to somebody... where are the other options" / "It's not
+        letting me give a player this item that I crafted"). Root cause:
+        forging a PLAIN, not-yet-magic item that's currently EQUIPPED
+        promotes it into a brand new generated instance (removed the old
+        id from inventory, added the new one) but never touched
+        equipped_weapon/equipped_armor/equipped_shield/
+        equipped_accessories -- leaving them pointing at an item_id no
+        longer owned at all (a silent "ghost equip"), while the real
+        upgraded item sat unequipped in the backpack. Confirmed live via
+        the real _do_forge_magic_item handler: the new generated item
+        must end up equipped in the OLD item's place, not orphaned.
+        """
+        from unittest.mock import patch
+        user_id = 996047
+        make_basic_character(user_id, "GhostEquipFixed", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        db.add_item(user_id, -999, "longsword", 1)
+        ok, msg, _ = db.equip_item(user_id, -999, "longsword")
+        self.assertTrue(ok, msg)
+        with patch("bot.narrate_skill_check", return_value="You forge it carefully."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_forge_magic_item(FakeUpdate(user_id, "forge my longsword into a magic item", []), "forge my longsword into a magic item")
+        character = db.get_character(user_id, -999)
+        gen_item_id = next(iid for iid in character["inventory"] if iid.startswith(db.GENERATED_ITEM_ID_PREFIX))
+        self.assertEqual(character["equipped_weapon"], gen_item_id,
+                          "the newly-forged instance must replace the old plain item in the equip slot, not leave it orphaned")
+        self.assertNotIn("longsword", character["inventory"], "the old plain item was consumed by the promotion")
+        self.assertTrue(db.is_item_equipped(character, gen_item_id))
+
+    def test_equipped_hint_line_explains_why_give_sell_market_are_hidden(self):
+        """
+        Companion UX fix for the same dev-bridge report: v1.27.631
+        already correctly hides Sell/List on Market/Give/Dismantle for
+        whichever item is currently equipped, but nothing ever told the
+        player WHY those buttons had vanished from an otherwise-normal
+        item card -- a forged upgrade to gear already worn looked broken
+        instead of working as designed. _equipped_hint_line must only
+        speak up when it's actually the reason the buttons are missing.
+        """
+        user_id = 996048
+        character = make_basic_character(user_id, "HintLineCheck", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "longsword", 2)
+        character = db.get_character(user_id, -999)
+        self.assertEqual(bot._equipped_hint_line("longsword", character), "",
+                          "an unequipped, merely-owned item needs no hint")
+        db.equip_item(user_id, -999, "longsword")
+        character = db.get_character(user_id, -999)
+        hint = bot._equipped_hint_line("longsword", character)
+        self.assertIn("Currently equipped", hint)
+        self.assertIn("give it away", hint)
+
     def test_resolve_dismantle_three_tiers(self):
         from rules.crafting import resolve_dismantle
         from unittest.mock import patch
@@ -19434,6 +19491,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ok, msg = shop_module.sell_item(996131, -999, ring_id, 1)
         self.assertFalse(ok)
         self.assertIn("unequip it first", msg.lower())
+
+    async def test_do_give_item_explains_a_real_party_member_is_just_not_here(self):
+        """
+        Real dev-bridge report (2026-09-21, four messages, Coffee: "Why
+        can't I give Lorianna/Laurienna who's on my party this item?"
+        after "give the lantern of true sight to laurienna" got a flat
+        "give it to whom? Name someone real who's actually here with
+        you."). Same exact bug SHAPE as the 2026-08-16 Ossian Vane fix
+        just above (a real, existing companion/player wrongly reads as
+        "not real" instead of "real, just not physically here right
+        now") -- extended from NPCs to real party members who are a
+        genuine chat member but not co-located with the giver.
+        """
+        giver_id, elsewhere_id = 996135, 996136
+        make_basic_character(giver_id, "PresenceGiver", current_location="crossroads_tavern")
+        make_basic_character(elsewhere_id, "LaurienaElsewhere", current_location="whispering_wood")
+        db.add_item(giver_id, -999, "torch", 1)
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give my torch to laurienaelsewhere", sink), "give my torch to laurienaelsewhere")
+        self.assertTrue(any("part of your party" in s and "isn't here right now" in s for s in sink), sink)
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get("torch"), 1)  # never left the giver
+
+    async def test_do_give_item_explains_a_real_party_member_is_resting(self):
+        """Same fix, the OTHER real exclusion reason (_get_combat_eligible_party_members' own is_inactive check) -- a resting party member gets its own honest, distinct wording."""
+        giver_id, resting_id = 996137, 996138
+        make_basic_character(giver_id, "PresenceGiver2", current_location="crossroads_tavern")
+        make_basic_character(resting_id, "LaurienaResting", current_location="crossroads_tavern")
+        db.update_character(resting_id, -999, is_inactive=1)
+        db.add_item(giver_id, -999, "torch", 1)
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give my torch to laurienaresting", sink), "give my torch to laurienaresting")
+        self.assertTrue(any("is resting right now" in s for s in sink), sink)
 
     async def test_do_give_item_rejects_a_currently_equipped_item(self):
         giver_id, recipient_id = 996132, 996133
