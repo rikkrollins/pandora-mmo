@@ -22508,18 +22508,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("SummonGoblinA", target_picker)
         self.assertIn(f"bm|summontarget|the_wrathflame_unbound|{-5100052}", target_picker)
 
-        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="You should not have come here."), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             result = await tap(f"bm|summontarget|the_wrathflame_unbound|{-5100052}")
-            # Real test-hygiene fix (2026-09-16, stale-test investigation):
-            # the summon flavor line fires as a real background
-            # asyncio.create_task (see bot._do_summon_remnant's own
-            # 2026-08-21 comment) -- without this sleep, the mock above
-            # unpatches before that task ever runs, and it falls through
-            # to a REAL Ollama call that blocks test teardown for up to
-            # 200s. Same fix already established at line ~36144.
-            await asyncio.sleep(0.2)
+            # Real test-hygiene fix (2026-09-16, stale-test investigation;
+            # completed 2026-09-21): the summon flavor line fires as a
+            # real background asyncio.create_task (see bot._do_summon_
+            # remnant's own 2026-08-21 comment), and summoning consumes
+            # the player's turn, so the enemy's own auto-resolved
+            # counter-turn ALSO enqueues a real narrate_action call on
+            # the same background queue. A plain sleep only ever covered
+            # the first of those two -- narrate_action was never mocked
+            # here at all, so the counter-turn's own narration could
+            # still fall through to a REAL Ollama call. Both are now
+            # mocked, and _drain_narration_queue (this file's own
+            # helper, ~line 54) reliably waits for the whole queue to
+            # finish instead of guessing a fixed delay.
+            await _drain_narration_queue()
         self.assertIn("The Wrathflame Unbound", result)
         self.assertIn("SummonGoblinB", result)
         sessions.end_session(-999)
@@ -22602,18 +22608,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertIn(f"bm|summontarget|the_root_that_remembers|{-5100062}", "\n".join(markup_lines))
 
-        import asyncio
         with patch("bot.narrate_remnant_summon", return_value="It answers your call."), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
             result_sink = []
             await bot.battle_menu_callback(
                 FakeCallbackUpdate(user_id, f"bm|summontarget|the_root_that_remembers|{-5100062}", result_sink), DummyContext(),
             )
-            # Real test-hygiene fix (2026-09-16): see the identical
-            # comment a few tests up -- the flavor line's background
-            # asyncio.create_task must run while the mock above is still
-            # active, or it leaks a real, up-to-200s Ollama call.
-            await asyncio.sleep(0.2)
+            # Real test-hygiene fix (2026-09-16, stale-test investigation;
+            # completed 2026-09-21): see the identical comment a few
+            # tests up -- narrate_action (the enemy's own auto-resolved
+            # counter-turn) was never mocked here either, so it could
+            # still leak a real Ollama call even with the flavor-line
+            # sleep in place. _drain_narration_queue reliably waits for
+            # the whole real narration queue instead of guessing a delay.
+            await _drain_narration_queue()
         result = "\n".join(result_sink)
         self.assertIn("The Root That Remembers", result)
         self.assertIn("The High Approach Sentinel 2", result)

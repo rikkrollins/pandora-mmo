@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.657] — test-only: closed the last 2 leaking Remnant-summon tests
+
+Follow-up to [[project_amulet_slot_and_sheet_gear_display_v1_27_627]]'s
+own incidental finding: 13 of 15 summon tests leaking a real,
+up-to-200s Ollama call during teardown were fixed there; 2 remained
+(`test_battle_menu_summon_flow_lists_remnant_then_target_then_casts`,
+`test_summontarget_callback_data_stays_under_telegrams_64_byte_limit`).
+Root cause was different from the other 13: summoning a Remnant
+consumes the player's turn, so the enemy's own auto-resolved counter-
+turn fires a SECOND real background narration call
+(`bot.narrate_action`) that neither test ever mocked — only the
+summon's own flavor line (`narrate_remnant_summon`) was covered, and
+only via a fixed `asyncio.sleep(0.2)` rather than a real wait. Fixed
+by mocking `narrate_action` too and replacing the sleep with this
+file's own `_drain_narration_queue()` helper (reliably waits for the
+whole real narration queue instead of guessing a delay).
+
+No production code touched. Both tests now finish in ~1s combined
+(previously could hang up to 200s each); full 46-test "summon" slice
+re-run clean. Test-only — no restart needed.
+
 ## [1.27.656] — content: real loop-back shortcuts for the 7 hand-authored dungeons
 
 Second, final half of the real Labyrinth-density audit from earlier
