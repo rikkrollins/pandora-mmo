@@ -32813,6 +32813,25 @@ async def _do_equip_item(update: Update, text: str, item_id: str | None = None) 
         item_id for item_id in target["inventory"]
         if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous")
     ]
+    # Real live report (2026-09-21, Coffee: forged two +2 Strength magic
+    # copies of gear Laurienna already had a plain version of -- "she is
+    # tryin to equip them but the normal item is being equipped"). Root
+    # cause: this free-text path (no button/item_id, since equipping
+    # something for ANOTHER party member has no button UI at all) has
+    # to resolve the named item by TEXT via _extract_item_list ->
+    # find_item_mentioned_in_text, whose own tie-break for two
+    # identically-named candidates is just a stable sort with no real
+    # preference -- it fell back to whichever id happened to come first
+    # in dict iteration order, which was the already-equipped plain
+    # item, not the newly-given magic one. Sorting the real generated
+    # ("gi"-prefixed) instance first for every name means a genuine
+    # name collision always resolves to the more specific, actually-
+    # forged/looted copy -- a player naming an item they own both a
+    # plain and a magic version of overwhelmingly means the magic one,
+    # especially right after receiving or forging it. The item_id-
+    # carrying button path (equip_menu_callback, fixed in v1.27.658) is
+    # completely unaffected -- this only changes text resolution.
+    equippable_ids = sorted(equippable_ids, key=lambda iid: not iid.startswith(db.GENERATED_ITEM_ID_PREFIX))
     if item_id is not None:
         items_wanted = [(item_id, 1)] if item_id in equippable_ids else []
     else:

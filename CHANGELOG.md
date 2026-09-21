@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.661] — fix: equipping gear for a party member could silently re-equip the plain copy instead of the magic one
+
+Real live report (Coffee, urgent): forged two +2 Strength magic copies
+of gear a companion (Laurienna) already had a plain version of, gave
+them to her — "she is tryin to equip them but the normal item is
+being equipped."
+
+Root cause: equipping something FOR another party member ("equip
+Laurienna with the cloak of elvenkind") has no button/item_id path at
+all — that only exists for the caller's own inventory — so it always
+resolves the named item from free text via `_extract_item_list` ->
+`items.find_item_mentioned_in_text`. When the target owns both a
+plain and a magic copy sharing the exact same name, that matcher's
+own tie-break is a stable sort with no real preference between equal-
+length names, so it fell back to whichever id happened to come first
+in inventory dict order — the already-equipped plain item, added long
+before the newly-given magic one — so the command kept "re-equipping"
+the same old item and the magic copy never got worn.
+
+Fixed in `_do_equip_item` (bot.py): the free-text candidate list is
+now sorted so a real generated ("gi"-prefixed) instance always wins a
+same-name tie over a plain catalog item — a player naming an item
+they own both versions of overwhelmingly means the magic one,
+especially right after receiving or forging it. The button path
+(`equip_menu_callback`, already fixed in v1.27.658 to carry the exact
+tapped item_id) is completely unaffected.
+
+New regression test reproduces the exact reported shape: a companion
+already wearing a plain Cloak of Elvenkind, given a +2 Strength magic
+copy, equipped for her by another party member via free text — now
+correctly ends up wearing the magic one. Full 139-test equip/give/
+forge/auto_equip slice re-run clean.
+
 ## [1.27.660] — fix: forged-in-place equipped gear no longer loses its equip slot, plus two real UX blind spots closed
 
 Real dev-bridge reports (Coffee, four messages): "I just forged this

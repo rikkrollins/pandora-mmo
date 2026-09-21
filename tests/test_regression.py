@@ -3661,6 +3661,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         self.assertEqual(character["equipped_weapon"], "longsword")
 
+    async def test_equipping_for_another_party_member_by_free_text_prefers_the_magic_copy_over_the_plain_one(self):
+        """
+        Real live report (2026-09-21, Coffee: forged two +2 Strength
+        magic copies of gear a companion, Laurienna, already had a
+        plain version of, gave them to her -- "she is tryin to equip
+        them but the normal item is being equipped"). Root cause:
+        equipping FOR another party member has no button/item_id at
+        all (that only exists for the caller's own inventory), so it
+        always resolves the named item from TEXT -- and when the
+        target owns both a plain and a magic copy sharing the same
+        name, find_item_mentioned_in_text's own stable sort had no real
+        preference, falling back to dict-iteration order (the already-
+        equipped plain item, added to inventory long before the new
+        magic one). Fixed by sorting equippable_ids so a real generated
+        instance always wins a same-name tie.
+        """
+        giver_id, companion_id = 996140, 996141
+        make_basic_character(giver_id, "GearGiver", current_location="crossroads_tavern")
+        make_basic_character(companion_id, "Laurienna", current_location="crossroads_tavern")
+        db.add_item(companion_id, -999, "cloak_of_elvenkind", 1)
+        db.equip_item(companion_id, -999, "cloak_of_elvenkind")
+        item = items_module.get_item("cloak_of_elvenkind")
+        base_stats = {k: v for k, v in item.items() if k != "affixes"}
+        magic_cloak_id = db.create_item_instance(
+            item_type=item["type"], name=item["name"], rarity=item.get("rarity", "common"),
+            price=item.get("price", 0), base_stats=base_stats,
+            affixes=[{"kind": "ability_bonus", "ability": "strength", "value": 2}], source="crafted",
+        )
+        db.add_item(companion_id, -999, magic_cloak_id, 1)
+
+        sink = []
+        await bot._do_equip_item(
+            FakeUpdate(giver_id, "equip laurienna with the cloak of elvenkind", sink),
+            "equip laurienna with the cloak of elvenkind",
+        )
+        companion = db.get_character(companion_id, -999)
+        self.assertEqual(companion["equipped_accessories"], [magic_cloak_id],
+                          f"expected the +2 Strength magic copy equipped, got {companion['equipped_accessories']}")
+
     # -- Reactions (Shield, Uncanny Dodge): CLAUDE.md flagged this as
     #    needing resolve_attack's roll-then-damage step to have a real
     #    checkpoint rather than a bolt-on -- that checkpoint already
