@@ -28304,6 +28304,37 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await _safe_send(update, caption, reply_markup=_item_actions_keyboard(item_id, character))
         return
 
+    if action == "equipfor" and len(parts) > 3:
+        # Real live bug (2026-09-21, Coffee, urgent: "for some reason
+        # they equipped onto my player? that was a glitch"). The give-
+        # item confirmation's own Equip button (v1.27.662) reused this
+        # same "equip" action above, which deliberately operates on
+        # whoever TAPS it -- correct for a shared loot-drop button
+        # ("whoever wants it taps it"), but a GIVE confirmation names
+        # ONE specific recipient. The giver tapping their own
+        # "Laurienna: Equip X" button (while legitimately still owning
+        # a separate copy of the same item themselves, e.g. from
+        # forging two) silently equipped it onto THEMSELVES instead --
+        # exactly the reported symptom. This action hard-codes the real
+        # recipient's telegram_user_id right in the button, so tapping
+        # it always targets that specific person no matter who taps --
+        # anyone in the party can still help gear someone up, same as
+        # "equip Sarah with the longbow" already allows; they just can
+        # no longer accidentally redirect the equip onto themselves.
+        recipient_tid = int(parts[3])
+        recipient_char = db.get_character(recipient_tid, update.effective_chat.id)
+        if recipient_char is None:
+            await _safe_send(update, "That character no longer exists.")
+            return
+        if recipient_char.get("inventory", {}).get(item_id, 0) <= 0:
+            await _safe_send(update, f"{recipient_char['name']} doesn't have the {item['name']} to equip.")
+            return
+        _ok, msg, updated = db.equip_item(recipient_tid, update.effective_chat.id, item_id)
+        await _safe_send(update, f"**{recipient_char['name']}**: {msg}" if _ok else msg)
+        if _ok and updated:
+            _sync_live_combat_equipment(recipient_tid, update.effective_chat.id, updated)
+        return
+
     owns_it = character.get("inventory", {}).get(item_id, 0) > 0
     if action == "equip":
         if not owns_it:
@@ -31779,16 +31810,21 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
     # -- a successful give landed the item in the recipient's own
     # inventory with zero next-step guidance, unlike every other real
     # item moment in this game (forge/enchant/craft/loot all attach a
-    # real Equip button via _item_actions_keyboard). Reuses that exact
-    # button (itemview|equip|<id>) rather than inventing a new one --
-    # itemview_callback's own equip branch already operates on
-    # whoever TAPS it (same "a party member tapping Equip on gear they
-    # don't personally own just gets an honest refusal" convention
-    # documented there), so this is safe even though the GIVER is the
-    # one seeing the message: only the actual recipient tapping it
-    # will find the item in their own inventory and succeed.
+    # real Equip button via _item_actions_keyboard). Uses the
+    # itemview|equipfor|<id>|<recipient_tid> action (2026-09-21, same
+    # incident's own follow-up bug: the FIRST version of this reused
+    # the plain itemview|equip|<id> action, which operates on whoever
+    # TAPS it -- correct for a shared loot-drop button, wrong here,
+    # since the giver tapping their own "Laurienna: Equip X" button
+    # while still legitimately owning a second copy themselves silently
+    # equipped it onto THEMSELVES instead) -- this action hard-codes
+    # the real recipient right in the button, so it always targets them
+    # no matter who taps it.
     equip_buttons = [
-        [InlineKeyboardButton(f"⚔️ {recipient['name']}: Equip {items_module.get_item(iid)['name']}", callback_data=f"itemview|equip|{iid}")]
+        [InlineKeyboardButton(
+            f"⚔️ {recipient['name']}: Equip {items_module.get_item(iid)['name']}",
+            callback_data=f"itemview|equipfor|{iid}|{recipient['telegram_user_id']}",
+        )]
         for iid in given_equippable_ids
     ]
     await _safe_send(update, "\n".join(given), reply_markup=InlineKeyboardMarkup(equip_buttons) if equip_buttons else None)

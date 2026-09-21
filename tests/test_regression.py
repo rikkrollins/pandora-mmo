@@ -19563,7 +19563,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_give_item(FakeUpdate(giver_id, "give my torch to laurienaresting", sink), "give my torch to laurienaresting")
         self.assertTrue(any("is resting right now" in s for s in sink), sink)
 
-    async def test_do_give_item_attaches_a_real_equip_button_the_recipient_can_tap(self):
+    async def test_do_give_item_attaches_a_real_equip_button_targeting_the_recipient(self):
         """
         Real live gap (2026-09-21, Coffee, urgent: "the equip system is
         too confusing... the player doesn't know what to do" -- after
@@ -19571,10 +19571,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         the recipient had no idea how to equip them). A successful give
         used to be a plain confirmation line with zero next-step
         guidance, unlike forge/enchant/craft/loot which all attach a
-        real Equip button. Reuses the exact same itemview|equip|<id>
-        button/callback -- must actually equip onto whoever TAPS it
-        (the recipient), not the giver, since the giver no longer owns
-        the item by the time this message is sent.
+        real Equip button. Uses itemview|equipfor|<id>|<recipient_tid>,
+        which hard-codes the real recipient right in the button, so it
+        always targets THEM regardless of who actually taps it.
         """
         from unittest.mock import patch
         giver_id, recipient_id = 996142, 996143
@@ -19598,13 +19597,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         button = captured["reply_markup"].inline_keyboard[0][0]
         self.assertIn("EquipButtonRecipient", button.text)
         self.assertIn("Longsword", button.text)
-        self.assertEqual(button.callback_data, "itemview|equip|longsword")
+        self.assertEqual(button.callback_data, f"itemview|equipfor|longsword|{recipient_id}")
 
-        # The recipient taps it -- must equip onto THEM, not the giver.
+        # The recipient taps it -- must equip onto them.
         sink = []
         await bot.itemview_callback(FakeCallbackUpdate(recipient_id, button.callback_data, sink), DummyContext())
         self.assertEqual(db.get_character(recipient_id, -999)["equipped_weapon"], "longsword")
         self.assertIsNone(db.get_character(giver_id, -999)["equipped_weapon"])
+
+    async def test_give_equip_button_targets_the_recipient_even_when_the_giver_taps_it(self):
+        """
+        The exact real bug reported right after v1.27.662 shipped
+        (Coffee: "for some reason they equipped onto my player? that
+        was a glitch"). The first version of the give-item Equip button
+        reused the plain itemview|equip|<id> action, which operates on
+        whoever TAPS it -- fine for a shared loot-drop button, wrong
+        here: the giver tapping their OWN "Laurienna: Equip X" button,
+        while still legitimately owning a separate copy of the exact
+        same item themselves (e.g. from forging two), silently equipped
+        it onto the GIVER instead of the named recipient. Reproduces
+        that exact shape: giver and recipient both own an item sharing
+        the same id space (here, literally two different real items so
+        each can independently equip a longsword) -- the giver tapping
+        the recipient-targeted button must equip onto the RECIPIENT,
+        never onto the tapping giver, even though the giver owns their
+        own separate copy too.
+        """
+        giver_id, recipient_id = 996144, 996145
+        make_basic_character(giver_id, "GlitchGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "GlitchRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "longsword", 2)  # giver keeps a copy after giving one away
+        db.add_item(recipient_id, -999, "longsword", 1)
+
+        button_data = f"itemview|equipfor|longsword|{recipient_id}"
+        sink = []
+        await bot.itemview_callback(FakeCallbackUpdate(giver_id, button_data, sink), DummyContext())
+        self.assertEqual(db.get_character(recipient_id, -999)["equipped_weapon"], "longsword",
+                          "the button's embedded recipient must be equipped, not whoever tapped it")
+        self.assertIsNone(db.get_character(giver_id, -999)["equipped_weapon"],
+                           "the giver still owning a copy must NOT cause it to equip onto them")
 
     async def test_do_give_item_rejects_a_currently_equipped_item(self):
         giver_id, recipient_id = 996132, 996133

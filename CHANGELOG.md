@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.663] — fix: the new give-item Equip button could equip onto the giver instead of the named recipient
+
+Real live report, immediately after v1.27.662 shipped (Coffee: "for
+some reason they equipped onto my player? that was a glitch").
+
+Root cause: that button reused the plain `itemview|equip|<id>` action,
+which deliberately operates on whoever TAPS it — correct for a shared
+loot-drop button ("whoever wants it taps it"), wrong for a give
+confirmation that names one specific recipient. The giver tapping
+their own "Laurienna: Equip X" button, while still legitimately owning
+a separate copy of the exact same item themselves (e.g. from forging
+two), silently equipped it onto the GIVER instead.
+
+New action `itemview|equipfor|<item_id>|<recipient_telegram_user_id>`
+hard-codes the real recipient right in the button, so it always
+targets them regardless of who physically taps it — anyone in the
+party can still help gear someone up (same as "equip Sarah with the
+longbow" already allows), they just can't accidentally redirect the
+equip onto themselves anymore.
+
+New regression test reproduces the exact reported shape: giver and
+recipient each own their own copy of the same item, giver taps the
+recipient-targeted button, only the recipient ends up equipped. Full
+115-test itemview/give/equip slice re-run clean.
+
 ## [1.27.662] — feature: giving someone gear now offers a one-tap Equip button
 
 Real live gap (Coffee, urgent): after successfully giving a companion
