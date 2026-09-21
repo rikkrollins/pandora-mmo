@@ -16453,7 +16453,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("forge|preview|longsword", callback_data)
         self.assertIn(f"forge|preview|{gen_item_id}", callback_data)
         reforge_button = next(btn for btn in buttons if btn.callback_data == f"forge|preview|{gen_item_id}")
-        self.assertEqual(reforge_button.text, "🔄 Reforge Test Blade")
+        # Real dev-bridge report (2026-09-21): this button's label now
+        # tags the item's own real bonus (this fixture's +1 Charisma
+        # affix) so two identically-named magic items are visually
+        # distinguishable -- see _item_bonus_tag's own docstring.
+        self.assertEqual(reforge_button.text, "🔄 Reforge Test Blade (+1 Charisma)")
 
     async def test_forge_menu_callback_rerolls_an_already_magic_items_ability_bonus_end_to_end(self):
         """
@@ -16597,6 +16601,119 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot.forge_menu_callback(FakeCallbackUpdate(user_id, "forge|make|longsword", sink), DummyContext())
         updated = db.get_character(user_id, -999)
         self.assertTrue(any(iid.startswith(db.GENERATED_ITEM_ID_PREFIX) for iid in updated["inventory"]))
+
+    def test_item_menu_label_distinguishes_a_plain_item_from_its_own_forged_copy(self):
+        """
+        Real dev-bridge report (2026-09-21, two screenshots): a real
+        inventory listing showed "Cloak of Elvenkind x1" twice and a
+        Reforge menu showed "Reforge Sturdy Leather Armor" as two
+        identical buttons -- a forged item keeps the exact same `name`
+        as the plain item it was promoted from (_do_forge_magic_item
+        copies it verbatim), so two owned copies with genuinely
+        different real stats looked completely identical everywhere a
+        menu just printed item["name"]. _item_menu_label must tag a
+        real bonus; a plain item's label must stay completely
+        unchanged (no regression for the overwhelming majority of items
+        that never collide).
+        """
+        plain = {"name": "Cloak of Elvenkind", "type": "wondrous"}
+        forged = {"name": "Cloak of Elvenkind", "type": "wondrous", "ability_bonuses": [{"ability": "charisma", "value": 2}]}
+        armor_forged = {"name": "Sturdy Leather Armor", "type": "armor", "ac_bonus": 1}
+        weapon_forged = {"name": "Longsword", "type": "weapon", "damage_bonus": 3}
+        self.assertEqual(bot._item_menu_label(plain), "Cloak of Elvenkind")
+        self.assertEqual(bot._item_menu_label(forged), "✨ Cloak of Elvenkind (+2 Charisma)")
+        self.assertEqual(bot._item_menu_label(armor_forged), "✨ Sturdy Leather Armor (+1 AC)")
+        self.assertEqual(bot._item_menu_label(weapon_forged), "✨ Longsword (+3 dmg)")
+        self.assertNotEqual(bot._item_menu_label(plain), bot._item_menu_label(forged))
+
+    async def test_reforge_menu_shows_distinct_labels_for_two_identically_named_magic_items(self):
+        """End-to-end: two owned generated items that happen to share an identical name (the exact real shape _do_forge_magic_item produces -- name copied verbatim from the plain item) must show two genuinely DIFFERENT Reforge button labels, not identical ones."""
+        user_id = 951030
+        make_basic_character(user_id, "ReforgeLabelTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        item_a = db.create_item_instance(
+            item_type="armor", name="Sturdy Leather Armor", rarity="uncommon", price=100,
+            base_stats={"ac_base": 12, "armor_category": "medium"}, affixes=[{"kind": "stat_bonus", "field": "ac_bonus", "value": 1}], source="crafted",
+        )
+        item_b = db.create_item_instance(
+            item_type="armor", name="Sturdy Leather Armor", rarity="rare", price=200,
+            base_stats={"ac_base": 12, "armor_category": "medium"}, affixes=[{"kind": "stat_bonus", "field": "ac_bonus", "value": 3}], source="crafted",
+        )
+        db.add_item(user_id, -999, item_a, 1)
+        db.add_item(user_id, -999, item_b, 1)
+        # The fake send_message only records plain text, not
+        # reply_markup (see tests/helpers.py's FakeChat) -- patching
+        # _safe_send itself is the reliable way to inspect the real
+        # button labels a fresh (non-edit) menu message actually sends.
+        from unittest.mock import patch
+        captured = {}
+        real_safe_send = bot._safe_send
+
+        async def capture_safe_send(update, text, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot.bsmenu_callback(FakeCallbackUpdate(user_id, "bsmenu|forge", []), DummyContext())
+        button_labels = [
+            btn.text for row in captured["reply_markup"].inline_keyboard for btn in row
+        ]
+        combined = "\n".join(button_labels)
+        self.assertIn("+1 AC", combined)
+        self.assertIn("+3 AC", combined)
+
+    async def test_equip_button_equips_the_exact_tapped_item_not_a_same_named_duplicate(self):
+        """
+        Real bug found via testing (2026-09-21, investigating the label
+        report above): equip_menu_callback used to discard the real,
+        already-known item_id from its own callback_data and re-encode
+        the item's NAME back into free text for _do_equip_item to
+        re-resolve -- when two owned items share an identical name,
+        that re-resolution could silently equip the WRONG one. Two
+        armors sharing a name (+1 AC vs +5 AC) -- tapping the button for
+        the SECOND one's real item_id must equip THAT exact instance.
+        """
+        user_id = 951031
+        make_basic_character(user_id, "EquipDispatchTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=10)
+        item_a = db.create_item_instance(
+            item_type="armor", name="Sturdy Leather Armor", rarity="uncommon", price=100,
+            base_stats={"ac_base": 12, "armor_category": "medium"}, affixes=[{"kind": "stat_bonus", "field": "ac_bonus", "value": 1}], source="crafted",
+        )
+        item_b = db.create_item_instance(
+            item_type="armor", name="Sturdy Leather Armor", rarity="rare", price=200,
+            base_stats={"ac_base": 12, "armor_category": "medium"}, affixes=[{"kind": "stat_bonus", "field": "ac_bonus", "value": 5}], source="crafted",
+        )
+        db.add_item(user_id, -999, item_a, 1)
+        db.add_item(user_id, -999, item_b, 1)
+        sink = []
+        await bot.equip_menu_callback(FakeCallbackUpdate(user_id, f"equip|item|{item_b}", sink), DummyContext())
+        updated = db.get_character(user_id, -999)
+        self.assertEqual(updated["equipped_armor"], item_b, "tapping the second item's own button must equip that exact instance, not the first same-named one")
+
+    async def test_give_button_gives_the_exact_tapped_item_not_a_same_named_duplicate(self):
+        """Same real dispatch bug as the Equip test above, for give_menu_callback -- two identically-named items, tapping the second one's real button must give away THAT exact instance."""
+        import sessions
+        giver_id, receiver_id, chat_id = 951032, 951033, -951032
+        make_basic_character(giver_id, "GiveDispatchGiver", current_location="crossroads_tavern", chat_id=chat_id)
+        make_basic_character(receiver_id, "GiveDispatchReceiver", current_location="crossroads_tavern", chat_id=chat_id)
+        item_a = db.create_item_instance(
+            item_type="wondrous", name="Cloak of Elvenkind", rarity="uncommon", price=100,
+            base_stats={}, affixes=[{"kind": "ability_bonus", "ability": "charisma", "value": 1}], source="crafted",
+        )
+        item_b = db.create_item_instance(
+            item_type="wondrous", name="Cloak of Elvenkind", rarity="rare", price=200,
+            base_stats={}, affixes=[{"kind": "ability_bonus", "ability": "charisma", "value": 4}], source="crafted",
+        )
+        db.add_item(giver_id, chat_id, item_a, 1)
+        db.add_item(giver_id, chat_id, item_b, 1)
+        sink = []
+        await bot.give_menu_callback(FakeCallbackUpdate(giver_id, f"give|to|{item_b}|{receiver_id}", sink, chat_id=chat_id), DummyContext())
+        giver_after = db.get_character(giver_id, chat_id)
+        receiver_after = db.get_character(receiver_id, chat_id)
+        self.assertNotIn(item_b, giver_after["inventory"])
+        self.assertIn(item_a, giver_after["inventory"], "the OTHER same-named item must remain untouched")
+        self.assertIn(item_b, receiver_after["inventory"], "the exact tapped item must be the one actually given")
 
     async def test_forge_menu_callback_serializes_rapid_duplicate_taps_instead_of_double_forging(self):
         """

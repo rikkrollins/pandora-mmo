@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.658] — feature+fix: enchanted items get a real distinct label, and a real wrong-item-equipped/given bug closed
+
+Real dev-bridge report (Coffee, two screenshots): a real inventory
+listing showed "Cloak of Elvenkind x1" twice and a Reforge menu showed
+"Reforge Sturdy Leather Armor" as two identical buttons, with zero way
+to tell which copy was which. Root cause: `_do_forge_magic_item`
+copies the plain item's own `name` verbatim onto the new magic
+instance (and tier-reforging never touches `name` either), so two
+owned copies with genuinely different real stats look identical
+everywhere a menu just prints `item["name"]`.
+
+New shared helper `_item_menu_label(item)` (plus `_item_bonus_tag` for
+callers with their own emoji/verb prefix already) tags a real bonus —
+whichever of `ability_bonuses`/`ac_bonus`/`damage_bonus` the item
+actually carries — with the same ✨ convention the Forge menu already
+used for a first-time promotion, e.g. "✨ Cloak of Elvenkind (+2
+Charisma)". A plain item's label is completely unchanged. Threaded
+through the inventory list, Reforge/Forge menu, Enchant picker, Equip
+menu (both the personal and in-battle "equip for an ally" flows), Give
+menu, Dismantle confirmation, and the market listing/sell broadcast.
+
+**A more serious bug found via the same investigation, not requested
+but fixed in the same pass**: `equip_menu_callback`, the battle-menu
+equip flow, and `give_menu_callback` all discarded the real, already-
+known `item_id` from their own tap's `callback_data` and re-encoded
+the item's *name* back into free text for `_do_equip_item`/
+`_do_give_item` to re-resolve by substring match — when two owned
+items shared an identical name, that re-resolution could silently
+equip or give away the *wrong* one. Both functions now accept an
+optional `item_id` that skips the free-text re-resolution entirely
+when the caller already knows exactly which item was tapped; the
+free-text path (typing "equip the longbow") is unchanged. `_do_use_item`
+was checked and left alone — it only ever applies to consumables/maps/
+books, which are never forge-duplicated, so it was never actually
+exploitable despite following a similar shape.
+
+6 new regression tests, including a direct reproduction of the wrong-
+item bug (two armors sharing a name, tapping the second one's real
+button must equip/give that exact instance, never the first). Full
+216-test inventory/forge/reforge/enchant/equip/give/dismantle/market
+slice re-run clean (1 pre-existing, unrelated batch-ordering flake
+confirmed passing in isolation).
+
 ## [1.27.657] — test-only: closed the last 2 leaking Remnant-summon tests
 
 Follow-up to [[project_amulet_slot_and_sheet_gear_display_v1_27_627]]'s

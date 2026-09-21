@@ -4402,7 +4402,7 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
             await _safe_edit_markup(query, _battle_menu_keyboard(session))
             return
         buttons = [
-            [InlineKeyboardButton(items_module.get_item(iid)["name"], callback_data=f"bm|equipitem|{target_tid}|{iid}")]
+            [InlineKeyboardButton(_item_menu_label(items_module.get_item(iid)), callback_data=f"bm|equipitem|{target_tid}|{iid}")]
             for iid in equippable_ids
         ]
         buttons.append([InlineKeyboardButton("« Back", callback_data="bm|equip")])
@@ -4411,14 +4411,17 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
 
     if action == "equipitem" and len(parts) > 3:
         target_tid = int(parts[2])
-        item = items_module.get_item(parts[3])
-        item_name = item["name"] if item else parts[3]
+        battle_equip_item_id = parts[3]
         target = db.get_character(target_tid, update.effective_chat.id)
         await _safe_edit_markup(query)
+        # Real fix (2026-09-21): pass the real item_id straight through
+        # (see _do_equip_item's own docstring) -- the "for {name}" text
+        # is still needed to resolve WHICH party member, but the item
+        # itself no longer round-trips through its own display name.
         if target is not None and target_tid != user_id:
-            await _do_equip_item(update, f"equip {item_name} for {target['name']}")
+            await _do_equip_item(update, f"for {target['name']}", item_id=battle_equip_item_id)
         else:
-            await _do_equip_item(update, f"equip {item_name}")
+            await _do_equip_item(update, "", item_id=battle_equip_item_id)
         await _safe_send(update, _turn_announcement(session), reply_markup=_battle_menu_keyboard(session))
         return
 
@@ -19654,7 +19657,7 @@ async def _do_sell_market(update: Update, args: list[str]) -> None:
     )
     listed_item = items_module.get_item(item_id)
     message = (
-        f"🏷️ **{character['name']}** lists **{quantity}x {listed_item['name']}** for **{price} gold** "
+        f"🏷️ **{character['name']}** lists **{quantity}x {_item_menu_label(listed_item)}** for **{price} gold** "
         f"(listing #{listing_id}). Say \"/buy_market {listing_id}\" to buy it, or "
         f"\"/cancel_market {listing_id}\" to pull it back if you listed it by mistake."
     )
@@ -19765,7 +19768,11 @@ def _market_keyboard(
     buttons = []
     for listing in listings:
         item = items_module.get_item(listing["item_id"])
-        item_name = item["name"] if item else listing["item_id"]
+        # Real dev-bridge report (2026-09-21): two listings of an
+        # identically-named item (a plain one and a forged one, or two
+        # sellers' own independently-rolled generated items) used to be
+        # indistinguishable in this list.
+        item_name = _item_menu_label(item) if item else listing["item_id"]
         if viewer_id is not None and listing["seller_id"] == viewer_id:
             buttons.append([InlineKeyboardButton(
                 f"🗑️ Unlist {listing['quantity']}x {item_name} — {listing['price']}g",
@@ -22233,7 +22240,7 @@ async def _do_check_inventory(update: Update) -> None:
         grouped: dict[str, list[str]] = {cat: [] for cat in _INVENTORY_SORT_CATEGORY_ORDER}
         for item_id, qty in character["inventory"].items():
             item = items_module.get_item(item_id)
-            name = item["name"] if item else item_id
+            name = _item_menu_label(item) if item else item_id
             grouped[_inventory_sort_category(item)].append(f"  {name} x{qty}")
         lines = []
         for cat in _INVENTORY_SORT_CATEGORY_ORDER:
@@ -22244,7 +22251,7 @@ async def _do_check_inventory(update: Update) -> None:
         lines = []
         for item_id, qty in character["inventory"].items():
             item = items_module.get_item(item_id)
-            name = item["name"] if item else item_id
+            name = _item_menu_label(item) if item else item_id
             lines.append(f"  {name} x{qty}")
     item_rows = _item_keyboard(character)
     # Scroll-cast buttons (2026-07-25, per Coffee: "No button for
@@ -22702,12 +22709,22 @@ async def _do_show_blacksmith_category(update: Update, category: str) -> None:
                 if item is None or item["type"] not in forge_recipe["applies_to"]:
                     continue
                 if already_magic:
-                    button_rows.append([InlineKeyboardButton(f"🔄 Reforge {item['name']}", callback_data=f"forge|preview|{item_id}")])
+                    # Real dev-bridge report (2026-09-21): two owned
+                    # magic items sharing a name (a forge copies the
+                    # plain item's own name verbatim) used to show as
+                    # two identical "🔄 Reforge X" buttons with zero way
+                    # to tell them apart. Append the real bonus tag when
+                    # there is one -- see _item_bonus_tag's own docstring
+                    # for why this doesn't just reuse _item_menu_label
+                    # outright (that would add a second, redundant ✨).
+                    tag = _item_bonus_tag(item)
+                    label = f"🔄 Reforge {item['name']} ({tag})" if tag else f"🔄 Reforge {item['name']}"
+                    button_rows.append([InlineKeyboardButton(label, callback_data=f"forge|preview|{item_id}")])
                     continue
                 if item["name"] in seen_names:
                     continue
                 seen_names.add(item["name"])
-                button_rows.append([InlineKeyboardButton(f"✨ {item['name']}", callback_data=f"forge|preview|{item_id}")])
+                button_rows.append([InlineKeyboardButton(_item_menu_label(item) if _item_bonus_tag(item) else f"✨ {item['name']}", callback_data=f"forge|preview|{item_id}")])
             if not button_rows:
                 locked_lines.append("You don't own a plain weapon, armor, shield, ring, amulet, or wondrous item to forge yet.")
     else:
@@ -22970,7 +22987,18 @@ async def _do_show_alchemy_category(update: Update, category: str) -> None:
             if item is None or not any(item["type"] in recipe["applies_to"] for _rid, recipe in eligible_recipes):
                 continue
             any_matching_item = True
-            button_rows.append([InlineKeyboardButton(f"✨ {item['name']}", callback_data=f"enchant|pickitem|{item_id}")])
+            # Real dev-bridge report (2026-09-21): two owned generated
+            # items can share an identical name. Every item reaching
+            # this branch is already a generated/magic item by
+            # construction (owned_generated only), so it always keeps
+            # its ✨ regardless of whether it happens to carry one of
+            # _item_bonus_tag's 3 tracked fields (a generated item's
+            # real affix could just as easily be a resistance/
+            # elemental one instead) -- unlike _item_menu_label, which
+            # only adds ✨ when a tag exists.
+            tag = _item_bonus_tag(item)
+            label = f"✨ {item['name']} ({tag})" if tag else f"✨ {item['name']}"
+            button_rows.append([InlineKeyboardButton(label, callback_data=f"enchant|pickitem|{item_id}")])
         if eligible_recipes and not any_matching_item:
             locked_lines.append("✅ You know real enchantments, but need a matching magic item to enchant.")
     else:
@@ -23280,7 +23308,7 @@ def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     if not others or not character.get("inventory"):
         return None
     buttons = [
-        [InlineKeyboardButton(f"🤝 Give {items_module.get_item(i)['name']}", callback_data=f"give|pick|{i}")]
+        [InlineKeyboardButton(f"🤝 Give {_item_menu_label(items_module.get_item(i))}", callback_data=f"give|pick|{i}")]
         for i, qty in character["inventory"].items()
         if qty > 0 and items_module.get_item(i) and not db.is_item_equipped(character, i)
         and not items_module.is_quest_item(i)
@@ -23323,7 +23351,9 @@ async def give_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         target_character = db.get_character(int(target_token), update.effective_chat.id)
         if target_character is None:
             return
-        await _do_give_item(update, f"give {item['name']} to {target_character['name']}")
+        # Real fix (2026-09-21): pass the real item_id straight through
+        # (see _do_give_item's own item_id docstring).
+        await _do_give_item(update, f"to {target_character['name']}", item_id=item_id)
 
 
 _ALL_GATHERABLE_MATERIAL_IDS: set[str] | None = None
@@ -24411,7 +24441,7 @@ async def _do_dismantle_item(update: Update, text: str) -> None:
     if count <= 1:
         await _safe_send(
             update,
-            f"⚠️ Dismantle **{item['name']}**?\n\nThis destroys it permanently for real crafting materials back — "
+            f"⚠️ Dismantle **{_item_menu_label(item)}**?\n\nThis destroys it permanently for real crafting materials back — "
             f"there's no undoing it. Are you sure?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Yes, dismantle it", callback_data=f"itemview|dismantle|{item_id}")],
@@ -28026,6 +28056,50 @@ def _format_item_stats_line(item: dict) -> str | None:
     return "; ".join(parts)
 
 
+def _item_menu_label(item: dict) -> str:
+    """
+    Real request (2026-09-21, per Coffee, dev-bridge, two screenshots:
+    a real inventory listing showing "Cloak of Elvenkind x1" and a
+    Reforge menu showing "Reforge Sturdy Leather Armor" each appearing
+    TWICE with zero visual distinction) -- a forged/enchanted item
+    instance keeps the exact same `name` as the plain item it was
+    promoted from (_do_forge_magic_item, ~line 24913, copies it
+    verbatim; db.forge_item_instance's tier-reforge path never touches
+    `name` either), so two owned copies with genuinely different real
+    stats look completely identical everywhere a menu just prints
+    item["name"]. Coffee's own ask: "label an enchanted item
+    differently... an emoji... and maybe the plus and the number
+    beside it."
+
+    Tags the label with the item's own real bonus -- whichever of
+    ability_bonuses/ac_bonus/damage_bonus it actually carries (the
+    exact fields a forge/enchant affix sets, see db._apply_affix) --
+    plus the same ✨ prefix the Forge menu already uses for a magic
+    item. Deliberately NOT the full _format_item_stats_line (rarity,
+    damage_dice, resistances, proficiency category, price, ...) --
+    that's a multi-clause tooltip line meant for the item-view screen,
+    far too long for a menu button; this is just the one real
+    differentiator between two same-named copies. A plain item with
+    none of these three fields returns its name completely unchanged
+    -- no behavior change for the overwhelming majority of items that
+    never collide.
+    """
+    tag = _item_bonus_tag(item)
+    return f"✨ {item['name']} ({tag})" if tag else item["name"]
+
+
+def _item_bonus_tag(item: dict) -> str | None:
+    """The compact '+N Stat, +N AC' part of _item_menu_label, split out on its own for a caller (the Reforge button) that already has its own emoji/verb prefix and just needs the disambiguating bonus text, not a second ✨."""
+    tags = []
+    for ab in item.get("ability_bonuses") or []:
+        tags.append(f"+{ab['value']} {ab['ability'].title()}")
+    if item.get("ac_bonus"):
+        tags.append(f"+{item['ac_bonus']} AC")
+    if item.get("damage_bonus"):
+        tags.append(f"+{item['damage_bonus']} dmg")
+    return ", ".join(tags) if tags else None
+
+
 def _format_item_detail_block(item: dict) -> str:
     """
     Structured, multi-line item-view breakdown (2026-08-15, per Coffee,
@@ -28226,7 +28300,7 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             return
         await _safe_send(
             update,
-            f"⚠️ Dismantle **{item['name']}**?\n\nThis destroys it permanently for real crafting materials back — "
+            f"⚠️ Dismantle **{_item_menu_label(item)}**?\n\nThis destroys it permanently for real crafting materials back — "
             f"there's no undoing it. Are you sure?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Yes, dismantle it", callback_data=f"itemview|dismantle|{item_id}")],
@@ -31523,7 +31597,7 @@ async def _do_find_merchant(update: Update) -> None:
     await _safe_send(update, line)
 
 
-async def _do_give_item(update: Update, text: str) -> None:
+async def _do_give_item(update: Update, text: str, item_id: str | None = None) -> None:
     """
     Player-to-player item trading (2026-07-15 backlog item): hand a
     carried item to another real player or AI companion. Scoped to
@@ -31532,6 +31606,16 @@ async def _do_give_item(update: Update, text: str) -> None:
     fight (_get_combat_eligible_party_members) -- not restricted to a
     formed party, since trading with anyone standing in the same room
     is the more natural reading of "give my potion to X".
+
+    `item_id` (2026-09-21, same real fix as _do_equip_item's own): the
+    Give menu's own button already carries the exact real item to give
+    in its callback_data -- give_menu_callback used to discard that and
+    re-encode the item's own NAME back into free text instead, which
+    _extract_item_list below then re-resolved by name substring,
+    risking silently giving away the WRONG one of two identically-named
+    items (e.g. a plain vs. forged copy). Passing the real id straight
+    through skips that re-resolution for the button path; a player
+    typing "give the cloak to Sarah" is unaffected.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -31578,7 +31662,10 @@ async def _do_give_item(update: Update, text: str) -> None:
             )
         return
 
-    items_wanted = _extract_item_list(text, list(character["inventory"].keys()))
+    if item_id is not None:
+        items_wanted = [(item_id, 1)] if item_id in character["inventory"] else []
+    else:
+        items_wanted = _extract_item_list(text, list(character["inventory"].keys()))
     if not items_wanted:
         await update.effective_chat.send_message(
             f"Give {recipient['name']} what, exactly? Name something you're actually carrying.",
@@ -32600,7 +32687,7 @@ async def _apply_shrine_blessing(update: Update, character: dict) -> None:
     )
 
 
-async def _do_equip_item(update: Update, text: str) -> None:
+async def _do_equip_item(update: Update, text: str, item_id: str | None = None) -> None:
     """
     Real bug from the same reverse-playthrough finding as _do_use_item
     (2026-07-15): items.py's weapon (damage_dice/ability), armor
@@ -32617,6 +32704,19 @@ async def _do_equip_item(update: Update, text: str) -> None:
     character when no other real party member is named. The item comes
     from the TARGET's own inventory, not the caller's -- this is
     "help them equip what they're already carrying," not a transfer.
+
+    `item_id` (2026-09-21, real dev-bridge report: two owned items
+    sharing an identical display name): equip_menu_callback's own
+    button already knows the EXACT real item to equip (it's embedded
+    directly in the tap's callback_data) -- it used to discard that and
+    re-encode the item's own NAME back into free text instead, which
+    _extract_item_list below then had to re-resolve by name substring,
+    silently picking an arbitrary one of two identically-named items
+    (items.find_item_mentioned_in_text's own tie-break) instead of the
+    exact one actually tapped. Passing the real id straight through
+    here skips that whole re-resolution step for the button path, while
+    the free-text path (a player typing "equip the longbow") is
+    completely unchanged.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -32638,7 +32738,10 @@ async def _do_equip_item(update: Update, text: str) -> None:
         item_id for item_id in target["inventory"]
         if (items_module.get_item(item_id) or {}).get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous")
     ]
-    items_wanted = _extract_item_list(text, equippable_ids)
+    if item_id is not None:
+        items_wanted = [(item_id, 1)] if item_id in equippable_ids else []
+    else:
+        items_wanted = _extract_item_list(text, equippable_ids)
     if not items_wanted:
         who = "you" if target is character else target["name"]
         await update.effective_chat.send_message(
@@ -34021,7 +34124,13 @@ def _equip_keyboard(character: dict) -> InlineKeyboardMarkup | None:
             continue
         item = items_module.get_item(item_id)
         if item and item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
-            buttons.append([InlineKeyboardButton(f"⚔️ {item['name']}", callback_data=f"equip|item|{item_id}")])
+            # Real dev-bridge report (2026-09-21): two carried items
+            # sharing a name (a plain one and a forged one, or two
+            # independently-rolled generated items) used to be
+            # indistinguishable here.
+            tag = _item_bonus_tag(item)
+            label = f"⚔️ {item['name']} ({tag})" if tag else f"⚔️ {item['name']}"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"equip|item|{item_id}")])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
@@ -34057,7 +34166,11 @@ async def equip_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     item = items_module.get_item(item_id) if item_id else None
     if item is None:
         return
-    await _do_equip_item(update, f"equip {item['name']}")
+    # Real fix (2026-09-21): pass the real item_id straight through
+    # instead of re-encoding item['name'] back into free text -- see
+    # _do_equip_item's own item_id docstring for the real bug this
+    # closes (two identically-named items, wrong one silently equipped).
+    await _do_equip_item(update, "", item_id=item_id)
 
 
 def _level_keyboard() -> InlineKeyboardMarkup:
