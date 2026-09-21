@@ -19563,6 +19563,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_give_item(FakeUpdate(giver_id, "give my torch to laurienaresting", sink), "give my torch to laurienaresting")
         self.assertTrue(any("is resting right now" in s for s in sink), sink)
 
+    async def test_do_give_item_attaches_a_real_equip_button_the_recipient_can_tap(self):
+        """
+        Real live gap (2026-09-21, Coffee, urgent: "the equip system is
+        too confusing... the player doesn't know what to do" -- after
+        successfully giving a companion two +2 Strength forged items,
+        the recipient had no idea how to equip them). A successful give
+        used to be a plain confirmation line with zero next-step
+        guidance, unlike forge/enchant/craft/loot which all attach a
+        real Equip button. Reuses the exact same itemview|equip|<id>
+        button/callback -- must actually equip onto whoever TAPS it
+        (the recipient), not the giver, since the giver no longer owns
+        the item by the time this message is sent.
+        """
+        from unittest.mock import patch
+        giver_id, recipient_id = 996142, 996143
+        make_basic_character(giver_id, "EquipButtonGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "EquipButtonRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "longsword", 1)
+
+        captured = {}
+        real_safe_send = bot._safe_send
+
+        async def capture_safe_send(update, text, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot._do_give_item(
+                FakeUpdate(giver_id, "give my longsword to EquipButtonRecipient", []),
+                "give my longsword to EquipButtonRecipient",
+            )
+        self.assertIsNotNone(captured["reply_markup"], "a successful give of an equippable item must attach an Equip button")
+        button = captured["reply_markup"].inline_keyboard[0][0]
+        self.assertIn("EquipButtonRecipient", button.text)
+        self.assertIn("Longsword", button.text)
+        self.assertEqual(button.callback_data, "itemview|equip|longsword")
+
+        # The recipient taps it -- must equip onto THEM, not the giver.
+        sink = []
+        await bot.itemview_callback(FakeCallbackUpdate(recipient_id, button.callback_data, sink), DummyContext())
+        self.assertEqual(db.get_character(recipient_id, -999)["equipped_weapon"], "longsword")
+        self.assertIsNone(db.get_character(giver_id, -999)["equipped_weapon"])
+
     async def test_do_give_item_rejects_a_currently_equipped_item(self):
         giver_id, recipient_id = 996132, 996133
         make_basic_character(giver_id, "EquippedGiver", current_location="crossroads_tavern")

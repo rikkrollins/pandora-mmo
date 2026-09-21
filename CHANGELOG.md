@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.662] — feature: giving someone gear now offers a one-tap Equip button
+
+Real live gap (Coffee, urgent): after successfully giving a companion
+two forged +2 Strength items, the recipient had no idea how to equip
+them. A successful give was always a plain confirmation line with
+zero next-step guidance — unlike forging, enchanting, crafting, and
+looting, which all already attach a real Equip button.
+
+`_do_give_item` now attaches a real "⚔️ [Recipient]: Equip [Item]"
+button to the confirmation for every successfully-given weapon/armor/
+shield/ring/amulet/wondrous item. Reuses the exact same `itemview|
+equip|<id>` button/callback every other item-view Equip button already
+uses — that handler already operates on whoever TAPS it (the same
+"a party member tapping Equip on gear they don't personally own just
+gets an honest refusal" convention it already documents), so the
+recipient tapping it correctly equips onto themselves even though the
+giver is the one who sees the message land.
+
+New regression test: gives an item, captures the real button, has the
+RECIPIENT (not the giver) tap it, and confirms it lands on the
+recipient's own character. Full 114-test give/itemview/equip slice
+re-run clean.
+
 ## [1.27.661] — fix: equipping gear for a party member could silently re-equip the plain copy instead of the magic one
 
 Real live report (Coffee, urgent): forged two +2 Strength magic copies

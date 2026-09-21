@@ -31749,6 +31749,7 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
         return
 
     given = []
+    given_equippable_ids = []
     for item_id, quantity in items_wanted:
         item_name = items_module.get_item(item_id)["name"]
         # Real live request (2026-09-16, per Coffee: "make sure we cant
@@ -31770,8 +31771,27 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
             continue
         db.add_item(recipient["telegram_user_id"], update.effective_chat.id, item_id, quantity)
         given.append(f"🤝 **{character['name']}** gives {quantity}x {item_name} to **{recipient['name']}**.")
+        if items_module.get_item(item_id).get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
+            given_equippable_ids.append(item_id)
 
-    await _safe_send(update, "\n".join(given))
+    # Real live gap found (2026-09-21, Coffee, urgent: "the equip
+    # system is too confusing... the player doesn't know what to do")
+    # -- a successful give landed the item in the recipient's own
+    # inventory with zero next-step guidance, unlike every other real
+    # item moment in this game (forge/enchant/craft/loot all attach a
+    # real Equip button via _item_actions_keyboard). Reuses that exact
+    # button (itemview|equip|<id>) rather than inventing a new one --
+    # itemview_callback's own equip branch already operates on
+    # whoever TAPS it (same "a party member tapping Equip on gear they
+    # don't personally own just gets an honest refusal" convention
+    # documented there), so this is safe even though the GIVER is the
+    # one seeing the message: only the actual recipient tapping it
+    # will find the item in their own inventory and succeed.
+    equip_buttons = [
+        [InlineKeyboardButton(f"⚔️ {recipient['name']}: Equip {items_module.get_item(iid)['name']}", callback_data=f"itemview|equip|{iid}")]
+        for iid in given_equippable_ids
+    ]
+    await _safe_send(update, "\n".join(given), reply_markup=InlineKeyboardMarkup(equip_buttons) if equip_buttons else None)
 
 
 async def _do_use_item(update: Update, text: str) -> None:
