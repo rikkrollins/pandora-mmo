@@ -422,6 +422,46 @@ def _grid_cell_owners(layer_locations: dict, visited_here: list[str]) -> dict[tu
     return owners
 
 
+def _largest_connected_owners(
+    owners: dict[tuple[int, int], list[str]], current_location_id: str | None,
+) -> dict[tuple[int, int], list[str]]:
+    """
+    Restricts `owners` to one grid-adjacency-connected cluster of cells
+    (4-directional, matching the same adjacency draw_walls already uses
+    for its own off-grid check) -- whichever cluster the character's
+    current location's own cell falls in, or the largest cluster if
+    they aren't standing on this grid right now (e.g. currently inside
+    an excluded dungeon interior). See the real bug this fixes in
+    render_layer_map's own comment above: a hand-authored quest chain
+    placed far from the main cluster otherwise blows out the whole
+    canvas for everyone, regardless of who's viewing it.
+    """
+    if not owners:
+        return owners
+    cell_of_location: dict[str, tuple[int, int]] = {}
+    for xy, ids in owners.items():
+        for lid in ids:
+            cell_of_location[lid] = xy
+    remaining = set(owners.keys())
+    clusters: list[set[tuple[int, int]]] = []
+    while remaining:
+        start = next(iter(remaining))
+        stack = [start]
+        seen = {start}
+        while stack:
+            cx, cy = stack.pop()
+            for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+                neighbor = (cx + dx, cy + dy)
+                if neighbor in remaining and neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+        clusters.append(seen)
+        remaining -= seen
+    current_cell = cell_of_location.get(current_location_id)
+    chosen = next((c for c in clusters if current_cell in c), None) or max(clusters, key=len)
+    return {xy: owners[xy] for xy in chosen}
+
+
 def _pick_primary(cell_ids: list[str], floor_levels: dict[str, int], current_location_id: str | None) -> str:
     """
     Which of a shared cell's locations gets the actual tile image and
@@ -577,6 +617,30 @@ def render_layer_map(
             xy: ids for xy, ids in owners.items()
             if any(floor_levels.get(lid, 0) == floor_filter for lid in ids)
         }
+    elif exclude_dungeon_interiors:
+        # Real bug found live (2026-09-21, Coffee, screenshot: "is the
+        # map supposed to look like this? it's very hard for me to
+        # see it"): a handful of hand-authored quest chains (Wordless
+        # Choir, Whispering Wood's Deep Root chain, Greymoor Downs'
+        # Below the Cairn/The Last Question) sit at grid_position
+        # coordinates just as far-flung as a real dungeon's own
+        # interior rooms (same build_location_grid.py "separate
+        # lateral strip" layout, see the floor_filter comment above)
+        # but were never tagged `dungeon_interior: true` -- confirmed
+        # live, they have no dungeon_id either, so they're genuinely
+        # not part of the dungeon system, just an authoring gap -- so
+        # exclude_dungeon_interiors above never drops them, and one of
+        # them alone blows the whole-layer bounding box out to 70+
+        # rows, cramming the real visible town cluster into one tiny
+        # top-left corner of an otherwise solid-black canvas. Scoped
+        # to only the real overworld view (exclude_dungeon_interiors
+        # is only ever True for that call, never render_dungeon_map)
+        # by keeping just the single grid-adjacency-connected cluster
+        # the player's own current location sits in (or the largest
+        # cluster, if they're not on this layer's grid at all right
+        # now) -- any other real, far-off cluster is still fully
+        # visited/revealed data, just no longer sized into THIS view.
+        floor_owners = _largest_connected_owners(owners, current_location_id)
     else:
         floor_owners = owners
 

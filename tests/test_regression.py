@@ -36064,6 +36064,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         image = Image.open(io.BytesIO(png))
         self.assertLess(image.size[1], 1000, f"expected a small, single-floor canvas, got {image.size}")
 
+    def test_overworld_layer_map_is_not_blown_out_by_an_unflagged_far_quest_chain(self):
+        """
+        Real live report (2026-09-21, Coffee, screenshot: "is the map
+        supposed to look like this? it's very hard for me to see it")
+        on the plain "MAP — Underground" overworld view (bot.py's
+        _send_layer_map, exclude_dungeon_interiors=True, floor_filter
+        always None). Root cause: real hand-authored quest chains
+        (Wordless Choir, Whispering Wood's Deep Root chain, Greymoor
+        Downs' Below the Cairn/The Last Question) sit at grid_position
+        coordinates as far from the main cluster as a real dungeon's
+        own interior rooms, but were never tagged dungeon_interior:
+        true (confirmed live: no dungeon_id either, genuinely not part
+        of the dungeon system) -- so exclude_dungeon_interiors above
+        never dropped them, and visiting just one blew the whole-layer
+        bounding box out to 70+ rows, cramming the real visible town
+        cluster into one tiny corner of an otherwise solid-black
+        canvas. Fixed by scoping the overworld view to the single
+        grid-adjacency-connected cluster the character is actually
+        standing in.
+        """
+        import io
+        from unittest.mock import patch
+        import map_render
+        from PIL import Image
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        main_cluster = {"sunken_root_caverns", "goblin_warrens", "the_first_city"}
+        far_chain = {"wordless_choir_gate", "wordless_choir_antechamber", "wordless_choir_machinery",
+                     "wordless_choir_hall", "wordless_choir_resonance_well", "wordless_choir_source",
+                     "wordless_choir_forgotten_chord", "the_first_city_forgotten_depth"}
+        self.assertTrue(far_chain <= underground.keys(), "fixture assumes these real campaign rooms still exist")
+        for lid in far_chain:
+            self.assertFalse(underground[lid].get("dungeon_interior"),
+                              f"{lid} is now flagged dungeon_interior -- this test's premise (the authoring gap) no longer holds, safe to remove/update")
+        visited = main_cluster | far_chain
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_layer_map(
+                "underground", underground, visited, set(), "sunken_root_caverns",
+                bot.CAMPAIGN["monsters"], bot.CAMPAIGN["quests"], None, True,
+            )
+        image = Image.open(io.BytesIO(png))
+        self.assertLess(image.size[1], 800, f"expected a small canvas scoped to the main cluster, got {image.size}")
+
     def test_every_real_ascends_descends_pair_has_a_matching_directions_entry(self):
         """
         Companion structural guard for the same real incident above --
@@ -36471,8 +36513,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         -5) must show a real gap (the flat fallback fill color, since
         the tile fetch is mocked out) at the middle of their shared
         edge, while a real, grid-adjacent pair with NO connection
-        (goblin_warrens_the_second_stash at (-1,5) <-> goblin_warrens_
-        grasks_old_cage at (-1,6)) must show a solid wall there instead.
+        (goblin_warrens_the_quiet_crossing at (-2,5) <-> goblin_warrens_
+        the_second_stash at (-1,5)) must show a solid wall there instead.
+
+        Note (2026-09-21): this negative-case pair was re-picked after
+        the original fixture pair (goblin_warrens_the_second_stash <->
+        goblin_warrens_grasks_old_cage) became a real, intentional
+        connection via v1.27.656's own hand-authored-dungeon loop-back
+        pass -- that was this test correctly catching its own fixture
+        going stale (the pixel there now shows the real, correct gap
+        color for a real connection), not a rendering regression.
         """
         from unittest.mock import patch
         import map_render
@@ -36507,10 +36557,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "a real open connection must leave a real gap (the flat fallback fill), not a solid wall",
         )
 
-        # Shared NORTH/SOUTH edge of the_second_stash (-1, 5) / grasks_
-        # old_cage (-1, 6) -- grid-adjacent but genuinely NOT connected.
+        # Shared EAST/WEST edge of the_quiet_crossing (-2, 5) / the_
+        # second_stash (-1, 5) -- grid-adjacent but genuinely NOT connected.
         stash_px, stash_py = cell_px_py("goblin_warrens_the_second_stash")
-        unconnected_edge_pixel = image.getpixel((stash_px + map_render.CELL_SIZE // 2, stash_py + 1))
+        unconnected_edge_pixel = image.getpixel((stash_px + 1, stash_py + map_render.CELL_SIZE // 2))
         self.assertNotEqual(
             unconnected_edge_pixel, (60, 55, 48),
             "two grid-adjacent rooms with no real connection must draw a solid wall, not a gap",

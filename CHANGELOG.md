@@ -2,6 +2,46 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.659] — fix: overworld "Underground" map no longer blown out by an unflagged far quest chain
+
+Real dev-bridge report (Coffee, screenshot): the "MAP — Underground"
+world map showed real location thumbnails crammed into one tiny
+top-left corner of an otherwise solid-black canvas — "is the map
+supposed to look like this? it's very hard for me to see it."
+
+Root cause: `render_layer_map`'s overworld view sizes its canvas from
+the bounding box of every visited, non-dungeon-interior location on
+the layer. A handful of hand-authored quest chains (Wordless Choir,
+Whispering Wood's Deep Root chain, Greymoor Downs' Below the
+Cairn/The Last Question) sit at `grid_position` coordinates just as
+far-flung as a real dungeon's own interior rooms — but were never
+tagged `dungeon_interior: true` (confirmed: they have no `dungeon_id`
+either, genuinely not part of the dungeon system, just an authoring
+gap) — so the existing dungeon-interior exclusion never dropped them,
+and visiting just one of these blew the whole-layer bounding box out
+to 70+ rows.
+
+Fixed by scoping the overworld view's bounding box to the single
+grid-adjacency-connected cluster the character is actually standing
+in (or the largest cluster, if they're not on this layer's grid right
+now) — a new `_largest_connected_owners` helper in `map_render.py`,
+mirroring the same real-incident fix v1.27.647 already made for a
+dungeon's own per-floor view (`floor_filter`). Any far-off real
+cluster stays fully visited/revealed data, it's just no longer sized
+into a view it isn't part of.
+
+Also found and fixed in the same pass: a pre-existing test
+(`test_render_dungeon_map_draws_a_real_doorway_gap_only_where_a_connection_exists`)
+had gone stale — its "genuinely not connected" negative-case fixture
+pair (`goblin_warrens_the_second_stash` / `goblin_warrens_grasks_old_cage`)
+became a real, intentional connection via v1.27.656's own
+hand-authored-dungeon loop-back pass. Re-picked a still-unconnected
+grid-adjacent pair; not a rendering regression.
+
+New regression test reproduces the exact reported scenario (main
+town cluster + the Wordless Choir chain both visited) and asserts the
+resulting canvas stays small.
+
 ## [1.27.658] — feature+fix: enchanted items get a real distinct label, and a real wrong-item-equipped/given bug closed
 
 Real dev-bridge report (Coffee, two screenshots): a real inventory
