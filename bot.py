@@ -22288,12 +22288,22 @@ async def _do_check_inventory(update: Update) -> None:
             item = items_module.get_item(item_id)
             name = _item_menu_label(item) if item else item_id
             lines.append(f"  {name} x{qty}")
-    item_rows = _item_keyboard(character)
-    # Scroll-cast buttons (2026-07-25, per Coffee: "No button for
-    # scrolls?" -- reported from exactly this backpack screen). Known
-    # spells already have their own buttons on the character sheet, so
-    # only the scroll-derived ones show up here, not a duplicate set.
-    scroll_rows = _scroll_spell_buttons(character)
+    # Real live report (2026-09-22, Coffee, screenshot, follow-up to the
+    # Give/Market category fix: "I like the sub menus, but you still
+    # have the push buttons from the previous manual system that needs
+    # to be cleaned up and put into the sub folders"). Use (consumables)
+    # and Cast a Scroll used to dump their own flat button list directly
+    # onto this screen -- fine when a character carried one or two
+    # scrolls, a real wall of buttons once they'd collected several (the
+    # exact same "excessive push buttons" shape as the Give menu had,
+    # just for a different action). Both are now single top-level
+    # buttons that reveal their real list on tap (item_menu_callback's
+    # new "showuse"/"showscrolls" actions), matching the reveal-then-
+    # Back shape the Give/Market category pickers already use -- Give's
+    # own buttons are left inline exactly as before (Coffee said he
+    # likes that one as-is).
+    use_rows = [[InlineKeyboardButton("🧪 Use an Item", callback_data="item|showuse")]] if _item_keyboard(character) else []
+    scroll_rows = [[InlineKeyboardButton("📜 Cast a Scroll", callback_data="item|showscrolls")]] if _scroll_spell_buttons(character) else []
     # Give buttons (2026-07-25, per Coffee: "anything the party might
     # need we need buttons for - like giving them item for their
     # backpack so they can use or cast them"). One per carried item,
@@ -22301,16 +22311,6 @@ async def _do_check_inventory(update: Update) -> None:
     # to (same presence scoping _do_give_item's own free-text already
     # uses) -- dispatches through that exact same handler.
     give_rows = _give_item_keyboard(character)
-    # Real live bug (2026-07-25, caught in bot_live_tmp.log right after
-    # this session's own give-buttons deploy): InlineKeyboardMarkup.
-    # inline_keyboard is a real tuple (confirmed directly against the
-    # installed python-telegram-bot), while _scroll_spell_buttons
-    # returns a plain list -- concatenating a tuple to a list raises
-    # TypeError, crashing this screen outright for any character with
-    # actual usable consumables (item_rows non-None), which is the
-    # common case. list(...) on each piece normalizes everything to the
-    # same type before combining.
-    #
     # Real live cleanup (2026-09-15, per Coffee: "now that we have all
     # these menus here u can remove the push button options for
     # crafting such things in the item menu") -- this used to also
@@ -22323,7 +22323,7 @@ async def _do_check_inventory(update: Update) -> None:
     # do the same thing.
     combined_rows = (
         _inventory_sort_keyboard(character)
-        + list(item_rows.inline_keyboard if item_rows else [])
+        + use_rows
         + scroll_rows
         + list(give_rows.inline_keyboard if give_rows else [])
     )
@@ -23284,6 +23284,28 @@ async def item_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if character is None:
             return
         db.update_character(update.effective_user.id, update.effective_chat.id, inventory_sort_mode=mode)
+        await _do_check_inventory(update)
+        return
+
+    if action == "showuse":
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        keyboard = _item_keyboard(character) if character else None
+        if keyboard is None:
+            return
+        rows = list(keyboard.inline_keyboard) + [[InlineKeyboardButton("« Back", callback_data="item|back")]]
+        await _safe_edit_markup(query, InlineKeyboardMarkup(rows))
+        return
+
+    if action == "showscrolls":
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        rows = _scroll_spell_buttons(character) if character else []
+        if not rows:
+            return
+        rows = rows + [[InlineKeyboardButton("« Back", callback_data="item|back")]]
+        await _safe_edit_markup(query, InlineKeyboardMarkup(rows))
+        return
+
+    if action == "back":
         await _do_check_inventory(update)
         return
 

@@ -19664,6 +19664,97 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         callback_datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
         self.assertTrue(all(cd.startswith("give|pick|") for cd in callback_datas), callback_datas)
 
+    async def test_do_check_inventory_folds_use_and_scroll_buttons_behind_top_level_reveals(self):
+        """
+        Real live follow-up (2026-09-22, Coffee, screenshot: "I like
+        the sub menus, but you still have the push buttons from the
+        previous manual system that needs to be cleaned up and put
+        into the sub folders") -- the Use and Cast-a-Scroll button
+        lists used to dump directly onto the inventory screen, the
+        exact same "excessive push buttons" shape the Give menu had
+        before its own category fix, just for a different action (a
+        character with several scrolls showed 9 real "X (scroll)"
+        buttons inline). Both must now be single top-level reveal
+        buttons instead of their real per-item lists showing directly.
+        """
+        from unittest.mock import patch
+        user_id = 996155
+        make_basic_character(user_id, "TopLevelInventoryChecker", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "healing_potion", 1)
+        for scroll_id in ("scroll_magic_missile", "scroll_fireball", "scroll_cure_wounds", "scroll_revivify", "scroll_shield"):
+            db.add_item(user_id, -999, scroll_id, 1)
+
+        captured = {}
+        real_safe_send = bot._safe_send
+
+        async def capture_safe_send(update, text, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot._do_check_inventory(FakeUpdate(user_id, "check my inventory", []))
+        callback_datas = [b.callback_data for row in captured["reply_markup"].inline_keyboard for b in row]
+        self.assertFalse(any(cd.startswith("item|use|") for cd in callback_datas), callback_datas)
+        self.assertFalse(any(cd.startswith("spell|castscroll|") for cd in callback_datas), callback_datas)
+        self.assertIn("item|showuse", callback_datas)
+        self.assertIn("item|showscrolls", callback_datas)
+
+    async def test_item_menu_showuse_reveals_the_real_use_buttons_and_back_returns(self):
+        """Tapping the top-level Use button reveals the real per-item Use buttons plus a Back button; Back re-sends the top-level inventory screen."""
+        from unittest.mock import patch
+        user_id = 996156
+        make_basic_character(user_id, "ShowUseTapper", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "healing_potion", 1)
+
+        sink = []
+        captured = {}
+        real_edit = bot._safe_edit_markup
+
+        async def capture_edit(query, reply_markup=None):
+            captured["markup"] = reply_markup
+            return await real_edit(query, reply_markup)
+
+        with patch("bot._safe_edit_markup", side_effect=capture_edit):
+            await bot.item_menu_callback(FakeCallbackUpdate(user_id, "item|showuse", sink), DummyContext())
+        callback_datas = [b.callback_data for row in captured["markup"].inline_keyboard for b in row]
+        self.assertIn("item|use|healing_potion", callback_datas)
+        self.assertIn("item|back", callback_datas)
+
+        real_safe_send = bot._safe_send
+        sent = {}
+
+        async def capture_safe_send(update, text, **kwargs):
+            sent["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot.item_menu_callback(FakeCallbackUpdate(user_id, "item|back", sink), DummyContext())
+        back_callback_datas = [b.callback_data for row in sent["reply_markup"].inline_keyboard for b in row]
+        self.assertIn("item|showuse", back_callback_datas)
+
+    async def test_item_menu_showscrolls_reveals_the_real_scroll_cast_buttons(self):
+        """Tapping the top-level Cast a Scroll button reveals the real scroll cast buttons plus a Back button."""
+        from unittest.mock import patch
+        user_id = 996157
+        make_basic_character(user_id, "ShowScrollsTapper", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "scroll_magic_missile", 1)
+        db.add_item(user_id, -999, "scroll_fireball", 1)
+
+        sink = []
+        captured = {}
+        real_edit = bot._safe_edit_markup
+
+        async def capture_edit(query, reply_markup=None):
+            captured["markup"] = reply_markup
+            return await real_edit(query, reply_markup)
+
+        with patch("bot._safe_edit_markup", side_effect=capture_edit):
+            await bot.item_menu_callback(FakeCallbackUpdate(user_id, "item|showscrolls", sink), DummyContext())
+        callback_datas = [b.callback_data for row in captured["markup"].inline_keyboard for b in row]
+        self.assertIn("spell|castscroll|magic_missile", callback_datas)
+        self.assertIn("spell|castscroll|fireball", callback_datas)
+        self.assertIn("item|back", callback_datas)
+
     async def test_give_menu_category_tap_shows_only_that_categorys_items_and_back_returns(self):
         """End-to-end: tapping a category button shows just that category's real items plus a Back button, and Back returns to the category list."""
         from unittest.mock import patch

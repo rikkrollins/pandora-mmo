@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.668] — feature: fold Use and Cast-a-Scroll into the same submenu pattern
+
+Real live follow-up (Coffee, screenshot): "I like the sub menus, but
+you still have the push buttons from the previous manual system that
+needs to be cleaned up and put into the sub folders." The Use
+(consumables) and Cast-a-Scroll button lists still dumped directly
+onto the inventory screen — the exact same "excessive push buttons"
+shape the Give menu had before v1.27.667's fix, just for a different
+action (a character with 5+ scrolls showed 9 real "X (scroll)"
+buttons inline, unrelated to the newly-fixed Give categories right
+below them).
+
+Both are now single top-level reveal buttons ("🧪 Use an Item", "📜
+Cast a Scroll") — new `item_menu_callback` actions `showuse`/
+`showscrolls` show the real per-item buttons plus a `« Back`
+(`item|back`) that re-sends the top-level inventory screen. Give's
+own category buttons are untouched (Coffee said he likes that one as
+it is). The real dispatch underneath (`item|use`, `item|target`,
+`spell|castscroll`) is completely unchanged.
+
+New regression tests cover: the top-level screen no longer shows real
+Use/scroll-cast buttons directly, `showuse`/`showscrolls` reveal the
+real lists plus Back, and Back returns to the top-level screen. Full
+114-test inventory/scroll/item-menu/give/market slice re-run clean
+(one pre-existing, already-documented batch-ordering flake).
+
 ## [1.27.667] — feature: category submenus for the Give and List-on-Market item pickers
 
 Real dev-bridge report (Coffee, screenshot): the Give section of the
