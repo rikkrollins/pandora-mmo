@@ -3214,6 +3214,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recreated["damage_bonus"], 1)
         self.assertIn("damage_dice", recreated, "must inherit the real Longbow's own base stats, not a blank item")
 
+    async def test_grant_item_command_works_from_any_topic_for_a_verified_owner(self):
+        """
+        Real live incident (2026-09-22, right after this command
+        shipped): Coffee typed a genuine /grant_item command in the
+        Adventure topic by mistake. The old Development-topic-only gate
+        silently did nothing there, so the exact same text ALSO reached
+        adventure_master_handler as ordinary free text, which misread
+        "...+1 damage..." as a forge attempt and told him he was
+        missing crafting materials -- deeply confusing, with no hint
+        /grant_item was ever reached at all. The real trust boundary is
+        the owner check itself (same bar /ban already uses), not which
+        topic the message landed in -- a verified owner can now use
+        this from anywhere; thread_id=None here stands in for Adventure
+        (any non-Development topic), confirming the command still
+        fires and replies instead of silently doing nothing.
+        """
+        owner_id, target_id = 950935, 950936
+        make_basic_character(owner_id, "GroupOwner7", current_location="crossroads_tavern")
+        make_basic_character(target_id, "AnyTopicGrantTarget", current_location="crossroads_tavern")
+
+        sink = []
+        update = FakeUpdate(owner_id, "/grant_item longbow to AnyTopicGrantTarget", sink, thread_id=None)
+        context = DummyContext(bot=FakeBot(status="creator"), args=["longbow", "to", "AnyTopicGrantTarget"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Granted 1x Longbow to AnyTopicGrantTarget" in s for s in sink), sink)
+        self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 1)
+
+    async def test_grant_item_command_still_silent_for_a_non_owner_in_any_topic(self):
+        """A non-owner gets total silence regardless of topic, unchanged -- this command's existence is never revealed to anyone but the real owner."""
+        non_owner_id, target_id = 950937, 950938
+        make_basic_character(non_owner_id, "NonOwnerAnywhere", current_location="crossroads_tavern")
+        make_basic_character(target_id, "SilentTarget", current_location="crossroads_tavern")
+
+        sink = []
+        update = FakeUpdate(non_owner_id, "/grant_item longbow to SilentTarget", sink, thread_id=None)
+        context = DummyContext(bot=FakeBot(status="member"), args=["longbow", "to", "SilentTarget"])
+        await bot.grant_item_command(update, context)
+
+        self.assertEqual(sink, [])
+        self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 0)
+
     async def test_grant_item_command_by_reply_grants_a_real_catalog_item(self):
         """
         Real live incident (2026-09-22, Coffee): a genuine bug (bot
@@ -3240,7 +3282,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 1)
 
     async def test_grant_item_command_rejects_a_non_owner(self):
-        """Same command, a real Telegram 'administrator' (not 'creator') must still be refused -- granting items is held to a tighter bar than Dev-topic access."""
+        """
+        Same command, a real Telegram 'administrator' (not 'creator')
+        must still be refused -- granting items is held to a tighter
+        bar than Dev-topic access. Silent, not an explicit refusal
+        message (2026-09-22 revision: this command's own existence is
+        never revealed to anyone but the real owner, regardless of
+        topic -- see test_grant_item_command_still_silent_for_a_non_
+        owner_in_any_topic for the fuller version of this same rule).
+        """
         non_owner_id, target_id = 950924, 950925
         make_basic_character(non_owner_id, "JustAnAdmin", current_location="crossroads_tavern")
         make_basic_character(target_id, "SomeTarget", current_location="crossroads_tavern")
@@ -3251,7 +3301,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         context = DummyContext(bot=FakeBot(status="administrator"), args=["longbow"])
         await bot.grant_item_command(update, context)
 
-        self.assertTrue(any("Only the group owner" in s for s in sink), sink)
+        self.assertEqual(sink, [])
         self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 0)
 
     async def test_grant_item_command_supports_a_quantity_and_a_numeric_id_target(self):

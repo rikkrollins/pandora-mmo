@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.679] — fix: /grant_item silently did nothing outside the Development topic
+
+Real live incident (2026-09-22, minutes after v1.27.678 shipped):
+Coffee typed a genuine `/grant_item Stormwrought Longbow of Embers +1
+damage to Laurienna` in the Adventure topic. The Development-topic-only
+gate silently did nothing there — but the exact same text also reached
+`adventure_master_handler` as ordinary free text (this game
+deliberately has no slash-command-only gating on natural gameplay),
+which misread "...+1 damage..." as a forge attempt and told him he
+was missing crafting materials. Deeply confusing, with zero hint
+`/grant_item` was ever reached at all.
+
+The real trust boundary here was always the owner check itself (the
+same single-person bar `/ban` already uses), not which topic the
+message happened to land in — and this command may well need to be
+used mid-incident, in whatever topic that incident is actually
+happening in. `/grant_item` now works from any topic for a verified
+owner; a non-owner still gets total silence everywhere, unchanged —
+this never reveals the command's existence to anyone else.
+
+2 new tests (works from a non-Development topic for the owner; stays
+silent for a non-owner regardless of topic) plus the full 9-test
+grant_item suite pass clean.
+
 ## [1.27.678] — feature: /grant_item gets name-based targeting and lost-magic-item recreation
 
 Direct follow-up to v1.27.677's `/grant_item`, per Coffee: "add

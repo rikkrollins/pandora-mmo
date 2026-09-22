@@ -40145,23 +40145,26 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if nothing after "to" matches an actual present character. Numeric
     Telegram ID as the first argument remains the last-resort fallback.
     """
-    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
-        return
+    # Real live incident (2026-09-22, right after this command shipped):
+    # Coffee typed a real /grant_item command in the Adventure topic by
+    # mistake. The OLD Development-topic-only gate silently returned
+    # with zero feedback there (matching /add_admin/ban's own
+    # convention) -- but the exact same message ALSO reaches
+    # adventure_master_handler as ordinary free text (this game
+    # deliberately has no slash-command-only gating on natural
+    # gameplay), which misread "...+1 damage..." as a forge attempt and
+    # told him he was missing crafting materials -- deeply confusing,
+    # with zero hint /grant_item was ever even reached. Dropped the
+    # topic restriction entirely for a verified owner: the real trust
+    # boundary here is the owner check itself (the same single-person
+    # bar /ban already uses), not which topic the message happened to
+    # land in, and this command may well need to be used mid-incident,
+    # in whichever topic that incident is actually happening in. A
+    # non-owner (or an unverifiable request) still gets total silence
+    # regardless of topic, unchanged from before -- this never reveals
+    # the command's existence to anyone who isn't already the owner.
     is_owner = await _is_group_owner(update, context)
-    if is_owner is None:
-        await _safe_send(
-            update,
-            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
-            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
-        )
-        return
     if not is_owner:
-        await _safe_send(
-            update,
-            "Only the group owner can grant items directly — this bypasses the normal game economy, "
-            "so it's kept to a single trusted person, unlike Dev-topic access.",
-            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
-        )
         return
 
     chat_id = update.effective_chat.id
@@ -40201,14 +40204,14 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             update,
             f"Name a real, present party member (\"... to Laurienna\"), reply to their message, or use their "
             f"numeric Telegram user ID — then the item: /grant_item <item name> [quantity].",
-            thread_id=topics.thread_id_for(chat_id, "development"),
+            thread_id=update.effective_message.message_thread_id,
         )
         return
     target_character = db.get_character(target_id, chat_id)
     if target_character is None:
         await _safe_send(
             update, f"{target_label} doesn't have a character in this game.",
-            thread_id=topics.thread_id_for(chat_id, "development"),
+            thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -40217,7 +40220,7 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             update,
             "Name the item to grant, e.g. /grant_item longbow 1 to Laurienna, or, to recreate a lost magic "
             "item as closely as possible: /grant_item Stormwrought Longbow of Embers +1 damage to Laurienna.",
-            thread_id=topics.thread_id_for(chat_id, "development"),
+            thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -40233,7 +40236,7 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 update,
                 f"Couldn't tell what kind of item \"{display_name}\" is — the name needs to contain a real "
                 f"base item somewhere in it (e.g. \"...Longbow...\", \"...Chain Mail Armor...\").",
-                thread_id=topics.thread_id_for(chat_id, "development"),
+                thread_id=update.effective_message.message_thread_id,
             )
             return
         _base_id, base_item = base
@@ -40259,7 +40262,7 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"✅ Recreated **{display_name}** ({bonus_label}, {tier} tier — inferred from the name, tell me if "
             f"that's wrong) and granted it to {target_label}. This is a best-effort recreation, not guaranteed "
             f"identical to the original.",
-            thread_id=topics.thread_id_for(chat_id, "development"),
+            thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -40275,7 +40278,7 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"No catalog item matches \"{item_name}\". Either name an ordinary catalog item exactly (e.g. "
             f"\"longbow\", \"healing potion\"), or recreate a magic one with a trailing bonus, e.g. "
             f"\"Stormwrought Longbow of Embers +1 damage\".",
-            thread_id=topics.thread_id_for(chat_id, "development"),
+            thread_id=update.effective_message.message_thread_id,
         )
         return
 
@@ -40283,7 +40286,7 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     item = items_module.get_item(item_id)
     await _safe_send(
         update, f"✅ Granted {quantity}x {item['name']} to {target_label}.",
-        thread_id=topics.thread_id_for(chat_id, "development"),
+        thread_id=update.effective_message.message_thread_id,
     )
 
 
