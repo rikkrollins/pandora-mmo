@@ -32203,6 +32203,50 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
         )
         return
 
+    # Real live incident (2026-09-22, Coffee, very angry, real
+    # reproduction confirmed via the live log): two SEPARATE forged/
+    # enchanted Wooden Shield instances (different real affixes,
+    # e.g. "+2 Strength, +2 AC" vs plain "+2 AC") share the exact same
+    # catalog `name` -- find_item_mentioned_in_text has no way to tell
+    # them apart from free text alone, and (being a stable sort over
+    # inventory dict order) always silently resolved "the wooden
+    # shield" to the SAME one of the two every single time, no matter
+    # which one was actually meant. When that one happened to be
+    # already equipped, EVERY attempt hit the same "unequip it first"
+    # refusal, which reads exactly like "it keeps switching back" from
+    # the player's side -- confirmed live: repeated identical give
+    # attempts, all refused the same way, followed by "somehow it
+    # switched out the items once again." A real, per-instance picker
+    # (same real _item_menu_label affix-aware labels the button-driven
+    # Give menu already uses) resolves the ambiguity instead of
+    # guessing, whenever 2+ actually-giveable copies share a name.
+    disambiguated = []
+    for original_id, quantity in items_wanted:
+        item_name = (items_module.get_item(original_id) or {}).get("name")
+        giveable_siblings = [
+            i for i in character["inventory"]
+            if character["inventory"].get(i, 0) > 0 and (items_module.get_item(i) or {}).get("name") == item_name
+            and not db.is_item_equipped(character, i) and not items_module.is_quest_item(i)
+        ]
+        if len(giveable_siblings) >= 2:
+            rows = [
+                [InlineKeyboardButton(
+                    _item_menu_label(items_module.get_item(i)),
+                    callback_data=f"itemview|giveto|{i}|{recipient['telegram_user_id']}",
+                )]
+                for i in giveable_siblings
+            ]
+            await _safe_send(
+                update, f"You're carrying more than one {item_name} — which one do you want to give {recipient['name']}?",
+                reply_markup=InlineKeyboardMarkup(rows),
+            )
+            return
+        if len(giveable_siblings) == 1:
+            disambiguated.append((giveable_siblings[0], quantity))
+        else:
+            disambiguated.append((original_id, quantity))
+    items_wanted = disambiguated
+
     given = []
     given_equippable_ids = []
     for item_id, quantity in items_wanted:

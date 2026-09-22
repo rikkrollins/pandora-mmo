@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.671] — fix: "give the wooden shield" always resolved to the SAME copy, even when it was equipped
+
+Root cause of the last piece of the same live incident, found via the
+live log: Coffee genuinely owns two separate real Wooden Shield
+instances — one forged into a magic item (+2 Strength, +2 AC) at some
+earlier point, and a second, plain one crafted fresh that morning
+("Craft a wooden shield", 10:54:49) — both sharing the exact catalog
+name "Wooden Shield". `find_item_mentioned_in_text` has no way to
+distinguish two owned items with an identical name from free text
+alone, and (being a stable sort over inventory order) always resolved
+"the wooden shield" to the same one of the two, every time — when
+that happened to be the currently-equipped one, every single "give
+the wooden shield to X" attempt hit the same "unequip it first"
+refusal, which reads exactly like "it keeps switching back" from the
+player's side.
+
+`_do_give_item` now checks, per matched item name, how many actually-
+giveable (unequipped, non-quest) copies the giver owns: exactly one ->
+silently resolves to that one even if a different, equipped copy of
+the same name matched first; two or more -> shows a real picker (the
+same real per-instance `_item_menu_label` affix-aware labels the
+button-driven Give menu already uses) instead of guessing, dispatching
+through the existing `itemview|giveto` action. 2 new tests cover both
+shapes; the existing 23-test give-item/give-equip-button suite still
+passes clean.
+
 ## [1.27.670] — fix: real action buttons on the free-text item-view path, one-tap Unequip, typo-tolerant give
 
 Direct continuation of v1.27.669, same live incident (Coffee, still

@@ -20308,6 +20308,87 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         button_texts = [btn.text for row in captured["reply_markup"].inline_keyboard for btn in row]
         self.assertTrue(any("Give" in t for t in button_texts), button_texts)
 
+    async def test_give_item_skips_the_equipped_duplicate_and_gives_the_free_copy(self):
+        """
+        Real live incident (2026-09-22, Coffee, very angry, confirmed
+        via the live log): two real, separately-forged Wooden Shield
+        instances share the exact catalog name "Wooden Shield" (their
+        real affixes differ -- one has +2 Strength, one doesn't) --
+        find_item_mentioned_in_text can't tell them apart from free
+        text and (being a stable sort) always resolved "the wooden
+        shield" to the SAME one, every time. When that one happened to
+        be the equipped one, every single "give the wooden shield to X"
+        attempt hit "unequip it first", which reads exactly like the
+        report Coffee actually gave ("somehow it switched out the items
+        once again"). One unequipped + one equipped, same name: must
+        silently resolve to the free one and succeed, not refuse.
+        """
+        giver_id = 950914
+        recipient_id = 950915
+        make_basic_character(giver_id, "DupeNameGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "DupeNameRecipient", current_location="crossroads_tavern")
+
+        equipped_shield = db.create_item_instance(
+            item_type="shield", name="Wooden Shield", rarity="common", price=10,
+            base_stats={"type": "shield", "ac_bonus": 2}, affixes=[{"kind": "ability_bonus", "ability": "strength", "value": 2}],
+        )
+        free_shield = db.create_item_instance(
+            item_type="shield", name="Wooden Shield", rarity="common", price=10,
+            base_stats={"type": "shield", "ac_bonus": 2}, affixes=[],
+        )
+        db.add_item(giver_id, -999, equipped_shield, 1)
+        db.add_item(giver_id, -999, free_shield, 1)
+        equip_success, _msg, _updated = db.equip_item(giver_id, -999, equipped_shield)
+        self.assertTrue(equip_success, _msg)
+
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give the wooden shield to DupeNameRecipient", sink),
+                                 "give the wooden shield to DupeNameRecipient")
+        self.assertTrue(any("gives" in line for line in sink), sink)
+        self.assertFalse(any("wearing/wielding" in line for line in sink), sink)
+        self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get(free_shield, 0), 1)
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get(equipped_shield, 0), 1)  # untouched
+        self.assertEqual(db.get_character(giver_id, -999)["equipped_shield"], equipped_shield)
+
+    async def test_give_item_shows_a_picker_when_two_giveable_copies_share_a_name(self):
+        """Sibling case: BOTH copies are actually giveable (neither equipped) -- must ask which one instead of guessing."""
+        from unittest.mock import patch
+        giver_id = 950916
+        recipient_id = 950917
+        make_basic_character(giver_id, "DupePickerGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "DupePickerRecipient", current_location="crossroads_tavern")
+
+        shield_a = db.create_item_instance(
+            item_type="shield", name="Wooden Shield", rarity="rare", price=10,
+            base_stats={"type": "shield", "ac_bonus": 2}, affixes=[{"kind": "ability_bonus", "ability": "strength", "value": 2}],
+        )
+        shield_b = db.create_item_instance(
+            item_type="shield", name="Wooden Shield", rarity="common", price=10,
+            base_stats={"type": "shield", "ac_bonus": 2}, affixes=[],
+        )
+        db.add_item(giver_id, -999, shield_a, 1)
+        db.add_item(giver_id, -999, shield_b, 1)
+
+        captured = {}
+        real_safe_send = bot._safe_send
+
+        async def capture_safe_send(update, text, **kwargs):
+            captured["text"] = text
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        sink = []
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot._do_give_item(FakeUpdate(giver_id, "give the wooden shield to DupePickerRecipient", sink),
+                                     "give the wooden shield to DupePickerRecipient")
+        self.assertIn("more than one", captured["text"])
+        self.assertIsNotNone(captured["reply_markup"])
+        callback_datas = {btn.callback_data for row in captured["reply_markup"].inline_keyboard for btn in row}
+        self.assertEqual(callback_datas, {f"itemview|giveto|{shield_a}|{recipient_id}", f"itemview|giveto|{shield_b}|{recipient_id}"})
+        # Neither actually given yet -- still both in the giver's own inventory.
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get(shield_a, 0), 1)
+        self.assertEqual(db.get_character(giver_id, -999)["inventory"].get(shield_b, 0), 1)
+
     async def test_give_item_recipient_name_tolerates_a_real_live_typo(self):
         """
         Real live incident (2026-09-22): Coffee typed "luarienna" for a
