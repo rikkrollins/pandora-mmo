@@ -23315,6 +23315,89 @@ async def item_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await _do_use_item(update, f"use {item['name']} on {target_character['name']}")
 
 
+# Real live report (2026-09-22, Coffee, screenshot: the Give section of
+# the inventory screen showing one button per every carried item --
+# scrolls, weapons, food, tools, herbs all mixed together with no
+# grouping -- "Clean up the menu system and any excessive push buttons
+# should be put into sub menu/folders system"). Shared category table
+# for every "pick any carried item" menu that lists ALL item types at
+# once (currently: the Give picker and the Market's List-on-Market sell
+# picker) -- _equip_keyboard/_item_keyboard/_scroll_spell_buttons are
+# each already scoped to one real type or a small type family and don't
+# have this problem, so they're deliberately left untouched. Every real
+# item type in the catalog (confirmed via a full items.ITEMS scan) is
+# covered except quest_item, which both pickers already exclude
+# entirely via items_module.is_quest_item.
+_ITEM_MENU_CATEGORIES: list[tuple[str, str, tuple[str, ...]]] = [
+    ("weapons_armor", "⚔️ Weapons & Armor", ("weapon", "armor", "shield")),
+    ("accessories", "💍 Accessories", ("ring", "amulet", "wondrous")),
+    ("consumables", "🧪 Consumables", ("consumable",)),
+    ("scrolls", "📜 Scrolls", ("scroll",)),
+    ("books_maps", "📚 Books & Maps", ("book", "map")),
+    ("materials", "🪨 Materials & Tools", ("material", "tool")),
+]
+
+
+def _item_menu_category(item: dict) -> str | None:
+    """Which _ITEM_MENU_CATEGORIES bucket a real item belongs in, or None if its type matches none of them."""
+    item_type = item.get("type")
+    for key, _label, types in _ITEM_MENU_CATEGORIES:
+        if item_type in types:
+            return key
+    return None
+
+
+def _categorized_item_picker(eligible_ids: list[str], cat_action: str, pick_action: str, label_for) -> InlineKeyboardMarkup | None:
+    """
+    Shared category-then-item picker for the Give and Market-sell
+    menus: groups eligible_ids by _item_menu_category and returns
+    either the top-level category buttons (callback_data
+    f"{cat_action}|{key}") when 2+ categories have something in them,
+    or -- skipping a pointless one-button submenu -- the real flat
+    item list directly (callback_data f"{pick_action}|{item_id}") when
+    only one category is non-empty. `cat_action`/`pick_action` are
+    passed as two separate, already-namespaced strings rather than one
+    shared prefix, since Give's own action names are single tokens
+    ("give|cat", "give|pick") while Market's are compound ("market|
+    sellcat", "market|sellpick", matching its pre-existing "sellpick"
+    action -- not renamed here). `label_for` lets each caller keep its
+    own existing button-text convention (Give's "🤝 Give X" vs Market's
+    bare item name).
+    """
+    if not eligible_ids:
+        return None
+    by_category: dict[str, list[str]] = {}
+    for item_id in eligible_ids:
+        item = items_module.get_item(item_id)
+        category = _item_menu_category(item) if item else None
+        if category:
+            by_category.setdefault(category, []).append(item_id)
+    non_empty = [(key, label) for key, label, _types in _ITEM_MENU_CATEGORIES if by_category.get(key)]
+    if len(non_empty) <= 1:
+        only_ids = eligible_ids if not non_empty else by_category[non_empty[0][0]]
+        return _item_picker_rows(only_ids, pick_action, label_for)
+    buttons = [
+        [InlineKeyboardButton(label, callback_data=f"{cat_action}|{key}")]
+        for key, label in non_empty
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def _item_picker_rows(item_ids: list[str], pick_action: str, label_for) -> InlineKeyboardMarkup:
+    """
+    The real, flat per-item button list for one category (or the whole
+    set, when there's only one) -- shared by both the picker above and
+    each menu's own "cat"/"sellcat" callback branch. `label_for` takes
+    the real item_id (not just the item dict) since Market's own label
+    needs the carried quantity too, which isn't part of items.py's
+    static item data.
+    """
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(label_for(item_id), callback_data=f"{pick_action}|{item_id}")]
+        for item_id in item_ids
+    ])
+
+
 def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     """
     Give buttons (2026-07-25, per Coffee: "anything the party might
@@ -23335,6 +23418,11 @@ def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     which already got that exclusion -- still listed every carried
     item unconditionally, guaranteeing a real rejection two taps later
     (pick item, pick recipient) for anything currently worn/wielded.
+
+    Category-grouped (2026-09-22, see _ITEM_MENU_CATEGORIES) instead of
+    one flat list of every carried item -- give_menu_callback's own
+    "cat" action shows one category's real items using this exact same
+    filter, re-applied.
     """
     others = [
         p for p in _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
@@ -23342,13 +23430,20 @@ def _give_item_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     ]
     if not others or not character.get("inventory"):
         return None
-    buttons = [
-        [InlineKeyboardButton(f"🤝 Give {_item_menu_label(items_module.get_item(i))}", callback_data=f"give|pick|{i}")]
-        for i, qty in character["inventory"].items()
+    return _categorized_item_picker(_give_eligible_item_ids(character), "give|cat", "give|pick", _give_item_label)
+
+
+def _give_item_label(item_id: str) -> str:
+    return f"🤝 Give {_item_menu_label(items_module.get_item(item_id))}"
+
+
+def _give_eligible_item_ids(character: dict) -> list[str]:
+    """The real filter behind _give_item_keyboard, factored out so give_menu_callback's own "cat" action can recompute the exact same eligible set for one category without duplicating this logic."""
+    return [
+        i for i, qty in character["inventory"].items()
         if qty > 0 and items_module.get_item(i) and not db.is_item_equipped(character, i)
         and not items_module.is_quest_item(i)
     ]
-    return InlineKeyboardMarkup(buttons) if buttons else None
 
 
 async def give_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -23357,6 +23452,31 @@ async def give_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
+
+    if action == "cat":
+        category_key = parts[2] if len(parts) > 2 else None
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None or category_key is None:
+            return
+        item_ids = [
+            i for i in _give_eligible_item_ids(character)
+            if _item_menu_category(items_module.get_item(i)) == category_key
+        ]
+        if not item_ids:
+            return
+        rows = list(_item_picker_rows(item_ids, "give|pick", _give_item_label).inline_keyboard)
+        rows.append([InlineKeyboardButton("« Back", callback_data="give|cats")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(rows))
+        return
+
+    if action == "cats":
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None:
+            return
+        keyboard = _give_item_keyboard(character)
+        if keyboard is not None:
+            await _safe_edit_markup(query, keyboard)
+        return
 
     if action == "pick":
         item_id = parts[2] if len(parts) > 2 else None
@@ -33243,19 +33363,35 @@ def _market_sell_picker_keyboard(character: dict) -> InlineKeyboardMarkup | None
     this one -- that handler had NO equipped check at all until now,
     unlike shop.sell_item), so this picker no longer advertises a
     guaranteed rejection.
+
+    Category-grouped (2026-09-22, see _ITEM_MENU_CATEGORIES) instead of
+    one flat list of every carried item, same real "clutter" report as
+    _give_item_keyboard -- market_menu_callback's own "sellcat" action
+    shows one category's real items using this exact same filter.
     """
+    return _categorized_item_picker(
+        _market_sell_eligible_item_ids(character), "market|sellcat", "market|sellpick", _market_sell_item_label(character),
+    )
+
+
+def _market_sell_eligible_item_ids(character: dict) -> list[str]:
+    """The real filter behind _market_sell_picker_keyboard, factored out so market_menu_callback's own "sellcat" action can recompute the exact same eligible set for one category."""
     if not character.get("inventory"):
-        return None
-    buttons = [
-        [InlineKeyboardButton(
-            f"{items_module.get_item(item_id)['name']}" + (f" (have {qty})" if qty > 1 else ""),
-            callback_data=f"market|sellpick|{item_id}",
-        )]
-        for item_id, qty in character["inventory"].items()
+        return []
+    return [
+        item_id for item_id, qty in character["inventory"].items()
         if qty > 0 and items_module.get_item(item_id) and not db.is_item_equipped(character, item_id)
         and not items_module.is_quest_item(item_id)
     ]
-    return InlineKeyboardMarkup(buttons) if buttons else None
+
+
+def _market_sell_item_label(character: dict):
+    """Closure over `character` so the label can show the real carried quantity -- not part of items.py's static item data."""
+    def label(item_id: str) -> str:
+        item = items_module.get_item(item_id)
+        qty = character["inventory"].get(item_id, 0)
+        return item["name"] + (f" (have {qty})" if qty > 1 else "")
+    return label
 
 
 def _format_market_listing_detail(listing: dict) -> str | None:
@@ -33374,6 +33510,29 @@ async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await _safe_send(
             update, "Which item would you like to list on the market?", reply_markup=keyboard,
         )
+        return
+
+    if action == "sellcat" and len(parts) >= 3:
+        category_key = parts[2]
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None:
+            return
+        item_ids = [
+            i for i in _market_sell_eligible_item_ids(character)
+            if _item_menu_category(items_module.get_item(i)) == category_key
+        ]
+        if not item_ids:
+            return
+        rows = list(_item_picker_rows(item_ids, "market|sellpick", _market_sell_item_label(character)).inline_keyboard)
+        rows.append([InlineKeyboardButton("« Back", callback_data="market|sellcats")])
+        await _safe_edit_markup(query, InlineKeyboardMarkup(rows))
+        return
+
+    if action == "sellcats":
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        keyboard = _market_sell_picker_keyboard(character) if character else None
+        if keyboard is not None:
+            await _safe_edit_markup(query, keyboard)
         return
 
     if action == "sellpick" and len(parts) >= 3:

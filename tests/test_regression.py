@@ -19627,6 +19627,119 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_give_item(FakeUpdate(giver_id, "give my torch to laurienaresting", sink), "give my torch to laurienaresting")
         self.assertTrue(any("is resting right now" in s for s in sink), sink)
 
+    async def test_give_item_keyboard_groups_into_categories_when_multiple_are_carried(self):
+        """
+        Real dev-bridge report (2026-09-22, Coffee, screenshot): the
+        Give section of the inventory screen showed one button per
+        every carried item -- scrolls, weapons, food, tools, herbs all
+        mixed together -- "Clean up the menu system and any excessive
+        push buttons should be put into sub menu/folders system."
+        _give_item_keyboard must now show category buttons, not a flat
+        item list, when the character carries items across 2+ real
+        item-menu categories.
+        """
+        giver_id, other_id = 996146, 996147
+        character = make_basic_character(giver_id, "CategoryGiver", current_location="crossroads_tavern")
+        make_basic_character(other_id, "CategoryRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "longsword", 1)
+        db.add_item(giver_id, -999, "healing_potion", 1)
+        db.add_item(giver_id, -999, "scroll_magic_missile", 1)
+        character = db.get_character(giver_id, -999)
+        keyboard = bot._give_item_keyboard(character)
+        self.assertIsNotNone(keyboard)
+        callback_datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+        self.assertTrue(all(cd.startswith("give|cat|") for cd in callback_datas), callback_datas)
+        self.assertEqual(len(callback_datas), 3)  # weapons_armor, consumables, scrolls
+
+    async def test_give_item_keyboard_skips_the_category_step_with_only_one_category_carried(self):
+        """The "no pointless one-button submenu" shortcut: a character carrying items in exactly one real category gets the flat item list directly."""
+        giver_id, other_id = 996148, 996149
+        make_basic_character(giver_id, "SingleCategoryGiver", current_location="crossroads_tavern")
+        make_basic_character(other_id, "SingleCategoryRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "healing_potion", 1)
+        db.add_item(giver_id, -999, "rations", 1)
+        character = db.get_character(giver_id, -999)
+        keyboard = bot._give_item_keyboard(character)
+        self.assertIsNotNone(keyboard)
+        callback_datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+        self.assertTrue(all(cd.startswith("give|pick|") for cd in callback_datas), callback_datas)
+
+    async def test_give_menu_category_tap_shows_only_that_categorys_items_and_back_returns(self):
+        """End-to-end: tapping a category button shows just that category's real items plus a Back button, and Back returns to the category list."""
+        from unittest.mock import patch
+        giver_id, other_id = 996150, 996151
+        make_basic_character(giver_id, "CategoryTapper", current_location="crossroads_tavern")
+        make_basic_character(other_id, "CategoryTapRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "longsword", 1)
+        db.add_item(giver_id, -999, "wooden_shield", 1)
+        db.add_item(giver_id, -999, "healing_potion", 1)
+
+        sink = []
+        captured = {}
+        real_edit = bot._safe_edit_markup
+
+        async def capture_edit(query, markup=None):
+            captured["markup"] = markup
+            return await real_edit(query, markup)
+
+        with patch("bot._safe_edit_markup", side_effect=capture_edit):
+            await bot.give_menu_callback(FakeCallbackUpdate(giver_id, "give|cat|weapons_armor", sink), DummyContext())
+        rows = captured["markup"].inline_keyboard
+        item_buttons = [b for row in rows for b in row if b.callback_data.startswith("give|pick|")]
+        self.assertEqual({b.callback_data for b in item_buttons}, {"give|pick|longsword", "give|pick|wooden_shield"})
+        back_buttons = [b for row in rows for b in row if b.callback_data == "give|cats"]
+        self.assertEqual(len(back_buttons), 1)
+
+        with patch("bot._safe_edit_markup", side_effect=capture_edit):
+            await bot.give_menu_callback(FakeCallbackUpdate(giver_id, "give|cats", sink), DummyContext())
+        cat_buttons = [b.callback_data for row in captured["markup"].inline_keyboard for b in row]
+        self.assertTrue(all(cd.startswith("give|cat|") for cd in cat_buttons), cat_buttons)
+
+    async def test_give_menu_full_flow_through_a_category_still_completes_the_real_give(self):
+        """End-to-end: category -> item -> recipient still gives the real item, unchanged."""
+        giver_id, recipient_id = 996152, 996153
+        make_basic_character(giver_id, "FullFlowGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "FullFlowRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "longsword", 1)
+        db.add_item(giver_id, -999, "healing_potion", 1)
+
+        sink = []
+        await bot.give_menu_callback(FakeCallbackUpdate(giver_id, "give|cat|weapons_armor", sink), DummyContext())
+        await bot.give_menu_callback(FakeCallbackUpdate(giver_id, "give|pick|longsword", sink), DummyContext())
+        await bot.give_menu_callback(FakeCallbackUpdate(giver_id, f"give|to|longsword|{recipient_id}", sink), DummyContext())
+        self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get("longsword"), 1)
+        self.assertNotIn("longsword", db.get_character(giver_id, -999)["inventory"])
+
+    async def test_market_sell_picker_groups_into_categories_and_sellpick_action_unchanged(self):
+        """Same category-grouping fix applied to the Market's List-on-Market sell picker -- the real "sellpick" action name/shape must stay unchanged."""
+        from unittest.mock import patch
+        user_id = 996154
+        make_basic_character(user_id, "MarketCategorySeller", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "longsword", 1)
+        db.add_item(user_id, -999, "healing_potion", 2)
+        character = db.get_character(user_id, -999)
+        keyboard = bot._market_sell_picker_keyboard(character)
+        self.assertIsNotNone(keyboard)
+        callback_datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+        self.assertTrue(all(cd.startswith("market|sellcat|") for cd in callback_datas), callback_datas)
+
+        sink = []
+        captured = {}
+        real_edit = bot._safe_edit_markup
+
+        async def capture_edit(query, markup=None):
+            captured["markup"] = markup
+            return await real_edit(query, markup)
+
+        with patch("bot._safe_edit_markup", side_effect=capture_edit):
+            await bot.market_menu_callback(FakeCallbackUpdate(user_id, "market|sellcat|consumables", sink), DummyContext())
+        rows = captured["markup"].inline_keyboard
+        item_buttons = [b for row in rows for b in row if b.callback_data.startswith("market|sellpick|")]
+        self.assertEqual({b.callback_data for b in item_buttons}, {"market|sellpick|healing_potion"})
+        self.assertIn("(have 2)", item_buttons[0].text)
+        back_buttons = [b for row in rows for b in row if b.callback_data == "market|sellcats"]
+        self.assertEqual(len(back_buttons), 1)
+
     async def test_do_give_item_attaches_a_real_equip_button_targeting_the_recipient(self):
         """
         Real live gap (2026-09-21, Coffee, urgent: "the equip system is
@@ -32399,7 +32512,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(db.get_market_listing(listing_id, chat_id))
         self.assertEqual(db.get_character(seller_id, chat_id)["inventory"].get("rusty_dagger", 0), 1)
 
-    def test_market_sell_picker_keyboard_shows_held_quantity_and_routes_to_sellpick(self):
+    async def test_market_sell_picker_keyboard_shows_held_quantity_and_routes_to_sellpick(self):
         """
         The Sell button opens a picker of the tapping player's REAL
         carried items -- each button shows how many are held and
@@ -32415,17 +32528,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         appears for an actually-stacked item (N > 1) -- real single
         gear (qty=1, the common case) gets that space back for its own
         name instead.
+
+        Updated 2026-09-22 for the category-grouping fix: rusty_dagger
+        (weapon) and silverleaf_herb (material) sit in two different
+        real categories, so the top-level picker now returns category
+        buttons, not a flat item list -- this test drills into each
+        item's own real category to check the same label formatting
+        and sellpick routing the original test covered.
         """
+        from unittest.mock import patch
         chat_id = self.MARKET_BUTTONS_CHAT - 3
         make_basic_character(900583, "MarketSellTapper", inventory={"rusty_dagger": 1, "silverleaf_herb": 5}, chat_id=chat_id)
-        kb = bot._market_sell_picker_keyboard(db.get_character(900583, chat_id))
-        labels = {b.text: b.callback_data for row in kb.inline_keyboard for b in row}
-        self.assertTrue(any("Silverleaf" in l and "(have 5)" in l for l in labels))
-        self.assertTrue(any(cb == "market|sellpick|silverleaf_herb" for cb in labels.values()))
-        dagger_label = next(l for l in labels if "Rusty Dagger" in l)
+        character = db.get_character(900583, chat_id)
+        kb = bot._market_sell_picker_keyboard(character)
+        cat_buttons = [b.callback_data for row in kb.inline_keyboard for b in row]
+        self.assertTrue(all(cb.startswith("market|sellcat|") for cb in cat_buttons), cat_buttons)
+
+        # Real label formatting, unchanged from before the category fix.
+        herb_label = bot._market_sell_item_label(character)("silverleaf_herb")
+        self.assertIn("Silverleaf", herb_label)
+        self.assertIn("(have 5)", herb_label)
+        dagger_label = bot._market_sell_item_label(character)("rusty_dagger")
+        self.assertIn("Rusty Dagger", dagger_label)
         self.assertNotIn("(have 1)", dagger_label)
         self.assertNotIn("💰", dagger_label)
-        self.assertTrue(any(cb == "market|sellpick|rusty_dagger" for cb in labels.values()))
+
+        # Real end-to-end routing: drilling into materials shows silverleaf_herb's real sellpick button.
+        sink = []
+        captured = {}
+        real_edit = bot._safe_edit_markup
+
+        async def capture_edit(query, markup=None):
+            captured["markup"] = markup
+            return await real_edit(query, markup)
+
+        with patch("bot._safe_edit_markup", side_effect=capture_edit):
+            await bot.market_menu_callback(FakeCallbackUpdate(900583, "market|sellcat|materials", sink, chat_id=chat_id), DummyContext())
+        routed = [b.callback_data for row in captured["markup"].inline_keyboard for b in row]
+        self.assertIn("market|sellpick|silverleaf_herb", routed)
 
     async def test_market_sellpick_then_free_text_lists_a_custom_quantity_and_price(self):
         """

@@ -2,6 +2,43 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.667] — feature: category submenus for the Give and List-on-Market item pickers
+
+Real dev-bridge report (Coffee, screenshot): the Give section of the
+inventory screen showed one button per every carried item — scrolls,
+weapons, food, tools, herbs all mixed together with no grouping,
+scrolling on for a full screen. "Clean up the menu system and any
+excessive push buttons should be put into sub menu/folders system."
+This also explains an earlier "Open my inventory" report from the
+same conversation — that's the exact screen this wall of buttons
+appeared on.
+
+Root cause: `_give_item_keyboard` and the Market's `_market_sell_
+picker_keyboard` both built one flat button per carried item of any
+type at all, with no grouping. `_equip_keyboard` (gear only) and the
+scroll-cast/consumable-use pickers were already scoped to one type
+family each and didn't have this problem.
+
+Both pickers now group by a shared 6-category table (⚔️ Weapons &
+Armor, 💍 Accessories, 🧪 Consumables, 📜 Scrolls, 📚 Books & Maps, 🪨
+Materials & Tools) — tapping "Give" or "List on Market" now shows
+only the categories you're actually carrying something in; tapping a
+category shows just that category's real items, with a Back button.
+When only one category has anything in it, the category step is
+skipped entirely (no pointless one-button submenu). The real
+give/sell dispatch underneath (`give|pick`/`give|to`, `market|
+sellpick`) is completely unchanged — this only restructures how the
+item is picked, not what happens once it's picked.
+
+New regression tests cover: category grouping when 2+ categories are
+carried, the single-category skip-through, the category-tap ->
+item-list -> Back round trip for both menus, and a full end-to-end
+give still landing correctly. Updated one pre-existing Market test
+whose fixture spanned two categories to drill through the new
+category step. Full 92+33-test give/market/inventory/itemview/
+battle-menu slice re-run clean (one pre-existing, already-documented
+batch-ordering flake confirmed passing standalone).
+
 ## [1.27.666] — fix: forging equipped gear no longer auto-equips the result on you
 
 Real live follow-up (Coffee, very direct): "when i crafted an item
