@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.673] — fix: plain inventory listing never showed which items were equipped
+
+Real live incident (2026-09-22, Coffee, dev-bridge screenshot of the
+plain-text "check inventory" listing, circling two forged items:
+"Why can't I add these items I forged to the trade or give them away
+they're not even showing up in my backpack as clickable items"). Root
+cause confirmed via the live log: he'd just run "check inventory" and
+screenshotted that exact message. Both Give and Trade's own "Add"
+button pickers already correctly exclude a currently-equipped item
+(can't give/trade away something you're wearing without unequipping
+first) — but the plain inventory dump never showed equip status at
+all, so there was no way to tell from that screen why a specific item
+wasn't offered in a button list elsewhere on it.
+
+`_do_check_inventory` now tags any actually-equipped item with
+"(equipped)" right in the listing, in both the default flat view and
+the type-sorted one. 1 new test covers both modes; the existing
+9-test inventory-listing/sort suite still passes clean.
+
 ## [1.27.672] — fix: two more root causes in the same forge/give incident thread
 
 **Image-send failures were silently eating the action buttons.**

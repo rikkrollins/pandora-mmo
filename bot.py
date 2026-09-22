@@ -22460,12 +22460,30 @@ async def _do_check_inventory(update: Update) -> None:
             "Your backpack is empty.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
+    # Real live incident (2026-09-22, Coffee, dev-bridge screenshot of
+    # this exact plain-text listing, circling two forged items: "Why
+    # can't I add these items I forged to the trade or give them away
+    # they're not even showing up in my backpack as clickable items").
+    # Root cause confirmed via the live log: he'd just run "check
+    # inventory" and screenshotted THIS message, expecting the listed
+    # items themselves to be interactive (Telegram text can never be
+    # "clickable" -- only the real buttons below are, which likely
+    # excluded these two for the ordinary, correct reason: give/trade's
+    # "add" pickers both already exclude a currently-equipped item, but
+    # nothing on this screen ever told him THAT'S why, since this list
+    # never showed equip status at all. A plain "(equipped)" tag next
+    # to any item that's actually worn closes that gap directly at the
+    # source, rather than leaving a player to guess why one specific
+    # item didn't show up in a button list elsewhere on the same screen.
+    def _equipped_tag(item_id: str) -> str:
+        return " (equipped)" if db.is_item_equipped(character, item_id) else ""
+
     if character.get("inventory_sort_mode") == "type":
         grouped: dict[str, list[str]] = {cat: [] for cat in _INVENTORY_SORT_CATEGORY_ORDER}
         for item_id, qty in character["inventory"].items():
             item = items_module.get_item(item_id)
             name = _item_menu_label(item) if item else item_id
-            grouped[_inventory_sort_category(item)].append(f"  {name} x{qty}")
+            grouped[_inventory_sort_category(item)].append(f"  {name} x{qty}{_equipped_tag(item_id)}")
         lines = []
         for cat in _INVENTORY_SORT_CATEGORY_ORDER:
             if grouped[cat]:
@@ -22476,7 +22494,7 @@ async def _do_check_inventory(update: Update) -> None:
         for item_id, qty in character["inventory"].items():
             item = items_module.get_item(item_id)
             name = _item_menu_label(item) if item else item_id
-            lines.append(f"  {name} x{qty}")
+            lines.append(f"  {name} x{qty}{_equipped_tag(item_id)}")
     # Real live report (2026-09-22, Coffee, screenshot, follow-up to the
     # Give/Market category fix: "I like the sub menus, but you still
     # have the push buttons from the previous manual system that needs

@@ -4047,6 +4047,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                      "what weapons do i have"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_inventory", text)
 
+    async def test_check_inventory_tags_currently_equipped_items(self):
+        """
+        Real live incident (2026-09-22, Coffee, dev-bridge screenshot of
+        this exact plain-text listing, circling two forged items: "Why
+        can't I add these items I forged to the trade or give them away
+        they're not even showing up in my backpack as clickable items").
+        Root cause: those items were genuinely equipped -- give/trade's
+        own "add" pickers both already correctly exclude a currently-
+        equipped item, but this plain listing never showed equip status
+        at all, so there was no way to tell why from this screen alone.
+        A "(equipped)" tag closes that gap directly, in both the
+        default flat listing and the type-sorted one.
+        """
+        user_id = 999931
+        make_basic_character(
+            user_id, "EquipTagTester",
+            inventory={"longsword": 1, "healing_potion": 2},
+        )
+        db.equip_item(user_id, -999, "longsword")
+
+        sink = []
+        await bot._do_check_inventory(FakeUpdate(user_id, "check my inventory", sink))
+        plain = sink[-1]
+        self.assertIn("Longsword x1 (equipped)", plain)
+        self.assertNotIn("Healing Potion x2 (equipped)", plain)
+
+        db.update_character(user_id, -999, inventory_sort_mode="type")
+        sink.clear()
+        await bot._do_check_inventory(FakeUpdate(user_id, "check my inventory", sink))
+        grouped = sink[-1]
+        self.assertIn("Longsword x1 (equipped)", grouped)
+        self.assertNotIn("Healing Potion x2 (equipped)", grouped)
+
     async def test_inventory_sort_button_groups_into_the_four_real_categories(self):
         """
         Real live request (2026-08-27, Coffee: "create a function so i
