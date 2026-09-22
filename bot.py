@@ -6175,7 +6175,7 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool, item_id: 
                 if len(siblings) > 1:
                     eligible_siblings = [
                         i for i in siblings
-                        if not db.is_item_equipped(character, i) and not items_module.is_quest_item(i)
+                        if _spare_quantity(character, i) > 0 and not items_module.is_quest_item(i)
                     ]
                     if len(eligible_siblings) == 1:
                         resolved_id = eligible_siblings[0]
@@ -6198,8 +6198,8 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool, item_id: 
             # offerer still fully equipped with it while it sat in the
             # trade record, ready to be handed to the other party on
             # accept -- a real dupe window, not just a dead-end button.
-            if db.is_item_equipped(character, matched_id):
-                changed_lines.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before trading it away.")
+            if db.is_item_equipped(character, matched_id) and quantity > _spare_quantity(character, matched_id):
+                changed_lines.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before trading away your last one.")
                 continue
             # Real gap found continuing the same audit (2026-09-19,
             # Coffee: "keep looking for gaps"): a quest_item can be
@@ -32233,6 +32233,27 @@ async def _do_find_merchant(update: Update) -> None:
     await _safe_send(update, line)
 
 
+def _spare_quantity(character: dict, item_id: str) -> int:
+    """
+    Real live incident (2026-09-22, Coffee, confirmed via screenshot:
+    a stack of 3 identical plain Wooden Shields, only ONE of which was
+    ever actually equipped -- "it says I'm wearing the shield but I'm
+    not" persisted even after fixing the separate same-name-resolution
+    bug, because `db.equip_item` never decrements inventory: equipping
+    ties up the item_id conceptually, not one specific physical unit.
+    Every give/trade/etc. blanket-refused touching ANY unit of a whole
+    stack the instant its id was equipped, even when most of the stack
+    was genuinely spare. Returns how many units of this exact item_id
+    are actually free right now: the full owned quantity, minus 1 if
+    this id is currently equipped (never negative) -- 1 always stays
+    reserved for whichever physical unit is being worn/wielded.
+    """
+    owned = character["inventory"].get(item_id, 0)
+    if db.is_item_equipped(character, item_id):
+        return max(owned - 1, 0)
+    return owned
+
+
 async def _do_give_item(update: Update, text: str, item_id: str | None = None) -> None:
     """
     Player-to-player item trading (2026-07-15 backlog item): hand a
@@ -32364,8 +32385,8 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
         item_name = (items_module.get_item(original_id) or {}).get("name")
         giveable_siblings = [
             i for i in character["inventory"]
-            if character["inventory"].get(i, 0) > 0 and (items_module.get_item(i) or {}).get("name") == item_name
-            and not db.is_item_equipped(character, i) and not items_module.is_quest_item(i)
+            if _spare_quantity(character, i) > 0 and (items_module.get_item(i) or {}).get("name") == item_name
+            and not items_module.is_quest_item(i)
         ]
         if len(giveable_siblings) >= 2:
             rows = [
@@ -32394,9 +32415,24 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
         # give them away either") -- giving away something currently
         # worn would leave the character "equipped" with an item they
         # no longer own.
+        #
+        # Real live incident (2026-09-22, Coffee, confirmed via
+        # screenshot: "✨ Wooden Shield (+2 AC) x3" -- a stack of 3
+        # identical plain shields, only ONE of which was actually
+        # equipped, via `equip_item`'s own real behavior of never
+        # decrementing inventory -- equipping ties up the item_id, not
+        # one physical unit). The old blanket check refused giving away
+        # ANY unit of the whole stack the instant equipped_shield
+        # pointed at that id, even though 2 of the 3 were genuinely
+        # spare -- reading, from the player's side, as "it says I'm
+        # wearing this but I'm not" for a shield they never even
+        # touched. Only the equipped item_id's OWN reserved unit (1)
+        # is off-limits; the rest of a real stack can leave freely.
         if db.is_item_equipped(character, item_id):
-            given.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before giving it away.")
-            continue
+            spare = character["inventory"].get(item_id, 0) - 1
+            if quantity > spare:
+                given.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before giving away your last one.")
+                continue
         # Real gap found continuing the same audit (2026-09-19, Coffee:
         # "keep looking for gaps") -- see items.is_quest_item.
         if items_module.is_quest_item(item_id):

@@ -2945,6 +2945,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # properly resolves its own trade before finishing.
         await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
 
+    async def test_trade_add_allows_a_spare_unit_from_a_stack_with_one_equipped(self):
+        """
+        Real live incident (2026-09-22, Coffee): same root cause as the
+        give-item version -- a stack of 3 identical plain items with
+        ONE equipped must still let the other 2 be traded away, since
+        equip_item never decrements inventory (equipping ties up the
+        item_id, not one physical unit).
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951019, 951020
+        make_basic_character(a_id, "StackedTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "StackedTraderB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "wooden_shield", 3)
+        equip_success, equip_msg, _updated = db.equip_item(a_id, -999, "wooden_shield")
+        self.assertTrue(equip_success, equip_msg)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with StackedTraderB", sink), "trade with StackedTraderB")
+        sink.clear()
+        await bot._do_trade_add(FakeUpdate(a_id, "add 1 wooden shield to the trade", sink), "add 1 wooden shield to the trade")
+
+        self.assertFalse(any("wearing/wielding" in s for s in sink), sink)
+        self.assertTrue(any("Added" in s for s in sink), sink)
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["inventory"].get("wooden_shield", 0), 2)
+        self.assertEqual(after["equipped_shield"], "wooden_shield")
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["items"].get("wooden_shield"), 1)
+        await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
+
     async def test_trade_add_by_free_text_prefers_the_unequipped_copy_when_two_share_a_name(self):
         """
         Real live incident (2026-09-22, Coffee, very angry: "I am
@@ -20548,6 +20579,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(captured["reply_markup"])
         button_texts = [btn.text for row in captured["reply_markup"].inline_keyboard for btn in row]
         self.assertTrue(any("Give" in t for t in button_texts), button_texts)
+
+    async def test_give_item_allows_giving_a_spare_unit_from_a_stack_with_one_equipped(self):
+        """
+        Real live incident (2026-09-22, Coffee, confirmed via
+        screenshot: "✨ Wooden Shield (+2 AC) x3" -- a real stack of 3
+        identical plain shields, ONE of which he had equipped at some
+        point today. `db.equip_item` never decrements inventory --
+        equipping ties up the item_id conceptually, not one physical
+        unit -- so the OLD blanket "you're wearing/wielding it" refusal
+        blocked giving away ANY unit of the whole stack, even though 2
+        of the 3 were genuinely spare. This persisted even after the
+        v1.27.671 same-name-resolution fix, since that fix only helps
+        when TWO DIFFERENT item_ids share a name -- this is one single
+        item_id with quantity > 1, a different real shape. Giving 1 of
+        3 must succeed and leave the equipped unit alone; giving all 3
+        (the last one included) must still correctly refuse.
+        """
+        giver_id = 950920
+        recipient_id = 950921
+        make_basic_character(giver_id, "StackedShieldGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "StackedShieldRecipient", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "wooden_shield", 3)
+        equip_success, equip_msg, _updated = db.equip_item(giver_id, -999, "wooden_shield")
+        self.assertTrue(equip_success, equip_msg)
+
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give 1 wooden shield to StackedShieldRecipient", sink),
+                                 "give 1 wooden shield to StackedShieldRecipient")
+        self.assertTrue(any("gives" in line for line in sink), sink)
+        after = db.get_character(giver_id, -999)
+        self.assertEqual(after["inventory"].get("wooden_shield", 0), 2, "2 spares should remain")
+        self.assertEqual(after["equipped_shield"], "wooden_shield", "the equipped reference must be untouched")
+        self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get("wooden_shield", 0), 1)
+
+        sink2 = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give 2 wooden shields to StackedShieldRecipient", sink2),
+                                 "give 2 wooden shields to StackedShieldRecipient")
+        self.assertTrue(any("wearing/wielding" in line for line in sink2), sink2)
+        after2 = db.get_character(giver_id, -999)
+        self.assertEqual(after2["inventory"].get("wooden_shield", 0), 2, "giving away the reserved last unit must still be refused")
 
     async def test_give_item_skips_the_equipped_duplicate_and_gives_the_free_copy(self):
         """

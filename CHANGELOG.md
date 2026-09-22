@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.676] — fix: equipping one unit of a stack blocked giving away the whole stack
+
+Real live incident (2026-09-22, Coffee, confirmed via screenshot: a
+real stack of "✨ Wooden Shield (+2 AC) x3" — three identical plain
+shields). `db.equip_item` never decrements inventory: equipping ties
+up the item_id conceptually, not one specific physical unit. Every
+give/trade "you're wearing/wielding it" check refused touching ANY
+unit of a whole stack the instant its id was equipped — even when 2
+of the 3 were genuinely spare. This is a real, different-shaped bug
+from the earlier same-name-resolution fixes (v1.27.671/672/674),
+which only help when TWO DIFFERENT item_ids share a display name;
+this is one single item_id with quantity > 1.
+
+New `_spare_quantity(character, item_id)` (owned quantity, minus 1 if
+this exact id is currently equipped, never negative) replaces the
+blanket equipped-check in `_do_give_item` and `_mutate_trade_offer`
+(both the direct refusal and their own same-name disambiguation
+logic) — giving/trading away spares now works; only the last unit
+still correctly requires unequipping first.
+
+2 new tests (give, trade) confirm a spare gives/trades cleanly while
+the reserved last unit still refuses. Existing give/trade/market/
+dismantle suite (99 tests) passes clean (one unrelated pre-existing
+batch-ordering flake confirmed via isolation, not a regression).
+
 ## [1.27.675] — hotfix: two live crashes from this session's own earlier conversation work
 
 Caught live in `bot_live_tmp.log` while investigating an unrelated
