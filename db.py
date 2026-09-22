@@ -1994,6 +1994,76 @@ def unequip_accessory(telegram_user_id: int, chat_id: int, item_id: str) -> tupl
     return True, f"You take off the {name}. AC is now {new_ac}.", updated
 
 
+def unequip_weapon_armor_or_shield(
+    telegram_user_id: int, chat_id: int, item_id: str, bare_armor_class: int | None = None,
+) -> tuple[bool, str, dict | None]:
+    """
+    Real, previously-missing feature (2026-09-22, live incident, Coffee,
+    very direct: "after I forge a magic item I should be able to send
+    it to another character... stop equipping things automatically").
+    `unequip_accessory` (above) shipped 2026-08-02 on the stated
+    reasoning that "weapon/armor/shield are single-slot columns already
+    correctly replaced by equipping something else... 'go bare-handed/
+    bare-chested' isn't a real ask, so it's out of scope" -- that
+    assumption broke down live: `_do_give_item` refuses to give away
+    an equipped weapon/armor/shield with "unequip or swap it out before
+    giving it away", but there was NO way to actually do the "unequip"
+    half of that instruction for anything but an accessory, a real dead
+    end that blocked exactly the forge-then-give-to-a-party-member flow
+    Coffee was trying to use.
+
+    Weapon and shield are pure-delta reverses of equip_item's own math
+    (a weapon only ever affects AC via a possible set-bonus delta; a
+    shield's ac_bonus is purely additive on top of whatever AC already
+    is), same "never a from-scratch recompute" discipline unequip_
+    accessory's docstring documents.
+
+    Armor is different: equip_item's armor branch doesn't apply a delta
+    at all, it REPLACES the AC's whole "foundation" (BASE_ARMOR_CLASS/
+    an Unarmored Defense formula/a previously-worn armor's own ac_base)
+    with the new item's ac_base + DEX -- so reversing it requires the
+    real UNARMORED baseline for this character's class, which db.py
+    deliberately never owns (see _sorcerer_armor_class_with_draconic_
+    hide's own docstring in bot.py for why). `bare_armor_class` is that
+    value, computed by the caller (bot.py's own `_bare_armor_class`)
+    and combined here with `non_class_armor_bonus` (shield/ring/set --
+    the part db.py DOES already own) -- required for the armor branch,
+    unused for weapon/shield.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return False, "No character found.", None
+    item = items_module.get_item(item_id)
+    name = item["name"] if item else item_id
+
+    if character.get("equipped_weapon") == item_id:
+        old_set_bonus = _equipped_set_ac_bonus(character)
+        character["equipped_weapon"] = None
+        set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
+        new_ac = character["armor_class"] + set_delta
+        updated = update_character(telegram_user_id, chat_id, equipped_weapon=None, armor_class=new_ac)
+        return True, f"You holster the {name}.", updated
+
+    if character.get("equipped_armor") == item_id:
+        if bare_armor_class is None:
+            return False, "Can't take that off right now — try again in a moment.", character
+        character["equipped_armor"] = None
+        new_ac = bare_armor_class + non_class_armor_bonus(character)
+        updated = update_character(telegram_user_id, chat_id, equipped_armor=None, armor_class=new_ac)
+        return True, f"You take off the {name}. AC is now {new_ac}.", updated
+
+    if character.get("equipped_shield") == item_id:
+        shield_bonus = item.get("ac_bonus", 0) if item else 0
+        old_set_bonus = _equipped_set_ac_bonus(character)
+        character["equipped_shield"] = None
+        set_delta = _equipped_set_ac_bonus(character) - old_set_bonus
+        new_ac = character["armor_class"] - shield_bonus + set_delta
+        updated = update_character(telegram_user_id, chat_id, equipped_shield=None, armor_class=new_ac)
+        return True, f"You lower the {name}. AC is now {new_ac}.", updated
+
+    return False, "You're not wearing or wielding that.", character
+
+
 def _meets_equip_requirement(character: dict, item: dict) -> bool:
     """
     Real progression gate for mythic-tier gear (magic item system

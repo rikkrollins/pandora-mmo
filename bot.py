@@ -897,6 +897,19 @@ _DEFEATED_NPCS: dict[int, set[str]] = {}
 _SENT_IMAGE_PROMPTS: dict[int, dict[int, dict]] = {}
 _REIMAGE_TRACKED_MESSAGES_PER_CHAT = 200
 
+# Real live request (2026-09-22, per Coffee: "using reply in telegram...
+# it shud know we are continue conversation") -- same exact shape as
+# _SENT_IMAGE_PROMPTS/_reimage_command above, but for NPC dialogue:
+# chat_id -> {message_id: npc_id}, populated whenever a real NPC/
+# companion reply is sent. Replying (Telegram's own native reply
+# gesture) to one of these messages routes the new text straight back
+# to that same npc_id, without needing to repeat their name. In-memory
+# only, same "resets on restart" convention as _SENT_IMAGE_PROMPTS;
+# capped per chat so a long-running process's memory doesn't grow
+# unbounded.
+_SENT_NPC_MESSAGES: dict[int, dict[int, str]] = {}
+_NPC_MESSAGE_TRACKED_PER_CHAT = 200
+
 
 def _chat_scoped_set(store: dict[int, set], chat_id: int) -> set:
     """Lazily creates and returns this chat's own set within a chat_id-keyed store."""
@@ -1638,7 +1651,7 @@ async def _maybe_post_world_heartbeat(bot, chat_id: int) -> None:
         npc_a, npc_b = random.sample(npcs_here, 2)
         npc_a_data, npc_b_data = CAMPAIGN["npcs"][npc_a], CAMPAIGN["npcs"][npc_b]
         line = await asyncio.to_thread(
-            generate_ambient_line, npc_a, npc_b_data["name"],
+            generate_ambient_line, npc_a, chat_id, 0, npc_b_data["name"],
             f"has just crossed paths with {npc_b_data['name']} here at {location_name}, with no one else around",
         )
         speaker_name = npc_a_data["name"]
@@ -1647,7 +1660,7 @@ async def _maybe_post_world_heartbeat(bot, chat_id: int) -> None:
         npc_data = CAMPAIGN["npcs"][npc_id]
         activity = random.choice(npc_data.get("activity_goals", ["going about their day"]))
         line = await asyncio.to_thread(
-            generate_ambient_line, npc_id, npc_data["name"],
+            generate_ambient_line, npc_id, chat_id, 0, npc_data["name"],
             f"is {activity}, alone at {location_name}",
         )
         speaker_name = npc_data["name"]
@@ -4630,8 +4643,14 @@ async def _safe_send(
     update: Update, text: str, thread_id: int | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     speak: bool = True,
-) -> None:
+) -> int | None:
     """
+    Returns the real sent message's `message_id` on success (2026-09-22,
+    added so a caller can track "this message_id was an NPC's own
+    reply" the same way `_send_generated_image` already tracks
+    `_SENT_IMAGE_PROMPTS` for `/reimage` -- see `_SENT_NPC_MESSAGES`),
+    or `None` on total failure. Every existing caller already ignores
+    the return value, so this is a pure addition, not a behavior change.
     speak=False (2026-07-22, per Coffee: "don't use tts for menus and
     other things that don't need voice") skips _maybe_speak entirely
     for this send -- used at every plain informational/menu listing
@@ -4722,13 +4741,13 @@ async def _safe_send(
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
-            await update.effective_chat.send_message(
+            sent = await update.effective_chat.send_message(
                 clean_text, message_thread_id=resolved_thread_id,
                 entities=entities or None, reply_markup=reply_markup,
             )
             if not is_buffering and speak:
                 await _maybe_speak(update, text, resolved_thread_id)
-            return
+            return getattr(sent, "message_id", None)
         except TelegramError as e:
             if attempt == max_attempts - 1:
                 logger.warning(f"[message] send failed again, giving up: {e!r}")
@@ -11942,7 +11961,8 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
                 taunt = None  # already sent above as its own cutscene message, not the inline taunt_line below
             else:
                 taunt = await asyncio.to_thread(
-                    generate_ambient_line, npc_id, character["name"], "arrives, about to be attacked", memory_facts
+                    generate_ambient_line, npc_id, chat_id, character["telegram_user_id"],
+                    character["name"], "arrives, about to be attacked", memory_facts
                 )
             enemy = _npc_combatant_from_stats(npc_id, npc_data, party_levels=[p.get("level", 1) for p in party])
             if npc_id in ("kess_the_bandit", "kess_the_unbound"):
@@ -11990,14 +12010,14 @@ async def _maybe_trigger_npc_encounter(update: Update, character: dict, location
         if other_data is None or other_id not in _NPCS:
             return
         line = await asyncio.to_thread(
-            generate_ambient_line, npc_id, other_data["name"],
+            generate_ambient_line, npc_id, chat_id, 0, other_data["name"],
             f"is talking with {other_data['name']} here, both unaware {character['name']} just arrived",
         )
         if line:
             await _safe_send(update, f"💬 **{npc_data['name']}** (to {other_data['name']}): {line}")
     else:
         line = await asyncio.to_thread(
-            generate_ambient_line, npc_id, character["name"], "arrives", memory_facts
+            generate_ambient_line, npc_id, chat_id, character["telegram_user_id"], character["name"], "arrives", memory_facts
         )
         if line:
             await _safe_send(update, f"💬 **{npc_data['name']}:** {line}")
@@ -14929,6 +14949,54 @@ def _character_has_darkvision(character: dict) -> bool:
     return bool(race_data and any("darkvision" in t.lower() for t in race_data.get("traits", [])))
 
 
+def _knows_thieves_cant(character: dict) -> bool:
+    """
+    Real live request (2026-09-22, per Coffee: "how about the secret
+    language and code that the races are referring to is the glyphs
+    and the secrets written on the walls"). Thieves' Cant (class_
+    features.py) was pure display text with zero mechanical hook until
+    now -- real 5E grants it to every Rogue, no subclass/level gate, so
+    a flat char_class check is the whole rule, same shape as every
+    other small class-feature predicate in this file (_character_has_
+    darkvision above, _ranger_natural_explorer_grants_advantage below).
+    """
+    return character.get("char_class") == "Rogue"
+
+
+def _npc_knows_thieves_cant(npc_id: str) -> bool:
+    """
+    Same check as _knows_thieves_cant, but against the STATIC campaign
+    NPC data rather than a live character row -- works identically
+    whether npc_id is a recruited companion (whose own live character
+    row could also be checked, but this is simpler and always
+    available) or a world NPC nobody's ever recruited.
+    """
+    return CAMPAIGN["npcs"].get(npc_id, {}).get("stats", {}).get("char_class") == "Rogue"
+
+
+def _known_thieves_cant_secrets(character: dict) -> list[str]:
+    """
+    Real, hand-authored thieves_cant_secret text for every glyph-
+    bearing interactable this character has actually VISITED --
+    fair-play scoped exactly like every other hint/clue in this file
+    (e.g. _next_step_hint_facts), never surfacing a secret for content
+    not yet found. Small campaign (~290 locations), recomputed fresh
+    each call -- same "no caching needed" style as _location_chapter_
+    arc_index.
+    """
+    visited = set(character.get("visited_locations") or [])
+    secrets = []
+    for layer in CAMPAIGN["locations"].values():
+        for loc_id, loc in layer.items():
+            if loc_id not in visited:
+                continue
+            for interactable in (loc.get("interactables") or {}).values():
+                secret = interactable.get("thieves_cant_secret")
+                if secret:
+                    secrets.append(secret)
+    return secrets
+
+
 def _has_light_source(character: dict, chat_id: int) -> bool:
     """
     True if this character can see in the dark right now: real
@@ -17150,8 +17218,50 @@ def _party_companion_context_facts(character: dict, location: dict | None) -> st
         return None
     return (
         "As the player's own traveling companion, here's what's really going on right now "
-        "(use this to ground your answer if it's relevant -- never invent new plot beyond it):\n"
+        "(use this to ground your answer if it's relevant -- never invent new plot beyond it -- "
+        "and stay concrete and specific -- the real place, the real quest, the real clue -- "
+        "rather than vague encouragement):\n"
         + "\n".join(lines)
+    )
+
+
+def _thieves_cant_grounding_block(telegram_user_id: int, chat_id: int, character: dict, npc_id: str) -> str | None:
+    """
+    Real live request (2026-09-22, per Coffee: an NPC/companion who
+    knows Thieves' Cant should be able to share what it's decoded --
+    "make sure we can have dialog in a logical manner about these
+    things"). None when npc_id isn't a real Rogue, or the character
+    hasn't actually visited any glyph yet (nothing true to share).
+
+    Affinity-gated (per Coffee: "make sure affinity is affected and
+    part of it too... DONT BE TOO OBVIOUS TO GIVE SPOILERS, it has to
+    feel like natural conversation") -- reuses _companion_trust_band's
+    own real low/mid/high bands (the same ones Borin's Kess-arc
+    dialogue already gates on) rather than a new trust scale. Below
+    "high" (a real, earned relationship, not just a first meeting),
+    the NPC still privately knows the secret but is instructed to stay
+    coy about it -- no real fact leaks until the player's actually
+    built the rapport for it.
+    """
+    if not _npc_knows_thieves_cant(npc_id):
+        return None
+    secrets = _known_thieves_cant_secrets(character)
+    if not secrets:
+        return None
+    if _companion_trust_band(telegram_user_id, chat_id, npc_id) != "high":
+        return (
+            "You privately know Thieves' Cant, the rogues' secret code, and you've "
+            "noticed real hidden meanings in markings the party's passed -- but you "
+            "don't know this player well enough yet to just hand that over. If asked "
+            "about it, deflect naturally or downplay it rather than explaining anything real."
+        )
+    return (
+        "You privately know Thieves' Cant, the rogues' secret code -- you've quietly "
+        "picked out real hidden meanings in markings the party has already passed. "
+        "Weave this into natural conversation ONLY if it's actually relevant to what's "
+        "being asked -- never as a blunt info-dump, never announced unprompted, and "
+        "never more plainly than an in-character rogue would actually explain it: "
+        + " | ".join(secrets)
     )
 
 
@@ -17189,24 +17299,32 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     companion = present[0]
     npc_id = _find_npc_id_by_name(companion["name"])
     if not npc_id or npc_id not in _NPCS:
-        await update.effective_chat.send_message(
-            f"**{companion['name']}** doesn't seem to have anything to say right now.",
-            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
-        )
-        return
+        # Real gap (2026-09-22, per Coffee: "make sure its fully
+        # implemented so AI players and NPCS alike can participate") --
+        # a real, present party member who's AI-controlled end-to-end
+        # (is_autonomous=1, not a recruited companion) has no campaign
+        # NPC entry at all, so this used to always refuse them here.
+        # Lazily registers one from their own real character data
+        # instead of giving up.
+        if companion.get("is_ai"):
+            npc_id = _ensure_autonomous_character_registered(companion)
+        else:
+            await update.effective_chat.send_message(
+                f"**{companion['name']}** doesn't seem to have anything to say right now.",
+                message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+            )
+            return
 
     location = cl.get_location(CAMPAIGN, character["current_location"])
     context_facts = _party_companion_context_facts(character, location)
+    thieves_cant_block = _thieves_cant_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+    combined_facts = "\n\n".join(f for f in (context_facts, thieves_cant_block) if f) or None
     relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
     reply = await asyncio.to_thread(
-        talk_to_npc, npc_id, action_text, character["name"], relationship["memory_events"], context_facts,
-        _npc_identity_facts(character),
+        talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, action_text, character["name"],
+        relationship["memory_events"], combined_facts, _npc_identity_facts(character),
     )
-    npc_data = CAMPAIGN["npcs"].get(npc_id, {})
-    npc_display_name = npc_data.get("name", companion["name"])
-    await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")
-    await _maybe_send_npc_portrait(update, npc_id, npc_data)
-    db.adjust_affinity(update.effective_user.id, update.effective_chat.id, npc_id, 1)
+    await _send_npc_reply_and_track(update, npc_id, reply, companion["name"])
 
 
 def _story_arc_for_quest(quest_id: str) -> tuple[str, dict] | None:
@@ -20656,6 +20774,40 @@ def _sorcerer_armor_class_with_draconic_hide(character: dict, points: int) -> in
     for _ in range(max(points, 0)):
         foundation = _um_pool_step(foundation)
     return foundation + db.non_class_armor_bonus(character)
+
+
+def _bare_armor_class(character: dict) -> int:
+    """
+    Real unarmored AC baseline for this character's class -- the exact
+    same per-class formula character creation uses (BASE_ARMOR_CLASS,
+    or a real Unarmored Defense formula for Wizard/Monk/Sorcerer),
+    recomputed from CURRENT ability scores/draconic_hide investment
+    rather than the flat value stored once at creation. Does NOT
+    include shield/ring/set bonuses -- db.non_class_armor_bonus already
+    owns those separately, same split _sorcerer_armor_class_with_
+    draconic_hide already uses.
+
+    Needed so unequipping armor (2026-09-22, real live incident) can
+    put a character back to their real bare AC instead of a from-
+    scratch guess -- lives here, not db.py, for the same reason that
+    function does: only bot.py owns BASE_ARMOR_CLASS/the Unarmored
+    Defense formulas (see db.unequip_weapon_armor_or_shield's own
+    docstring for the full reasoning).
+    """
+    char_class = character.get("char_class")
+    dex_mod = ability_modifier(character["dexterity"])
+    if char_class == "Sorcerer":
+        points = _skill_points(character, "draconic_hide")
+        bare = 13 + dex_mod  # Draconic Resilience, unarmored
+        for _ in range(max(points, 0)):
+            bare = _um_pool_step(bare)
+        return bare
+    if char_class == "Wizard":
+        return BASE_ARMOR_CLASS.get(char_class, 10) + dex_mod
+    if char_class == "Monk":
+        wis_mod = ability_modifier(character["wisdom"])
+        return 10 + dex_mod + wis_mod
+    return BASE_ARMOR_CLASS.get(char_class, 10)
 
 
 def _skill_tree_keyboard(character: dict) -> InlineKeyboardMarkup:
@@ -28855,7 +29007,16 @@ async def _do_examine(update: Update, target_text: str) -> None:
     narration = await asyncio.to_thread(
         narrate_examine, character, location["name"], obj_data["name"], obj_data["description"]
     )
-    await _safe_send(update, f"🔍 **{character['name']}** examines {obj_data['name']}: {narration}")
+    message = f"🔍 **{character['name']}** examines {obj_data['name']}: {narration}"
+    # Thieves' Cant (2026-09-22, per Coffee: glyphs/wall-secrets should
+    # mean something real to a character who knows the code) -- a
+    # literal, hand-authored bonus line, never routed through the AI,
+    # same "never let AI invent a game fact" discipline as everywhere
+    # else here.
+    secret = obj_data.get("thieves_cant_secret")
+    if secret and _knows_thieves_cant(character):
+        message += f"\n\n🗝️ **(Thieves' Cant)** {secret}"
+    await _safe_send(update, message)
     await _maybe_send_interactable_image(update, obj_data)
 
 
@@ -31387,6 +31548,21 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
                 "a great deal of your own story still unfinished before this would make any sense."
             )
 
+    # A seventh condition (2026-09-22, per Coffee: "how about the secret
+    # language and code that the races are referring to is the glyphs
+    # and the secrets written on the walls" -- some real content should
+    # only open up to a character who actually knows the code). Checks
+    # the ACTING character OR any real party member physically present
+    # right now (_get_combat_eligible_party_members, the same
+    # "physically present" convention every other gate in this file
+    # already uses) -- so recruiting a real Rogue companion and bringing
+    # them along genuinely unlocks this for the whole party, not just a
+    # Rogue player character.
+    if gate.get("requires_thieves_cant"):
+        present = _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
+        if not any(_knows_thieves_cant(p) for p in present):
+            return "Something here is written in a code you can't read — you'd need someone who actually knows it."
+
     trust_gate = gate.get("requires_companion_trust")
     if trust_gate:
         # Real live request (2026-08-23, Coffee, after v1.27.340 fixed
@@ -33139,9 +33315,23 @@ async def _do_unequip_item(update: Update, text: str) -> None:
     existed anywhere. Needed for a set bonus to be meaningfully real (a
     bonus that could only ever be gained, never lost, would have no
     trustworthy "off" state), but genuinely useful on its own too.
-    Accessories only for now, same scope db.unequip_accessory's own
-    docstring explains -- weapon/armor/shield are single-slot columns
-    already correctly replaced by equipping something else.
+
+    Extended to weapon/armor/shield (2026-09-22, real live incident,
+    Coffee, very direct: "after I forge a magic item I should be able
+    to send it to another character... stop equipping things
+    automatically you are making the forging process far more
+    confusing") -- this used to be accessories-only, on the reasoning
+    that a single-slot weapon/armor/shield is "already correctly
+    replaced by equipping something else." That broke down live:
+    `_do_give_item` tells a player wearing/wielding the item to
+    "unequip or swap it out before giving it away", but there was
+    genuinely no way to do the "unequip" half for anything but an
+    accessory -- a real dead end that left a forged item stuck
+    equipped on the forger with no way to hand it off bare. Now checks
+    every real equip slot (weapon/armor/shield via db.
+    unequip_weapon_armor_or_shield, then accessories), same "one
+    function checks every slot" convention db.is_item_equipped already
+    uses.
     """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -33151,17 +33341,27 @@ async def _do_unequip_item(update: Update, text: str) -> None:
         return
 
     worn_ids = character.get("equipped_accessories", [])
-    items_wanted = _extract_item_list(text, worn_ids)
+    gear_ids = [
+        iid for iid in (character.get("equipped_weapon"), character.get("equipped_armor"), character.get("equipped_shield"))
+        if iid
+    ]
+    items_wanted = _extract_item_list(text, gear_ids + worn_ids)
     if not items_wanted:
         await update.effective_chat.send_message(
-            "Take off what, exactly? Name a ring, amulet, or wondrous item you're actually wearing.",
+            "Take off what, exactly? Name a weapon, armor, shield, ring, amulet, or wondrous item you're actually wearing.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
 
     lines = []
     for item_id, _quantity in items_wanted:
-        success, message, updated = db.unequip_accessory(update.effective_user.id, update.effective_chat.id, item_id)
+        if item_id in gear_ids:
+            bare_armor_class = _bare_armor_class(character) if item_id == character.get("equipped_armor") else None
+            success, message, updated = db.unequip_weapon_armor_or_shield(
+                update.effective_user.id, update.effective_chat.id, item_id, bare_armor_class=bare_armor_class,
+            )
+        else:
+            success, message, updated = db.unequip_accessory(update.effective_user.id, update.effective_chat.id, item_id)
         lines.append(f"🎽 {message}" if success else message)
         # Real live bug fix (2026-08-20, Charvenna) -- see
         # _sync_live_combat_equipment's own docstring.
@@ -37099,6 +37299,108 @@ def _find_npc_id_by_name(name: str) -> str | None:
     return None
 
 
+def _ensure_autonomous_character_registered(character: dict) -> str:
+    """
+    Real gap found investigating conversation coverage (2026-09-22, per
+    Coffee: "make sure its fully implemented so AI players and NPCS
+    alike can participate"). _NPCS is only ever populated once, at
+    startup, from the static CAMPAIGN["npcs"] roster (setup_default_
+    npcs) -- a genuine player character who happens to be AI-controlled
+    end-to-end (is_ai=1, is_autonomous=1, a real party member, NOT a
+    recruited companion, who's already a real campaign NPC) has no
+    entry there at all, so _do_talk_party silently refused them even
+    though they're real and present. Lazily builds one from their own
+    real character data the first time they're addressed -- cached
+    under a synthetic id from then on, reusing register_npc's own
+    persona-building path so the rest of the dialogue system (buffer,
+    facts, Thieves' Cant grounding) needs no special-casing at all.
+    """
+    synthetic_id = f"character:{character['character_id']}"
+    if synthetic_id not in _NPCS:
+        class_line = f"{character.get('race', 'an adventurer')} {character.get('char_class', '')}".strip()
+        guild = character.get("guild")
+        personality = (
+            f"a real {class_line} traveling with the party, adventuring alongside everyone here"
+            + (f", a member of the {guild.replace('_', ' ').title()}" if guild else "")
+        )
+        register_npc(synthetic_id, character["name"], personality, disposition="friendly")
+    return synthetic_id
+
+
+async def _send_npc_reply_and_track(update: Update, npc_id: str, reply: str, npc_name_fallback: str) -> None:
+    """
+    Real shared tail end of every NPC/companion dialogue path (2026-09-
+    22, extracted so the new Telegram-reply conversation-continuation
+    feature can reuse it too, not just the two original call sites):
+    sends the reply, tracks the sent message_id (_SENT_NPC_MESSAGES) so
+    a later real Telegram reply to it can resume this exact
+    conversation without repeating the NPC's name, sends a portrait,
+    and grants the same small ordinary-conversation affinity bump every
+    real exchange already did.
+    """
+    npc_data = CAMPAIGN["npcs"].get(npc_id, {})
+    npc_display_name = npc_data.get("name", npc_name_fallback)
+    sent_message_id = await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")
+    if sent_message_id is not None:
+        tracked = _chat_scoped_dict(_SENT_NPC_MESSAGES, update.effective_chat.id)
+        tracked[sent_message_id] = npc_id
+        if len(tracked) > _NPC_MESSAGE_TRACKED_PER_CHAT:
+            tracked.pop(min(tracked), None)
+    await _maybe_send_npc_portrait(update, npc_id, npc_data)
+    db.adjust_affinity(update.effective_user.id, update.effective_chat.id, npc_id, 1)
+
+
+async def _maybe_resolve_npc_reply_from_text(update: Update) -> bool:
+    """
+    Real live request (2026-09-22, per Coffee: "this includes with
+    command line commands and by selecting reply in telegram and
+    replying to them also. it shud know we are continue conversation").
+    Telegram's own native "Reply" gesture on an NPC's/companion's past
+    message is an unambiguous, zero-ambiguity signal to keep talking to
+    that exact same one -- same real shape as `/reimage`'s own
+    `_SENT_IMAGE_PROMPTS` message-id tracking, applied to NPC dialogue
+    via `_SENT_NPC_MESSAGES` (populated by `_send_npc_reply_and_track`,
+    every real NPC reply's own send). Returns False (a genuine no-op,
+    letting ordinary intent classification run) whenever this ISN'T a
+    reply to a tracked NPC message -- the overwhelming majority of real
+    messages. Deliberately a leaner continuation than the full named-
+    NPC talk path: no Kess-arc special case, no companion-quest-offer
+    push -- just the real conversation itself, grounded the same way.
+    """
+    message = update.message
+    reply = message.reply_to_message if message else None
+    if reply is None:
+        return False
+    npc_id = _chat_scoped_dict(_SENT_NPC_MESSAGES, update.effective_chat.id).get(reply.message_id)
+    if npc_id is None or npc_id not in _NPCS:
+        return False
+
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    npc_data_for_disposition = CAMPAIGN["npcs"].get(npc_id, {})
+    if _effective_disposition(update.effective_user.id, update.effective_chat.id, npc_id, npc_data_for_disposition) == "hostile":
+        await _safe_send(
+            update,
+            f"**{npc_data_for_disposition.get('name', 'They')}** isn't interested in talking anymore — "
+            f"this ends in a fight, not a conversation.",
+        )
+        return True
+
+    character_name = character["name"] if character else "the player"
+    relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
+    quest_facts = _npc_quest_facts(character, npc_id) if character else None
+    thieves_cant_block = (
+        _thieves_cant_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+        if character else None
+    )
+    combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block) if f) or None
+    reply_text = await asyncio.to_thread(
+        talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, message.text, character_name,
+        relationship["memory_events"], combined_facts, _npc_identity_facts(character),
+    )
+    await _send_npc_reply_and_track(update, npc_id, reply_text, npc_data_for_disposition.get("name", "them"))
+    return True
+
+
 def _shop_items_for_npc(npc_id: str) -> list[dict]:
     """
     Real wares a shopkeeper NPC actually sells, resolved from
@@ -37199,6 +37501,16 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # other processing, including touch_last_active, so a ban is a real
     # dead end, not just a quieter version of playing.
     if await asyncio.to_thread(db.is_banned, update.effective_user.id):
+        return
+
+    # Real live request (2026-09-22, per Coffee: "using reply in
+    # telegram and replying to them also. it shud know we are continue
+    # conversation") -- see _maybe_resolve_npc_reply_from_text's own
+    # docstring. Checked before ordinary intent classification, same
+    # reasoning as the pending-reaction check just below: a reply to an
+    # NPC's own message is an unambiguous signal, never worth risking a
+    # misclassification on.
+    if await _maybe_resolve_npc_reply_from_text(update):
         return
 
     # Real live gap (2026-08-20, Coffee, mid-fight: typed "Counter it"
@@ -38095,18 +38407,22 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             else:
                 relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
                 quest_facts = _npc_quest_facts(character, npc_id) if character else None
-                reply = await asyncio.to_thread(
-                    talk_to_npc, npc_id, text, character_name, relationship["memory_events"], quest_facts,
-                    _npc_identity_facts(character),
+                thieves_cant_block = (
+                    _thieves_cant_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+                    if character else None
                 )
-            npc_data = CAMPAIGN["npcs"].get(npc_id, {})
-            npc_display_name = npc_data.get("name", intent["npc_name"])
-            await _safe_send(update, f"💬 **{npc_display_name}:** {reply}")
-            await _maybe_send_npc_portrait(update, npc_id, npc_data)
-            # Ordinary conversation builds a small amount of rapport over
-            # time — real, persistent, and separate from the short-term
-            # conversation buffer talk_to_npc already keeps.
-            db.adjust_affinity(update.effective_user.id, update.effective_chat.id, npc_id, 1)
+                combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block) if f) or None
+                reply = await asyncio.to_thread(
+                    talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, text, character_name,
+                    relationship["memory_events"], combined_facts, _npc_identity_facts(character),
+                )
+            # _send_npc_reply_and_track (2026-09-22) handles the send,
+            # _SENT_NPC_MESSAGES tracking (so a later real Telegram reply
+            # can resume this exact conversation), portrait, and the
+            # ordinary-conversation affinity bump -- same real, persistent
+            # rapport this always granted, separate from the short-term
+            # conversation buffer talk_to_npc keeps.
+            await _send_npc_reply_and_track(update, npc_id, reply, intent["npc_name"])
             faction_id = _faction_for_npc(npc_id)
             if faction_id:
                 _adjust_faction_standing(

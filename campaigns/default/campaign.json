@@ -64,7 +64,8 @@
         ],
         "npcs": [
           "old_maren",
-          "borin_ironjaw"
+          "borin_ironjaw",
+          "fen_larkspur"
         ],
         "shop": "marens_wares",
         "interactables": {
@@ -2347,7 +2348,8 @@
           },
           "unfamiliar_glyphs": {
             "name": "glyphs carved into every visible surface",
-            "description": "A script that matches nothing above ground, repeated so often it starts to feel less like writing and more like counting."
+            "description": "A script that matches nothing above ground, repeated so often it starts to feel less like writing and more like counting.",
+            "thieves_cant_secret": "It isn't counting -- it's a route. The repeats mark a path a thief once cut through here, over and over, until the walls remembered it too."
           }
         },
         "story_gates": {
@@ -2425,11 +2427,13 @@
         "description": "The upper reaches of the buried city, close enough to the central spire to feel its warmth without touching it. The glyphs here are denser, and some of them move, slightly, when you're not looking directly at them.",
         "connections": [
           "the_first_city",
-          "the_first_city_spire_stair"
+          "the_first_city_spire_stair",
+          "the_first_city_the_shifting_hollow"
         ],
         "directions": {
           "west": "the_first_city",
-          "east": "the_first_city_spire_stair"
+          "east": "the_first_city_spire_stair",
+          "south": "the_first_city_the_shifting_hollow"
         },
         "resource_nodes": [
           {
@@ -2443,7 +2447,13 @@
         "interactables": {
           "reaches_shifting_glyphs": {
             "name": "a dense cluster of restless glyphs",
-            "description": "Watched directly, they hold perfectly still. Watched from the corner of your eye, more than one of them is moving."
+            "description": "Watched directly, they hold perfectly still. Watched from the corner of your eye, more than one of them is moving.",
+            "thieves_cant_secret": "The ones that move are pointing. Follow where they're leaning and there's a real gap in the stone behind them, wide enough to slip through."
+          }
+        },
+        "story_gates": {
+          "the_first_city_the_shifting_hollow": {
+            "requires_thieves_cant": true
           }
         },
         "monsters": [],
@@ -2453,6 +2463,39 @@
         },
         "dungeon_id": "the_first_city",
         "dungeon_interior": true
+      },
+      "the_first_city_the_shifting_hollow": {
+        "name": "The Shifting Hollow",
+        "layer": "underground",
+        "description": "A narrow gap behind the glyph wall, barely wide enough to slip through -- the air inside is stiller and colder than anywhere else in the spire. Nothing about this space is on any map anyone's ever drawn.",
+        "connections": [
+          "the_first_city_spire_reaches"
+        ],
+        "directions": {
+          "north": "the_first_city_spire_reaches"
+        },
+        "interactables": {
+          "hollow_cache": {
+            "name": "a small, undisturbed cache tucked into the stone",
+            "description": "Whoever hid this clearly meant to come back for it, and clearly never did."
+          }
+        },
+        "lockables": [
+          {
+            "id": "hollow_cache_stash",
+            "kind": "chest",
+            "name": "the undisturbed cache",
+            "loot": {
+              "silverleaf_herb": 2
+            },
+            "gold": 40
+          }
+        ],
+        "monsters": [],
+        "grid_position": {
+          "x": 3,
+          "y": -2
+        }
       },
       "the_first_city_sunken_archive": {
         "name": "The Sunken Archive",
@@ -8449,6 +8492,33 @@
       "personality": "a sharp-tongued trader who has an answer for everything except why she never leaves Market Row after dark",
       "shop": "marens_wares",
       "alignment": "Lawful Neutral",
+      "disposition": "friendly"
+    },
+    "fen_larkspur": {
+      "name": "Fen Larkspur",
+      "role": "back_alley_fence",
+      "personality": "a wiry, easygoing rogue who reads a room before saying anything real in it, and never quite explains how he knows the things he knows",
+      "goals": "staying one step ahead of whoever's still looking for him from the last town",
+      "recruitable": true,
+      "pronouns": "he/him",
+      "stats": {
+        "race": "Human",
+        "char_class": "Rogue",
+        "strength": 10,
+        "dexterity": 17,
+        "constitution": 12,
+        "intelligence": 13,
+        "wisdom": 10,
+        "charisma": 13,
+        "hp_max": 9,
+        "armor_class": 13,
+        "gold": 35,
+        "inventory": {
+          "shortsword": 1,
+          "leather_armor": 1
+        }
+      },
+      "alignment": "Chaotic Neutral",
       "disposition": "friendly"
     },
     "sera_wanderer": {

@@ -2,6 +2,51 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.669] — fix: can't unequip a weapon/armor/shield to free it up for giving away
+
+Real live incident (2026-09-22, Coffee, very angry, urgent dev-bridge
+reports with screenshots): "after I forge a magic item I should be
+able to send it to another character and equipment... stop equipping
+things automatically you are making the forging process far more
+confusing that it needs to be... why the fuck are you equipping it to
+my fucking character."
+
+Investigated via the live log and two follow-up screenshots. Neither
+`_do_forge_magic_item` nor `_do_give_item` actually auto-equips
+anything onto the wrong character (confirmed by code read — forging
+promotes a plain item into a new instance and explicitly CLEARS any
+stale equip reference rather than transferring it, per v1.27.666; a
+successful give only ever offers an Equip button hard-coded to the
+real recipient). The real, concrete, reproducible bug: `_do_give_item`
+correctly refuses to give away an equipped weapon/armor/shield
+("You're wearing/wielding the X — unequip or swap it out before
+giving it away"), but `_do_unequip_item`/`db.unequip_accessory` only
+ever supported rings/amulets/wondrous items — there was genuinely no
+way to do the "unequip" half of that instruction for a weapon, armor,
+or shield (confirmed live: "Unequip the wooden shield" / "Unequip
+gleaming chain mail armor" both got "Take off what, exactly? Name a
+ring, amulet, or wondrous item you're actually wearing" — a real dead
+end the game's own error message told the player to do something
+impossible).
+
+New `db.unequip_weapon_armor_or_shield` mirrors `equip_item`'s own AC
+math exactly in reverse for weapon and shield (pure deltas, same
+discipline `unequip_accessory`'s docstring already documents). Armor
+is different — `equip_item`'s armor branch fully REPLACES the AC
+foundation rather than delta'ing it, so reversing it needs the real
+per-class unarmored baseline (BASE_ARMOR_CLASS, or the Wizard/Monk/
+Sorcerer Unarmored Defense formulas) that only bot.py owns; new
+`bot._bare_armor_class` supplies that, same "lives in bot.py, not
+db.py" split `_sorcerer_armor_class_with_draconic_hide` already uses.
+`_do_unequip_item` now checks every real equip slot (weapon/armor/
+shield, then accessories) instead of accessories only.
+
+3 new tests, including a full real-handler reproduction of the exact
+reported workflow (equip a shield, unequip it via free text, confirm
+it can then actually be given to a present party member) plus a
+targeted 142-test regression slice across every equip/give/armor/
+shield/Sorcerer-draconic-hide path — all pass clean.
+
 ## [1.27.668] — feature: fold Use and Cast-a-Scroll into the same submenu pattern
 
 Real live follow-up (Coffee, screenshot): "I like the sub menus, but

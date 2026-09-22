@@ -9,10 +9,26 @@ import requests
 import config
 from ai.text_cleanup import strip_think_tags, is_placeholder_text
 
-# In-memory NPC registry: npc_id -> {"persona": str, "memory": [(role, text), ...]}
+# In-memory NPC registry: npc_id -> {"persona": str, "memory": {(chat_id, telegram_user_id): [(role, text), ...]}}
 _NPCS: dict[str, dict] = {}
 
 MAX_MEMORY_TURNS = 10
+
+
+def _conversation_buffer(npc_id: str, chat_id: int, telegram_user_id: int) -> list:
+    """
+    Real per-(chat, player) conversation buffer (2026-09-22, fixing a
+    real cross-player/cross-tenant leak: this used to be ONE flat list
+    per npc_id, shared by literally every real player -- and every
+    tenant chat, given the multi-tenant work already shipped -- talking
+    to that same NPC, so two different people's conversations could
+    blend into each other's prompt context). Lazily created per key,
+    same "no upfront allocation" convention as every other per-chat
+    dict in this codebase. `telegram_user_id=0` is the real sentinel
+    for NPC-to-NPC/world "ambient" lines that aren't about any specific
+    player at all (see generate_ambient_line's own callers).
+    """
+    return _NPCS[npc_id]["memory"].setdefault((chat_id, telegram_user_id), [])
 
 
 def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
@@ -50,7 +66,7 @@ def register_npc(npc_id: str, name: str, personality: str, goals: str = "",
         + "Stay in character at all times. Respond conversationally, in 1-4 sentences."
     )
     _NPCS[npc_id] = {
-        "persona": persona, "memory": [], "disposition": disposition,
+        "persona": persona, "memory": {}, "disposition": disposition,
         "shop_items": shop_items or [],
     }
 
@@ -98,12 +114,12 @@ def _memory_facts_block(memory_facts: list[str] | None, character_name: str) -> 
     return f"What you specifically remember about {character_name}:\n{facts}"
 
 
-def _build_prompt(npc_id: str, player_message: str, character_name: str = "the player",
+def _build_prompt(npc_id: str, chat_id: int, telegram_user_id: int, player_message: str, character_name: str = "the player",
                    memory_facts: list[str] | None = None, quest_facts: str | None = None,
                    identity_facts: str | None = None) -> str:
     npc = _NPCS[npc_id]
     history_lines = []
-    for role, text in npc["memory"][-MAX_MEMORY_TURNS:]:
+    for role, text in _conversation_buffer(npc_id, chat_id, telegram_user_id)[-MAX_MEMORY_TURNS:]:
         history_lines.append(f"{role}: {text}")
     history = "\n".join(history_lines) or "(no prior conversation this session)"
     memory_block = _memory_facts_block(memory_facts, character_name)
@@ -127,7 +143,7 @@ def _build_prompt(npc_id: str, player_message: str, character_name: str = "the p
     )
 
 
-def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the player",
+def talk_to_npc(npc_id: str, chat_id: int, telegram_user_id: int, player_message: str, character_name: str = "the player",
                 memory_facts: list[str] | None = None, quest_facts: str | None = None,
                 identity_facts: str | None = None) -> str:
     """
@@ -144,11 +160,17 @@ def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the pla
     fixed for shop inventory. `identity_facts` (Synergy Phase 8,
     2026-08-13) grounds WHO is actually talking -- real class/subclass/
     guild facts, same "compute then hand to narration" convention.
+
+    `chat_id`/`telegram_user_id` (2026-09-22, real cross-player/cross-
+    tenant conversation leak fix): the short-term conversation buffer
+    is now scoped per (chat, player), not shared globally by every real
+    person talking to this NPC -- see _conversation_buffer's own
+    docstring.
     """
     if npc_id not in _NPCS:
         raise ValueError(f"Unknown NPC id: {npc_id!r}. Call register_npc() first.")
 
-    prompt = _build_prompt(npc_id, player_message, character_name, memory_facts, quest_facts, identity_facts)
+    prompt = _build_prompt(npc_id, chat_id, telegram_user_id, player_message, character_name, memory_facts, quest_facts, identity_facts)
 
     try:
         response = requests.post(
@@ -170,12 +192,13 @@ def talk_to_npc(npc_id: str, player_message: str, character_name: str = "the pla
         print(f"[npc_agent] NPC call failed, falling back: {e}")
         reply = "..."
 
-    _NPCS[npc_id]["memory"].append(("Player", player_message))
-    _NPCS[npc_id]["memory"].append(("You", reply))
+    buffer = _conversation_buffer(npc_id, chat_id, telegram_user_id)
+    buffer.append(("Player", player_message))
+    buffer.append(("You", reply))
     return reply
 
 
-def generate_ambient_line(npc_id: str, character_name: str, situation: str,
+def generate_ambient_line(npc_id: str, chat_id: int, telegram_user_id: int, character_name: str, situation: str,
                            memory_facts: list[str] | None = None) -> str:
     """
     An UNPROMPTED in-character line — the NPC noticing/reacting to a
@@ -188,9 +211,15 @@ def generate_ambient_line(npc_id: str, character_name: str, situation: str,
     the person who beat them, a shopkeeper who hasn't forgotten a theft.
     Falls back to silence (empty string) if the model is unreachable —
     an ambient flourish is allowed to simply not happen.
+
+    `telegram_user_id` (2026-09-22, same cross-player leak fix as
+    talk_to_npc): pass the real arriving player's id when this line is
+    actually reacting to one specific person; pass `0` for a pure
+    NPC-to-NPC/world "ambient" line that isn't about any specific
+    player at all (see `_conversation_buffer`'s own docstring).
     """
     npc = _NPCS[npc_id]
-    history_lines = [f"{role}: {text}" for role, text in npc["memory"][-MAX_MEMORY_TURNS:]]
+    history_lines = [f"{role}: {text}" for role, text in _conversation_buffer(npc_id, chat_id, telegram_user_id)[-MAX_MEMORY_TURNS:]]
     history = "\n".join(history_lines) or "(no prior conversation this session)"
     memory_block = _memory_facts_block(memory_facts, character_name)
     shop_block = _shop_grounding_block(npc_id)

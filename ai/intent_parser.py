@@ -142,8 +142,9 @@ party member — different from casting a revival spell. Set "target" to the dea
 - "equip_item" is for equipping/wielding/wearing/putting on a weapon or piece of armor they're carrying \
 (e.g. "equip my longsword", "wear the chain mail", "wield the dagger", "equip Sarah with the longbow"). \
 Set "item_name" to the item, and "target" to who it's for if a specific OTHER party member is named (defaults to self).
-- "unequip_item" is the inverse: taking off a currently-worn ring/amulet/wondrous item \
-(e.g. "take off my ring", "unequip the amulet", "remove my cloak"). Set "item_name" to the item.
+- "unequip_item" is the inverse: taking off a currently-worn weapon, armor, shield, ring, amulet, or wondrous item \
+(e.g. "take off my ring", "unequip the amulet", "remove my cloak", "unequip the wooden shield", "take off my armor"). \
+Set "item_name" to the item.
 - "auto_equip" is for asking the game to automatically equip the best weapon/armor/shield being carried, \
 without naming a specific item (e.g. "auto equip my character", "put on my gear automatically", \
 "help me equip my player"). Set "target" to a specific party member's name if named, else self.

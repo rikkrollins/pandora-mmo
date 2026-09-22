@@ -14543,6 +14543,91 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(ring1_id, after_unequip["equipped_accessories"])
         self.assertIn(ring2_id, after_unequip["equipped_accessories"])
 
+    async def test_unequipping_a_shield_armor_or_weapon_frees_it_to_be_given_away(self):
+        """
+        Real live incident (2026-09-22, Coffee, very direct: "after I
+        forge a magic item I should be able to send it to another
+        character... stop equipping things automatically you are making
+        the forging process far more confusing"). Root cause confirmed
+        via the live log/screenshots: `_do_give_item` correctly refuses
+        to give away an equipped weapon/armor/shield ("unequip or swap
+        it out before giving it away"), but `_do_unequip_item` only ever
+        handled accessories (rings/amulets/wondrous) -- there was
+        genuinely no way to do the "unequip" half for a weapon, armor,
+        or shield, a real dead end. This exercises the full real
+        sequence through the actual handlers: equip a shield, confirm
+        AC reflects it, unequip it via free text, confirm AC drops back
+        and the slot clears, then confirm the freed item can actually
+        be given to a present party member (the exact blocked workflow).
+        """
+        user_id = 950907
+        make_basic_character(
+            user_id, "ShieldTester", current_location="crossroads_tavern",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        recipient_id = 950908
+        make_basic_character(
+            recipient_id, "ShieldRecipient", current_location="crossroads_tavern",
+        )
+        db.update_character(recipient_id, -999, party_id=db.get_character(user_id, -999).get("party_id"))
+
+        shield_id = "wooden_shield"
+        db.add_item(user_id, -999, shield_id, 1)
+        base_ac = db.get_character(user_id, -999)["armor_class"]
+        success, _msg, _updated = db.equip_item(user_id, -999, shield_id)
+        self.assertTrue(success)
+        equipped_ac = db.get_character(user_id, -999)["armor_class"]
+        self.assertGreater(equipped_ac, base_ac)
+        self.assertEqual(db.get_character(user_id, -999)["equipped_shield"], shield_id)
+
+        sink = []
+        await bot._do_unequip_item(FakeUpdate(user_id, "unequip the wooden shield", sink), "unequip the wooden shield")
+        after_unequip = db.get_character(user_id, -999)
+        self.assertIsNone(after_unequip["equipped_shield"])
+        self.assertEqual(after_unequip["armor_class"], base_ac)
+        self.assertTrue(any("take off" in line.lower() or "lower" in line.lower() for line in sink))
+
+        give_sink = []
+        await bot._do_give_item(FakeUpdate(user_id, "give the wooden shield to ShieldRecipient", give_sink),
+                                 "give the wooden shield to ShieldRecipient")
+        self.assertTrue(any("gives" in line for line in give_sink), give_sink)
+        self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get(shield_id, 0), 1)
+        self.assertEqual(db.get_character(user_id, -999)["inventory"].get(shield_id, 0), 0)
+
+    async def test_unequipping_armor_reverses_its_exact_ac_contribution(self):
+        """
+        Same 2026-09-22 fix, armor branch: confirms unequip_armor mirrors
+        equip_item's own delta math exactly in reverse (armor_class
+        returns to its pre-equip value), not a from-scratch recompute --
+        the same "pure delta" discipline unequip_accessory's docstring
+        already documents, now extended to the single-slot gear types.
+        """
+        user_id = 950909
+        make_basic_character(
+            user_id, "ArmorTester", current_location="crossroads_tavern",
+            ability_scores={"strength": 10, "dexterity": 14, "constitution": 10,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        armor_id = "leather_armor"
+        db.add_item(user_id, -999, armor_id, 1)
+        # The fixture's own armor_class default (15) is a flat,
+        # dexterity/class-disconnected placeholder (see this file's own
+        # test_set_bonus_applies_at_threshold_and_drops_off_on_unequip
+        # docstring for the same caveat) -- the real bare baseline this
+        # class/DEX combo should return to is bot._bare_armor_class's
+        # own real formula, not whatever the fixture happened to start at.
+        base_ac = bot._bare_armor_class(db.get_character(user_id, -999))
+        success, _msg, _updated = db.equip_item(user_id, -999, armor_id)
+        self.assertTrue(success)
+        self.assertEqual(db.get_character(user_id, -999)["equipped_armor"], armor_id)
+
+        sink = []
+        await bot._do_unequip_item(FakeUpdate(user_id, "take off my leather armor", sink), "take off my leather armor")
+        after = db.get_character(user_id, -999)
+        self.assertIsNone(after["equipped_armor"])
+        self.assertEqual(after["armor_class"], base_ac)
+
     def test_mythic_ignore_resistance_deals_full_damage_through_a_resistance(self):
         """
         Real Phase 6 deliverable of the magic item system (2026-08-02):
@@ -35194,12 +35279,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
         captured.clear()
         with patch("ai.npc_agent.requests.post", side_effect=fake_post):
-            npc_agent_module.talk_to_npc("num_thread_test_npc", "hello", "Aldric")
+            npc_agent_module.talk_to_npc("num_thread_test_npc", -999, 950940, "hello", "Aldric")
         self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
 
         captured.clear()
         with patch("ai.npc_agent.requests.post", side_effect=fake_post):
-            npc_agent_module.generate_ambient_line("num_thread_test_npc", "Aldric", "arrives")
+            npc_agent_module.generate_ambient_line("num_thread_test_npc", -999, 950940, "Aldric", "arrives")
         self.assertEqual(captured["options"]["num_thread"], config.OLLAMA_NUM_THREAD)
 
         captured.clear()
@@ -39340,14 +39425,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         import ai.npc_agent as npc_agent_module
         npc_agent_module.register_npc("phase8_test_npc", "Test NPC", "A test persona.")
         prompt = npc_agent_module._build_prompt(
-            "phase8_test_npc", "Hello there", "Wren", identity_facts="Who you're talking to: Wren is a level 12 Rogue (Assassin).",
+            "phase8_test_npc", -999, 950940, "Hello there", "Wren", identity_facts="Who you're talking to: Wren is a level 12 Rogue (Assassin).",
         )
         self.assertIn("Who you're talking to: Wren is a level 12 Rogue (Assassin).", prompt)
 
     def test_npc_agent_prompt_omits_the_identity_block_when_absent(self):
         import ai.npc_agent as npc_agent_module
         npc_agent_module.register_npc("phase8_test_npc2", "Test NPC 2", "A test persona.")
-        prompt = npc_agent_module._build_prompt("phase8_test_npc2", "Hello there", "Wren")
+        prompt = npc_agent_module._build_prompt("phase8_test_npc2", -999, 950940, "Hello there", "Wren")
         self.assertNotIn("Who you're talking to:", prompt)
 
     async def test_talk_npc_real_call_site_passes_real_identity_facts(self):
@@ -39468,6 +39553,160 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._dispatch_intent(FakeUpdate(user_id, "hello", sink), DummyContext(), intent, "hello")
 
         self.assertEqual(len(sink), 1, "only the plain chat reply should be sent, no quest card")
+
+    # -- Thieves' Cant (2026-09-22, per Coffee: "how about the secret
+    # language and code that the races are referring to is the glyphs
+    # and the secrets written on the walls") ----------------------------
+
+    def test_knows_thieves_cant_predicate(self):
+        rogue = make_basic_character(996160, "CantTester", char_class="Rogue", current_location="crossroads_tavern")
+        non_rogue = make_basic_character(996161, "NonCantTester", char_class="Fighter", current_location="crossroads_tavern")
+        self.assertTrue(bot._knows_thieves_cant(rogue))
+        self.assertFalse(bot._knows_thieves_cant(non_rogue))
+        self.assertTrue(bot._npc_knows_thieves_cant("fen_larkspur"))
+        self.assertFalse(bot._npc_knows_thieves_cant("grimsby"))
+
+    async def test_do_examine_reveals_thieves_cant_secret_only_for_a_rogue(self):
+        """The bonus glyph-secret line is real, literal, non-AI text -- shown to a Rogue examining a real glyph interactable, never to any other class."""
+        from unittest.mock import patch
+        rogue = make_basic_character(996162, "GlyphRogue", char_class="Rogue", current_location="the_first_city")
+        non_rogue = make_basic_character(996163, "GlyphFighter", char_class="Fighter", current_location="the_first_city")
+        with patch("bot.narrate_examine", return_value="A script that means nothing to you."):
+            sink_rogue = []
+            await bot._do_examine(FakeUpdate(996162, "examine the glyphs", sink_rogue), "the glyphs")
+            sink_other = []
+            await bot._do_examine(FakeUpdate(996163, "examine the glyphs", sink_other), "the glyphs")
+        self.assertTrue(any("Thieves' Cant" in s and "route" in s for s in sink_rogue), sink_rogue)
+        self.assertFalse(any("Thieves' Cant" in s for s in sink_other), sink_other)
+
+    def test_requires_thieves_cant_gate_blocks_then_passes(self):
+        chat_id = -999160
+        make_basic_character(996164, "GateNonRogue", chat_id=chat_id, char_class="Fighter", current_location="the_first_city_spire_reaches")
+        current = {"story_gates": {"the_first_city_the_shifting_hollow": {"requires_thieves_cant": True}}}
+        character = db.get_character(996164, chat_id)
+        rejection = bot._check_story_gate(character, current, "the_first_city_the_shifting_hollow")
+        self.assertIsNotNone(rejection, "no one present knows the code -- must block")
+        make_basic_character(996165, "GateRogue", chat_id=chat_id, char_class="Rogue", current_location="the_first_city_spire_reaches")
+        character = db.get_character(996164, chat_id)  # re-fetch, party composition changed
+        self.assertIsNone(bot._check_story_gate(character, current, "the_first_city_the_shifting_hollow"),
+                           "a real, present Rogue party member must unlock it for everyone")
+
+    async def test_the_shifting_hollow_is_gated_end_to_end(self):
+        """End-to-end via the real _do_move handler: a non-Rogue alone cannot reach the hidden room; a real Rogue can."""
+        make_basic_character(996166, "HollowBlocked", current_location="the_first_city_spire_reaches", char_class="Fighter")
+        sink = []
+        await bot._do_move(FakeUpdate(996166, "go south", sink), "south")
+        self.assertEqual(db.get_character(996166, -999)["current_location"], "the_first_city_spire_reaches")
+
+        make_basic_character(996167, "HollowRogue", current_location="the_first_city_spire_reaches", char_class="Rogue")
+        sink2 = []
+        await bot._do_move(FakeUpdate(996167, "go south", sink2), "south")
+        self.assertEqual(db.get_character(996167, -999)["current_location"], "the_first_city_the_shifting_hollow")
+
+    async def test_fen_larkspur_is_a_real_recruitable_rogue(self):
+        make_basic_character(996168, "FenRecruiter", current_location="market_row")
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(996168, "recruit Fen Larkspur", sink), "Fen Larkspur")
+        companion = next(
+            (p for p in bot._get_party_members(-999) if p["name"] == "Fen Larkspur"), None,
+        )
+        self.assertIsNotNone(companion, sink)
+        self.assertEqual(companion["char_class"], "Rogue")
+
+    def test_thieves_cant_grounding_block_stays_coy_below_trust_then_reveals_at_high_trust(self):
+        bot.setup_default_npcs()
+        user_id, chat_id = 996169, -999161
+        character = make_basic_character(user_id, "TrustGater", chat_id=chat_id, current_location="the_first_city")
+        db.update_character(user_id, chat_id, visited_locations=["the_first_city"])
+        character = db.get_character(user_id, chat_id)
+        low_trust = bot._thieves_cant_grounding_block(user_id, chat_id, character, "fen_larkspur")
+        self.assertIsNotNone(low_trust)
+        self.assertIn("don't know this player well enough", low_trust)
+        self.assertNotIn("route", low_trust)
+        db.adjust_affinity(user_id, chat_id, "fen_larkspur", 40)
+        high_trust = bot._thieves_cant_grounding_block(user_id, chat_id, character, "fen_larkspur")
+        self.assertIn("route", high_trust)
+
+    def test_thieves_cant_grounding_block_is_none_for_a_non_rogue_npc_or_unvisited_glyphs(self):
+        character = make_basic_character(996170, "NoSecretsYet", current_location="crossroads_tavern")
+        self.assertIsNone(bot._thieves_cant_grounding_block(996170, -999, character, "grimsby"))  # not a Rogue NPC
+        bot.setup_default_npcs()
+        self.assertIsNone(bot._thieves_cant_grounding_block(996170, -999, character, "fen_larkspur"))  # no glyph visited yet
+
+    # -- Conversation quality/correctness (2026-09-22) -------------------
+
+    def test_npc_conversation_memory_is_isolated_per_player_and_chat(self):
+        """Real cross-player/cross-chat leak fix: two different (chat, player) pairs talking to the same NPC must never see each other's history."""
+        from unittest.mock import patch
+        from ai import npc_agent
+        npc_agent.register_npc("test_isolation_npc_996174", "Tester", "a plain test persona")
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "acknowledged"}
+
+        with patch("ai.npc_agent.requests.post", return_value=FakeResponse()):
+            npc_agent.talk_to_npc("test_isolation_npc_996174", 111, 1, "player one's secret message", "Alice")
+            npc_agent.talk_to_npc("test_isolation_npc_996174", 111, 2, "player two's secret message", "Bob")
+            prompt_for_two = npc_agent._build_prompt("test_isolation_npc_996174", 111, 2, "follow-up", "Bob")
+            prompt_for_a_different_chat = npc_agent._build_prompt("test_isolation_npc_996174", 222, 1, "follow-up", "Alice")
+        self.assertNotIn("player one's secret message", prompt_for_two)
+        self.assertIn("player two's secret message", prompt_for_two)
+        self.assertNotIn("player one's secret message", prompt_for_a_different_chat)
+
+    async def test_replying_to_an_npc_message_continues_the_conversation_without_naming_them(self):
+        from unittest.mock import patch, AsyncMock
+        bot.setup_default_npcs()
+        user_id = 996171
+        make_basic_character(user_id, "ReplyContinuer", current_location="crossroads_tavern")
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "A real in-character reply."}
+
+        sink = []
+        with patch("ai.npc_agent.requests.post", return_value=FakeResponse()), \
+             patch("bot._find_npc_id_by_name", return_value="grimsby"), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            intent = {"action": "talk_npc", "npc_name": "Grimsby", "raw_text": "hello"}
+            await bot._dispatch_intent(FakeUpdate(user_id, "hello", sink), DummyContext(), intent, "hello")
+            npc_message_id = next(iter(bot._SENT_NPC_MESSAGES.get(-999, {})))
+
+            sink2 = []
+            reply_stub = type("R", (), {"message_id": npc_message_id, "text": "hello", "from_user": None})()
+            update_with_reply = FakeUpdate(user_id, "what did you mean by that?", sink2, reply_to_message=reply_stub)
+            handled = await bot._maybe_resolve_npc_reply_from_text(update_with_reply)
+        self.assertTrue(handled)
+        self.assertTrue(any("A real in-character reply." in s for s in sink2), sink2)
+
+    async def test_do_talk_party_can_reach_an_autonomous_ai_played_party_member(self):
+        """Real gap fix: a real, present, is_ai=1/is_autonomous=1 party member (not a recruited companion) must be reachable via _do_talk_party, not refused."""
+        from unittest.mock import patch
+        human_id, ai_player_id = 996172, 996173
+        human = make_basic_character(human_id, "AskingHuman", current_location="crossroads_tavern")
+        ai_player = make_basic_character(ai_player_id, "AutonomousAlly", current_location="crossroads_tavern", is_ai=True)
+        db.update_character(ai_player_id, -999, is_autonomous=1)
+        party_id = db.create_party(human_id, -999)
+        db.update_character(ai_player_id, -999, party_id=party_id)
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "I'm right here."}
+
+        sink = []
+        with patch("ai.npc_agent.requests.post", return_value=FakeResponse()):
+            await bot._do_talk_party(FakeUpdate(human_id, "how's it going?", sink), "how's it going?")
+        self.assertTrue(any("I'm right here." in s for s in sink), sink)
+        self.assertIn(f"character:{ai_player['character_id']}", bot._NPCS)
 
     def test_look_action_travel_buttons_use_real_directional_emoji(self):
         """
