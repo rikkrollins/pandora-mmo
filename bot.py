@@ -6077,8 +6077,31 @@ async def _do_trade_request(update: Update, text: str) -> None:
     await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(trade_id), speak=False)
 
 
-async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
-    """Shared by _do_trade_add/_do_trade_remove -- same item/gold parsing, opposite direction."""
+async def _mutate_trade_offer(update: Update, text: str, adding: bool, item_id: str | None = None) -> None:
+    """
+    Shared by _do_trade_add/_do_trade_remove -- same item/gold parsing,
+    opposite direction.
+
+    `item_id` (2026-09-22, real live incident, Coffee, very angry: "I
+    am giving the items with +STR to Laurienna!!! ... I did NOT equip
+    them"). Root cause, the exact same "name round-trip" bug already
+    fixed once for give (v1.27.658): the button-driven Add-to-Trade
+    picker (_trade_item_picker_keyboard) already resolves ONE SPECIFIC
+    real item_id per button -- correctly distinguishing two owned
+    items sharing an identical display name (e.g. two "Amulet of
+    Health" instances with genuinely different real affixes, one
+    equipped, one meant for Laurienna) -- but trade_menu_callback's own
+    "qty" step re-encoded that choice back into free text using only
+    the item's NAME (f"add {qty} {item['name']} to the trade") before
+    calling this function, throwing the specific id away. This function
+    then re-resolved the name via find_item_mentioned_in_text, which
+    can't tell the two apart and deterministically (and arbitrarily)
+    always picks the same one -- silently undoing the exact
+    disambiguation the button chain had already established. Passing
+    the real id straight through here skips that re-resolution
+    entirely, same "skip re-resolution for the button path" fix
+    _do_give_item's own `item_id` param already applies.
+    """
     telegram_user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     character = db.get_character(telegram_user_id, chat_id)
@@ -6113,12 +6136,57 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
             db.update_character(telegram_user_id, chat_id, gold=character["gold"] + amount)
             changed_lines.append(f"Took {amount} gold back out of the trade.")
 
-    items_wanted = _extract_item_list(
-        text, list(character["inventory"].keys()) if adding else list(side["items"].keys())
-    )
-    for item_id, quantity in items_wanted:
-        item_name = items_module.get_item(item_id)["name"]
+    explicit_item_id = item_id is not None
+    if explicit_item_id:
+        items_wanted = [(item_id, _extract_quantity(text))]
+    else:
+        items_wanted = _extract_item_list(
+            text, list(character["inventory"].keys()) if adding else list(side["items"].keys())
+        )
+    for matched_id, quantity in items_wanted:
+        item_name = items_module.get_item(matched_id)["name"]
         if adding:
+            # Real live incident (2026-09-22, Coffee, very angry, same
+            # root cause as v1.27.671/672's give/forge fixes: "I am
+            # giving the items with +STR to Laurienna!!! ... I did NOT
+            # equip them"). A free-text match (no explicit `item_id`
+            # above) can't tell apart two owned items sharing an
+            # identical display name (here, two real "Amulet of Health"
+            # instances with genuinely different affixes -- one
+            # equipped, one meant for Laurienna) and always resolves to
+            # the SAME one -- when that one happened to be the equipped
+            # copy, every "add X to the trade" attempt hit "unequip it
+            # first" even though the copy Coffee actually meant was
+            # never equipped at all. When there's exactly one actually-
+            # tradeable (unequipped, non-quest) sibling sharing this
+            # name, silently prefer it; when 2+ such siblings exist,
+            # point at the real per-instance Add-to-Trade button picker
+            # (_trade_item_picker_keyboard, one real button per exact
+            # item_id) instead of guessing which one free text meant.
+            # Skipped entirely when the caller already passed a real,
+            # exact `item_id` (the button path) -- that choice is
+            # already unambiguous and must never be second-guessed here.
+            if not explicit_item_id:
+                resolved_id = matched_id
+                siblings = [
+                    i for i in character["inventory"]
+                    if character["inventory"].get(i, 0) > 0 and (items_module.get_item(i) or {}).get("name") == item_name
+                ]
+                if len(siblings) > 1:
+                    eligible_siblings = [
+                        i for i in siblings
+                        if not db.is_item_equipped(character, i) and not items_module.is_quest_item(i)
+                    ]
+                    if len(eligible_siblings) == 1:
+                        resolved_id = eligible_siblings[0]
+                    elif len(eligible_siblings) > 1:
+                        changed_lines.append(
+                            f"You're carrying more than one {item_name} — tap ➕ below (or the \"Add to Trade\" "
+                            f"button) to pick the exact one instead of naming it."
+                        )
+                        continue
+                matched_id = resolved_id
+                item_name = items_module.get_item(matched_id)["name"]
             # Real gap found continuing the equipped-item audit
             # (2026-09-18, Coffee: "check the trade and loot-vote hand-
             # off for the same gap") -- same duplication shape just
@@ -6130,7 +6198,7 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
             # offerer still fully equipped with it while it sat in the
             # trade record, ready to be handed to the other party on
             # accept -- a real dupe window, not just a dead-end button.
-            if db.is_item_equipped(character, item_id):
+            if db.is_item_equipped(character, matched_id):
                 changed_lines.append(f"You're wearing/wielding the {item_name} — unequip or swap it out before trading it away.")
                 continue
             # Real gap found continuing the same audit (2026-09-19,
@@ -6142,27 +6210,27 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool) -> None:
             # content. See items.is_quest_item's own docstring for why
             # this can't just reuse is_sellable (that also excludes
             # ordinary price-0 loot, which should stay tradeable).
-            if items_module.is_quest_item(item_id):
+            if items_module.is_quest_item(matched_id):
                 changed_lines.append(f"The {item_name} is important for something you're still working on — it can't be traded away.")
                 continue
-            removed, _ = db.remove_item(telegram_user_id, chat_id, item_id, quantity)
+            removed, _ = db.remove_item(telegram_user_id, chat_id, matched_id, quantity)
             if not removed:
-                have = character["inventory"].get(item_id, 0)
+                have = character["inventory"].get(matched_id, 0)
                 changed_lines.append(f"You don't have {quantity}x {item_name} to add — you only have {have}.")
                 continue
-            side["items"][item_id] = side["items"].get(item_id, 0) + quantity
+            side["items"][matched_id] = side["items"].get(matched_id, 0) + quantity
             changed_lines.append(f"Added {quantity}x {item_name} to the trade.")
         else:
-            have = side["items"].get(item_id, 0)
+            have = side["items"].get(matched_id, 0)
             quantity = min(quantity, have)
             if quantity <= 0:
                 continue
             remaining = have - quantity
             if remaining <= 0:
-                side["items"].pop(item_id, None)
+                side["items"].pop(matched_id, None)
             else:
-                side["items"][item_id] = remaining
-            db.add_item(telegram_user_id, chat_id, item_id, quantity)
+                side["items"][matched_id] = remaining
+            db.add_item(telegram_user_id, chat_id, matched_id, quantity)
             changed_lines.append(f"Took {quantity}x {item_name} back out of the trade.")
 
     if not changed_lines:
@@ -6390,7 +6458,17 @@ async def trade_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             return
         verb = "add" if mode == "add" else "remove"
         preposition = "to" if mode == "add" else "from"
-        await _mutate_trade_offer(update, f"{verb} {qty_text} {item['name']} {preposition} the trade", adding=(mode == "add"))
+        # Real live incident (2026-09-22) -- see _mutate_trade_offer's
+        # own `item_id` param docstring: this used to re-encode the
+        # button's own already-specific item_id back into free text by
+        # NAME ONLY, which _mutate_trade_offer then re-resolved and
+        # could silently land on a DIFFERENT owned item sharing that
+        # same name (e.g. an equipped duplicate) -- undoing the exact
+        # disambiguation this button picker exists to provide. Passing
+        # the real id straight through skips that re-resolution.
+        await _mutate_trade_offer(
+            update, f"{verb} {qty_text} {item['name']} {preposition} the trade", adding=(mode == "add"), item_id=item_id,
+        )
         return
 
     if action == "gold" and len(parts) >= 5:

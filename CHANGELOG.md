@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.674] — fix: trading an item wrongly refused as "equipped" when a same-named duplicate was worn instead
+
+Real live incident (2026-09-22, Coffee, very angry, correctly pushing
+back on the previous deploy's diagnosis: "NO u are mistaken!! ...
+I did NOT equip them"). He was right — the v1.27.673 fix addressed a
+real but different gap; this was the actual live blocker.
+
+Root cause: he owns two real "Amulet of Health" / "Ring of Protection"
+instances each, sharing the same catalog name but genuinely different
+affixes — one equipped, one meant for Laurienna. The button-driven
+Add-to-Trade picker already resolves one exact item per button
+correctly, but `trade_menu_callback`'s own "qty" step re-encoded that
+choice back into free text using only the item's NAME before calling
+`_mutate_trade_offer` — which then re-resolved the name and could
+silently land on the OTHER, equipped copy instead. The exact same
+"name round-trip" bug already fixed once for give (v1.27.658), never
+ported to trade.
+
+`_mutate_trade_offer` gained an `item_id` param (same convention
+`_do_give_item` already uses) so the button path skips free-text
+re-resolution entirely; free-text "add X to the trade" (no explicit
+id) now also prefers the single actually-tradeable sibling when one
+exists, and asks the player to use the real per-instance button
+picker when genuinely ambiguous, rather than guessing.
+
+2 new tests (free-text preference, exact button-driven targeting) plus
+the existing 20-test trade suite all pass clean.
+
 ## [1.27.673] — fix: plain inventory listing never showed which items were equipped
 
 Real live incident (2026-09-22, Coffee, dev-bridge screenshot of the

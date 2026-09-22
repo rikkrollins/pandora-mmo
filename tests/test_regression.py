@@ -2945,6 +2945,117 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # properly resolves its own trade before finishing.
         await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
 
+    async def test_trade_add_by_free_text_prefers_the_unequipped_copy_when_two_share_a_name(self):
+        """
+        Real live incident (2026-09-22, Coffee, very angry: "I am
+        giving the items with +STR to Laurienna!!! ... I did NOT equip
+        them" -- confirmed live via screenshot: "You're wearing/
+        wielding the Amulet of Health -- unequip or swap it out before
+        trading it away," even though the specific copy he meant was
+        never equipped). Two real "Amulet of Health" instances sharing
+        the same catalog name, one equipped, one not: free-text "add
+        the amulet of health to the trade" must silently resolve to the
+        UNEQUIPPED one instead of whichever one find_item_mentioned_in_
+        text's stable sort happens to always pick.
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951015, 951016
+        make_basic_character(a_id, "DupeAmuletTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "DupeAmuletTraderB", current_location="crossroads_tavern")
+        db.update_character(a_id, -999, level=5)
+
+        equipped_amulet = db.create_item_instance(
+            item_type="amulet", name="Amulet of Health", rarity="rare", price=50,
+            base_stats={"type": "amulet"}, affixes=[{"kind": "ability_bonus", "ability": "intelligence", "value": 2}],
+        )
+        free_amulet = db.create_item_instance(
+            item_type="amulet", name="Amulet of Health", rarity="common", price=50,
+            base_stats={"type": "amulet"}, affixes=[{"kind": "ability_bonus", "ability": "strength", "value": 1}],
+        )
+        db.add_item(a_id, -999, equipped_amulet, 1)
+        db.add_item(a_id, -999, free_amulet, 1)
+        equip_success, equip_msg, _updated = db.equip_item(a_id, -999, equipped_amulet)
+        self.assertTrue(equip_success, equip_msg)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with DupeAmuletTraderB", sink), "trade with DupeAmuletTraderB")
+        sink.clear()
+        await bot._do_trade_add(FakeUpdate(a_id, "add the amulet of health to the trade", sink), "add the amulet of health to the trade")
+
+        self.assertFalse(any("wearing/wielding" in s for s in sink), sink)
+        self.assertTrue(any("Added" in s for s in sink), sink)
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["equipped_accessories"], [equipped_amulet], "the equipped copy must never be touched")
+        self.assertEqual(after["inventory"].get(free_amulet, 0), 0, "the unequipped copy must be the one actually traded")
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["items"].get(free_amulet), 1)
+        await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
+
+    async def test_trade_button_flow_adds_the_exact_item_even_with_an_equipped_duplicate_of_the_same_name(self):
+        """
+        Real live incident, the button-driven half: the Add-to-Trade
+        picker (_trade_item_picker_keyboard) already resolves ONE real
+        item_id per button, correctly distinguishing two owned items
+        sharing a name -- but the old "qty" callback re-encoded that
+        choice back into free text using only the item's NAME before
+        calling _mutate_trade_offer, which then re-resolved the name
+        and could silently land on the OTHER (here, equipped) copy --
+        the exact same "name round-trip" bug already fixed once for
+        give (v1.27.658), just never ported to trade. Tapping through
+        Add -> the free copy's own button -> a quantity must add THAT
+        exact copy, never the equipped duplicate, regardless of which
+        one find_item_mentioned_in_text would have guessed.
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951017, 951018
+        make_basic_character(a_id, "DupeButtonTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "DupeButtonTraderB", current_location="crossroads_tavern")
+        db.update_character(a_id, -999, level=5)
+
+        equipped_ring = db.create_item_instance(
+            item_type="ring", name="Ring of Protection", rarity="rare", price=50,
+            base_stats={"type": "ring", "ac_bonus": 1}, affixes=[{"kind": "ability_bonus", "ability": "dexterity", "value": 2}],
+        )
+        free_ring = db.create_item_instance(
+            item_type="ring", name="Ring of Protection", rarity="common", price=50,
+            base_stats={"type": "ring", "ac_bonus": 1}, affixes=[{"kind": "ability_bonus", "ability": "strength", "value": 2}],
+        )
+        db.add_item(a_id, -999, equipped_ring, 1)
+        db.add_item(a_id, -999, free_ring, 1)
+        equip_success, equip_msg, _updated = db.equip_item(a_id, -999, equipped_ring)
+        self.assertTrue(equip_success, equip_msg)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with DupeButtonTraderB", sink), "trade with DupeButtonTraderB")
+        record = bot._find_trade_for_user(-999, a_id)
+        trade_id = record["trade_id"]
+
+        sink2 = []
+        await bot.trade_menu_callback(FakeCallbackUpdate(a_id, f"trade|{trade_id}|addmenu", sink2), DummyContext())
+        markup = next(m for m in sink2 if m.startswith("<edit_markup:"))
+        self.assertIn(f"trade|{trade_id}|pick|add|{free_ring}", markup)
+        self.assertNotIn(f"trade|{trade_id}|pick|add|{equipped_ring}", markup, "the equipped copy must not even be offered")
+
+        sink3 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|pick|add|{free_ring}", sink3), DummyContext(),
+        )
+        qty_markup = next(m for m in sink3 if m.startswith("<edit_markup:"))
+        self.assertIn(f"trade|{trade_id}|qty|add|{free_ring}|1", qty_markup)
+
+        sink4 = []
+        await bot.trade_menu_callback(
+            FakeCallbackUpdate(a_id, f"trade|{trade_id}|qty|add|{free_ring}|1", sink4), DummyContext(),
+        )
+        record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(record["party_a"]["items"].get(free_ring), 1, "must add the exact tapped copy")
+        self.assertIsNone(record["party_a"]["items"].get(equipped_ring), "must never substitute the equipped duplicate")
+        after = db.get_character(a_id, -999)
+        self.assertEqual(after["equipped_accessories"], [equipped_ring])
+        await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
+
     async def test_trade_button_flow_add_and_remove_gold(self):
         """Same button flow, for gold -- percentage-based amounts since gold totals vary wildly across characters."""
         import sessions
