@@ -2,6 +2,45 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.665] — feature: a real story-arc progression gate, closing a 9-chapter skip
+
+Real dev-bridge report (Coffee, screenshot): a Chapter 3 character
+solved a skill-check secret passage under The Deepest Record and was
+immediately offered real Chapter 12 (Wordless Choir) content — "the
+game needs to be linear so it makes sense to the player, don't let
+characters skip chapters."
+
+Root cause: the secret passage (a `locked_connections` skill-check
+door) correctly requires solving a puzzle, but nothing checked whether
+the character had actually reached that point in the STORY — arc_12's
+own `required_level` field (99) was never a real enforced gate at all,
+confirmed it's read nowhere outside the cosmetic "Suggested Level"
+quest-offer text (true of every arc from arc_9 onward).
+
+Added a new, sixth `story_gates` condition type, `requires_current_arc`
+(`_check_story_gate`, bot.py) — passes once the character has actually
+finished every EARLIER story arc (reusing `_current_story_arc`, the
+same "what chapter are they really on" computation the Story So Far
+hint already treats as ground truth), not just reached some level
+number. Applied to the real gate: `the_first_city_deepest_record`'s
+connection to `the_first_city_forgotten_depth` (the Wordless Choir's
+real front door) now also requires having reached arc_12 through the
+actual story — independent of, and in addition to, the existing
+skill-check lock.
+
+Also found and fixed, in the same investigation: a pre-existing,
+unrelated bug in this project's own structural story-gate audit test
+(`test_no_story_gate_requires_a_quest_unreachable_without_crossing_
+that_same_gate`) — its reachability BFS never followed
+`locked_connections` edges at all, so any room only reachable through
+a lockable (not a story gate) was wrongly flagged as an unrecoverable
+softlock. Confirmed pre-existing via `git stash` before fixing.
+
+New regression tests cover the gate condition directly (blocks then
+passes once every earlier arc is done) and end-to-end (the real lock
++ story gate both independently blocking the real location). Full
+17-test story-gate slice + 24-test DungeonAuditTests re-run clean.
+
 ## [1.27.664] — fix: a dungeon floor view could still be blown out by two real rooms on the same floor
 
 Real dev-bridge report (Coffee, screenshot): "MAP — The First City

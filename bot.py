@@ -31211,6 +31211,40 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
             "unfinished business standing between you and whatever's deeper in."
         )
 
+    # A sixth condition (2026-09-22, real live report, Coffee: a level-3
+    # character solved a skill-check secret passage (record_hidden_
+    # seam) under The Deepest Record and was immediately offered real
+    # arc_12 (Wordless Choir) content, 9 chapters ahead of where they
+    # actually were -- "the game needs to be linear so it makes sense
+    # to the player, don't let characters skip chapters"). The 4 gate
+    # types above all check something the character DID (a fight, a
+    # quest, a relationship) -- none of them can express "you haven't
+    # gotten far enough in the STORY yet" on their own, and arc_12's own
+    # required_level (99, a placeholder never actually calibrated, same
+    # as every arc from arc_9 on) was never a real enforced gate at
+    # all -- confirmed it's read nowhere outside the cosmetic "Suggested
+    # Level" quest-offer text. Reuses _current_story_arc (the same
+    # "earliest arc with an incomplete quest" computation the Story So
+    # Far/"what's next" hint already treats as the source of truth for
+    # "what chapter is this player really on") -- the gate passes once
+    # every EARLIER arc's quests are fully done, i.e. once this
+    # character has actually reached that chapter through the real
+    # story, not skipped ahead to it via an unrelated shortcut. A
+    # character who's already finished the named arc (or the whole
+    # story) trivially passes too, same as any other one-way progress
+    # gate here.
+    required_arc_id = gate.get("requires_current_arc")
+    if required_arc_id:
+        arc_ids = list(CAMPAIGN.get("story_arcs", {}).keys())
+        current_arc_info = _current_story_arc(character)
+        current_arc_idx = arc_ids.index(current_arc_info[0]) if current_arc_info else len(arc_ids)
+        required_idx = arc_ids.index(required_arc_id)
+        if current_arc_idx < required_idx:
+            return (
+                "Something here isn't ready to reveal itself yet — you can feel there's "
+                "a great deal of your own story still unfinished before this would make any sense."
+            )
+
     trust_gate = gate.get("requires_companion_trust")
     if trust_gate:
         # Real live request (2026-08-23, Coffee, after v1.27.340 fixed

@@ -6732,6 +6732,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = {"completed_quests": []}
         self.assertIsNone(bot._check_story_gate(character, {"story_gates": {}}, "anywhere"))
 
+    def test_requires_current_arc_gate_blocks_a_low_chapter_character_then_passes(self):
+        """
+        Real live report (2026-09-22, Coffee, screenshot: a Chapter-3
+        character solved the Deepest Record's own skill-check secret
+        passage and was immediately offered real arc_12 (Wordless
+        Choir) content -- "the game needs to be linear so it makes
+        sense to the player, don't let characters skip chapters."
+        requires_current_arc must block anyone who hasn't actually
+        finished every earlier arc yet (real linear progression, not
+        just a level number), and pass once they have.
+        """
+        chat_id = -999053
+        user_id = 900996
+        make_basic_character(user_id, "ArcGateWalker", chat_id=chat_id, current_location="crossroads_tavern")
+        current = {"story_gates": {"the_first_city_forgotten_depth": {"requires_current_arc": "arc_12_wordless_choir"}}}
+        character = db.get_character(user_id, chat_id)
+        rejection = bot._check_story_gate(character, current, "the_first_city_forgotten_depth")
+        self.assertIsNotNone(rejection, "a fresh, arc_1 character must not be let into arc_12 content")
+        # Complete every quest in every arc before arc_12 -- the real
+        # "reached chapter 12 through the actual story" bar.
+        arc_ids = list(bot.CAMPAIGN["story_arcs"].keys())
+        target_idx = arc_ids.index("arc_12_wordless_choir")
+        for arc_id in arc_ids[:target_idx]:
+            for quest_id in bot.CAMPAIGN["story_arcs"][arc_id].get("quests", []):
+                db.complete_quest(user_id, chat_id, quest_id)
+        character = db.get_character(user_id, chat_id)
+        self.assertIsNone(bot._check_story_gate(character, current, "the_first_city_forgotten_depth"),
+                           "a character who has genuinely finished every earlier arc must pass")
+
+    async def test_the_wordless_choirs_real_front_door_is_gated_behind_reaching_arc_12(self):
+        """
+        End-to-end: a fresh character standing right at the Deepest
+        Record cannot move into The Forgotten Depth (the Wordless
+        Choir's real front door) even after solving the hidden seam --
+        the lock and the story gate are two independent checks, both
+        must pass.
+        """
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        self.assertEqual(
+            underground["the_first_city_deepest_record"]["story_gates"]["the_first_city_forgotten_depth"]["requires_current_arc"],
+            "arc_12_wordless_choir",
+        )
+        user_id = 900997
+        make_basic_character(user_id, "SeamWalker", current_location="the_first_city_deepest_record")
+        db.update_character(user_id, -999, cleared_locations=["the_first_city_deepest_record"])
+        bot._UNLOCKED.setdefault(-999, set()).add("record_hidden_seam")  # the seam itself is solved -- only the story gate should still block
+        sink = []
+        await bot._do_move(FakeUpdate(user_id, "go to the forgotten depth", sink), "the forgotten depth")
+        combined = "\n".join(sink)
+        self.assertNotIn("Forgotten Depth", combined, f"a fresh character must not reach arc_12 content early: {combined}")
+        self.assertEqual(db.get_character(user_id, -999)["current_location"], "the_first_city_deepest_record")
+
     def test_wrathflame_vault_is_real_and_gated_behind_wrens_trial(self):
         """
         End-to-end: a fresh character cannot move from the shrine into
@@ -25215,7 +25267,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 locs[lid] = loc
 
         def neighbors_of(loc):
+            # Real gap found 2026-09-22 (investigating a genuine new
+            # story_gates entry, the_first_city_deepest_record ->
+            # the_first_city_forgotten_depth): this only ever read
+            # `connections`, never `locked_connections` -- a room ONLY
+            # reachable through a lockable (a skill-check door, a key,
+            # etc, never a story_gate) was wrongly treated as having NO
+            # path in at all, since a locked_connections edge is real
+            # and eventually traversable (that's the whole point of a
+            # lockable, unlike a story_gate which needs an in-order
+            # quest) -- the exact same "every OTHER gate is freely
+            # passable" standard this function's own docstring already
+            # claims to model, just missing this one real edge type.
             out = set(loc.get("connections", []))
+            out.update(loc.get("locked_connections", {}).keys())
             if loc.get("ascends_to"):
                 out.add(loc["ascends_to"])
             if loc.get("descends_to"):

@@ -2530,6 +2530,11 @@
         "locked_connections": {
           "the_first_city_forgotten_depth": "record_hidden_seam"
         },
+        "story_gates": {
+          "the_first_city_forgotten_depth": {
+            "requires_current_arc": "arc_12_wordless_choir"
+          }
+        },
         "monsters": [
           "the_deepest_record"
         ],
