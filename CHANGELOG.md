@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.670] — fix: real action buttons on the free-text item-view path, one-tap Unequip, typo-tolerant give
+
+Direct continuation of v1.27.669, same live incident (Coffee, still
+very frustrated, four more urgent dev-bridge reports with
+screenshots). Two more real, concrete root causes found:
+
+**The buttons Coffee kept saying weren't there genuinely weren't
+there — on the path he was actually using.** Screenshot evidence:
+"View the wooden shield" (the entirely natural free-text phrasing)
+produced a plain examine narration with NO buttons at all — Give,
+Equip, Sell, Market, Reforge, Dismantle, none of it. There were two
+completely separate "view an item" code paths in this game:
+`itemview_callback`'s own "show" action (button-driven, always had
+`_item_actions_keyboard` attached) and `_do_examine_owned_item` (the
+free-text "examine"/"view"/"look at" path) — and only the first one
+ever got real action buttons. `_do_examine_owned_item` now attaches
+the exact same `_item_actions_keyboard` every other item view already
+uses.
+
+**A real "Unequip" button on the item card itself.** v1.27.669 fixed
+the underlying free-text dead end (no way to unequip a weapon/armor/
+shield), but the card only ever TOLD the player to "unequip it first"
+via `_equipped_hint_line` with no button to actually do it. New
+`itemview|unequip` action, shown only while the item is actually
+equipped, dispatching to the same `db.unequip_weapon_armor_or_shield`/
+`db.unequip_accessory` split v1.27.669 added — and it immediately
+re-shows the card with Give/Sell/Market/Dismantle now available,
+matching what Coffee explicitly asked for: "when I'm viewing the
+item, I can decide what I want to do with it."
+
+**Typo-tolerant party-member name matching.** Coffee mistyped the
+same real, present party member's name three different ways in one
+incident ("Lorianna", "luarienna", her real name is "Laurienna") and
+got "give it to whom? Name someone real who's actually here with
+you" each time — a real person's own existence effectively denied
+over a couple of transposed letters. `_match_member_by_name_or_
+username`'s exact-match tiers are unchanged; a new similarity-based
+last resort only fires when there's a single, clearly-best candidate
+(≥0.72 similarity, no runner-up within 0.15) — the same "never guess
+when ambiguous" discipline the existing first-name-fallback tier
+already follows, just tolerant of a few misplaced letters instead of
+requiring zero.
+
+4 new tests plus a full re-run of the existing name-matching
+precedence/ambiguity-safety tests (first-name fallback, shared-first-
+name non-guess) confirm the new fuzzy tier never overrides an exact
+match and never guesses between two close candidates.
+
 ## [1.27.669] — fix: can't unequip a weapon/armor/shield to free it up for giving away
 
 Real live incident (2026-09-22, Coffee, very angry, urgent dev-bridge

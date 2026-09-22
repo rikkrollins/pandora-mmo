@@ -2617,6 +2617,29 @@ def _match_member_by_name_or_username(text: str, members: list[dict]) -> dict | 
     ]
     if len(first_name_matches) == 1:
         return first_name_matches[0]
+
+    # Typo-tolerant last resort (2026-09-22, real live incident: Coffee
+    # typed "luarienna"/"Lorianna" for a real party member actually
+    # named "Laurienna" three separate times in one incident, each
+    # exact-matching to nothing above and refusing the action --
+    # "give it to whom? Name someone real" reads as a denial of a real,
+    # present person over what's plainly just a typo). Compares every
+    # word in the message against every member's first name by
+    # similarity; only returns a match when there's a single, clearly-
+    # best candidate (>= 0.72 similarity, and no runner-up within 0.15
+    # of it) -- same "don't guess when ambiguous" discipline the exact-
+    # match tiers above already follow, just tolerant of a few
+    # transposed/misplaced letters instead of requiring zero.
+    words = re.findall(r"[a-zA-Z']+", lowered)
+    if words:
+        scored = []
+        for member in members:
+            first_name = member["name"].lower().split()[0]
+            best = max((difflib.SequenceMatcher(None, w, first_name).ratio() for w in words), default=0.0)
+            scored.append((best, member))
+        scored.sort(key=lambda pair: -pair[0])
+        if scored and scored[0][0] >= 0.72 and (len(scored) == 1 or scored[1][0] < scored[0][0] - 0.15):
+            return scored[0][1]
     return None
 
 
@@ -5544,6 +5567,20 @@ def _item_actions_keyboard(item_id: str, character: dict | None = None) -> Inlin
     buttons = [[InlineKeyboardButton("⚔️ Equip", callback_data=f"itemview|equip|{item_id}")]] if can_equip else []
     if can_reforge:
         buttons.append([InlineKeyboardButton("🔨 Reforge", callback_data=f"itemview|reforge|{item_id}")])
+    # Real live incident (2026-09-22, Coffee, very direct: "why isn't
+    # there buttons underneath the item for me to be able to give it to
+    # another character... you're making it impossible for me to be
+    # able to forge magic item for another player") -- Sell/List on
+    # Market/Give/Dismantle are correctly hidden while equipped (right
+    # below), and _equipped_hint_line already TELLS the player to
+    # "unequip it first", but there was never a button for the "unequip
+    # it first" half itself -- a real dead end on the card that matches
+    # the identical free-text dead end db.unequip_weapon_armor_or_shield
+    # just fixed. One tap here now unequips (whichever real slot it's
+    # actually in) and immediately re-shows this same card, so Give/
+    # Sell/Market/Dismantle appear right away without leaving the card.
+    if is_equipped:
+        buttons.append([InlineKeyboardButton("🎽 Unequip", callback_data=f"itemview|unequip|{item_id}")])
     if not is_equipped and not is_quest_item:
         if can_sell:
             buttons.append([InlineKeyboardButton("💰 Sell", callback_data=f"itemview|sell|{item_id}")])
@@ -28630,6 +28667,29 @@ async def itemview_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     owns_it = character.get("inventory", {}).get(item_id, 0) > 0
+    if action == "unequip":
+        # Real live incident (2026-09-22) -- see _item_actions_keyboard's
+        # own comment on this same button. Dispatches to whichever real
+        # db function actually owns this item's slot, same split
+        # bot._do_unequip_item's free-text path uses.
+        if not db.is_item_equipped(character, item_id):
+            await _safe_send(update, f"You're not wearing or wielding the {item['name']}.")
+            return
+        if item_id == character.get("equipped_armor"):
+            success, msg, updated = db.unequip_weapon_armor_or_shield(
+                update.effective_user.id, update.effective_chat.id, item_id, bare_armor_class=_bare_armor_class(character),
+            )
+        elif item_id in (character.get("equipped_weapon"), character.get("equipped_shield")):
+            success, msg, updated = db.unequip_weapon_armor_or_shield(update.effective_user.id, update.effective_chat.id, item_id)
+        else:
+            success, msg, updated = db.unequip_accessory(update.effective_user.id, update.effective_chat.id, item_id)
+        if success and updated:
+            _sync_live_combat_equipment(update.effective_user.id, update.effective_chat.id, updated)
+        await _safe_send(
+            update, f"🎽 {msg}" if success else msg,
+            reply_markup=_item_actions_keyboard(item_id, updated if success else character),
+        )
+        return
     if action == "equip":
         if not owns_it:
             await _safe_send(update, f"You don't have the {item['name']} to equip.")
@@ -28827,7 +28887,19 @@ async def _do_examine_owned_item(update: Update, character: dict, location: dict
     stats_line = _format_item_stats_line(item_data)
     if stats_line:
         message += f"\n\n📊 **Stats:** {stats_line}"
-    await _safe_send(update, message)
+    # Real live incident (2026-09-22, Coffee, very direct: "the buttons
+    # for give equip sell and market reforge, and the other options
+    # that should be underneath this are not showing up" -- confirmed
+    # via screenshot he was reaching for the entirely natural "view/
+    # examine the wooden shield" free-text phrasing, which lands HERE,
+    # not itemview_callback's own "show" action -- the only place
+    # _item_actions_keyboard was ever attached. Two separate "view an
+    # item" paths existed (this one, and the button-driven itemview
+    # "show"), and only one of them ever got real action buttons; the
+    # free-text one, which is if anything the more natural of the two,
+    # had none at all. Attaching the exact same real keyboard here
+    # closes that gap without inventing a second, parallel button set.
+    await _safe_send(update, message, reply_markup=_item_actions_keyboard(item_match, character))
     return True
 
 

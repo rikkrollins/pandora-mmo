@@ -18900,6 +18900,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(len(transcript) > 0)
         self.assertIn("Stats:", transcript)
 
+    async def test_examining_an_owned_item_by_free_text_shows_the_real_action_buttons(self):
+        """
+        Real live incident (2026-09-22, Coffee, screenshot: "The buttons
+        for give equip sell and market reforge... are not showing up",
+        after typing "View the wooden shield"). Root cause: there were
+        two separate "view an item" code paths -- itemview_callback's
+        own "show" action (button-driven, always had _item_actions_
+        keyboard attached) and _do_examine_owned_item (the free-text
+        "examine"/"view"/"look at" path, reached here) -- and only the
+        first ever attached real action buttons. Free text is if
+        anything the MORE natural way a player reaches for this, so it
+        had the gap that actually mattered live.
+        """
+        from unittest.mock import patch
+        user_id = 950913
+        make_basic_character(user_id, "ExamineButtonTester", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "wooden_shield", 1)
+
+        captured = {}
+        real_safe_send = bot._safe_send
+
+        async def capture_safe_send(update, text, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        sink = []
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot._do_examine(FakeUpdate(user_id, "View the wooden shield", sink), "View the wooden shield")
+        self.assertIsNotNone(captured.get("reply_markup"), "free-text examine must attach the real item action buttons")
+        button_texts = [btn.text for row in captured["reply_markup"].inline_keyboard for btn in row]
+        self.assertTrue(any("Give" in t for t in button_texts), button_texts)
+        self.assertTrue(any("Equip" in t for t in button_texts), button_texts)
+
     async def test_examine_inventory_item_wins_over_a_same_word_location_interactable(self):
         """
         Real live report (2026-08-28, dev-bridge, Charvenna: "That's
@@ -20235,6 +20268,68 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(
             [l for l in db.get_market_listings(-999) if l["seller_id"] == 996144 and l["item_id"] == "longsword"]
         )
+
+    async def test_itemview_callback_unequip_action_frees_the_item_and_reshows_give_button(self):
+        """
+        Real live incident (2026-09-22, Coffee, very direct: "why isn't
+        there buttons underneath the item for me to be able to give it
+        to another character... you're making it impossible for me to
+        be able to forge magic item for another player"). The item card
+        already tells the player to "unequip it first" via
+        _equipped_hint_line, but had no button to actually do it. This
+        confirms the new "Unequip" button both unequips the real item
+        (AC drops back, slot clears) AND that the SAME callback's own
+        reply immediately offers a real Give button, since the item is
+        no longer equipped -- the exact one-tap flow Coffee asked for.
+        """
+        user_id = 950910
+        make_basic_character(user_id, "UnequipButtonTester", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "wooden_shield", 1)
+        db.equip_item(user_id, -999, "wooden_shield")
+        self.assertEqual(db.get_character(user_id, -999)["equipped_shield"], "wooden_shield")
+
+        from unittest.mock import patch
+        real_safe_send = bot._safe_send
+        captured = {}
+
+        async def capture_safe_send(update, text, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        sink = []
+        update = FakeCallbackUpdate(user_id, "itemview|unequip|wooden_shield", sink)
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot.itemview_callback(update, DummyContext())
+        self.assertTrue(any("lower" in s.lower() or "take off" in s.lower() for s in sink), sink)
+        character = db.get_character(user_id, -999)
+        self.assertIsNone(character["equipped_shield"])
+
+        self.assertIsNotNone(captured["reply_markup"])
+        button_texts = [btn.text for row in captured["reply_markup"].inline_keyboard for btn in row]
+        self.assertTrue(any("Give" in t for t in button_texts), button_texts)
+
+    async def test_give_item_recipient_name_tolerates_a_real_live_typo(self):
+        """
+        Real live incident (2026-09-22): Coffee typed "luarienna" for a
+        real, present party member actually named "Laurienna" (a typo,
+        not a wrong name) and got "give it to whom? Name someone real
+        who's actually here with you" -- a real, present person's own
+        existence effectively denied over a couple of transposed
+        letters. _match_member_by_name_or_username's new fuzzy last
+        resort should still resolve this one, since there's only one
+        real candidate and the similarity is high.
+        """
+        giver_id = 950911
+        recipient_id = 950912
+        make_basic_character(giver_id, "TypoGiver", current_location="crossroads_tavern")
+        make_basic_character(recipient_id, "Laurienna", current_location="crossroads_tavern")
+        db.add_item(giver_id, -999, "wooden_shield", 1)
+
+        sink = []
+        await bot._do_give_item(FakeUpdate(giver_id, "give the wooden shield to luarienna", sink),
+                                 "give the wooden shield to luarienna")
+        self.assertTrue(any("gives" in line for line in sink), sink)
+        self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get("wooden_shield", 0), 1)
 
     async def test_itemview_callback_dismantle_action_works(self):
         from unittest.mock import patch
