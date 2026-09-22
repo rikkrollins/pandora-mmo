@@ -25237,6 +25237,32 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
         await _safe_send(update, "Not sure which weapon, armor, or accessory you mean.")
         return
 
+    # Real live incident (2026-09-22, Coffee, same shape as v1.27.671's
+    # give-item fix, confirmed live: "I just forged this and for some
+    # reason it auto equipped it onto my character... I'm forging it
+    # for someone else"). find_item_mentioned_in_text can't tell apart
+    # two owned items sharing the exact same display name, and always
+    # resolves to the same one -- if that happens to be the character's
+    # OWN currently-equipped copy, forging it (a real, intentional
+    # "Reforge/Enchant still work on equipped gear" feature) correctly
+    # keeps it equipped, but reads exactly like an unwanted auto-equip
+    # when the player actually meant their OTHER, unequipped copy of
+    # the same name (e.g. one meant for someone else). When there's
+    # exactly one unequipped sibling sharing this name, silently prefer
+    # it -- matches the far more common real intent ("forge my free
+    # copy"), and forging the equipped one deliberately remains
+    # reachable by naming it when no such sibling exists.
+    item_name = item["name"]
+    name_siblings = [
+        i for i in character["inventory"]
+        if character["inventory"].get(i, 0) > 0 and (items_module.get_item(i) or {}).get("name") == item_name
+    ]
+    if len(name_siblings) > 1 and db.is_item_equipped(character, item_id):
+        unequipped_siblings = [i for i in name_siblings if not db.is_item_equipped(character, i)]
+        if len(unequipped_siblings) == 1:
+            item_id = unequipped_siblings[0]
+            item = items_module.get_item(item_id)
+
     recipe = get_enchant_recipe("forge_magic_upgrade")
     if item["type"] not in recipe["applies_to"]:
         await _safe_send(update, f"A {item['type']} can't be forged into a magic item — only weapons, armor, and accessories.")
@@ -27255,11 +27281,28 @@ async def _maybe_send_item_image(
         if len(caption) > 1024:
             caption = f"🎒 {item_data['name']}" + (f"\n📊 {stats_line}" if stats_line else "")
     rows = list(extra_buttons or []) + list(_item_actions_keyboard(item_id, viewer_character).inline_keyboard)
-    await _send_generated_image(
+    markup = InlineKeyboardMarkup(rows)
+    sent = await _send_generated_image(
         update, prompt, caption,
         seed=_deterministic_image_seed(f"item:{item_id}"), log_key=item_id,
-        reply_markup=InlineKeyboardMarkup(rows),
+        reply_markup=markup,
     )
+    if not sent:
+        # Real live bug (2026-09-22, Coffee, dev-bridge: "It didn't give
+        # me the push button of options after I forged this magic
+        # item") -- confirmed via the live log: the image genuinely
+        # failed to send 3 times in a row ("Failed to get http url
+        # content") and _send_generated_image gave up, but this
+        # function never checked its own return value, so BOTH the
+        # picture AND the stats+action-buttons caption that would have
+        # gone with it were silently dropped -- the exact same failure
+        # class itemview_callback's own "show" action was already fixed
+        # for on 2026-08-05 ("i clicked to view the item and its not
+        # processing"), just never ported to this second, separate
+        # call site (buy/gather/craft/forge/enchant/equip). Every one
+        # of those actions is a real request the player just performed,
+        # so it always gets a real reply now, image or not.
+        await _safe_send(update, caption, reply_markup=markup)
 
 
 def _monster_image_prompt(template: dict) -> str:

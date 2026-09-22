@@ -15610,6 +15610,103 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # masterwork forced True above -> round(1 * 1.5) == 2, not the plain +1.
         self.assertEqual(bonus["value"], 2)
 
+    async def test_forge_magic_item_still_shows_action_buttons_when_the_image_send_fails(self):
+        """
+        Real live incident (2026-09-22, Coffee, dev-bridge: "It didn't
+        give me the push button of options after I forged this magic
+        item"). Confirmed via the live log: the item image genuinely
+        failed to send 3 times in a row ("Failed to get http url
+        content") right after a real forge success, and
+        _maybe_send_item_image never checked _send_generated_image's
+        own return value -- so BOTH the picture and the stats+action-
+        buttons caption that would have gone with it were silently
+        dropped. Same failure class itemview_callback's own "show"
+        action was already fixed for on 2026-08-05, just never ported
+        to this second, separate call site.
+        """
+        from unittest.mock import patch, AsyncMock
+        make_basic_character(950942, "ForgeImageFailTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(950942, -999, guild="forge_guild", level=20)
+        db.add_item(950942, -999, "iron_ore", 4)
+        db.add_item(950942, -999, "moonpetal", 2)
+        db.add_item(950942, -999, "longsword", 1)
+
+        sink = []
+        update = FakeUpdate(950942, "forge my longsword into a magic item", sink)
+        with patch("bot.narrate_skill_check", return_value="Power surges into the blade."), \
+             patch("bot._roll_masterwork_quality", return_value=True), \
+             patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            for _ in range(30):
+                db.add_item(950942, -999, "iron_ore", 4)
+                db.add_item(950942, -999, "moonpetal", 2)
+                sink.clear()
+                await bot._do_forge_magic_item(update, "forge my longsword into a magic item")
+                if not any("fails" in s.lower() for s in sink):
+                    break
+        combined = "\n".join(sink)
+        self.assertIn("magic", combined.lower())
+        # The fallback text message (image failed) must still carry the
+        # real action buttons -- confirmed by checking _safe_send's own
+        # reply_markup on that call, not just that some text went out.
+        self.assertTrue(any("🎒" in s for s in sink), sink)
+
+    async def test_forge_magic_item_prefers_the_unequipped_copy_when_two_share_a_name(self):
+        """
+        Real live incident (2026-09-22, Coffee, dev-bridge: "I just
+        forged this and for some reason it auto equipped it onto my
+        character... I didn't forge this for myself I'm forging it for
+        someone else"). Root cause, same shape as v1.27.671's give-item
+        fix: find_item_mentioned_in_text can't tell apart two owned
+        items sharing an identical display name, and always resolves to
+        the same one -- when that one happened to already be equipped,
+        forging it (a real, intentional "Reforge/Enchant still work on
+        equipped gear" feature) correctly kept it equipped, but looked
+        exactly like an unwanted auto-equip to a player who actually
+        meant their OTHER, unequipped copy of the same item. Forging
+        must silently prefer the unequipped sibling when there's
+        exactly one, leaving the equipped one completely untouched.
+        """
+        from unittest.mock import patch
+        user_id = 950943
+        make_basic_character(user_id, "ForgeDupeNameTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=20)
+        db.add_item(user_id, -999, "iron_ore", 40)
+        db.add_item(user_id, -999, "moonpetal", 20)
+
+        equipped_sword = db.create_item_instance(
+            item_type="weapon", name="Longsword", rarity="common", price=15,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "weapon_category": "martial"}, affixes=[],
+        )
+        free_sword = db.create_item_instance(
+            item_type="weapon", name="Longsword", rarity="common", price=15,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "weapon_category": "martial"}, affixes=[],
+        )
+        db.add_item(user_id, -999, equipped_sword, 1)
+        db.add_item(user_id, -999, free_sword, 1)
+        equip_success, equip_msg, _updated = db.equip_item(user_id, -999, equipped_sword)
+        self.assertTrue(equip_success, equip_msg)
+
+        sink = []
+        update = FakeUpdate(user_id, "forge my longsword into a magic item", sink)
+        with patch("bot.narrate_skill_check", return_value="Power surges into the blade."), \
+             patch("bot._roll_masterwork_quality", return_value=False):
+            for _ in range(30):
+                db.add_item(user_id, -999, "iron_ore", 4)
+                db.add_item(user_id, -999, "moonpetal", 2)
+                sink.clear()
+                await bot._do_forge_magic_item(update, "forge my longsword into a magic item")
+                if not any("fails" in s.lower() for s in sink):
+                    break
+        combined = "\n".join(sink)
+        self.assertIn("magic", combined.lower())
+
+        updated = db.get_character(user_id, -999)
+        self.assertEqual(updated["equipped_weapon"], equipped_sword, "the equipped copy must never be touched")
+        equipped_item = db.materialize_item_instance(equipped_sword)
+        self.assertEqual(len(equipped_item.get("ability_bonuses", [])), 0, "the equipped copy must NOT receive the forge")
+        free_item = db.materialize_item_instance(free_sword)
+        self.assertEqual(len(free_item.get("ability_bonuses", [])), 1, "the unequipped copy must be the one actually forged")
+
     async def test_forge_magic_item_reforge_replaces_instead_of_stacking_ability_bonus(self):
         """
         Real exploit found 2026-09-13 (same audit pass as the Warding/

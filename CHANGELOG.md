@@ -2,6 +2,38 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.672] — fix: two more root causes in the same forge/give incident thread
+
+**Image-send failures were silently eating the action buttons.**
+Confirmed live via `bot_live_tmp.log`: right after a real forge
+success, the item's image failed to send 3 times in a row ("Failed to
+get http url content") and `_send_generated_image` gave up — but
+`_maybe_send_item_image` (used by every buy/gather/craft/forge/
+enchant/equip call site) never checked its own return value, so BOTH
+the picture and the stats+action-buttons caption that would have gone
+with it were silently dropped. `itemview_callback`'s own "show" action
+already had this exact fallback since 2026-08-05 ("i clicked to view
+the item and its not processing"); it was just never ported to this
+second, separate call site. Now it is — image or not, the player
+always gets a real reply to something they just did.
+
+**Forging had the same ambiguous-same-name bug v1.27.671 fixed for
+giving.** Confirmed live: "I just forged this and for some reason it
+auto equipped it onto my character... I'm forging it for someone
+else." `find_item_mentioned_in_text` can't tell apart two owned items
+sharing an identical display name, and always resolves to the same
+one — when that one happened to already be equipped, forging it (a
+real, intentional "Reforge/Enchant still work on equipped gear"
+feature) correctly kept it equipped, but reads exactly like an
+unwanted auto-equip to a player who meant their other, unequipped
+copy. `_do_forge_magic_item` now silently prefers the single
+unequipped sibling when one exists, leaving the equipped copy
+completely untouched.
+
+2 new tests plus a full 67-test targeted regression run across every
+forge/craft/enchant/gather/buy/equip test in the suite — all pass
+clean.
+
 ## [1.27.671] — fix: "give the wooden shield" always resolved to the SAME copy, even when it was equipped
 
 Root cause of the last piece of the same live incident, found via the
