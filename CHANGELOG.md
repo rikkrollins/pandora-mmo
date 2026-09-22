@@ -2,6 +2,42 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.666] — fix: forging equipped gear no longer auto-equips the result on you
+
+Real live follow-up (Coffee, very direct): "when i crafted an item
+yesterday it auto matically equipped it to myself (which i DID NOT
+WANT) then i wasnt able to give it away... When crafting i want to see
+a list of options what to do with that item and i shud be able to
+give it and equip it to ANOTHER PLAYER."
+
+Root cause: v1.27.660 (shipped earlier in this same live incident)
+fixed a real "ghost equip" bug — forging a PLAIN item that was
+currently equipped promoted it into a new instance without updating
+the equip slots at all, leaving them pointing at an item no longer
+owned. That fix closed the gap by auto-transferring the equip onto
+the NEW instance — which stopped the ghost reference, but silently
+re-imposed the exact same "can't give/sell/list it, it's equipped"
+block on the new item that Coffee was originally complaining about,
+just relocated.
+
+`db.reequip_after_item_replacement` is now `db.clear_stale_equip_
+reference` — it clears the stale slot outright instead of
+auto-equipping the replacement. The real, full item-actions menu
+(View/Equip/Give-to-a-specific-present-party-member/Sell/List on
+Market/Dismantle) already exists on every item card via
+`_item_actions_keyboard` and was only ever hidden by whichever item
+happened to be equipped — a freshly-forged item now shows it the same
+way any other freshly-crafted item already does, and the player
+decides what to do with it, including giving it straight to another
+present party member (the Give button's own recipient picker, already
+shipped) or equipping it for them (the give confirmation's own
+Equip-for-them button, v1.27.663).
+
+Rewrote the regression test this reverses (it previously asserted the
+opposite, now-rejected behavior) to assert the new one directly, plus
+that the full button set actually shows. Full 155-test forge/equip/
+give/itemview/reforge/dismantle slice re-run clean.
+
 ## [1.27.665] — feature: a real story-arc progression gate, closing a 9-chapter skip
 
 Real dev-bridge report (Coffee, screenshot): a Chapter 3 character

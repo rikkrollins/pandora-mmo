@@ -2094,7 +2094,7 @@ def _meets_rarity_level_requirement(character: dict, item: dict) -> bool:
     return character.get("level", 1) >= _item_level_requirement(item)
 
 
-def reequip_after_item_replacement(telegram_user_id: int, chat_id: int, old_item_id: str, new_item_id: str) -> None:
+def clear_stale_equip_reference(telegram_user_id: int, chat_id: int, old_item_id: str) -> None:
     """
     Real gap found investigating a dev-bridge report (2026-09-21,
     Coffee, two screenshots about a forged item's missing Give/Sell/
@@ -2107,10 +2107,30 @@ def reequip_after_item_replacement(telegram_user_id: int, chat_id: int, old_item
     pointing at an item_id no longer in the character's inventory at
     all (a silent "ghost equip": the sheet keeps claiming to wear the
     old item forever, while the real, newly-upgraded instance sits
-    unequipped in the backpack doing nothing). Called right after that
-    same remove/add pair -- a genuine no-op for the overwhelmingly
-    common case (an unequipped item being upgraded), since none of the
-    equip fields will match old_item_id then.
+    unequipped in the backpack). Called right after that same
+    remove/add pair -- a genuine no-op for the overwhelmingly common
+    case (an unequipped item being upgraded), since none of the equip
+    fields will match old_item_id then.
+
+    Deliberately CLEARS the slot rather than auto-equipping the new
+    instance in its place (2026-09-22, real live follow-up, Coffee,
+    very direct: crafting an item "automatically equipped it to
+    myself (which I DID NOT WANT)... I wasn't able to give it away...
+    I should be able to give it and equip it to ANOTHER PLAYER" -- an
+    earlier version of this function DID auto-transfer the equip onto
+    the new instance, which fixed the ghost reference but silently
+    re-imposed the exact same "can't give/sell/market it, it's
+    equipped" block Coffee was originally complaining about, just on
+    the new item instead of the old one. The full options menu (View/
+    Equip/Give-to-a-specific-present-party-member/Sell/List on Market/
+    Dismantle) already exists on every item card via
+    _item_actions_keyboard -- it was only ever hidden by whichever
+    item happened to be equipped. Clearing the slot outright lets that
+    real menu show up the way every other freshly-crafted/looted item
+    already does, and the player equips it themselves (on their own
+    character or, via the Give button's own recipient picker plus the
+    give confirmation's own Equip-for-them button, on someone else's)
+    if and when they actually want to.
     """
     character = get_character(telegram_user_id, chat_id)
     if character is None:
@@ -2118,10 +2138,10 @@ def reequip_after_item_replacement(telegram_user_id: int, chat_id: int, old_item
     updates = {}
     for field in ("equipped_weapon", "equipped_armor", "equipped_shield"):
         if character.get(field) == old_item_id:
-            updates[field] = new_item_id
+            updates[field] = None
     accessories = character.get("equipped_accessories") or []
     if old_item_id in accessories:
-        updates["equipped_accessories"] = [new_item_id if aid == old_item_id else aid for aid in accessories]
+        updates["equipped_accessories"] = [aid for aid in accessories if aid != old_item_id]
     if updates:
         update_character(telegram_user_id, chat_id, **updates)
 

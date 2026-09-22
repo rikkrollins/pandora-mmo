@@ -24996,7 +24996,7 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
         )
         db.remove_item(update.effective_user.id, update.effective_chat.id, item_id, 1)
         db.add_item(update.effective_user.id, update.effective_chat.id, target_item_id, 1)
-        db.reequip_after_item_replacement(update.effective_user.id, update.effective_chat.id, item_id, target_item_id)
+        db.clear_stale_equip_reference(update.effective_user.id, update.effective_chat.id, item_id)
 
     # Real exploit found 2026-09-13 (same audit pass that found the
     # Warding/guild-ladder restack gap, v1.27.590): this call had NO

@@ -19350,21 +19350,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             expected[mat_id] = expected.get(mat_id, 0) + qty
         self.assertEqual(materials, expected)
 
-    async def test_forge_magic_upgrade_keeps_a_previously_equipped_plain_item_equipped(self):
+    async def test_forge_magic_upgrade_clears_a_stale_equip_reference_without_auto_equipping_the_new_item(self):
         """
         Real dev-bridge report (2026-09-21, two screenshots, Coffee: "I
         just forged this item, but it's not giving me an option to give
         it to somebody... where are the other options" / "It's not
-        letting me give a player this item that I crafted"). Root cause:
-        forging a PLAIN, not-yet-magic item that's currently EQUIPPED
-        promotes it into a brand new generated instance (removed the old
-        id from inventory, added the new one) but never touched
-        equipped_weapon/equipped_armor/equipped_shield/
-        equipped_accessories -- leaving them pointing at an item_id no
-        longer owned at all (a silent "ghost equip"), while the real
-        upgraded item sat unequipped in the backpack. Confirmed live via
-        the real _do_forge_magic_item handler: the new generated item
-        must end up equipped in the OLD item's place, not orphaned.
+        letting me give a player this item that I crafted") root-caused
+        to a silent "ghost equip": forging a PLAIN, not-yet-magic item
+        that's currently EQUIPPED promotes it into a brand new generated
+        instance (removes the old id from inventory, adds the new one)
+        but never touched equipped_weapon/armor/shield/accessories,
+        leaving them pointing at an item_id no longer owned at all.
+
+        An EARLIER fix (this same session) closed that by auto-
+        transferring the equip onto the new instance -- but Coffee's own
+        direct live follow-up (2026-09-22) rejected that: "it
+        automatically equipped it to myself (which I DID NOT WANT)...
+        then I wasn't able to give it away... I should be able to give
+        it and equip it to ANOTHER PLAYER." Auto-equipping just re-hid
+        the exact same Give/Sell/Market buttons on the NEW item instead
+        of the old one. The real fix: clear the stale slot outright
+        (nothing equipped), so the freshly-forged item shows the real,
+        full item-actions menu (View/Equip/Give-to-a-specific-present-
+        party-member/Sell/List on Market/Dismantle) the way any other
+        freshly-crafted item already does, and the player decides.
         """
         from unittest.mock import patch
         user_id = 996047
@@ -19380,10 +19389,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_forge_magic_item(FakeUpdate(user_id, "forge my longsword into a magic item", []), "forge my longsword into a magic item")
         character = db.get_character(user_id, -999)
         gen_item_id = next(iid for iid in character["inventory"] if iid.startswith(db.GENERATED_ITEM_ID_PREFIX))
-        self.assertEqual(character["equipped_weapon"], gen_item_id,
-                          "the newly-forged instance must replace the old plain item in the equip slot, not leave it orphaned")
+        self.assertIsNone(character["equipped_weapon"], "forging must not auto-equip the new item, and must clear the stale old reference")
         self.assertNotIn("longsword", character["inventory"], "the old plain item was consumed by the promotion")
-        self.assertTrue(db.is_item_equipped(character, gen_item_id))
+        self.assertFalse(db.is_item_equipped(character, gen_item_id))
+        kb = bot._item_actions_keyboard(gen_item_id, character)
+        button_texts = [b[0].text for b in kb.inline_keyboard]
+        self.assertTrue(any("Give" in t for t in button_texts), f"Give must be offered on an unequipped freshly-forged item: {button_texts}")
+        self.assertTrue(any("Market" in t for t in button_texts), f"List on Market must be offered too: {button_texts}")
 
     def test_equipped_hint_line_explains_why_give_sell_market_are_hidden(self):
         """
