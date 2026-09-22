@@ -36266,6 +36266,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         image = Image.open(io.BytesIO(png))
         self.assertLess(image.size[1], 1000, f"expected a small, single-floor canvas, got {image.size}")
 
+    def test_render_dungeon_map_floor_view_is_not_blown_out_by_two_real_far_apart_rooms_on_the_same_floor(self):
+        """
+        Real live report (2026-09-22, Coffee, screenshot: "Is the map
+        supposed to look like this for the third dungeon?" -- The First
+        City's own basement floor, "MAP — The First City (B1)"). The
+        v1.27.647 fix above scopes the canvas to just the requested
+        floor's OWN rooms, but floor B1 genuinely has two real rooms of
+        its own -- the_first_city_sunken_archive at (-6, -60) and
+        the_first_city_spire_stair at (4, -1) -- so the floor-level
+        filter can't separate them; one floor's own two legitimate rooms
+        alone still blew the canvas out to a mostly-black column with
+        real content crammed into one corner. Fixed by additionally
+        scoping to the single grid-adjacency-connected cluster the
+        player is actually standing in on that floor.
+        """
+        import io
+        from unittest.mock import patch
+        import map_render
+        from PIL import Image
+        underground = bot.CAMPAIGN["locations"]["underground"]
+        rooms = {rid: r for rid, r in underground.items() if r.get("dungeon_id") == "the_first_city"}
+        # Full-dungeon visited set: _floor_levels' BFS needs BOTH ends
+        # of every real up/down link present to chain spire_stair's own
+        # floor number all the way back to the Sunken Archive's shared
+        # vertical component -- a minimal 2-3 room visited set breaks
+        # that chain and wrongly defaults spire_stair to floor 0.
+        visited = set(rooms.keys())
+        floor_filter = map_render.floor_of(rooms, visited, "the_first_city_spire_stair")
+        self.assertEqual(floor_filter, -1, "the Spire Stair must resolve to the same real B1 floor as the Sunken Archive")
+        with patch("map_render._fetch_location_tile", return_value=None):
+            png = map_render.render_dungeon_map(
+                "the_first_city", "The First City", rooms, visited, set(),
+                "the_first_city_spire_stair", bot.CAMPAIGN["monsters"], bot.CAMPAIGN["quests"], floor_filter,
+            )
+        image = Image.open(io.BytesIO(png))
+        self.assertLess(image.size[1], 1000, f"expected a small canvas scoped to the player's own cluster, got {image.size}")
+
     def test_overworld_layer_map_is_not_blown_out_by_an_unflagged_far_quest_chain(self):
         """
         Real live report (2026-09-21, Coffee, screenshot: "is the map

@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.664] — fix: a dungeon floor view could still be blown out by two real rooms on the same floor
+
+Real dev-bridge report (Coffee, screenshot): "MAP — The First City
+(B1)" showed the same "real content crammed into one corner of a
+mostly-black canvas" symptom v1.27.647 and v1.27.659 already fixed —
+this time on a single dungeon floor view.
+
+Root cause: v1.27.647 scoped a floor view's canvas to just that
+floor's own rooms, but The First City's basement floor B1 genuinely
+has two real rooms of its own — the_first_city_sunken_archive at
+(-6, -60) and the_first_city_spire_stair at (4, -1) — so the
+floor-level filter alone can't separate them; one floor's own two
+legitimate, same-floor rooms still blew out the canvas.
+
+Fixed by additionally scoping a floor view to the single grid-
+adjacency-connected cluster the player is actually standing in on
+that floor — the same `_largest_connected_owners` helper v1.27.659
+already added for the overworld case, now also applied after the
+floor-level filter in `render_layer_map`.
+
+New regression test reproduces the exact reported scenario (both
+real B1 rooms visited, viewing from the Spire Stair) and asserts the
+canvas stays small. Full 48-test map slice + 24-test DungeonAuditTests
+re-run clean.
+
 ## [1.27.663] — fix: the new give-item Equip button could equip onto the giver instead of the named recipient
 
 Real live report, immediately after v1.27.662 shipped (Coffee: "for

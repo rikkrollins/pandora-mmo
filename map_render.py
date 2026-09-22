@@ -617,6 +617,21 @@ def render_layer_map(
             xy: ids for xy, ids in owners.items()
             if any(floor_levels.get(lid, 0) == floor_filter for lid in ids)
         }
+        # Real live report (2026-09-22, Coffee, screenshot: "Is the map
+        # supposed to look like this for the third dungeon?" -- The
+        # First City's own basement floor B1). Confirmed against real
+        # campaign data: floor B1 has exactly 2 real rooms --
+        # the_first_city_sunken_archive at (-6, -60) and
+        # the_first_city_spire_stair at (4, -1) -- genuinely both on
+        # the SAME floor (so the floor-level filter just above can't
+        # separate them) but at wildly different grid coordinates (the
+        # same build_location_grid.py "separate lateral strip" layout
+        # the comment above already describes) -- one floor's own two
+        # legitimate rooms alone still blew out the canvas. Same fix as
+        # the overworld case just below: scope to the single grid-
+        # adjacency-connected cluster the player is actually standing
+        # in on this floor, not the floor's whole bounding box.
+        floor_owners = _largest_connected_owners(floor_owners, current_location_id)
     elif exclude_dungeon_interiors:
         # Real bug found live (2026-09-21, Coffee, screenshot: "is the
         # map supposed to look like this? it's very hard for me to
