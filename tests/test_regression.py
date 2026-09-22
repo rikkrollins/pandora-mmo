@@ -3140,6 +3140,80 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(a_id, -999)["inventory"].get("healing_potion", 0), 5, "cancelling must still return the restored item")
         self.assertIsNone(bot._find_trade_for_user(-999, a_id))
 
+    async def test_grant_item_command_supports_name_based_targeting(self):
+        """
+        Real live follow-up (2026-09-22, per Coffee: "add name-based
+        targeting... i want to type that previous command and it will
+        work for her"). "... to <name>" resolves against this chat's
+        own real party members, same as _do_give_item's own recipient
+        resolution -- no reply-to-message needed.
+        """
+        # A unique name, not "Laurienna" -- that exact name is reused as
+        # a throwaway placeholder character by several unrelated tests
+        # elsewhere in this same file, all sharing chat_id=-999; running
+        # in the full suite, more than one real "Laurienna" can exist at
+        # once, which _match_member_by_name_or_username correctly (and
+        # safely) refuses to guess between -- a real batch-order
+        # collision from a shared name, not a bug in this feature.
+        owner_id, target_id = 950930, 950931
+        make_basic_character(owner_id, "GroupOwner4", current_location="crossroads_tavern")
+        make_basic_character(target_id, "GrantItemNameTarget", current_location="crossroads_tavern")
+
+        sink = []
+        update = FakeUpdate(owner_id, "/grant_item longbow to GrantItemNameTarget", sink, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        context = DummyContext(bot=FakeBot(status="creator"), args=["longbow", "to", "GrantItemNameTarget"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Granted 1x Longbow to GrantItemNameTarget" in s for s in sink), sink)
+        self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 1)
+
+    async def test_grant_item_command_falls_back_when_named_target_does_not_match_anyone(self):
+        """A "to <name>" that matches no real present character must never silently guess -- falls through to requiring a reply or numeric ID instead."""
+        owner_id = 950932
+        make_basic_character(owner_id, "GroupOwner5", current_location="crossroads_tavern")
+
+        sink = []
+        update = FakeUpdate(owner_id, "/grant_item longbow to Nobody", sink, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        context = DummyContext(bot=FakeBot(status="creator"), args=["longbow", "to", "Nobody"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Name a real, present party member" in s for s in sink), sink)
+
+    async def test_grant_item_command_recreates_a_lost_magic_item_from_its_display_name(self):
+        """
+        Real live incident (2026-09-22, Coffee: "loot it up to find out
+        what that item had and remake it" -- recreating the real
+        Stormwrought Longbow of Embers (+1 dmg) lost to the mid-trade
+        restart bug). "Stormwrought" is a rules.item_generator PREFIXES
+        entry that only ever rolls at "rare" tier -- the tier must be
+        recovered exactly, not guessed; the base item (Longbow) is
+        recovered from the name itself; the +1 damage bonus is exactly
+        what was typed, never invented.
+        """
+        owner_id, target_id = 950933, 950934
+        make_basic_character(owner_id, "GroupOwner6", current_location="crossroads_tavern")
+        make_basic_character(target_id, "Laurienna2", current_location="crossroads_tavern")
+
+        sink = []
+        text = "/grant_item Stormwrought Longbow of Embers +1 damage to Laurienna2"
+        update = FakeUpdate(owner_id, text, sink, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        context = DummyContext(
+            bot=FakeBot(status="creator"),
+            args=["Stormwrought", "Longbow", "of", "Embers", "+1", "damage", "to", "Laurienna2"],
+        )
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Recreated" in s and "Stormwrought Longbow of Embers" in s and "rare" in s for s in sink), sink)
+        after = db.get_character(target_id, -999)
+        generated_ids = [iid for iid in after["inventory"] if iid.startswith(db.GENERATED_ITEM_ID_PREFIX)]
+        self.assertEqual(len(generated_ids), 1)
+        recreated = db.materialize_item_instance(generated_ids[0])
+        self.assertEqual(recreated["name"], "Stormwrought Longbow of Embers")
+        self.assertEqual(recreated["type"], "weapon")
+        self.assertEqual(recreated["rarity"], "rare")
+        self.assertEqual(recreated["damage_bonus"], 1)
+        self.assertIn("damage_dice", recreated, "must inherit the real Longbow's own base stats, not a blank item")
+
     async def test_grant_item_command_by_reply_grants_a_real_catalog_item(self):
         """
         Real live incident (2026-09-22, Coffee): a genuine bug (bot
