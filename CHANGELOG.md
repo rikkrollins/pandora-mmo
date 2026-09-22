@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.680] — fix: a real, previously-undiscovered bug in every reply-based admin command
+
+Real live incident (2026-09-22, Coffee: "It didn't work" — a real
+`/grant_item Stormwrought Longbow of Embers +1 damage to Laurienna`
+resolved to the wrong target and left "to Laurienna" stuck in the
+item text, producing "No catalog item matches ...to Laurienna").
+
+Root cause, confirmed across multiple real messages in
+`bot_live_tmp.log`: in this group's forum topics, Telegram auto-sets
+**every single message's** `reply_to_message` to that topic's own
+creation service message (`forum_topic_created` set, `from_user` =
+whoever created the topic) — not only when a player deliberately taps
+Reply. `reply_to_message is not None` can therefore never be trusted
+as "the user deliberately replied" in this group; every message in
+every topic already satisfies it.
+
+This silently broke `_resolve_telegram_target` — the shared function
+behind `/add_admin`, `/remove_admin`, `/ban`, and `/unban` — the same
+way: any of those commands used without an explicit numeric Telegram
+ID would have resolved to whoever created the current topic, not the
+intended target, this entire time. New `_genuine_reply_target` filters
+out exactly the forum-topic-creation service message; a real,
+deliberate reply to an ordinary message works exactly as before.
+
+1 new test reproduces the exact real shape (a reply target carrying
+`forum_topic_created`) and confirms name-based targeting still fires
+correctly instead of being shadowed by it; the full 10-test grant_item
+suite passes clean.
+
 ## [1.27.679] — fix: /grant_item silently did nothing outside the Development topic
 
 Real live incident (2026-09-22, minutes after v1.27.678 shipped):

@@ -3214,6 +3214,44 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recreated["damage_bonus"], 1)
         self.assertIn("damage_dice", recreated, "must inherit the real Longbow's own base stats, not a blank item")
 
+    async def test_grant_item_command_ignores_the_forum_topic_auto_reply_and_uses_name_targeting(self):
+        """
+        Real live bug (2026-09-22, Coffee: "It didn't work" -- a real
+        /grant_item with "... to Laurienna" in the text resolved to the
+        wrong target and left "to Laurienna" stuck in the item text,
+        producing "No catalog item matches ...to Laurienna"). Root
+        cause confirmed via bot_live_tmp.log across multiple real
+        messages: in this group's forum topics, Telegram auto-sets
+        EVERY message's reply_to_message to that topic's own creation
+        service message (forum_topic_created set, from_user = whoever
+        created the topic) -- not only when a player deliberately taps
+        Reply. The old `reply_to_message is not None` check treated
+        every single message as a genuine reply, so name-based
+        targeting (and the item-text stripping that depends on it)
+        never ran at all. A message carrying this exact real shape
+        (forum_topic_created set on the reply target) must be treated
+        as NOT a real reply -- name-based targeting must still fire.
+        """
+        owner_id, target_id = 950939, 950940
+        make_basic_character(owner_id, "GroupOwner8", current_location="crossroads_tavern")
+        make_basic_character(target_id, "ForumReplyTarget", current_location="crossroads_tavern")
+
+        fake_topic_creation = type("FakeTopicCreationMessage", (), {
+            "from_user": FakeUser(owner_id),
+            "forum_topic_created": object(),  # real python-telegram-bot sets a real ForumTopicCreated here
+        })()
+
+        sink = []
+        update = FakeUpdate(
+            owner_id, "/grant_item longbow to ForumReplyTarget", sink,
+            thread_id=None, reply_to_message=fake_topic_creation,
+        )
+        context = DummyContext(bot=FakeBot(status="creator"), args=["longbow", "to", "ForumReplyTarget"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Granted 1x Longbow to ForumReplyTarget" in s for s in sink), sink)
+        self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 1)
+
     async def test_grant_item_command_works_from_any_topic_for_a_verified_owner(self):
         """
         Real live incident (2026-09-22, right after this command

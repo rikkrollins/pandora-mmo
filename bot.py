@@ -40010,6 +40010,36 @@ async def set_topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
 
 
+def _genuine_reply_target(message):
+    """
+    Real live bug (2026-09-22, found chasing a /grant_item report: "It
+    didn't work" -- a command with `... to Laurienna` in the text
+    resolved to the WRONG person and left "to Laurienna" sitting
+    unstripped in the item text). Root cause, confirmed via
+    bot_live_tmp.log across multiple real messages from different real
+    users: in THIS group's forum topics, Telegram auto-sets every
+    single message's `reply_to_message` to that topic's own creation
+    service message (a real `Message` with `forum_topic_created` set,
+    `from_user` = whoever created the topic) -- NOT only when a player
+    actually taps "Reply." `reply_to_message is not None` therefore can
+    NEVER be trusted as "the user deliberately replied" in this group;
+    every message in every topic already satisfies it. This silently
+    broke `_resolve_telegram_target` (used by /add_admin, /remove_admin,
+    /ban, /unban) the same way -- any of those commands used WITHOUT an
+    explicit numeric ID would have resolved to the topic's creator, not
+    the intended target, this whole time. Filters out exactly the
+    forum-topic-creation service message; a real, deliberate reply to
+    an ordinary message (which never sets forum_topic_created) still
+    works exactly as before.
+    """
+    reply = getattr(message, "reply_to_message", None)
+    if reply is None or reply.from_user is None:
+        return None
+    if getattr(reply, "forum_topic_created", None) is not None:
+        return None
+    return reply
+
+
 def _resolve_telegram_target(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[int | None, str]:
     """
     Resolves the target Telegram user for /add_admin, /remove_admin,
@@ -40019,11 +40049,13 @@ def _resolve_telegram_target(update: Update, context: ContextTypes.DEFAULT_TYPE)
     even if it did, guessing wrong here would be a real access-control
     bug, not just a misfired narration). Two ways to specify a target:
     1. Reply to that person's own message with the command -- Telegram
-       hands back a real User object directly, zero ambiguity.
+       hands back a real User object directly, zero ambiguity (see
+       _genuine_reply_target for why this ISN'T simply "reply_to_
+       message is not None").
     2. Pass their raw numeric Telegram user ID as the command argument.
     """
-    reply = update.message.reply_to_message
-    if reply is not None and reply.from_user is not None:
+    reply = _genuine_reply_target(update.message)
+    if reply is not None:
         user = reply.from_user
         label = f"{user.full_name} (@{user.username})" if user.username else user.full_name
         return user.id, label
@@ -40168,8 +40200,12 @@ async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     chat_id = update.effective_chat.id
-    reply = update.effective_message.reply_to_message
-    is_reply_target = reply is not None and reply.from_user is not None
+    # _genuine_reply_target, not a bare `reply_to_message is not None`
+    # check (2026-09-22 real live bug -- see its own docstring): this
+    # group's forum topics auto-attach every message's reply_to_message
+    # to that topic's own creation service message, which would
+    # otherwise make EVERY /grant_item look like a deliberate reply.
+    is_reply_target = _genuine_reply_target(update.effective_message) is not None
 
     target_id = None
     target_label = ""
