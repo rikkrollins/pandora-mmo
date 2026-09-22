@@ -2,6 +2,44 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.677] — fix: a bot restart mid-trade could permanently lose an already-offered item; new /grant_item recovery command
+
+Real live incident (2026-09-22, Coffee): restarting the bot to ship
+an unrelated fix while a real trade was mid-negotiation wiped the
+entire in-memory trade record — but `_mutate_trade_offer` removes an
+item from the offerer's real inventory the INSTANT it's added to an
+offer, well before either side accepts. The item was gone with
+nothing left recording where it went. Same real bug shape sessions.py
+already had and fixed once before (task #159, 2026-07-18: a redeploy
+used to silently wipe an entire in-progress fight) — trades just never
+got the same treatment.
+
+Trades are now persisted to disk (`trades_snapshot.json`, same atomic
+tmp-file-then-replace pattern as `sessions_snapshot.json`) on every
+real mutation (opening, adding/removing an offer, accepting, cancelling/
+finishing) and restored at startup, plus a periodic safety-net sweep.
+An abandoned trade older than the existing 10-minute timeout is still
+correctly dropped, never resurrected stale.
+
+Also new: **`/grant_item`** (Development topic, group-owner only,
+reply to the recipient's own message or pass their numeric Telegram
+ID, then `<item name> [quantity]`) — a real, narrow, auditable way to
+correct a live item-loss incident like this one going forward, since
+Claude is (correctly, by design) blocked from ever hand-editing a
+specific real player's live inventory directly. Deliberately limited
+to the static item catalog — a lost generated/magic item's exact
+affixes can't be safely reconstructed from a display name alone, so
+only the plain base item is offered, never an invented approximation.
+
+5 new tests (snapshot survives a simulated restart with an item
+already held, /grant_item happy path + owner-gate + numeric-id/
+quantity path + unknown-item rejection); the full 26-test trade suite
+passes clean. Test helper `use_test_db` now also redirects `bot.
+_TRADE_SNAPSHOT_PATH`, the same isolation `sessions.SNAPSHOT_PATH`
+already had — without it, this feature's own tests would have
+silently written fake trade data into the live bot's real snapshot
+file.
+
 ## [1.27.676] — fix: equipping one unit of a stack blocked giving away the whole stack
 
 Real live incident (2026-09-22, Coffee, confirmed via screenshot: a

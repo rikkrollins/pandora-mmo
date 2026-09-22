@@ -3087,6 +3087,127 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(after["equipped_accessories"], [equipped_ring])
         await bot._trade_cancel_trade(FakeUpdate(a_id, "", []), -999, a_id)
 
+    async def test_trade_snapshot_survives_a_simulated_restart_with_an_item_already_held(self):
+        """
+        Real live incident (2026-09-22, Coffee): restarting the bot to
+        ship an unrelated fix while a real trade was mid-negotiation
+        wiped the entire in-memory _ACTIVE_TRADES dict -- but the item
+        already added to the offer had ALREADY left the offerer's real
+        inventory (_mutate_trade_offer removes it the instant it's
+        added, well before either side accepts), so it was simply gone
+        with nothing left recording where it went. Reproduces the exact
+        shape: add a real item to an offer (confirms it actually left
+        inventory), simulate a restart (save snapshot, wipe the live
+        in-memory dicts), reload, and confirm the trade -- item and
+        all -- is exactly as it was, still finishable normally.
+        """
+        import sessions
+        sessions.end_session(-999)
+        a_id, b_id = 951030, 951031
+        make_basic_character(a_id, "SnapshotTraderA", current_location="crossroads_tavern")
+        make_basic_character(b_id, "SnapshotTraderB", current_location="crossroads_tavern")
+        db.add_item(a_id, -999, "healing_potion", 5)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with SnapshotTraderB", sink), "trade with SnapshotTraderB")
+        sink.clear()
+        await bot._do_trade_add(FakeUpdate(a_id, "add 2 healing potions to the trade", sink), "add 2 healing potions to the trade")
+        self.assertTrue(any("Added" in s for s in sink), sink)
+        self.assertEqual(db.get_character(a_id, -999)["inventory"].get("healing_potion", 0), 3, "the item must have really left inventory")
+
+        before_record = bot._find_trade_for_user(-999, a_id)
+        self.assertEqual(before_record["party_a"]["items"].get("healing_potion"), 2)
+        trade_id = before_record["trade_id"]
+
+        # Simulate a bot restart: wipe every in-memory trade dict (what
+        # a real process restart does for free, since none of this was
+        # ever the database), then reload from the snapshot that every
+        # real mutation above already wrote.
+        bot._ACTIVE_TRADES.clear()
+        bot._USER_ACTIVE_TRADE.clear()
+        restored_count = bot._load_trade_snapshot()
+        self.assertGreaterEqual(restored_count, 1)
+
+        after_record = bot._find_trade_for_user(-999, a_id)
+        self.assertIsNotNone(after_record, "the trade itself must survive the simulated restart")
+        self.assertEqual(after_record["trade_id"], trade_id)
+        self.assertEqual(after_record["party_a"]["items"].get("healing_potion"), 2, "the already-held item must not be lost")
+        self.assertEqual(bot._find_trade_for_user(-999, b_id)["trade_id"], trade_id, "both sides must resolve to the restored record")
+
+        # The restored trade must still work completely normally afterward.
+        sink2 = []
+        await bot._trade_cancel_trade(FakeUpdate(a_id, "", sink2), -999, a_id)
+        self.assertEqual(db.get_character(a_id, -999)["inventory"].get("healing_potion", 0), 5, "cancelling must still return the restored item")
+        self.assertIsNone(bot._find_trade_for_user(-999, a_id))
+
+    async def test_grant_item_command_by_reply_grants_a_real_catalog_item(self):
+        """
+        Real live incident (2026-09-22, Coffee): a genuine bug (bot
+        restarted mid-trade, wiping the in-memory record while an
+        already-offered item had already left the giver's real
+        inventory) permanently lost a real player's item, with no
+        existing in-game way to correct it and no way for Claude to
+        hand-edit a specific live player's inventory directly (blocked
+        at the environment level). /grant_item is the sanctioned,
+        narrow, owner-only alternative -- goes through the exact same
+        db.add_item every legitimate loot/craft/purchase already uses.
+        """
+        owner_id, target_id = 950922, 950923
+        make_basic_character(owner_id, "GroupOwner", current_location="crossroads_tavern")
+        make_basic_character(target_id, "Laurienna", current_location="crossroads_tavern")
+
+        sink = []
+        reply = DummyMessage(target_id, full_name="Laurienna")
+        update = FakeUpdate(owner_id, "/grant_item longbow", sink, thread_id=config.TOPIC_DEVELOPMENT_ID, reply_to_message=reply)
+        context = DummyContext(bot=FakeBot(status="creator"), args=["longbow"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Granted" in s and "Longbow" in s for s in sink), sink)
+        self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 1)
+
+    async def test_grant_item_command_rejects_a_non_owner(self):
+        """Same command, a real Telegram 'administrator' (not 'creator') must still be refused -- granting items is held to a tighter bar than Dev-topic access."""
+        non_owner_id, target_id = 950924, 950925
+        make_basic_character(non_owner_id, "JustAnAdmin", current_location="crossroads_tavern")
+        make_basic_character(target_id, "SomeTarget", current_location="crossroads_tavern")
+
+        sink = []
+        reply = DummyMessage(target_id, full_name="SomeTarget")
+        update = FakeUpdate(non_owner_id, "/grant_item longbow", sink, thread_id=config.TOPIC_DEVELOPMENT_ID, reply_to_message=reply)
+        context = DummyContext(bot=FakeBot(status="administrator"), args=["longbow"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Only the group owner" in s for s in sink), sink)
+        self.assertEqual(db.get_character(target_id, -999)["inventory"].get("longbow", 0), 0)
+
+    async def test_grant_item_command_supports_a_quantity_and_a_numeric_id_target(self):
+        """The non-reply fallback path (raw numeric Telegram user ID as the first arg), plus a trailing quantity."""
+        owner_id, target_id = 950926, 950927
+        make_basic_character(owner_id, "GroupOwner2", current_location="crossroads_tavern")
+        make_basic_character(target_id, "NumericTarget", current_location="crossroads_tavern")
+
+        sink = []
+        update = FakeUpdate(owner_id, f"/grant_item {target_id} healing potion 3", sink, thread_id=config.TOPIC_DEVELOPMENT_ID)
+        context = DummyContext(bot=FakeBot(status="creator"), args=[str(target_id), "healing", "potion", "3"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("Granted 3x Healing Potion" in s for s in sink), sink)
+        self.assertEqual(db.get_character(target_id, -999)["inventory"].get("healing_potion", 0), 3)
+
+    async def test_grant_item_command_rejects_an_unknown_item_name(self):
+        """Never silently grants nothing, and never invents/guesses a generated/magic item from a display name it can't reconstruct."""
+        owner_id, target_id = 950928, 950929
+        make_basic_character(owner_id, "GroupOwner3", current_location="crossroads_tavern")
+        make_basic_character(target_id, "UnknownItemTarget", current_location="crossroads_tavern")
+
+        sink = []
+        reply = DummyMessage(target_id, full_name="UnknownItemTarget")
+        update = FakeUpdate(owner_id, "/grant_item Stormwrought Longbow of Embers", sink, thread_id=config.TOPIC_DEVELOPMENT_ID, reply_to_message=reply)
+        context = DummyContext(bot=FakeBot(status="creator"), args=["Stormwrought", "Longbow", "of", "Embers"])
+        await bot.grant_item_command(update, context)
+
+        self.assertTrue(any("No catalog item matches" in s for s in sink), sink)
+
     async def test_trade_button_flow_add_and_remove_gold(self):
         """Same button flow, for gold -- percentage-based amounts since gold totals vary wildly across characters."""
         import sessions

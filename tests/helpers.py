@@ -63,6 +63,19 @@ def use_test_db(path: str) -> None:
     config.DB_PATH = path
     db.init_db()
     sessions.SNAPSHOT_PATH = path + ".sessions_snapshot.json"
+    # Same real leak, same fix, for bot.py's own trade-persistence
+    # snapshot (2026-09-22 hotfix): bot._TRADE_SNAPSHOT_PATH is a bare
+    # relative filename ("trades_snapshot.json") resolved against cwd
+    # at save time, completely independent of config.DB_PATH -- without
+    # this redirect, any test exercising a real trade (accept/cancel/
+    # add/remove all call bot._save_trade_snapshot()) would silently
+    # overwrite the LIVE bot's own trades_snapshot.json with fake test
+    # trade data, exactly the sessions_snapshot incident described
+    # above, just for the newer file. Imported lazily (not at module
+    # top) to avoid a circular import, since bot.py itself imports this
+    # helpers module for its own test suite.
+    import bot
+    bot._TRADE_SNAPSHOT_PATH = path + ".trades_snapshot.json"
     # Also isolates topics.py's per-tenant fallback (2026-09-09, real
     # multi-tenant hardening before going public): topics._resolve now
     # only falls back to the home-group TOPIC_*_ID constants for the

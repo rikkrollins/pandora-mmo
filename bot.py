@@ -1284,6 +1284,18 @@ TRADE_TIMEOUT_SECONDS = 600
 _ACTIVE_TRADES: dict[int, dict] = {}
 _USER_ACTIVE_TRADE: dict[int, dict] = {}
 _NEXT_TRADE_ID = 1
+# Real live incident (2026-09-22, Coffee): a bot restart mid-trade (to
+# ship an unrelated fix) wiped this whole in-memory dict while it was
+# already holding a real player's real item -- _mutate_trade_offer
+# removes an item from inventory the INSTANT it's added to an offer,
+# well before either side accepts, so that item was simply gone with
+# nothing left recording where it went. Same real bug shape, same real
+# fix, as sessions.py's own save_snapshot/load_snapshot (task #159,
+# 2026-07-18: a redeploy used to silently wipe an entire in-progress
+# fight the identical way) -- see _save_trade_snapshot/_load_trade_
+# snapshot below, near _end_trade.
+_TRADE_SNAPSHOT_PATH = "trades_snapshot.json"
+TRADE_SNAPSHOT_MAX_AGE_SECONDS = TRADE_TIMEOUT_SECONDS
 
 
 # Character description (2026-07-16, per Coffee): "add a description to my
@@ -6007,6 +6019,72 @@ def _end_trade(chat_id: int, record: dict) -> None:
     user_map = _chat_scoped_dict(_USER_ACTIVE_TRADE, chat_id)
     user_map.pop(record["party_a"]["id"], None)
     user_map.pop(record["party_b"]["id"], None)
+    _save_trade_snapshot()
+
+
+def _save_trade_snapshot() -> None:
+    """
+    Writes every active trade to disk (2026-09-22 hotfix -- see
+    _TRADE_SNAPSHOT_PATH's own comment for the real incident this
+    fixes). Best-effort, same discipline as sessions.py's own
+    save_snapshot: a failure to write here should never break the
+    actual trade action that triggered it. Trade records are already
+    plain JSON-serializable dicts (no custom classes), so this dumps
+    them directly rather than needing a to_json_dict step -- only
+    _ACTIVE_TRADES is saved; _USER_ACTIVE_TRADE is fully reconstructible
+    from each record's own party_a/party_b ids, so it's rebuilt on load
+    instead of separately serialized (one source of truth, not two that
+    could drift apart).
+    """
+    try:
+        payload = {
+            "saved_at": time.time(),
+            "next_trade_id": _NEXT_TRADE_ID,
+            "trades": [record for chat_trades in _ACTIVE_TRADES.values() for record in chat_trades.values()],
+        }
+        tmp_path = _TRADE_SNAPSHOT_PATH + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(payload, f)
+        os.replace(tmp_path, _TRADE_SNAPSHOT_PATH)
+    except Exception as e:  # noqa: BLE001 -- best-effort, never fatal to the caller
+        logger.warning(f"[trades] failed to save snapshot: {e!r}")
+
+
+def _load_trade_snapshot() -> int:
+    """
+    Restores active trades from disk at startup (2026-09-22 hotfix).
+    Returns how many were actually restored, so the caller can log it.
+    A snapshot older than TRADE_SNAPSHOT_MAX_AGE_SECONDS (same value as
+    TRADE_TIMEOUT_SECONDS -- an abandoned trade already wouldn't have
+    survived this long even without a restart) is deliberately ignored,
+    same "an old, abandoned encounter silently reappearing would be
+    worse than just not restoring it" reasoning sessions.py's own
+    load_snapshot documents. Missing or corrupt files are treated the
+    same as "no snapshot" rather than crashing bot startup.
+    """
+    global _NEXT_TRADE_ID
+    if not os.path.exists(_TRADE_SNAPSHOT_PATH):
+        return 0
+    try:
+        with open(_TRADE_SNAPSHOT_PATH) as f:
+            payload = json.load(f)
+        if time.time() - payload.get("saved_at", 0) > TRADE_SNAPSHOT_MAX_AGE_SECONDS:
+            os.remove(_TRADE_SNAPSHOT_PATH)
+            return 0
+        _NEXT_TRADE_ID = max(_NEXT_TRADE_ID, payload.get("next_trade_id", _NEXT_TRADE_ID))
+        restored = 0
+        for record in payload.get("trades", []):
+            chat_id = record["chat_id"]
+            trade_id = record["trade_id"]
+            _chat_scoped_dict(_ACTIVE_TRADES, chat_id)[trade_id] = record
+            user_map = _chat_scoped_dict(_USER_ACTIVE_TRADE, chat_id)
+            user_map[record["party_a"]["id"]] = trade_id
+            user_map[record["party_b"]["id"]] = trade_id
+            restored += 1
+        return restored
+    except Exception as e:
+        logger.warning(f"[trades] failed to load snapshot: {e!r}")
+        return 0
 
 
 _TRADE_GOLD_PATTERN = re.compile(r"(\d+)\s*gold\b")
@@ -6074,6 +6152,7 @@ async def _do_trade_request(update: Update, text: str) -> None:
     user_map = _chat_scoped_dict(_USER_ACTIVE_TRADE, chat_id)
     user_map[telegram_user_id] = trade_id
     user_map[recipient["telegram_user_id"]] = trade_id
+    _save_trade_snapshot()
     await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(trade_id), speak=False)
 
 
@@ -6271,6 +6350,7 @@ async def _mutate_trade_offer(update: Update, text: str, adding: bool, item_id: 
     side["accepted"] = False
     record[other_key]["accepted"] = False
     record["last_activity_at"] = time.time()
+    _save_trade_snapshot()
     await _safe_send(update, "\n".join(changed_lines), speak=False)
     await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(record["trade_id"]), speak=False)
 
@@ -6341,6 +6421,7 @@ async def _trade_accept_side(update: Update, chat_id: int, telegram_user_id: int
     if record["party_a"]["accepted"] and record["party_b"]["accepted"]:
         await _finalize_trade(update, chat_id, record)
         return
+    _save_trade_snapshot()
     await _safe_send(update, _trade_message_text(record), reply_markup=_trade_keyboard(record["trade_id"]), speak=False)
 
 
@@ -39961,6 +40042,107 @@ _NO_TARGET_MESSAGE = (
 )
 
 
+async def grant_item_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Real live incident (2026-09-22, Coffee): restarting the bot mid-
+    trade (to ship an unrelated fix) wiped the in-memory trade record
+    while it was already holding a real player's real item -- see
+    _ACTIVE_TRADES/_USER_ACTIVE_TRADE's own new persist-through-
+    restart docstring, shipped the same release as this command. That
+    fix stops it happening again, but the item already lost that
+    session had no way back through any existing game mechanic, and
+    (correctly) no way for Claude to just hand-edit a specific real
+    player's live inventory to fix it -- that's blocked at the
+    environment level as a live-player-data-safety rule, independent
+    of who's asking or why. This is the sanctioned, narrow, auditable
+    alternative Coffee asked for instead: a real owner-only command
+    that goes through the exact same db.add_item every legitimate
+    loot/craft/purchase already uses -- never a raw database edit.
+
+    Owner-only (not the broader "any Dev-topic admin" _is_dev_topic_
+    authorized gate /add_admin uses) -- granting real items bypasses
+    the entire game economy (drop rates, crafting costs, gold sinks),
+    a meaningfully bigger trust boundary than Development-topic read
+    access, so it's held to the same single-person standard as /ban.
+
+    Deliberately scoped to the STATIC catalog only (items.ITEMS, via
+    items.find_item_id_by_name) -- a generated/magic item's exact
+    affixes (which ability, which value, masterwork or not) can't be
+    safely reconstructed from a display name alone, so "restore this
+    exact lost magic item" isn't offered; granting the plain base item
+    is the honest, correct-scope substitute, same discipline as every
+    other place in this file that refuses to invent a fact it can't
+    verify.
+    """
+    if not topics.is_development(update.effective_chat.id, update.effective_message.message_thread_id):
+        return
+    is_owner = await _is_group_owner(update, context)
+    if is_owner is None:
+        await _safe_send(
+            update,
+            "Couldn't verify permissions just now (a Telegram API call failed) — try again in a moment.",
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+        )
+        return
+    if not is_owner:
+        await _safe_send(
+            update,
+            "Only the group owner can grant items directly — this bypasses the normal game economy, "
+            "so it's kept to a single trusted person, unlike Dev-topic access.",
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+        )
+        return
+
+    reply = update.effective_message.reply_to_message
+    is_reply_target = reply is not None and reply.from_user is not None
+    target_id, target_label = _resolve_telegram_target(update, context)
+    if target_id is None:
+        await _safe_send(
+            update,
+            f"{_NO_TARGET_MESSAGE} Then name the item after that: /grant_item <item name> [quantity].",
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+        )
+        return
+    target_character = db.get_character(target_id, update.effective_chat.id)
+    if target_character is None:
+        await _safe_send(
+            update, f"{target_label} doesn't have a character in this game.",
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+        )
+        return
+
+    # The numeric-id fallback path consumes context.args[0] as the
+    # target itself (see _resolve_telegram_target); the reply path
+    # doesn't touch context.args at all, so every arg is real item text.
+    item_args = list(context.args) if is_reply_target else list(context.args[1:])
+    if not item_args:
+        await _safe_send(
+            update, "Name the item to grant, e.g. /grant_item longbow 1 (reply to their message).",
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+        )
+        return
+    quantity = 1
+    if len(item_args) > 1 and item_args[-1].isdigit():
+        quantity = max(1, int(item_args.pop()))
+    item_name = " ".join(item_args)
+    item_id = items_module.find_item_id_by_name(item_name)
+    if item_id is None:
+        await _safe_send(
+            update,
+            f"No catalog item matches \"{item_name}\". This only grants ordinary catalog items (not "
+            f"unique forged/enchanted ones) — name it exactly, e.g. \"longbow\" or \"healing potion\".",
+            thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+        )
+        return
+
+    db.add_item(target_id, update.effective_chat.id, item_id, quantity)
+    item = items_module.get_item(item_id)
+    await _safe_send(
+        update, f"✅ Granted {quantity}x {item['name']} to {target_label}.",
+        thread_id=topics.thread_id_for(update.effective_chat.id, "development"),
+    )
+
+
 async def add_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Grants Development-topic access to another real person -- e.g.
@@ -42293,6 +42475,16 @@ async def _idle_inactivity_loop(application: Application) -> None:
                 sessions.save_snapshot()
         except Exception as e:
             logger.error(f"[sessions] periodic snapshot failed this cycle: {e!r}")
+        try:
+            # Same safety net, for trades (2026-09-22 hotfix) -- every
+            # real mutation point already saves immediately on its own
+            # (_do_trade_request/_mutate_trade_offer/_trade_accept_side/
+            # _end_trade), this just covers anything that manages to
+            # slip through uncaught.
+            if _ACTIVE_TRADES:
+                _save_trade_snapshot()
+        except Exception as e:
+            logger.error(f"[trades] periodic snapshot failed this cycle: {e!r}")
 
 
 class _StartupChatStub:
@@ -42438,6 +42630,21 @@ async def _on_startup(application: Application) -> None:
             except Exception as e:
                 logger.error(f"[sessions] failed to announce restored session for chat {chat_id}: {e!r}")
 
+    # 2026-09-22 hotfix (real live incident, Coffee): restore any
+    # trade(s) that were active when the bot last stopped -- see
+    # _save_trade_snapshot/_load_trade_snapshot's own docstrings for
+    # the real item-loss incident this fixes (same shape as the combat
+    # restore just above, task #159). Deliberately no per-side
+    # "your trade survived" announcement the way combat gets one --
+    # a trade sits inert until someone acts on it again (no turn timer
+    # to keep alive), so silently having the record and items back,
+    # ready for "check trade"/"accept the trade" to work normally
+    # again, is enough; a proactive message to two people mid-
+    # negotiation risks reading as more alarming than reassuring.
+    trades_restored = _load_trade_snapshot()
+    if trades_restored:
+        logger.info(f"[trades] restored {trades_restored} active trade(s) from snapshot")
+
 
 def build_application() -> Application:
     # concurrent_updates=True is important: without it, python-telegram-bot
@@ -42511,6 +42718,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("changelog", changelog_command))
     application.add_handler(CommandHandler("donotdisturb", donotdisturb_command))
     application.add_handler(CommandHandler("endturn", endturn_command))
+    application.add_handler(CommandHandler("grant_item", grant_item_command))
     application.add_handler(CommandHandler("guild", guild_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("hint", hint_command))

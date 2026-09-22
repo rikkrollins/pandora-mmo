@@ -17,6 +17,8 @@ bot_test_tmp.log
 bot_persistence.pickle
 sessions_snapshot.json
 sessions_snapshot.json.tmp
+trades_snapshot.json
+trades_snapshot.json.tmp
 dev_screenshots/
 dev_videos/
 # Coffee-uploaded campaign-book PDFs/links — likely copyrighted, never
