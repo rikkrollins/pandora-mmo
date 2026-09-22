@@ -37622,8 +37622,17 @@ async def _maybe_resolve_npc_reply_from_text(update: Update) -> bool:
     NPC talk path: no Kess-arc special case, no companion-quest-offer
     push -- just the real conversation itself, grounded the same way.
     """
+    # getattr, not a direct attribute access (2026-09-22 hotfix, real
+    # live crash: "'_Message' object has no attribute 'reply_to_
+    # message'") -- an autonomous AI party member's own "turn" is
+    # routed through this exact same handler via _AiPlayerUpdate's
+    # lightweight _Message shim (see its own docstring), which only
+    # ever sets .text/.message_thread_id, never .reply_to_message --
+    # unlike a real python-telegram-bot Message, which always has that
+    # attribute (defaulting to None). Every autonomous turn crashed
+    # here until this was defensive.
     message = update.message
-    reply = message.reply_to_message if message else None
+    reply = getattr(message, "reply_to_message", None) if message else None
     if reply is None:
         return False
     npc_id = _chat_scoped_dict(_SENT_NPC_MESSAGES, update.effective_chat.id).get(reply.message_id)

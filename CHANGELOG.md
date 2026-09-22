@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.675] — hotfix: two live crashes from this session's own earlier conversation work
+
+Caught live in `bot_live_tmp.log` while investigating an unrelated
+report — both are real regressions from the v1.27.669 conversation-
+memory refactor shipped earlier today, neither previously caught.
+
+**Every ambient NPC line crashed the moment the model actually
+answered.** `ai/npc_agent.py`'s `generate_ambient_line` still did
+`npc["memory"].append(...)` directly on the now-dict-shaped memory
+field (v1.27.669 changed it from a flat list to a dict keyed by
+`(chat_id, telegram_user_id)`) instead of appending to the real
+per-player sub-list via `_conversation_buffer`. Crashed real player
+travel (`_maybe_trigger_npc_encounter` → `AttributeError: 'dict'
+object has no attribute 'append'`) — confirmed this was already
+failing the project's own `test_every_real_ollama_call_site_caps_
+its_own_cpu_thread_usage` test, which had gone unnoticed in a broad
+batch run earlier today.
+
+**Every autonomous AI party member's own turn crashed outright.** The
+new Telegram-reply-continuation check (`_maybe_resolve_npc_reply_
+from_text`) accessed `update.message.reply_to_message` directly —
+fine for a real player, but an autonomous AI party member's own "turn"
+routes through the exact same handler via `_AiPlayerUpdate`'s
+lightweight `_Message` shim, which only ever sets `.text`/
+`.message_thread_id`, never `.reply_to_message`. Now uses `getattr`
+defensively.
+
+2 new/fixed tests confirm both. No version-relevant feature change —
+pure hotfix for damage this session's own earlier work caused.
+
 ## [1.27.674] — fix: trading an item wrongly refused as "equipped" when a same-named duplicate was worn instead
 
 Real live incident (2026-09-22, Coffee, very angry, correctly pushing

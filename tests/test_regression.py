@@ -40102,6 +40102,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(handled)
         self.assertTrue(any("A real in-character reply." in s for s in sink2), sink2)
 
+    async def test_maybe_resolve_npc_reply_from_text_tolerates_the_ai_player_update_shim(self):
+        """
+        Real live crash (2026-09-22 hotfix): "AttributeError: '_Message'
+        object has no attribute 'reply_to_message'" -- every autonomous
+        AI party member's own "turn" is routed through adventure_master_
+        handler via _AiPlayerUpdate's lightweight _Message shim, which
+        only ever sets .text/.message_thread_id (see its own docstring),
+        never .reply_to_message like a real python-telegram-bot Message
+        always does. _maybe_resolve_npc_reply_from_text's new (2026-09-
+        22, same session) reply-continuation check crashed EVERY single
+        autonomous AI turn until this was made defensive with getattr.
+        """
+        update_like = bot._AiPlayerUpdate(None, -999, 950945, "look around")
+        handled = await bot._maybe_resolve_npc_reply_from_text(update_like)
+        self.assertFalse(handled)
+
     async def test_do_talk_party_can_reach_an_autonomous_ai_played_party_member(self):
         """Real gap fix: a real, present, is_ai=1/is_autonomous=1 party member (not a recruited companion) must be reachable via _do_talk_party, not refused."""
         from unittest.mock import patch

@@ -250,5 +250,5 @@ def generate_ambient_line(npc_id: str, chat_id: int, telegram_user_id: int, char
         return ""
 
     if line:
-        npc["memory"].append(("You", line))
+        _conversation_buffer(npc_id, chat_id, telegram_user_id).append(("You", line))
     return line
