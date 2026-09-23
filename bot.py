@@ -8190,7 +8190,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
         # SKILL_CHECK_DC (13) this game already uses everywhere else
         # rather than inventing a new deliberate difficulty number.
         if "paralyzed" in current.get("conditions", []):
-            save_roll = roll_d20()
+            save_roll = roll_d20(lucky=current.get("race") == "Halfling")
             save_bonus = ability_modifier(current.get("constitution", 10))
             if is_proficient_in_save(current.get("char_class"), "constitution"):
                 save_bonus += current.get("proficiency_bonus", 2)
@@ -8569,7 +8569,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             if applied_condition:
                 await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
             if resisted_condition:
-                trait = "Dwarven Resilience" if resisted_condition == "poisoned" else "Fey Ancestry"
+                trait = _racial_immunity_trait_name(target, resisted_condition)
                 await _safe_send(update, f"🛡️ **{target['name']}'s {trait} shrugs off the {resisted_condition}!**")
             if drain_amount > 0:
                 await _safe_send(
@@ -11136,7 +11136,7 @@ async def _resolve_labyrinth_hazard(update: Update, character: dict, room: dict,
             roll_suffix = ""
         else:
             dex_mod = ability_modifier(member.get("dexterity", 10))
-            save_roll = roll_d20()
+            save_roll = roll_d20(lucky=member.get("race") == "Halfling")
             save_total = save_roll + dex_mod
             if save_total >= SKILL_CHECK_DC:
                 lines.append(f"**{member['name']}** dodges clear ({save_roll}+{dex_mod}={save_total} vs DC {SKILL_CHECK_DC}).")
@@ -13326,7 +13326,7 @@ async def _maybe_use_breath_weapon(
     dmg = roll_damage(f"{dice_count}d6")
     scaled_total = int(dmg["total"] * power_scale_ratio(level, caster.get("rebirth_count", 0)))
     save_dc = 8 + caster.get("proficiency_bonus", 2) + ability_modifier(caster.get("constitution", 10))
-    save_roll = roll_d20() + ability_modifier(target.get("dexterity", 10))
+    save_roll = roll_d20(lucky=target.get("race") == "Halfling") + ability_modifier(target.get("dexterity", 10))
     save_success = save_roll >= save_dc
     damage_dealt = scaled_total // 2 if save_success else scaled_total
     # Real request (2026-09-19, per Coffee: "bring them down to one HP"
@@ -15111,12 +15111,59 @@ def _racially_immune_to_condition(character: dict, condition: str) -> bool:
     mechanic in this engine to hook the literal trait text onto more
     exactly, same kind of adaptation already used for Ranger's Favored
     Enemy and Monk's Martial Arts.
+
+    2026-09-23 (full class/race/spell mechanic audit, per Coffee: "are
+    there any class abilities or race abilities or cantrips or spells
+    that have not been done yet?"): two more races' signature traits
+    adapted the same way. Halfling's Brave (real 5E: advantage vs.
+    being frightened) becomes flat immunity to 'frightened' -- a real,
+    common on-hit condition (17 monster attacks in campaign.json use
+    it), unlike the near-unused 'charmed'. Gnome Cunning (real 5E:
+    advantage on INT/WIS/CHA saves against magic -- broader than any
+    single race trait above, covering fear AND hold-type magic at
+    once) becomes immunity to BOTH 'frightened' and 'paralyzed', the
+    two condition types this engine actually models that a real spell
+    effect would otherwise impose.
     """
     race = character.get("race")
     return (
         (condition == "poisoned" and race == "Dwarf")
-        or (condition == "paralyzed" and race in ("Elf", "Half-Elf"))
+        or (condition == "paralyzed" and race in ("Elf", "Half-Elf", "Gnome"))
+        or (condition == "frightened" and race in ("Halfling", "Gnome"))
     )
+
+
+# Real 5E named-skill race traits (2026-09-23 audit), adapted the same
+# way CLASS_SKILL_ABILITIES already adapts named 5E skills onto this
+# engine's ability-based skill checks (see rules/leveling.py's own
+# comment: "no per-character skill selection to look a real proficiency
+# up in... each class gets proficiency on the two abilities its real
+# 5E skill list leans on hardest, picked by flavor"). Same fixed-by-
+# flavor simplification here: Keen Senses (Perception) -> wisdom,
+# Menacing (Intimidation) -> charisma, Stonecunning (History) ->
+# intelligence. Skill Versatility (Half-Elf, real 5E: 2 skills of the
+# PLAYER's own choice) has no selection UI to hang a real choice on,
+# so it gets a fixed flavor pair the same way each class's own two
+# skill abilities are fixed rather than chosen.
+RACE_SKILL_ABILITIES = {
+    "Elf": ("wisdom",),
+    "Half-Orc": ("charisma",),
+    "Dwarf": ("intelligence",),
+    "Half-Elf": ("charisma", "wisdom"),
+}
+
+
+def _race_proficient_in_skill(race: str | None, ability: str) -> bool:
+    return ability in RACE_SKILL_ABILITIES.get(race or "", ())
+
+
+def _racial_immunity_trait_name(character: dict, condition: str) -> str:
+    """Which real trait _racially_immune_to_condition just fired for, for narration -- Gnome Cunning covers 2 conditions, so this can't be a flat per-condition lookup."""
+    if condition == "poisoned":
+        return "Dwarven Resilience"
+    if character.get("race") == "Gnome":
+        return "Gnome Cunning"
+    return "Fey Ancestry" if condition == "paralyzed" else "Brave"
 
 
 # Darkness / light sources (2026-08-04, per Coffee: "if some locations
@@ -15478,6 +15525,15 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     result["total"] += skill_check_proficiency_bonus(
         character["char_class"], character.get("level", 1), ability, character.get("proficiency_bonus", 0)
     )
+    # Racial skill traits (Keen Senses/Menacing/Stonecunning/Skill
+    # Versatility, 2026-09-23 audit): only adds the flat proficiency
+    # bonus once, even if the class already covers this same ability --
+    # 5E never double-counts multiple proficiency sources on one skill.
+    if (
+        _race_proficient_in_skill(character.get("race"), ability)
+        and not is_proficient_in_skill(character["char_class"], ability)
+    ):
+        result["total"] += character.get("proficiency_bonus", 0)
     bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, ability)
     bonus += _effective_ability_check_bonus(character, ability)
     result["total"] += bonus
@@ -15848,7 +15904,7 @@ def _check_concentration(participant: dict, damage_taken: int, session: sessions
     concentrating_on = participant.get("concentrating_on")
     if not concentrating_on:
         return
-    save_roll = roll_d20()
+    save_roll = roll_d20(lucky=participant.get("race") == "Halfling")
     save_bonus = ability_modifier(participant.get("constitution", 10))
     if is_proficient_in_save(participant.get("char_class"), "constitution"):
         save_bonus += participant.get("proficiency_bonus", 2)
@@ -16316,6 +16372,20 @@ WARLOCK_PACT_MAGIC_REST_HOURS = NATURAL_HEALING_FULL_REST_HOURS / 8
 # as every other class).
 
 
+def _race_rest_hours_divisor(character: dict) -> float:
+    """
+    Elf's Trance (real 5E: 4 hours of meditation gives the same benefit
+    as 8 hours of sleep for anyone else -- previously pure flavor text,
+    2026-09-23 audit). This engine's rest curve is real wall-clock
+    time, not hit-dice, so unlike WARLOCK_PACT_MAGIC_REST_HOURS's
+    slots-only carve-out, Trance is a genuinely meaningful mechanical
+    difference here -- it halves the real-world time needed for
+    EVERYTHING a rest recovers (HP, spell slots, feature-use resets),
+    not just one resource.
+    """
+    return 2.0 if character.get("race") == "Elf" else 1.0
+
+
 PASSIVE_REGEN_BASE_HP = 1  # per tick of the existing 60s world loop (IDLE_CHECK_INTERVAL_SECONDS)
 PASSIVE_REGEN_SAFE_AREA_BONUS_HP = 1  # doubles the base rate at any location flagged "safe" in campaign.json
 
@@ -16490,10 +16560,12 @@ def _apply_natural_healing(telegram_user_id: int, character: dict, elapsed_secon
     Returns (hp_healed, slots_healed) actually applied (0, 0 if no time
     has meaningfully passed or the character is already full).
     """
-    fraction = min(1.0, max(0.0, elapsed_seconds) / (NATURAL_HEALING_FULL_REST_HOURS * 3600))
+    race_divisor = _race_rest_hours_divisor(character)
+    rest_hours = NATURAL_HEALING_FULL_REST_HOURS / race_divisor
+    fraction = min(1.0, max(0.0, elapsed_seconds) / (rest_hours * 3600))
     slot_rest_hours = (
         WARLOCK_PACT_MAGIC_REST_HOURS if character.get("char_class") == "Warlock" else NATURAL_HEALING_FULL_REST_HOURS
-    )
+    ) / race_divisor
     slot_fraction = min(1.0, max(0.0, elapsed_seconds) / (slot_rest_hours * 3600))
     missing_hp = character["hp_max"] - character["hp_current"]
     missing_slots = character["spell_slots_max"] - character["spell_slots_current"]

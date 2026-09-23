@@ -27968,6 +27968,82 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(bot._racially_immune_to_condition({"race": "Dwarf"}, "paralyzed"))
         self.assertFalse(bot._racially_immune_to_condition({"race": "Elf"}, "poisoned"))
 
+    # -- Full class/race/spell mechanic audit (2026-09-23, per Coffee:
+    #    "are there any class abilities or race abilities or cantrips or
+    #    spells that have not been done yet?"). Divine Sense/Druidic/
+    #    Ranger fix already shipped this session; these close the
+    #    remaining real gaps the audit found, all in races.py. ----------
+
+    def test_halfling_is_immune_to_frightened_gnome_to_frightened_and_paralyzed(self):
+        self.assertTrue(bot._racially_immune_to_condition({"race": "Halfling"}, "frightened"))
+        self.assertFalse(bot._racially_immune_to_condition({"race": "Halfling"}, "paralyzed"))
+        self.assertTrue(bot._racially_immune_to_condition({"race": "Gnome"}, "frightened"))
+        self.assertTrue(bot._racially_immune_to_condition({"race": "Gnome"}, "paralyzed"))
+        self.assertFalse(bot._racially_immune_to_condition({"race": "Human"}, "frightened"))
+
+    def test_racial_immunity_trait_name_matches_the_real_trait(self):
+        self.assertEqual(bot._racial_immunity_trait_name({"race": "Dwarf"}, "poisoned"), "Dwarven Resilience")
+        self.assertEqual(bot._racial_immunity_trait_name({"race": "Elf"}, "paralyzed"), "Fey Ancestry")
+        self.assertEqual(bot._racial_immunity_trait_name({"race": "Halfling"}, "frightened"), "Brave")
+        self.assertEqual(bot._racial_immunity_trait_name({"race": "Gnome"}, "frightened"), "Gnome Cunning")
+        self.assertEqual(bot._racial_immunity_trait_name({"race": "Gnome"}, "paralyzed"), "Gnome Cunning")
+
+    def test_halfling_lucky_rerolls_a_natural_1_on_ability_checks_and_attacks(self):
+        from unittest.mock import patch
+        from rules import dice
+        halfling = make_basic_character(996200, "LuckyHalfling", race="Halfling", current_location="crossroads_tavern")
+        human = make_basic_character(996201, "UnluckyHuman", race="Human", current_location="crossroads_tavern")
+        rolls = iter([1, 15])  # first roll a natural 1, the reroll lands on 15
+        with patch("rules.dice.random.randint", side_effect=lambda a, b: next(rolls)):
+            result = dice.roll_ability_check(halfling, "wisdom")
+        self.assertEqual(result["raw_roll"], 15, "a Halfling must reroll a natural 1 and use the new result")
+
+        rolls2 = iter([1, 1])  # natural 1, rerolled into another natural 1 -- 5E: still keep it
+        with patch("rules.dice.random.randint", side_effect=lambda a, b: next(rolls2)):
+            result2 = dice.roll_attack(halfling, target_ac=10, ability="strength")
+        self.assertEqual(result2["raw_roll"], 1)
+        self.assertTrue(result2["critical_fail"])
+
+        rolls3 = iter([1, 20])
+        with patch("rules.dice.random.randint", side_effect=lambda a, b: next(rolls3)):
+            result3 = dice.roll_ability_check(human, "wisdom")
+        self.assertEqual(result3["raw_roll"], 1, "a non-Halfling never gets the reroll")
+
+    def test_elf_trance_halves_real_rest_hours(self):
+        self.assertEqual(bot._race_rest_hours_divisor({"race": "Elf"}), 2.0)
+        self.assertEqual(bot._race_rest_hours_divisor({"race": "Human"}), 1.0)
+        elf = make_basic_character(996202, "TranceElf", race="Elf", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(996202, -999, hp_current=1, hp_max=100)
+        elf = db.get_character(996202, -999)
+        half_rest_seconds = (bot.NATURAL_HEALING_FULL_REST_HOURS / 2) * 3600
+        hp_healed, _ = bot._apply_natural_healing(996202, elf, half_rest_seconds)
+        self.assertEqual(hp_healed, 99, "an Elf should be FULLY healed in half the normal rest time")
+
+    def test_race_skill_bonuses_apply_once_and_never_double_with_class(self):
+        self.assertTrue(bot._race_proficient_in_skill("Elf", "wisdom"))
+        self.assertTrue(bot._race_proficient_in_skill("Half-Orc", "charisma"))
+        self.assertTrue(bot._race_proficient_in_skill("Dwarf", "intelligence"))
+        self.assertTrue(bot._race_proficient_in_skill("Half-Elf", "charisma"))
+        self.assertTrue(bot._race_proficient_in_skill("Half-Elf", "wisdom"))
+        self.assertFalse(bot._race_proficient_in_skill("Human", "wisdom"))
+        self.assertFalse(bot._race_proficient_in_skill("Elf", "charisma"))
+
+    async def test_do_check_ability_applies_race_skill_bonus_on_a_real_check(self):
+        """End-to-end via the real handler: an Elf's Keen Senses (wisdom) adds proficiency_bonus once, even though Fighter isn't wisdom-proficient by class."""
+        from unittest.mock import patch
+        elf_fighter = make_basic_character(
+            996203, "KeenElf", race="Elf", char_class="Fighter", current_location="crossroads_tavern",
+        )
+        with patch("bot.roll_ability_check", return_value={"raw_roll": 10, "modifier": 0, "proficiency": 0, "subclass_bonus": 0, "total": 10}), \
+             patch("bot.narrate_skill_check", return_value="flavor"):
+            sink = []
+            await bot._dispatch_intent(
+                FakeUpdate(996203, "check for traps", sink), DummyContext(),
+                {"action": "skill_check", "ability": "wisdom", "raw_text": "check for traps"}, "check for traps",
+            )
+        prof_bonus = db.get_character(996203, -999)["proficiency_bonus"]
+        self.assertTrue(any(f"={10 + prof_bonus}" in s or str(10 + prof_bonus) in s for s in sink), sink)
+
     # -- Dragonborn Breath Weapon (2026-07-16): races.py's own trait text
     #    called this "a real, usable action" but nothing ever implemented
     #    it. Real 5E damage scaling + a real combat action, gated to

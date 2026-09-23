@@ -2,6 +2,56 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.682] — real mechanics for 5 more racial traits (Halfling, Gnome, Elf, Dwarf, Half-Orc, Half-Elf)
+
+Real live follow-up (2026-09-23, Coffee: "are there any class abilities
+or race abilities or cantrips or spells that have not been done yet?").
+A full audit found class_features.py and spells.py (cantrips included)
+are already 100% wired to real mechanics — every remaining gap was in
+races.py, which had only ever gotten Dwarven Resilience/Fey Ancestry
+(v1.10.12) and Half-Orc's own traits wired up.
+
+**Halfling's Lucky** — rerolls a natural 1 on attack rolls, ability
+checks, and saving throws (real 5E: must use the new result even if
+it's also a 1). Implemented at the one real place a d20 lands
+(`rules.dice.roll_d20`), so every roll type gets it automatically;
+never applies in physical-dice mode, since a reported roll is the
+player's own real die.
+
+**Halfling's Brave** (immune to `frightened`) and **Gnome Cunning**
+(immune to both `frightened` and `paralyzed` — broader, matching real
+5E's "advantage on INT/WIS/CHA saves against magic") extend the
+existing `_racially_immune_to_condition` helper Dwarven Resilience/Fey
+Ancestry already used. `frightened` is a real, common on-hit condition
+(17 monster attacks in campaign.json use it), so this isn't cosmetic.
+
+**Elf's Trance** — meditating 4 hours gives the same benefit as 8
+hours of sleep for anyone else. This engine's rest curve is real
+wall-clock time, so unlike Warlock Pact Magic's slots-only carve-out,
+Trance genuinely halves the real-world time an Elf needs to fully
+recover HP, spell slots, AND limited-use features.
+
+**Racial skill bonuses** — Keen Senses (Elf → Perception), Menacing
+(Half-Orc → Intimidation), Stonecunning (Dwarf → History), and Skill
+Versatility (Half-Elf → 2 skills of choice, no selection UI so given a
+fixed flavor pair) adapted onto this engine's existing ability-based
+skill-check system (skill checks here are ability-based, not the 18
+named 5E skills — same simplification `CLASS_SKILL_ABILITIES` already
+uses). Never stacks with an already-proficient class ability.
+
+**Investigated, no fix needed:** the audit flagged
+`_racially_immune_to_condition`'s exclusion of spell-cast results as a
+theoretical gap (an immune character could still be affected by a
+monster's condition-inflicting spell). Verified against the real
+code: monster spellcasting (`_maybe_monster_cast_spell`/
+`_decide_monster_spell`) only ever casts damage-effect spells today —
+no monster can currently inflict a condition via a spell at all, so
+this exclusion never actually lets anything slip through in live play.
+Left as-is; worth revisiting if monster condition-spellcasting is ever
+added.
+
+6 new tests, all passing.
+
 ## [1.27.681] — real mechanics for Divine Sense (Paladin) and Druidic (Druid), Ranger spell-list fix
 
 Real live request (2026-09-23, Coffee: "what is next? any gaps?" —

@@ -30,7 +30,8 @@ def roll_percentage_check(chance_pct: float, forced_roll: float | None = None) -
     return value < chance_pct
 
 
-def roll_d20(advantage: bool = False, disadvantage: bool = False, forced_roll: int | None = None) -> int:
+def roll_d20(advantage: bool = False, disadvantage: bool = False, forced_roll: int | None = None,
+             lucky: bool = False) -> int:
     """
     Roll a d20, handling 5E advantage/disadvantage:
     - advantage: roll twice, take the higher
@@ -58,6 +59,15 @@ def roll_d20(advantage: bool = False, disadvantage: bool = False, forced_roll: i
     the player's own roll is always genuinely used, never discarded,
     exactly like a real second physical die would be if they'd had one
     on hand.
+
+    `lucky` (2026-09-23, real Halfling racial trait, previously pure
+    flavor text): real 5E Halfling Lucky rerolls a natural 1 on an
+    attack roll, ability check, or saving throw and must use the new
+    result. Applied here (the one real place a d20 lands) rather than
+    at each caller, so every roll type gets it for free. Never applies
+    in physical-dice mode -- a real reported roll is the player's own
+    physical die and this game never overrides that, same principle
+    manual-dice mode already follows elsewhere.
     """
     if forced_roll is not None:
         if advantage and not disadvantage:
@@ -66,12 +76,16 @@ def roll_d20(advantage: bool = False, disadvantage: bool = False, forced_roll: i
             return min(forced_roll, random.randint(1, 20))
         return forced_roll
     if advantage and disadvantage:
-        return random.randint(1, 20)
-    if advantage:
-        return max(random.randint(1, 20), random.randint(1, 20))
-    if disadvantage:
-        return min(random.randint(1, 20), random.randint(1, 20))
-    return random.randint(1, 20)
+        result = random.randint(1, 20)
+    elif advantage:
+        result = max(random.randint(1, 20), random.randint(1, 20))
+    elif disadvantage:
+        result = min(random.randint(1, 20), random.randint(1, 20))
+    else:
+        result = random.randint(1, 20)
+    if lucky and result == 1:
+        result = random.randint(1, 20)
+    return result
 
 
 def ability_modifier(score: int) -> int:
@@ -99,7 +113,8 @@ def roll_ability_check(character: dict, ability: str, proficient: bool = False,
     # checks, gathering, shoving) picks it up automatically, no
     # per-call-site wiring needed.
     subclass_bonus = utility_subclass_ability_check_bonus(character.get("subclass"), ability)
-    raw = roll_d20(advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll)
+    raw = roll_d20(advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll,
+                    lucky=character.get("race") == "Halfling")
     total = raw + mod + prof + subclass_bonus
     return {
         "raw_roll": raw,
@@ -128,7 +143,8 @@ def roll_attack(character: dict, target_ac: int, ability: str = "strength",
     score = character[ability.lower()]
     mod = ability_modifier(score)
     prof = character.get("proficiency_bonus", 0) if proficient else 0
-    raw = roll_d20(advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll)
+    raw = roll_d20(advantage=advantage, disadvantage=disadvantage, forced_roll=forced_roll,
+                    lucky=character.get("race") == "Halfling")
 
     critical_hit = raw == 20
     critical_fail = raw == 1
