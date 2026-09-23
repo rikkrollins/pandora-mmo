@@ -10990,6 +10990,80 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # pct=100, 20*2.0=40 at pct=200 -- an exact +20 delta.
         self.assertEqual(damage_at_200 - damage_at_100, 20)
 
+    # -- Individual weapon-type mastery (2026-09-23, per Coffee: "make
+    #    weapons profinciencys for idnv weapon types" + "do the things
+    #    for the dwarfs") -- a real, SEPARATE additive layer alongside
+    #    the existing category (simple/martial) grind above, plus real
+    #    Dwarven Combat Training. ------------------------------------
+
+    def test_weapon_type_of_reads_static_and_generated_items(self):
+        self.assertEqual(bot._weapon_type_of(items_module.get_item("stoneheart_warhammer")), "warhammer")
+        self.assertEqual(bot._weapon_type_of(items_module.get_item("rusty_dagger")), "dagger")
+        self.assertEqual(bot._weapon_type_of({"generated_base": "longsword", "type": "weapon"}), "longsword")
+        self.assertIsNone(bot._weapon_type_of(None))
+        self.assertIsNone(bot._weapon_type_of({"type": "armor"}))
+
+    def test_dwarven_combat_training_gives_a_real_head_start_only_for_its_own_4_weapon_types(self):
+        from unittest.mock import patch, MagicMock
+        dwarf = make_basic_character(996230, "TrainedDwarf", race="Dwarf", char_class="Fighter", current_location="crossroads_tavern")
+        human = make_basic_character(996231, "UntrainedHuman", race="Human", char_class="Fighter", current_location="crossroads_tavern")
+        mock_roll = MagicMock(return_value=True)
+        with patch("bot.roll_percentage_check", mock_roll):
+            bot._roll_weapon_type_proficiency(dwarf, "warhammer")
+            dwarf_warhammer_chance = mock_roll.call_args[0][0]
+            mock_roll.reset_mock()
+            bot._roll_weapon_type_proficiency(human, "warhammer")
+            human_warhammer_chance = mock_roll.call_args[0][0]
+            mock_roll.reset_mock()
+            bot._roll_weapon_type_proficiency(dwarf, "longsword")
+            dwarf_longsword_chance = mock_roll.call_args[0][0]
+        self.assertEqual(dwarf_warhammer_chance - human_warhammer_chance, bot.DWARVEN_COMBAT_TRAINING_BONUS_PCT,
+                          "a Dwarf gets a real, fixed head start specifically on its own trained weapon types")
+        self.assertEqual(dwarf_longsword_chance, human_warhammer_chance,
+                          "the Dwarf bonus must never leak onto a weapon type outside its real 4")
+
+    async def test_weapon_type_mastery_procs_as_a_real_separate_layer_from_category_mastery(self):
+        """
+        End-to-end via the real _do_attack handler: with both rolls
+        forced true, a hit should show BOTH the category "Weapon
+        mastery!" line AND the new per-type mastery line -- proof this
+        is a genuinely additive second layer, not a replacement for the
+        existing category system.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        user_id = 996232
+        make_basic_character(user_id, "TypeMasteryTester", char_class="Fighter", current_location="crossroads_tavern", inventory={"rusty_dagger": 1})
+        db.equip_item(user_id, -999, "rusty_dagger")
+        enemy_id = -996232
+        enemy = {"telegram_user_id": enemy_id, "name": "TypeMasteryDummy", "dexterity": 10, "strength": 10,
+                 "armor_class": 1, "hp_current": 100000, "hp_max": 100000, "is_ai": 1, "monster_key": "goblin"}
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", enemy_id: "enemy"})
+        session.turn_order = [user_id, enemy_id]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.roll_percentage_check", return_value=True), \
+             patch("bot.roll_damage", return_value={"total": 20}), \
+             patch("rules.combat.roll_damage", return_value={"total": 20}), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            await bot._do_attack(FakeUpdate(user_id, "attack the dummy", sink), "attack the dummy", forced_roll=20)
+            await _drain_narration_queue()
+        sessions.end_session(-999)
+        self.assertTrue(any("Weapon mastery!" in s for s in sink), sink)
+        self.assertTrue(any("Dagger mastery!" in s for s in sink), sink)
+
+    def test_character_sheet_shows_individual_weapon_type_mastery(self):
+        character = make_basic_character(996233, "TypeSheetTester", current_location="crossroads_tavern")
+        db.update_character(996233, -999, weapon_type_proficiency_pct={"warhammer": 42.0})
+        character = db.get_character(996233, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("⚔️ Weapons: Warhammer 42%", sheet)
+
     async def test_armor_mastery_overflow_scales_the_damage_reduction(self):
         """
         Same rule as weapon mastery above, defender's side. Armor

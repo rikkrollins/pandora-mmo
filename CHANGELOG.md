@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.685] — real individual weapon-type mastery, plus Dwarven Combat Training
+
+Real live request (2026-09-23, Coffee: "make weapons profinciencys for
+idnv weapon types" + "do the things for the dwarfs" — Dwarven Combat
+Training was flagged in the earlier race-trait audit as "not cleanly
+adaptable without inventing a new sub-system," but Coffee asked for it
+anyway once told what it'd take).
+
+**Individual weapon-type mastery**: a genuinely SEPARATE, additive
+grind layer alongside the existing weapon_proficiency_pct category
+system (simple/martial) — never a replacement, since replacing it
+would have silently discarded every real live player's already-earned
+category mastery. New `weapon_type_proficiency_pct` (same dict-of-
+percentages shape, keyed by the weapon's own specific type — dagger,
+shortsword, longsword, greataxe, longbow, rapier, warhammer — instead
+of its broad category), grinding and proc'ing its own independent
+"mastery strike" bonus damage the same way category mastery already
+does. A hit can proc BOTH bonuses at once. Items now carry a real
+`weapon_type` field (generated/forged weapons already carried the
+exact same data as `generated_base` — reused directly, no generator
+changes needed).
+
+Found and fixed a real wiring gap while building this: `_weapon_for_
+attacker` (the function that turns an equipped item into the dict
+combat actually reads) hand-copies specific fields and was missing
+`weapon_type`/`generated_base` entirely — the exact same shape of gap
+its own comment already flagged once for `two_handed`/`ranged`
+(Fighting Style). Without this fix the new mastery layer would never
+have fired for a real equipped weapon, only in a synthetic test.
+
+**Dwarven Combat Training** (real 5E, previously pure flavor text):
+Dwarves get a real, computed-live +25% head start specifically on
+battleaxe/handaxe/light hammer/warhammer's own mastery grind — computed
+at roll time, never written to a character's stored data, so no
+existing Dwarf ever needs a data migration.
+
+Character sheet: individual weapon-type entries show in the same
+"⚔️ Weapons" section as category mastery already did — no separate
+section, no formatter changes needed (`_format_proficiency_line`
+already reads whatever keys exist).
+
+4 new tests, all passing.
+
 ## [1.27.684] — fix: character sheet only showed 6 of 15 real limited-use features
 
 Real follow-up (2026-09-23, Coffee: "check all character sheets for

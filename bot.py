@@ -208,6 +208,14 @@ def _weapon_for_attacker(attacker: dict) -> dict:
                 # items.py dict directly, as a synthetic test would.
                 "two_handed": item.get("two_handed", False),
                 "ranged": item.get("ranged", False),
+                # weapon_type/generated_base (2026-09-23, individual
+                # weapon-type mastery): same "without this, the real
+                # feature never fires for an actually-equipped weapon"
+                # gap the two_handed/ranged comment above already
+                # describes -- _weapon_type_of reads these two field
+                # names, neither of which this hand-built dict carried.
+                "weapon_type": item.get("weapon_type"),
+                "generated_base": item.get("generated_base"),
             }
     # Monster/echo natural attack (2026-07-26, monster/area rebalance):
     # every monster template used to deal DEFAULT_WEAPON's flat 1d8
@@ -636,6 +644,57 @@ def _roll_weapon_proficiency(character: dict, weapon_category: str) -> bool:
     stored = stored_dict.get(weapon_category, PROFICIENCY_STARTING_PCT)
     chance = min(stored + _equipped_proficiency_bonus(character, "weapon", weapon_category), PROFICIENCY_MAX_PCT)
     _grind_dict_proficiency(character["telegram_user_id"], character["chat_id"], "weapon_proficiency_pct", stored_dict, weapon_category)
+    return roll_percentage_check(chance)
+
+
+# Dwarven Combat Training (real 5E, 2026-09-23, per Coffee: "make
+# weapons profinciencys for idnv weapon types" + "do the things for
+# the dwarfs"): real 5E just grants flat proficiency with these 4
+# weapons, no equivalent "already trained" concept exists in this
+# engine's mastery-grind model -- adapted as a real, computed-live head
+# start on the SAME per-weapon-type % grind every character can earn
+# through use, rather than a separate binary flag. Computed live
+# (never written to the character row) so no existing Dwarf's stored
+# data ever needs a migration -- same principle _racially_immune_to_
+# condition and _race_rest_hours_divisor already follow.
+DWARVEN_COMBAT_TRAINING_WEAPON_TYPES = {"battleaxe", "handaxe", "light_hammer", "warhammer"}
+DWARVEN_COMBAT_TRAINING_BONUS_PCT = 25.0
+
+
+def _weapon_type_of(weapon: dict | None) -> str | None:
+    """
+    The real, specific weapon this item represents (dagger/shortsword/
+    longsword/greataxe/longbow/rapier/warhammer/...), for the NEW
+    individual-weapon-type mastery grind -- distinct from weapon_
+    category (simple/martial), which is unaffected by any of this.
+    Static catalog items carry their own "weapon_type" field; anything
+    from rules/item_generator.py already carries "generated_base" (the
+    exact same real weapon-type vocabulary, added back in task #223) --
+    reused directly rather than duplicating that data a second way.
+    """
+    if not weapon:
+        return None
+    return weapon.get("weapon_type") or weapon.get("generated_base")
+
+
+def _roll_weapon_type_proficiency(character: dict, weapon_type: str) -> bool:
+    """
+    Individual weapon-type mastery (2026-09-23, per Coffee: "make
+    weapons profinciencys for idnv weapon types") -- a genuinely
+    SEPARATE, additive layer alongside _roll_weapon_proficiency's
+    existing category grind, same dict-of-percentages shape, keyed by
+    weapon_type instead of weapon_category. Deliberately additive, not
+    a replacement: switching the category system's own stored keys
+    would have silently discarded every real live player's already-
+    earned category mastery.
+    """
+    stored_dict = character.get("weapon_type_proficiency_pct", {})
+    stored = stored_dict.get(weapon_type, PROFICIENCY_STARTING_PCT)
+    racial_bonus = DWARVEN_COMBAT_TRAINING_BONUS_PCT if (
+        character.get("race") == "Dwarf" and weapon_type in DWARVEN_COMBAT_TRAINING_WEAPON_TYPES
+    ) else 0.0
+    chance = min(stored + racial_bonus, PROFICIENCY_MAX_PCT)
+    _grind_dict_proficiency(character["telegram_user_id"], character["chat_id"], "weapon_type_proficiency_pct", stored_dict, weapon_type)
     return roll_percentage_check(chance)
 
 
@@ -13768,6 +13827,25 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                 result["damage_dealt"] += mastery_strike_dmg
                 target["hp_current"], _warded = _apply_damage_with_death_ward(target, mastery_strike_dmg)
                 result["defender_hp_remaining"] = target["hp_current"]
+
+            # Individual weapon-type mastery (2026-09-23, per Coffee:
+            # "make weapons profinciencys for idnv weapon types") -- a
+            # real, SEPARATE mastery-strike roll on top of the category
+            # one above, same shape, keyed by the weapon's own specific
+            # type (dagger/longsword/warhammer/etc.) rather than its
+            # broad simple/martial category. A character can proc BOTH
+            # in the same hit -- this is a genuinely additional layer,
+            # not a replacement.
+            weapon_type_strike_dmg = 0
+            weapon_type_used = _weapon_type_of(weapon_used)
+            if result["hit"] and attacker.get("char_class") and weapon_type_used and _roll_weapon_type_proficiency(attacker, weapon_type_used):
+                weapon_type_strike_dmg = roll_damage(weapon_used["damage_dice"], modifier=weapon_used.get("damage_bonus", 0))["total"]
+                weapon_type_strike_dmg = apply_damage_type_modifier(weapon_type_strike_dmg, weapon_used.get("damage_type", "physical"), target, attacker)
+                weapon_type_pct = attacker.get("weapon_type_proficiency_pct", {}).get(weapon_type_used, PROFICIENCY_STARTING_PCT)
+                weapon_type_strike_dmg = int(weapon_type_strike_dmg * _mastery_overflow_multiplier(weapon_type_pct))
+                result["damage_dealt"] += weapon_type_strike_dmg
+                target["hp_current"], _warded = _apply_damage_with_death_ward(target, weapon_type_strike_dmg)
+                result["defender_hp_remaining"] = target["hp_current"]
             _maybe_apply_weapon_element_mastery(attacker, target, weapon_used, result)
 
             # General armor mastery -- same shape, defender's side: a
@@ -13850,6 +13928,13 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             await _maybe_summon_minions(update, session, target)
             if mastery_strike_dmg:
                 await _safe_send(update, f"🗡️ **Weapon mastery!** {attacker['name']}'s practice pays off — **+{mastery_strike_dmg} bonus damage!**")
+            if weapon_type_strike_dmg:
+                weapon_type_label = weapon_type_used.replace("_", " ").capitalize()
+                await _safe_send(
+                    update,
+                    f"🗡️ **{weapon_type_label} mastery!** {attacker['name']}'s real skill with this exact "
+                    f"weapon shows — **+{weapon_type_strike_dmg} bonus damage!**",
+                )
             if armor_mastery_reduction:
                 await _safe_send(update, f"🛡️ **Armor mastery!** {target['name']}'s training softens the blow — **-{armor_mastery_reduction} damage taken.**")
             attack_label = (
@@ -22410,6 +22495,14 @@ def _format_proficiency_line(character: dict) -> str:
     ]
     weapons, armor, professions, magic, combat, summoning = (g[2] for g in groups)
     for key, pct in sorted((character.get("weapon_proficiency_pct") or {}).items()):
+        if pct > PROFICIENCY_STARTING_PCT:
+            weapons.append((key.replace("_", " ").capitalize(), pct))
+    # Individual weapon-type mastery (2026-09-23) -- folded into the
+    # SAME "Weapons" bucket as the category grind right above, not a
+    # new bucket of its own: both are real weapon proficiency, just at
+    # two different granularities, and a player asking "where's my
+    # weapon mastery" shouldn't have to check two different sections.
+    for key, pct in sorted((character.get("weapon_type_proficiency_pct") or {}).items()):
         if pct > PROFICIENCY_STARTING_PCT:
             weapons.append((key.replace("_", " ").capitalize(), pct))
     for key, pct in sorted((character.get("armor_proficiency_pct") or {}).items()):

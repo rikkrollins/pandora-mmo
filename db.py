@@ -734,6 +734,17 @@ def init_db() -> None:
         # not a category).
         if "weapon_proficiency_pct" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN weapon_proficiency_pct TEXT NOT NULL DEFAULT '{}'")
+        # Individual weapon-type mastery (2026-09-23, per Coffee: "make
+        # weapons proficiencys for indv weapon types" -- a genuinely
+        # separate, additive layer alongside weapon_proficiency_pct's
+        # existing category (simple/martial) grind, not a replacement --
+        # switching the CATEGORY system's own keys would have discarded
+        # every real live player's already-earned progress there. Same
+        # dict-of-percentages shape, keyed by items.py's own new
+        # weapon_type field (dagger/shortsword/longsword/greataxe/
+        # longbow/rapier/warhammer) instead of weapon_category.
+        if "weapon_type_proficiency_pct" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN weapon_type_proficiency_pct TEXT NOT NULL DEFAULT '{}'")
         if "armor_proficiency_pct" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN armor_proficiency_pct TEXT NOT NULL DEFAULT '{}'")
         if "backstab_proficiency_pct" not in columns:
@@ -1323,6 +1334,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["map_revealed_locations"] = json.loads(d["map_revealed_locations"])
     d["skill_tree_upgrades"] = json.loads(d["skill_tree_upgrades"])
     d["weapon_proficiency_pct"] = json.loads(d["weapon_proficiency_pct"])
+    d["weapon_type_proficiency_pct"] = json.loads(d["weapon_type_proficiency_pct"])
     d["armor_proficiency_pct"] = json.loads(d["armor_proficiency_pct"])
     d["profession_mastery_pct"] = json.loads(d["profession_mastery_pct"])
     d["guild_curriculum_state"] = json.loads(d["guild_curriculum_state"])
@@ -1470,7 +1482,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "weapon_type_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1514,7 +1526,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "weapon_type_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])

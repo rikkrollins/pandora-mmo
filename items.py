@@ -27,31 +27,31 @@ ITEMS = {
     "rusty_dagger": {
         "name": "Rusty Dagger", "type": "weapon", "rarity": "common",
         "price": 2, "weight": 1, "damage_dice": "1d4", "ability": "dexterity",
-        "weapon_category": "simple", "damage_type": "physical",
+        "weapon_category": "simple", "weapon_type": "dagger", "damage_type": "physical",
         "description": "Deals 1d4 physical damage. Pitted along the blade, the edge still holds well enough to do the job.",
     },
     "shortsword": {
         "name": "Shortsword", "type": "weapon", "rarity": "common",
         "price": 10, "weight": 2, "damage_dice": "1d6", "ability": "dexterity",
-        "weapon_category": "simple", "damage_type": "physical",
+        "weapon_category": "simple", "weapon_type": "shortsword", "damage_type": "physical",
         "description": "Deals 1d6 physical damage. A plain, honest blade — nothing about it stands out, and nothing about it fails you.",
     },
     "longsword": {
         "name": "Longsword", "type": "weapon", "rarity": "common",
         "price": 15, "weight": 3, "damage_dice": "1d8", "ability": "strength",
-        "weapon_category": "martial", "damage_type": "physical",
+        "weapon_category": "martial", "weapon_type": "longsword", "damage_type": "physical",
         "description": "Deals 1d8 physical damage. Well-balanced steel, the kind every armory keeps in stock because it never stops selling.",
     },
     "greataxe": {
         "name": "Greataxe", "type": "weapon", "rarity": "common",
         "price": 30, "weight": 7, "damage_dice": "1d12", "ability": "strength",
-        "weapon_category": "martial", "damage_type": "physical", "two_handed": True,
+        "weapon_category": "martial", "weapon_type": "greataxe", "damage_type": "physical", "two_handed": True,
         "description": "Deals 1d12 physical damage. Heavy enough that swinging it wrong would hurt you as much as anything else.",
     },
     "longbow": {
         "name": "Longbow", "type": "weapon", "rarity": "common",
         "price": 50, "weight": 2, "damage_dice": "1d8", "ability": "dexterity",
-        "weapon_category": "martial", "damage_type": "physical", "ranged": True,
+        "weapon_category": "martial", "weapon_type": "longbow", "damage_type": "physical", "ranged": True,
         "description": "Deals 1d8 physical damage. Strung tight, the wood still flexes like it was cut yesterday.",
     },
     "silvered_dagger": {
@@ -59,21 +59,21 @@ ITEMS = {
         "price": 75, "weight": 1, "damage_dice": "1d4+1", "ability": "dexterity",
         "note": "Effective against creatures vulnerable to silver.",
         "description": "Deals 1d4+1 silver damage. Effective against creatures vulnerable to silver.",
-        "weapon_category": "simple", "damage_type": "silver",
+        "weapon_category": "simple", "weapon_type": "dagger", "damage_type": "silver",
     },
     "flametongue_shortsword": {
         "name": "Flametongue Shortsword", "type": "weapon", "rarity": "rare",
         "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
         "note": "Warm to the touch. Wreathes itself in fire when drawn in anger.",
         "description": "Deals 1d6+2 fire damage. Warm to the touch. Wreathes itself in fire when drawn in anger.",
-        "weapon_category": "martial", "damage_type": "fire",
+        "weapon_category": "martial", "weapon_type": "shortsword", "damage_type": "fire",
     },
     "the_last_word": {
         "name": "The Last Word", "type": "weapon", "rarity": "legendary",
         "price": 0, "weight": 3, "damage_dice": "2d8+3", "ability": "strength",
         "note": "The carving stops repeating itself the instant your hand closes around the hilt.",
         "description": "Deals 2d8+3 physical damage. The carving stops repeating itself the instant your hand closes around the hilt.",
-        "weapon_category": "martial", "damage_type": "physical", "two_handed": True,
+        "weapon_category": "martial", "weapon_type": "longsword", "damage_type": "physical", "two_handed": True,
     },
     # Elemental Foundations (2026-08-30): before this, flametongue_
     # shortsword (fire) was the ONLY elemental weapon in the entire
@@ -85,14 +85,14 @@ ITEMS = {
         "price": 0, "weight": 5, "damage_dice": "1d8+2", "ability": "strength",
         "note": "Heavier than its size should allow. The head never chips, no matter what it strikes.",
         "description": "Deals 1d8+2 earth damage. Heavier than its size should allow. The head never chips, no matter what it strikes.",
-        "weapon_category": "martial", "damage_type": "earth",
+        "weapon_category": "martial", "weapon_type": "warhammer", "damage_type": "earth",
     },
     "stormcaller_rapier": {
         "name": "Stormcaller Rapier", "type": "weapon", "rarity": "rare",
         "price": 0, "weight": 2, "damage_dice": "1d6+2", "ability": "dexterity",
         "note": "A faint crackle follows every thrust, half a second behind the blade.",
         "description": "Deals 1d6+2 lightning damage. A faint crackle follows every thrust, half a second behind the blade.",
-        "weapon_category": "martial", "damage_type": "lightning",
+        "weapon_category": "martial", "weapon_type": "rapier", "damage_type": "lightning",
     },
 
     # --- Armor & Shields ---
