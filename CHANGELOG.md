@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.684] — fix: character sheet only showed 6 of 15 real limited-use features
+
+Real follow-up (2026-09-23, Coffee: "check all character sheets for
+any gaps"). `_feature_use_status` (the sheet's "remaining uses this
+rest" line) only ever covered Second Wind, Rage, Bardic Inspiration,
+Lay on Hands, Arcane Recovery, and Wild Shape — a grep across every
+real `db.use_feature`/`get_feature_uses` call site found 15 real
+tracked features total. Divine Sense (this SESSION's own new feature,
+v1.27.681) was already missing from its own sheet the moment it
+shipped. Now also shows: Action Surge (Fighter 2+), Channel Divinity
+(Cleric 2+), Divine Sense (Paladin), Ki (Monk 2+), Empowered Spell
+(Sorcerer 3+), Eldritch Smite (Warlock 2+), Relentless Endurance
+(Half-Orc, any class), and Breath Weapon (Dragonborn, any class) —
+the last two are racial, not class-keyed, so the function now checks
+both independently (a Half-Orc Paladin correctly sees Lay on Hands,
+Divine Sense, AND Relentless Endurance together).
+
+6 new tests, all passing.
+
 ## [1.27.683] — fix: NPC dialogue could reply with a bare "..."
 
 Real live bug (2026-09-23, dev-bridge screenshot, Coffee: "Is this

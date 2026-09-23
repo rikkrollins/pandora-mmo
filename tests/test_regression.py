@@ -30767,6 +30767,76 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sheet = bot._format_character_sheet(character)
         self.assertNotIn("Proficiencies", sheet)
 
+    # -- Character sheet feature-use gap audit (2026-09-23, per Coffee:
+    #    "check all character sheets for any gaps"). _feature_use_status
+    #    only ever covered 6 of the real 15 feature_uses keys this game
+    #    tracks -- Divine Sense (this session's OWN new feature) was
+    #    already missing from its own sheet the moment it shipped. ------
+
+    def test_feature_use_status_covers_every_real_tracked_feature(self):
+        paladin = make_basic_character(996210, "GapPaladin", char_class="Paladin")
+        db.update_character(996210, -999, level=5, charisma=14)
+        paladin = db.get_character(996210, -999)
+        status = bot._feature_use_status(paladin)
+        self.assertIn("Lay on Hands: 1/1", status)
+        self.assertIn("Divine Sense: 3/3", status, "1 + CHA mod (14 -> +2) = 3, not the old flat 1/1")
+
+        cleric = make_basic_character(996211, "GapCleric", char_class="Cleric")
+        db.update_character(996211, -999, level=2)
+        cleric = db.get_character(996211, -999)
+        self.assertIn("Channel Divinity: 1/1", bot._feature_use_status(cleric))
+
+        fighter = make_basic_character(996212, "GapFighter", char_class="Fighter")
+        db.update_character(996212, -999, level=2)
+        fighter = db.get_character(996212, -999)
+        fighter_status = bot._feature_use_status(fighter)
+        self.assertIn("Second Wind: 1/1", fighter_status)
+        self.assertIn("Action Surge: 1/1", fighter_status)
+
+        low_level_fighter = make_basic_character(996213, "LowFighter", char_class="Fighter")
+        self.assertNotIn("Action Surge", bot._feature_use_status(low_level_fighter), "Action Surge is level 2+")
+
+        monk = make_basic_character(996214, "GapMonk", char_class="Monk")
+        db.update_character(996214, -999, level=4)
+        monk = db.get_character(996214, -999)
+        self.assertIn("Ki: 4/4", bot._feature_use_status(monk))
+
+        sorcerer = make_basic_character(996215, "GapSorcerer", char_class="Sorcerer")
+        db.update_character(996215, -999, level=3)
+        sorcerer = db.get_character(996215, -999)
+        self.assertIn("Empowered Spell: 1/1", bot._feature_use_status(sorcerer))
+
+        warlock = make_basic_character(996216, "GapWarlock", char_class="Warlock")
+        db.update_character(996216, -999, level=2)
+        warlock = db.get_character(996216, -999)
+        self.assertIn("Eldritch Smite: 1/1", bot._feature_use_status(warlock))
+
+    def test_feature_use_status_covers_racial_features_regardless_of_class(self):
+        half_orc = make_basic_character(996217, "GapHalfOrc", race="Half-Orc", char_class="Wizard")
+        self.assertIn("Relentless Endurance: 1/1", bot._feature_use_status(half_orc))
+
+        dragonborn = make_basic_character(996218, "GapDragonborn", race="Dragonborn", char_class="Rogue")
+        self.assertIn("Breath Weapon: 1/1", bot._feature_use_status(dragonborn))
+
+    def test_feature_use_status_shows_both_class_and_race_features_together(self):
+        half_orc_paladin = make_basic_character(996219, "BothGaps", race="Half-Orc", char_class="Paladin")
+        status = bot._feature_use_status(half_orc_paladin)
+        self.assertIn("Lay on Hands", status)
+        self.assertIn("Divine Sense", status)
+        self.assertIn("Relentless Endurance", status)
+
+    def test_feature_use_status_still_none_for_a_class_and_race_with_nothing_trackable(self):
+        rogue = make_basic_character(996220, "NoGaps", race="Human", char_class="Rogue")
+        self.assertIsNone(bot._feature_use_status(rogue))
+
+    async def test_divine_sense_shows_on_the_real_character_sheet(self):
+        """End-to-end via the real handler: Divine Sense's remaining uses actually reach the sheet a player checks."""
+        character = make_basic_character(996221, "SheetPaladin", char_class="Paladin")
+        db.update_character(996221, -999, charisma=10)
+        character = db.get_character(996221, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("Divine Sense: 1/1", sheet)
+
     def test_character_sheet_proficiencies_grouped_by_real_category_on_separate_lines(self):
         """
         Real live report (2026-09-03, Coffee, dev-bridge screenshot of

@@ -22200,36 +22200,65 @@ async def _do_set_formation_row(update: Update, target_name: str, row: str) -> N
 
 def _feature_use_status(character: dict) -> str | None:
     """
-    One line summarizing a character's per-rest limited-use class
-    feature and how many uses remain, for the character sheet -- so a
-    player can check before trying it, rather than only finding out via
-    an "already used" reply when they attempt the command. Returns None
-    for classes with no trackable per-rest feature (Rogue's Sneak
-    Attack and Warlock's Pact Magic are both automatic, no uses to
-    track; everything else not yet made mechanical has no state here).
+    One line per real per-rest limited-use feature this character has
+    (class AND race -- a character can genuinely have both, e.g. a
+    Half-Orc Paladin has Lay on Hands, Divine Sense, AND Relentless
+    Endurance all at once), for the character sheet -- so a player can
+    check before trying it, rather than only finding out via an
+    "already used" reply when they attempt the command. Returns None
+    when nothing trackable applies at all (Rogue's Sneak Attack and
+    Warlock's Pact Magic are both automatic, no uses to track).
+
+    2026-09-23 (real live gap found doing a full character-sheet audit,
+    per Coffee: "check all character sheets for any gaps"): this only
+    ever covered 6 of the real 15 feature_uses keys this game actually
+    tracks (confirmed by grep across every db.use_feature/get_feature_
+    uses call site) -- Action Surge, Channel Divinity, Divine Sense
+    (this session's own new feature -- added and immediately missing
+    from its own sheet), Ki, Empowered Spell, Eldritch Smite, Relentless
+    Endurance, and Breath Weapon were all real and grinding/spending a
+    real resource with zero visibility on the one screen a player
+    checks to plan around it.
     """
     telegram_user_id = character["telegram_user_id"]
+    chat_id = character["chat_id"]
     char_class = character["char_class"]
+    level = character.get("level", 1)
+    lines = []
+
+    def add(label: str, feature_key: str, max_uses: int) -> None:
+        used = db.get_feature_uses(telegram_user_id, chat_id, feature_key)
+        lines.append(f"{label}: {max(0, max_uses - used)}/{max_uses} use(s) remaining this rest")
+
     if char_class == "Fighter":
-        used = db.get_feature_uses(telegram_user_id, character["chat_id"], "second_wind")
-        return f"Second Wind: {max(0, 1 - used)}/1 use(s) remaining this rest"
+        add("Second Wind", "second_wind", 1)
+        if level >= 2:
+            add("Action Surge", "action_surge", 1)
     if char_class == "Barbarian":
-        used = db.get_feature_uses(telegram_user_id, character["chat_id"], "rage")
-        return f"Rage: {max(0, RAGE_MAX_USES - used)}/{RAGE_MAX_USES} use(s) remaining this rest"
+        add("Rage", "rage", RAGE_MAX_USES)
     if char_class == "Bard":
-        max_uses = max(1, ability_modifier(character["charisma"]))
-        used = db.get_feature_uses(telegram_user_id, character["chat_id"], "bardic_inspiration")
-        return f"Bardic Inspiration: {max(0, max_uses - used)}/{max_uses} use(s) remaining this rest"
+        add("Bardic Inspiration", "bardic_inspiration", max(1, ability_modifier(character["charisma"])))
     if char_class == "Paladin":
-        used = db.get_feature_uses(telegram_user_id, character["chat_id"], "lay_on_hands")
-        return f"Lay on Hands: {max(0, 1 - used)}/1 use(s) remaining this rest"
+        add("Lay on Hands", "lay_on_hands", 1)
+        add("Divine Sense", "divine_sense", max(1, 1 + ability_modifier(character["charisma"])))
     if char_class == "Wizard":
-        used = db.get_feature_uses(telegram_user_id, character["chat_id"], "arcane_recovery")
-        return f"Arcane Recovery: {max(0, 1 - used)}/1 use(s) remaining this rest"
+        add("Arcane Recovery", "arcane_recovery", 1)
     if char_class == "Druid":
-        used = db.get_feature_uses(telegram_user_id, character["chat_id"], "wild_shape")
-        return f"Wild Shape: {max(0, WILD_SHAPE_MAX_USES - used)}/{WILD_SHAPE_MAX_USES} use(s) remaining this rest"
-    return None
+        add("Wild Shape", "wild_shape", WILD_SHAPE_MAX_USES)
+    if char_class == "Cleric" and level >= 2:
+        add("Channel Divinity", "channel_divinity", 1)
+    if char_class == "Monk" and level >= 2:
+        add("Ki", "ki", level + 2 * _skill_points(character, "iron_will"))
+    if char_class == "Sorcerer" and level >= 3:
+        add("Empowered Spell", "empowered_spell", EMPOWERED_SPELL_MAX_USES)
+    if char_class == "Warlock" and level >= 2:
+        add("Eldritch Smite", "eldritch_smite", 1)
+    if character.get("race") == "Half-Orc":
+        add("Relentless Endurance", "relentless_endurance", 1)
+    if character.get("race") == "Dragonborn":
+        add("Breath Weapon", "breath_weapon", 1)
+
+    return "\n".join(lines) if lines else None
 
 
 def _find_campaign_npc_by_name(name: str) -> dict | None:
