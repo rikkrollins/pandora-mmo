@@ -6224,6 +6224,89 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("I channel divinity", "I turn undead", "turn the undead", "channel divinity"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "channel_divinity", text)
 
+    async def test_divine_sense_rejects_non_paladin(self):
+        """
+        Real Paladin class feature (2026-09-23, found by a full
+        cantrip/class-feature audit): "Divine Sense: action, detect
+        celestials/fiends/undead within 60 ft" was pure display text in
+        class_features.py with zero mechanical hook -- the one Paladin
+        level-1 feature with nothing behind it at all, unlike Lay on
+        Hands/Channel Divinity right next to it.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900550
+        make_basic_character(user_id, "Plainfolk2", char_class="Fighter")
+        sink = []
+        await bot._do_divine_sense(FakeUpdate(user_id, "divine sense", sink))
+        self.assertTrue(any("doesn't have it" in m for m in sink))
+
+    async def test_divine_sense_out_of_combat_detects_a_real_undead_at_the_location(self):
+        """Works outside combat too (real 5E has no combat-only restriction) -- reads the location's own real `monsters` list, same data the arrival "you sense danger here" flavor already uses."""
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900551
+        make_basic_character(user_id, "Templar", char_class="Paladin", current_location="crossroads_tavern")
+        # cl.get_location returns a fresh shallow COPY every call (see
+        # its own real implementation) -- mutating that copy's own
+        # "monsters" key never touches the underlying bot.CAMPAIGN data
+        # _do_divine_sense will separately re-fetch, so the real
+        # in-place location dict must be found and mutated directly.
+        real_location = next(
+            layer["crossroads_tavern"] for layer in bot.CAMPAIGN["locations"].values() if "crossroads_tavern" in layer
+        )
+        original_monsters = list(real_location.get("monsters", []))
+        real_location["monsters"] = original_monsters + ["shadow_wisp"]
+        try:
+            sink = []
+            await bot._do_divine_sense(FakeUpdate(user_id, "use divine sense", sink))
+            self.assertTrue(any("Shadow Wisp" in m for m in sink), sink)
+        finally:
+            real_location["monsters"] = original_monsters
+
+    async def test_divine_sense_reports_nothing_when_no_undead_present(self):
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900552
+        make_basic_character(user_id, "Templar2", char_class="Paladin", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_divine_sense(FakeUpdate(user_id, "divine sense", sink))
+        self.assertTrue(any("feels nothing" in m for m in sink), sink)
+
+    async def test_divine_sense_detects_undead_in_combat_and_respects_cha_based_uses_per_rest(self):
+        """1 + CHA modifier uses per rest (real 5E), not a flat once-per-rest like Lay on Hands."""
+        import sessions
+        sessions.end_session(-999)
+        user_id = 900553
+        make_basic_character(
+            user_id, "Templar3", char_class="Paladin", current_location="crossroads_tavern",
+            ability_scores={"strength": 15, "dexterity": 10, "constitution": 13,
+                             "intelligence": 10, "wisdom": 10, "charisma": 14},  # +2 CHA mod -> 3 uses/rest
+        )
+        undead_id = -2_500_050
+        undead = {
+            "telegram_user_id": undead_id, "name": "Ash Wraith", "dexterity": 16,
+            "hp_current": 260, "monster_key": "ash_wraith",
+        }
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        sessions.start_session(-999, [player, undead], {undead_id: "enemy", user_id: "party"})
+
+        for i in range(3):
+            sink = []
+            await bot._do_divine_sense(FakeUpdate(user_id, "divine sense", sink))
+            self.assertTrue(any("Ash Wraith" in m for m in sink), (i, sink))
+        self.assertEqual(db.get_feature_uses(user_id, -999, "divine_sense"), 3)
+
+        sink4 = []
+        await bot._do_divine_sense(FakeUpdate(user_id, "divine sense", sink4))
+        self.assertTrue(any("already used Divine Sense 3/3" in m for m in sink4), sink4)
+        sessions.end_session(-999)
+
+    def test_divine_sense_phrasing_classified_correctly(self):
+        for text in ("I use divine sense", "divine sense", "sense evil", "sense undead"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "divine_sense", text)
+
     # -- Gathering tools (2026-07-16, per Coffee): fishing needs a
     #    fishing pole + bait, lumberjacking needs an axe, mining needs a
     #    pickaxe -- herbalism needs no tool at all, but owning Shears
@@ -40403,6 +40486,84 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(bot._thieves_cant_grounding_block(996170, -999, character, "grimsby"))  # not a Rogue NPC
         bot.setup_default_npcs()
         self.assertIsNone(bot._thieves_cant_grounding_block(996170, -999, character, "fen_larkspur"))  # no glyph visited yet
+
+    # -- Druidic (2026-09-23, per Coffee: "Yes, both" -- same treatment
+    # as Thieves' Cant, for the Druid's own class feature) ---------------
+
+    def test_knows_druidic_predicate(self):
+        druid = make_basic_character(996180, "DruidicTester", char_class="Druid", current_location="crossroads_tavern")
+        non_druid = make_basic_character(996181, "NonDruidicTester", char_class="Fighter", current_location="crossroads_tavern")
+        self.assertTrue(bot._knows_druidic(druid))
+        self.assertFalse(bot._knows_druidic(non_druid))
+        self.assertTrue(bot._npc_knows_druidic("wren_hollowbrook"))
+        self.assertFalse(bot._npc_knows_druidic("grimsby"))
+
+    async def test_do_examine_reveals_druidic_secret_only_for_a_druid(self):
+        """The bonus nature-marking secret line is real, literal, non-AI text -- shown to a Druid examining a real marking, never to any other class."""
+        from unittest.mock import patch
+        druid = make_basic_character(996182, "RingDruid", char_class="Druid", current_location="hollow_stump_shrine")
+        non_druid = make_basic_character(996183, "RingFighter", char_class="Fighter", current_location="hollow_stump_shrine")
+        with patch("bot.narrate_examine", return_value="Just old wood."):
+            sink_druid = []
+            await bot._do_examine(FakeUpdate(996182, "examine the growth rings", sink_druid), "the growth rings")
+            sink_other = []
+            await bot._do_examine(FakeUpdate(996183, "examine the growth rings", sink_other), "the growth rings")
+        self.assertTrue(any("Druidic" in s and "screamed" in s for s in sink_druid), sink_druid)
+        self.assertFalse(any("Druidic" in s for s in sink_other), sink_other)
+
+    def test_requires_druidic_gate_blocks_then_passes(self):
+        chat_id = -999180
+        make_basic_character(996184, "GateNonDruid", chat_id=chat_id, char_class="Fighter", current_location="hollow_stump_shrine")
+        current = {"story_gates": {"hollow_stump_the_grown_hollow": {"requires_druidic": True}}}
+        character = db.get_character(996184, chat_id)
+        rejection = bot._check_story_gate(character, current, "hollow_stump_the_grown_hollow")
+        self.assertIsNotNone(rejection, "no one present reads nature's language -- must block")
+        make_basic_character(996185, "GateDruid", chat_id=chat_id, char_class="Druid", current_location="hollow_stump_shrine")
+        character = db.get_character(996184, chat_id)  # re-fetch, party composition changed
+        self.assertIsNone(bot._check_story_gate(character, current, "hollow_stump_the_grown_hollow"),
+                           "a real, present Druid party member must unlock it for everyone")
+
+    async def test_the_grown_hollow_is_gated_end_to_end(self):
+        """End-to-end via the real _do_move handler: a non-Druid alone cannot reach the hidden room; a real Druid can."""
+        make_basic_character(996186, "HollowBlocked", current_location="hollow_stump_shrine", char_class="Fighter")
+        sink = []
+        await bot._do_move(FakeUpdate(996186, "go west", sink), "west")
+        self.assertEqual(db.get_character(996186, -999)["current_location"], "hollow_stump_shrine")
+
+        make_basic_character(996187, "HollowDruid", current_location="hollow_stump_shrine", char_class="Druid")
+        sink2 = []
+        await bot._do_move(FakeUpdate(996187, "go west", sink2), "west")
+        self.assertEqual(db.get_character(996187, -999)["current_location"], "hollow_stump_the_grown_hollow")
+
+    async def test_wren_hollowbrook_is_a_real_recruitable_druid(self):
+        make_basic_character(996188, "WrenRecruiter", current_location="hollow_stump_shrine")
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(996188, "recruit Wren Hollowbrook", sink), "Wren Hollowbrook")
+        companion = next(
+            (p for p in bot._get_party_members(-999) if p["name"] == "Wren Hollowbrook"), None,
+        )
+        self.assertIsNotNone(companion, sink)
+        self.assertEqual(companion["char_class"], "Druid")
+
+    def test_druidic_grounding_block_stays_coy_below_trust_then_reveals_at_high_trust(self):
+        bot.setup_default_npcs()
+        user_id, chat_id = 996189, -999181
+        character = make_basic_character(user_id, "DruidTrustGater", chat_id=chat_id, current_location="hollow_stump_shrine")
+        db.update_character(user_id, chat_id, visited_locations=["hollow_stump_shrine"])
+        character = db.get_character(user_id, chat_id)
+        low_trust = bot._druidic_grounding_block(user_id, chat_id, character, "wren_hollowbrook")
+        self.assertIsNotNone(low_trust)
+        self.assertIn("don't know this player well enough", low_trust)
+        self.assertNotIn("screamed", low_trust)
+        db.adjust_affinity(user_id, chat_id, "wren_hollowbrook", 40)
+        high_trust = bot._druidic_grounding_block(user_id, chat_id, character, "wren_hollowbrook")
+        self.assertIn("screamed", high_trust)
+
+    def test_druidic_grounding_block_is_none_for_a_non_druid_npc_or_unvisited_markings(self):
+        character = make_basic_character(996190, "NoDruidSecretsYet", current_location="crossroads_tavern")
+        self.assertIsNone(bot._druidic_grounding_block(996190, -999, character, "grimsby"))  # not a Druid NPC
+        bot.setup_default_npcs()
+        self.assertIsNone(bot._druidic_grounding_block(996190, -999, character, "wren_hollowbrook"))  # no marking visited yet
 
     # -- Conversation quality/correctness (2026-09-22) -------------------
 

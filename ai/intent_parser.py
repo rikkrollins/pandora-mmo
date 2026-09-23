@@ -219,6 +219,9 @@ attacks this turn, at the cost of attacks against you also having advantage unti
 (e.g. "I attack recklessly", "reckless attack", "I go reckless").
 - "divine_smite" is specifically a Paladin's real class feature (level 2+): spending a spell slot on your next \
 hit for bonus radiant damage (e.g. "I smite", "divine smite", "I use divine smite").
+- "divine_sense" is specifically a Paladin's real class feature (level 1+): detecting undead nearby (this world \
+has no distinct fiend/celestial creatures), usable a limited number of times per rest, works in or out of combat \
+(e.g. "I use divine sense", "divine sense", "sense evil", "sense undead").
 - "flurry_of_blows" is specifically a Monk's real class feature (level 2+): spending a ki point for a bonus \
 unarmed strike (e.g. "flurry of blows", "I use flurry of blows", "I flurry").
 - "wild_shape" is specifically a Druid's real class feature (level 2+): shapeshifting into a beast in combat \
@@ -1847,6 +1850,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["lay on hands", "lay hands"]):
         return {**base, "action": "lay_on_hands"}
 
+    if any(w in lowered for w in ["divine sense", "sense evil", "sense undead"]):
+        return {**base, "action": "divine_sense"}
+
     if any(w in lowered for w in ["arcane recovery", "recover a spell slot", "recover my spell slot",
                                     "recover spell slots"]):
         return {**base, "action": "arcane_recovery"}
@@ -2970,7 +2976,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
                 "invite_to_party", "accept_party_invite", "leave_party", "bench_party_member",
                 "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
-                "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
+                "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "divine_sense", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "unequip_item", "auto_equip", "breath_weapon",
                 "forge_item", "forge_magic_item", "enchant_item", "discard_item", "dismantle_item",
                 "channel_divinity", "action_surge", "reckless_attack", "divine_smite",

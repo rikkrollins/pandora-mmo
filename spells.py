@@ -538,7 +538,7 @@ CLASS_SPELL_LISTS = {
     "paladin": ["cure_wounds", "command", "protection_from_evil_and_good",
                 "lesser_restoration", "death_ward", "banishment"],
     "ranger": ["cure_wounds", "animal_friendship", "hunters_mark", "longstrider",
-               "lesser_restoration", "summon_lesser_spirit", "insect_plague"],
+               "lesser_restoration", "insect_plague"],
 }
 
 

@@ -2,6 +2,51 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.681] — real mechanics for Divine Sense (Paladin) and Druidic (Druid), Ranger spell-list fix
+
+Real live request (2026-09-23, Coffee: "what is next? any gaps?" —
+following up on an earlier ask for a full cantrip/class-feature audit).
+A full read of `spells.py`/`class_features.py` cross-checked against
+`bot.py`'s real dispatch logic found two class features that were pure
+flavor text with zero mechanical hook, plus one real class-spell-list
+bug. Coffee approved building real mechanics for both features ("Yes,
+both") and fixing the spell-list bug ("Remove it from Ranger's list").
+
+**Divine Sense (Paladin, level 1+).** New `bot._do_divine_sense`:
+detects undead within the current encounter or location, usable
+`1 + CHA modifier` times per rest (the real 5E formula — not a flat
+once-per-rest like Lay on Hands), working both in and out of combat.
+Deliberately does not add fiend/celestial detection: this campaign has
+no monsters thematically tagged as either. Found and fixed a real gap
+in the undead roster while wiring this up: `ash_wraith` was missed by
+an earlier "wraith"-naming pass despite being just as unambiguous as
+`verge_wraith`/`the_verge_warden` — added to `UNDEAD_MONSTER_KEYS`.
+Wired through `ai/intent_parser.py` (keyword fallback + valid_actions),
+the Labyrinth action allowlist, and `_dispatch_intent`.
+
+**Druidic (Druid, level 1+).** Same treatment as Thieves' Cant
+(v1.27.669): a Druid who examines a real nature marking now gets a
+literal, hand-authored bonus line revealing what it actually means —
+`_knows_druidic`/`_npc_knows_druidic`/`_known_druidic_secrets` mirror
+the Thieves' Cant predicates exactly, gated on `char_class == "Druid"`.
+Two real markings now carry a `druidic_secret`: the growth rings at the
+Hollow Stump Shrine, and the deliberately-shaped root Wren Hollowbrook
+tends in the Sunken Root Caverns' Old Grove (a quiet nod to who's
+really been keeping it alive). A new `requires_druidic` story gate
+unlocks a small hidden room off the Hollow Stump Shrine (The Grown
+Hollow — optional flavor content with a minor gold/herb reward, never
+story-critical) for a party with a real Druid present. Wren
+Hollowbrook (the game's existing recruitable Druid companion) can now
+share these secrets in conversation once real trust is earned, same
+affinity-gated coy-then-reveal behavior as Fen Larkspur's Thieves'
+Cant dialogue — wired into all 3 real NPC-dialogue call sites.
+
+**Ranger spell-list fix.** `CLASS_SPELL_LISTS["ranger"]` incorrectly
+included `summon_lesser_spirit`, contradicting that spell's own
+documented design ("scroll-only by design," `spells.py` lines 144-146)
+— removed, so no Ranger could ever actually learn it as a known spell
+the way the comment already promised.
+
 ## [1.27.680] — fix: a real, previously-undiscovered bug in every reply-based admin command
 
 Real live incident (2026-09-22, Coffee: "It didn't work" — a real

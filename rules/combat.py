@@ -84,11 +84,16 @@ def formation_damage_reduction_pct(defender: dict) -> int:
 # necrotic resistance" (several non-undead monsters elsewhere also
 # resist necrotic without being undead, e.g. The Unbegun's cosmic/
 # paradox theme).
+# Found during a full cantrip/class-feature audit (2026-09-23, for
+# Paladin's Divine Sense -- see bot.py's own _do_divine_sense): Ash
+# Wraith was missed by the 2026-07-27 pass despite being just as
+# unambiguously named ("wraith") as verge_wraith/the_verge_warden.
 UNDEAD_MONSTER_KEYS = {
     "shadow_wisp",
     "verge_wraith", "bound_verge_wraith", "the_verge_warden",
     "bone_legionnaire", "elder_bone_legionnaire",
     "cairn_watcher", "young_cairn_watcher",
+    "ash_wraith",
 }
 
 # Boss Enrage (2026-07-27, per Coffee: "I want the battles to be

@@ -15193,6 +15193,40 @@ def _known_thieves_cant_secrets(character: dict) -> list[str]:
     return secrets
 
 
+def _knows_druidic(character: dict) -> bool:
+    """
+    Same treatment as _knows_thieves_cant (2026-09-23, per Coffee:
+    "Yes, both" -- build a real mechanic for Druidic to match). Real
+    5E grants Druidic to every Druid, no subclass/level gate.
+    """
+    return character.get("char_class") == "Druid"
+
+
+def _npc_knows_druidic(npc_id: str) -> bool:
+    """Same shape as _npc_knows_thieves_cant, checked against static campaign NPC data."""
+    return CAMPAIGN["npcs"].get(npc_id, {}).get("stats", {}).get("char_class") == "Druid"
+
+
+def _known_druidic_secrets(character: dict) -> list[str]:
+    """
+    Real, hand-authored druidic_secret text for every nature-marking
+    interactable this character has actually VISITED -- same fair-play
+    scoping as _known_thieves_cant_secrets, never surfacing a secret
+    for content not yet found.
+    """
+    visited = set(character.get("visited_locations") or [])
+    secrets = []
+    for layer in CAMPAIGN["locations"].values():
+        for loc_id, loc in layer.items():
+            if loc_id not in visited:
+                continue
+            for interactable in (loc.get("interactables") or {}).values():
+                secret = interactable.get("druidic_secret")
+                if secret:
+                    secrets.append(secret)
+    return secrets
+
+
 def _has_light_source(character: dict, chat_id: int) -> bool:
     """
     True if this character can see in the dark right now: real
@@ -17461,6 +17495,35 @@ def _thieves_cant_grounding_block(telegram_user_id: int, chat_id: int, character
     )
 
 
+def _druidic_grounding_block(telegram_user_id: int, chat_id: int, character: dict, npc_id: str) -> str | None:
+    """
+    Same shape and gating as _thieves_cant_grounding_block: an NPC/
+    companion who knows Druidic can share what it's read in nature's
+    own markings, but only once real trust ("high" trust band) is
+    earned -- stays coy below that, same non-spoiler discipline.
+    """
+    if not _npc_knows_druidic(npc_id):
+        return None
+    secrets = _known_druidic_secrets(character)
+    if not secrets:
+        return None
+    if _companion_trust_band(telegram_user_id, chat_id, npc_id) != "high":
+        return (
+            "You privately know Druidic, the secret language of nature, and you've "
+            "read real meaning in markings the party's passed -- but you don't know "
+            "this player well enough yet to just hand that over. If asked about it, "
+            "deflect naturally or downplay it rather than explaining anything real."
+        )
+    return (
+        "You privately know Druidic, the secret language of nature -- you've quietly "
+        "read real meaning in growth patterns and markings the party has already "
+        "passed. Weave this into natural conversation ONLY if it's actually relevant "
+        "to what's being asked -- never as a blunt info-dump, never announced "
+        "unprompted, and never more plainly than an in-character druid would actually "
+        "explain it: " + " | ".join(secrets)
+    )
+
+
 async def _do_talk_party(update: Update, action_text: str) -> None:
     """
     Real party-companion dialogue (2026-07-26, per Coffee: "when we say
@@ -17514,7 +17577,8 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     location = cl.get_location(CAMPAIGN, character["current_location"])
     context_facts = _party_companion_context_facts(character, location)
     thieves_cant_block = _thieves_cant_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
-    combined_facts = "\n\n".join(f for f in (context_facts, thieves_cant_block) if f) or None
+    druidic_block = _druidic_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+    combined_facts = "\n\n".join(f for f in (context_facts, thieves_cant_block, druidic_block) if f) or None
     relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
     reply = await asyncio.to_thread(
         talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, action_text, character["name"],
@@ -26726,6 +26790,82 @@ async def _do_bardic_inspiration(update: Update, target_text: str) -> None:
     await _maybe_send_ability_image(update, "Bardic Inspiration", "a bard playing an inspiring, rousing tune", "🎵")
 
 
+async def _do_divine_sense(update: Update) -> None:
+    """
+    Real Paladin class feature (2026-09-23, found by a full cantrip/
+    class-feature audit: "Divine Sense: action, detect celestials/
+    fiends/undead within 60 ft" was pure display text in class_
+    features.py with zero mechanical hook -- the one Paladin level-1
+    feature with nothing behind it at all, unlike Lay on Hands/Channel
+    Divinity right next to it). Real 5E: usable 1 + CHA modifier times
+    per long rest (minimum 1), same "compute the real formula, don't
+    hardcode a flat 1/rest like Lay on Hands" spirit Metamagic's own
+    uses-per-rest math already follows elsewhere in this file.
+
+    This campaign has no distinct "fiend" or "celestial" creature
+    category (confirmed by the same audit -- no monster here is named/
+    themed as a demon, devil, or angelic being; the setting's real
+    villains are cosmic/existential rather than classic outsiders), so
+    this only ever detects real UNDEAD (rules.combat.UNDEAD_MONSTER_
+    KEYS) -- never inventing a fiend/celestial hit this game's own
+    monster roster doesn't actually contain. Works both in and out of
+    combat (real 5E has no combat-only restriction, unlike Channel
+    Divinity's Turn Undead) -- checks the live opposing side if
+    already fighting, or the current location's own real `monsters`
+    list otherwise (the same data _monster_danger_line's "you sense
+    danger here" arrival flavor already reads).
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    if character["char_class"] != "Paladin":
+        await update.effective_chat.send_message(
+            "Divine Sense is a real Paladin class feature — your class doesn't have it.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+
+    max_uses = max(1, 1 + ability_modifier(character["charisma"]))
+    used = db.get_feature_uses(update.effective_user.id, update.effective_chat.id, "divine_sense")
+    if used >= max_uses:
+        await update.effective_chat.send_message(
+            f"You've already used Divine Sense {max_uses}/{max_uses} times since your last rest.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+    db.use_feature(update.effective_user.id, update.effective_chat.id, "divine_sense")
+
+    session = sessions.get_session_for_user(update.effective_chat.id, update.effective_user.id)
+    if session is not None:
+        opposing = session.living_on_side(session.opposing_side(update.effective_user.id))
+        undead_names = [p["name"] for p in opposing if p.get("monster_key") in UNDEAD_MONSTER_KEYS]
+    else:
+        location = cl.get_location(CAMPAIGN, character["current_location"]) or {}
+        undead_names = [
+            (CAMPAIGN["monsters"].get(k, {}).get("name") or k)
+            for k in location.get("monsters", []) if k in UNDEAD_MONSTER_KEYS
+        ]
+
+    remaining = max_uses - used - 1
+    uses_note = f" ({remaining} use(s) left this rest.)" if remaining > 0 else " (no uses left this rest.)"
+    if undead_names:
+        await _safe_send(
+            update,
+            f"✨ **{character['name']}** opens their senses to the divine — an undead presence radiates "
+            f"nearby: **{', '.join(undead_names)}**.{uses_note}",
+        )
+    else:
+        await _safe_send(
+            update,
+            f"✨ **{character['name']}** opens their senses to the divine, but feels nothing undead, "
+            f"fiendish, or celestial nearby.{uses_note}",
+        )
+    await _maybe_send_ability_image(update, "Divine Sense", "a paladin's eyes glowing with radiant divine awareness", "✨")
+
+
 async def _do_lay_on_hands(update: Update, target_text: str) -> None:
     """
     Real Paladin class feature: touch to heal from a pool of 5 x
@@ -29308,6 +29448,11 @@ async def _do_examine(update: Update, target_text: str) -> None:
     secret = obj_data.get("thieves_cant_secret")
     if secret and _knows_thieves_cant(character):
         message += f"\n\n🗝️ **(Thieves' Cant)** {secret}"
+    # Druidic (2026-09-23, same treatment): a Druid reads real meaning
+    # in nature's own markings the same literal, non-AI way.
+    druidic_secret = obj_data.get("druidic_secret")
+    if druidic_secret and _knows_druidic(character):
+        message += f"\n\n🌿 **(Druidic)** {druidic_secret}"
     await _safe_send(update, message)
     await _maybe_send_interactable_image(update, obj_data)
 
@@ -31854,6 +31999,14 @@ def _check_story_gate(character: dict, current: dict, destination_id: str) -> st
         present = _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
         if not any(_knows_thieves_cant(p) for p in present):
             return "Something here is written in a code you can't read — you'd need someone who actually knows it."
+
+    # Same treatment for Druidic (2026-09-23): a Druid (acting character
+    # or any real party member physically present) reads real meaning
+    # in nature's own markings that unlocks this path.
+    if gate.get("requires_druidic"):
+        present = _get_combat_eligible_party_members(character["current_location"], character["chat_id"])
+        if not any(_knows_druidic(p) for p in present):
+            return "Something here is written in nature's own language — you'd need someone who actually reads it."
 
     trust_gate = gate.get("requires_companion_trust")
     if trust_gate:
@@ -37773,7 +37926,11 @@ async def _maybe_resolve_npc_reply_from_text(update: Update) -> bool:
         _thieves_cant_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
         if character else None
     )
-    combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block) if f) or None
+    druidic_block = (
+        _druidic_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+        if character else None
+    )
+    combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block, druidic_block) if f) or None
     reply_text = await asyncio.to_thread(
         talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, message.text, character_name,
         relationship["memory_events"], combined_facts, _npc_identity_facts(character),
@@ -37860,7 +38017,7 @@ def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int, 
 FORMATION_ACTIONS = {"set_front_row", "set_back_row"}
 REAL_TURN_ACTIONS = {
     "attack", "cast_spell", "shove", "throw_weapon", "use_item", "flee",
-    "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "arcane_recovery",
+    "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "divine_sense", "arcane_recovery",
     "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
     "flurry_of_blows", "wild_shape", "breath_weapon",
 }
@@ -38547,7 +38704,7 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
     if _in_labyrinth and action not in (
         "move", "look", "attack", "start_combat", "leave_labyrinth", "descend_labyrinth", "check_inventory",
         "check_party", "show_map", "visual_map", "give_offering", "cast_spell", "use_item", "flee", "throw_weapon",
-        "second_wind", "rage", "lay_on_hands", "arcane_recovery", "breath_weapon", "action_surge",
+        "second_wind", "rage", "lay_on_hands", "divine_sense", "arcane_recovery", "breath_weapon", "action_surge",
         "divine_smite", "wild_shape", "examine", "skill_check", "talk_npc", "chat", "summon_remnant", "find_merchant",
         "rest", "go_inactive", "check_labyrinth_seed", "load_labyrinth_seed", "check_formation",
         "give_item", "trade_request", "trade_add", "trade_remove", "trade_accept", "trade_cancel", "trade_status",
@@ -38792,7 +38949,11 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
                     _thieves_cant_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
                     if character else None
                 )
-                combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block) if f) or None
+                druidic_block = (
+                    _druidic_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+                    if character else None
+                )
+                combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block, druidic_block) if f) or None
                 reply = await asyncio.to_thread(
                     talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, text, character_name,
                     relationship["memory_events"], combined_facts, _npc_identity_facts(character),
@@ -38978,6 +39139,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_bardic_inspiration(update, intent.get("target") or text)
     elif action == "lay_on_hands":
         await _do_lay_on_hands(update, intent.get("target") or text)
+    elif action == "divine_sense":
+        await _do_divine_sense(update)
     elif action == "arcane_recovery":
         await _do_arcane_recovery(update)
     elif action == "breath_weapon":

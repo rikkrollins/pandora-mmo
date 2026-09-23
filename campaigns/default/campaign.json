@@ -377,13 +377,21 @@
           },
           "stumps_rings": {
             "name": "the stump's growth rings",
-            "description": "Visible where the outer bark has fallen away. One ring, deep in, is far darker than all the others \u2014 as if that entire year burned instead of grew."
+            "description": "Visible where the outer bark has fallen away. One ring, deep in, is far darker than all the others \u2014 as if that entire year burned instead of grew.",
+            "druidic_secret": "The dark ring isn't fire scarring -- it's what a tree looks like after it's screamed. Something under the roots hurt it badly, once, and it kept growing anyway."
           }
         },
+        "connections": [
+          "whispering_wood",
+          "wrathflame_vault_threshold",
+          "goblin_warrens",
+          "hollow_stump_the_grown_hollow"
+        ],
         "monsters": [],
         "directions": {
           "south": "whispering_wood",
-          "down": "goblin_warrens"
+          "down": "goblin_warrens",
+          "west": "hollow_stump_the_grown_hollow"
         },
         "grid_position": {
           "x": 1,
@@ -392,9 +400,45 @@
         "story_gates": {
           "wrathflame_vault_threshold": {
             "requires_defeated_monster": "wolf"
+          },
+          "hollow_stump_the_grown_hollow": {
+            "requires_druidic": true
           }
         },
         "real_shrine": true
+      },
+      "hollow_stump_the_grown_hollow": {
+        "name": "The Grown Hollow",
+        "layer": "surface",
+        "description": "A gap in the stump's dead wood that shouldn't exist -- the grain around it grew AROUND the opening on purpose, decades before anyone alive could have cut it. It reads like it was left for someone who'd know to look.",
+        "connections": [
+          "hollow_stump_shrine"
+        ],
+        "directions": {
+          "east": "hollow_stump_shrine"
+        },
+        "interactables": {
+          "grown_hollow_cache": {
+            "name": "a cache tucked into the living grain",
+            "description": "Whoever grew this space into being wanted it found by the right person, eventually."
+          }
+        },
+        "lockables": [
+          {
+            "id": "grown_hollow_stash",
+            "kind": "chest",
+            "name": "the grown cache",
+            "loot": {
+              "moonpetal": 2
+            },
+            "gold": 35
+          }
+        ],
+        "monsters": [],
+        "grid_position": {
+          "x": 0,
+          "y": 1
+        }
       },
       "greymoor_downs": {
         "name": "The Greymoor Downs",
@@ -5362,7 +5406,8 @@
         "interactables": {
           "old_grove_tending": {
             "name": "a grove someone's clearly still tending",
-            "description": "Wren stops here longer than anywhere else in the caverns. \"This shouldn't still be alive,\" she says, quiet, kneeling by a root that's threaded itself into a shape too deliberate to be an accident. \"Someone's been keeping it this way. Recently.\" She doesn't say who she thinks did."
+            "description": "Wren stops here longer than anywhere else in the caverns. \"This shouldn't still be alive,\" she says, quiet, kneeling by a root that's threaded itself into a shape too deliberate to be an accident. \"Someone's been keeping it this way. Recently.\" She doesn't say who she thinks did.",
+            "druidic_secret": "The shape isn't random growth -- it's a real word, woven root over root the slow way. Whoever tends this grove has been leaving the same message for a long time: still here."
           }
         },
         "grid_position": {
