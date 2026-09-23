@@ -40665,6 +40665,40 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("player two's secret message", prompt_for_two)
         self.assertNotIn("player one's secret message", prompt_for_a_different_chat)
 
+    def test_talk_to_npc_never_replies_with_a_bare_ellipsis(self):
+        """
+        Real live bug (2026-09-23, dev-bridge screenshot, Coffee: "Is
+        this supposed to happen?" -- a player got back literally
+        "Grimsby: ..."). talk_to_npc's old fallback was a bare "..." on
+        BOTH a request failure and a degenerate model response --
+        is_placeholder_text's own regex matches "..." itself, so a real
+        model reply of literally "..." round-tripped right back to the
+        exact same "...". Neither path should ever leave a direct reply
+        with zero real words, unlike generate_ambient_line's empty-
+        string fallback (an unprompted flourish is allowed to not
+        happen; a direct reply to something the player just said is not).
+        """
+        from unittest.mock import patch
+        from ai import npc_agent
+        npc_agent.register_npc("test_ellipsis_fallback_npc", "Tester", "a plain test persona")
+
+        class PlaceholderResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "..."}
+
+        with patch("ai.npc_agent.requests.post", return_value=PlaceholderResponse()):
+            reply = npc_agent.talk_to_npc("test_ellipsis_fallback_npc", 333, 1, "hello", "Tester Player")
+        self.assertNotEqual(reply.strip(), "...")
+        self.assertTrue(reply, "a direct reply must never be empty")
+
+        with patch("ai.npc_agent.requests.post", side_effect=requests.ConnectionError("simulated Ollama outage")):
+            reply2 = npc_agent.talk_to_npc("test_ellipsis_fallback_npc", 333, 1, "hello again", "Tester Player")
+        self.assertNotEqual(reply2.strip(), "...")
+        self.assertTrue(reply2)
+
     async def test_replying_to_an_npc_message_continues_the_conversation_without_naming_them(self):
         from unittest.mock import patch, AsyncMock
         bot.setup_default_npcs()

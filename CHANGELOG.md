@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.683] — fix: NPC dialogue could reply with a bare "..."
+
+Real live bug (2026-09-23, dev-bridge screenshot, Coffee: "Is this
+supposed to happen?" — a player who said "Talk to grimsby" got back
+literally "Grimsby: ..."). Root cause: unlike every other narration
+path in this game (`ai/dm_agent.py`'s own placeholder-detection call
+sites all fall back to a real plain-text template), `ai/npc_agent.py`'s
+`talk_to_npc` fell back to a bare ellipsis on both a request failure
+AND a degenerate model response — and `is_placeholder_text`'s own
+regex matches "..." itself, so a real model reply of literally "..."
+round-tripped right back to the exact same "...". Now falls back to a
+real, generic in-character line ("just shrugs, not in a talking mood
+right now") on both paths — a direct reply to something a player just
+said should never come back with zero real words, unlike
+`generate_ambient_line`'s empty-string fallback, which is fine (an
+unprompted flourish is allowed to simply not happen).
+
+1 new test, passing.
+
 ## [1.27.682] — real mechanics for 5 more racial traits (Halfling, Gnome, Elf, Dwarf, Half-Orc, Half-Elf)
 
 Real live follow-up (2026-09-23, Coffee: "are there any class abilities

@@ -143,6 +143,22 @@ def _build_prompt(npc_id: str, chat_id: int, telegram_user_id: int, player_messa
     )
 
 
+# Real live bug (2026-09-23, dev-bridge screenshot, Coffee: "Is this
+# supposed to happen?" -- a player who said "Talk to grimsby" got back
+# literally "Grimsby: ..."). Root cause: unlike every other narration
+# path in this game (dm_agent.py's own is_placeholder_text call sites
+# all fall back to a real plain-text template, e.g. _fallback_
+# narration/_fallback_welcome), talk_to_npc's fallback for BOTH a
+# request failure AND a degenerate placeholder-shaped model response
+# (is_placeholder_text also matches a bare "..." itself, so a model
+# reply of literally "..." round-tripped right back to the same "...")
+# was a bare ellipsis with zero real words -- a direct reply to
+# something the player just said, unlike generate_ambient_line's
+# empty-string fallback (an unprompted flourish is allowed to simply
+# not happen; a direct reply is not).
+_TALK_FALLBACK_REPLY = "just shrugs, not in a talking mood right now."
+
+
 def talk_to_npc(npc_id: str, chat_id: int, telegram_user_id: int, player_message: str, character_name: str = "the player",
                 memory_facts: list[str] | None = None, quest_facts: str | None = None,
                 identity_facts: str | None = None) -> str:
@@ -187,10 +203,10 @@ def talk_to_npc(npc_id: str, chat_id: int, telegram_user_id: int, player_message
         data = response.json()
         reply = strip_think_tags(data.get("response", ""))
         if is_placeholder_text(reply):
-            reply = "..."
+            reply = _TALK_FALLBACK_REPLY
     except (requests.RequestException, ValueError) as e:
         print(f"[npc_agent] NPC call failed, falling back: {e}")
-        reply = "..."
+        reply = _TALK_FALLBACK_REPLY
 
     buffer = _conversation_buffer(npc_id, chat_id, telegram_user_id)
     buffer.append(("Player", player_message))
