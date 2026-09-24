@@ -14071,6 +14071,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         after = db.get_character_by_id(companion["character_id"])
         self.assertEqual(after.get("equipped_weapon"), "longsword")
 
+    async def test_ai_party_turn_skips_the_ollama_decision_call_when_congested(self):
+        """
+        Real live gap found 2026-09-24 (autonomous-monitor cron, error-
+        log leg): 101 real "action generation failed... Read timed out
+        (read timeout=200)" log lines, every single one silently falling
+        back to "I look around" -- confirmed this call never checked
+        _ollama_congested() first, so under sustained load an AI
+        companion's own purely-discretionary decision call would block
+        for the FULL 200s every tick before giving up, tying up the
+        single shared generation slot a real player might be waiting on.
+        Confirms choose_next_action is never even attempted when
+        congested (no doomed request placed at all), and IS attempted
+        normally when not congested (existing behavior unaffected).
+        """
+        import sessions
+        sessions.end_session(-999)
+        make_basic_character(950976, "CongestionLeader", current_location="crossroads_tavern")
+        party_id = db.create_party(950976, -999)
+        companion = db.create_ai_companion(
+            -999, "CongestionCompanion", "Human", "Fighter",
+            ability_scores={"strength": 14, "dexterity": 12, "constitution": 12, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=20, armor_class=11, gold=0, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
+
+        from unittest.mock import patch, MagicMock
+        mock_choose = MagicMock(return_value="I rest for now")
+        with patch("bot.choose_next_action", mock_choose), \
+             patch("bot._ollama_congested", return_value=True):
+            actor = db.get_character_by_id(companion["character_id"])
+            actor["telegram_user_id"] = companion["telegram_user_id"]
+            await bot._ai_party_act_one_turn(None, actor)
+        mock_choose.assert_not_called()
+
+        mock_choose.reset_mock()
+        with patch("bot.choose_next_action", mock_choose), \
+             patch("bot._ollama_congested", return_value=False):
+            actor = db.get_character_by_id(companion["character_id"])
+            actor["telegram_user_id"] = companion["telegram_user_id"]
+            await bot._ai_party_act_one_turn(None, actor)
+        mock_choose.assert_called_once()
+
     async def test_ai_party_cohesion_snaps_to_an_active_human_not_an_arbitrary_inactive_one(self):
         """
         Real bug found and fixed (2026-09-14, proactive audit):

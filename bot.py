@@ -42851,6 +42851,23 @@ async def _ai_party_act_one_turn(bot, actor: dict) -> None:
     guidance = context_like.user_data.pop("human_guidance", None)
     if guidance:
         situation_facts += f"\nA party member just told you directly: \"{guidance}\""
+    # Real live gap found 2026-09-24 (autonomous-monitor cron, error-log
+    # leg): choose_next_action's own docstring already documents falling
+    # back to a harmless "I look around" when Ollama is unreachable, but
+    # nothing here ever checked _ollama_congested() FIRST -- so under
+    # sustained load this call would still block for the FULL 200s
+    # timeout every single tick before giving up, exactly the "stacks up
+    # into a single action taking HOURS" scenario _ollama_congested's
+    # own docstring warns about, and tying up the one shared generation
+    # slot a real player might be waiting on the whole time. This is
+    # purely discretionary background flavor (nobody is blocked waiting
+    # on an AI companion's own autonomous choice) -- the exact category
+    # _ollama_congested already exists to gate. Skips this actor's turn
+    # entirely rather than falling back to a narrated "look around" --
+    # same practical outcome (nothing happens this cycle) without ever
+    # placing the doomed request in the first place.
+    if _ollama_congested():
+        return
     action_text = await asyncio.to_thread(choose_next_action, actor, personality, situation_facts, last_action)
     # Real gap found 2026-08-12 (hunting the live log): ai/autonomous_
     # player.py's own prompt explicitly tells the model "NEVER copy a

@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.686] — fix: AI companions could block a real player's Ollama slot for 200s on every autonomous turn
+
+Found by the recurring monitoring cron's error-log leg: 101 real
+`[autonomous_player] action generation failed... Read timed out (read
+timeout=200)` log lines, every single one silently falling back to
+"I look around" — working as designed (never a crash), but each
+failure meant an AI companion's own purely-discretionary decision call
+sat in the shared single-slot Ollama queue for the FULL 200 seconds
+before giving up, exactly the "stacks up into a single action taking
+HOURS" scenario `_ollama_congested()`'s own docstring already warns
+about — potentially delaying a real player's own narration the whole
+time.
+
+`_ollama_congested()` already exists specifically to gate this class of
+purely-discretionary background call (ambient NPC lines, hourly
+updates) — nobody is blocked waiting on an AI companion's own
+autonomous choice, unlike a real player's own action. It just was never
+checked before `_ai_party_act_one_turn` placed this particular request.
+Now skips the actor's turn entirely (retried next tick, ~15 min later)
+when the system is already under load, rather than placing a doomed
+200-second request at all.
+
+1 new test, all passing.
+
 ## [1.27.685] — real individual weapon-type mastery, plus Dwarven Combat Training
 
 Real live request (2026-09-23, Coffee: "make weapons profinciencys for
