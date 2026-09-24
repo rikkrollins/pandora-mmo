@@ -132,6 +132,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         bot._USER_WORKERS.clear()
         bot._USER_BUSY.clear()
         bot._USER_PENDING_SIGNATURES.clear()
+        # Same real cross-test hazard, a third module-level global
+        # (2026-09-24, added alongside ai/ollama_health.py): any test
+        # that deliberately simulates a real Ollama timeout/failure
+        # (e.g. test_talk_to_npc_never_replies_with_a_bare_ellipsis)
+        # leaves this flagged "recently congested" for real minutes,
+        # which would silently make bot._ollama_congested() return True
+        # for every LATER test in the same process run too -- reset
+        # before every test, not just the ones that know to reset it
+        # themselves.
+        import ai.ollama_health as _ollama_health
+        _ollama_health._last_timeout_at = None
 
     # -- NPC-name stopword bug (v1.7.3) --------------------------------
     def test_npc_name_filler_words_dont_hijack_unrelated_messages(self):
@@ -14112,6 +14123,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             actor["telegram_user_id"] = companion["telegram_user_id"]
             await bot._ai_party_act_one_turn(None, actor)
         mock_choose.assert_called_once()
+
+    def test_ollama_health_recently_congested_reflects_a_real_recorded_timeout(self):
+        """
+        Real live gap found 2026-09-24 (Coffee: "we arent playing the
+        game so if its not working, u need to fix it" -- investigating
+        why a real cutscene call timed out with nobody online). Root
+        cause: os.getloadavg() stayed under _ollama_congested's own
+        threshold the ENTIRE time a real narration call was measurably
+        stuck at ~3 tokens/sec (confirmed via `vmstat`: real hypervisor
+        CPU steal time, 16-30%, which load average has no visibility
+        into at all). ai.ollama_health now tracks the one signal that
+        can't lie about it: did a real Ollama call actually just fail.
+        """
+        import ai.ollama_health as ollama_health
+        original = ollama_health._last_timeout_at
+        try:
+            ollama_health._last_timeout_at = None
+            self.assertFalse(ollama_health.recently_congested())
+            ollama_health.record_timeout()
+            self.assertTrue(ollama_health.recently_congested())
+            self.assertFalse(ollama_health.recently_congested(window_seconds=0))
+        finally:
+            ollama_health._last_timeout_at = original
+
+    def test_ollama_congested_also_trusts_a_recent_real_timeout_not_just_load_average(self):
+        """_ollama_congested must catch real Ollama slowness that load average alone misses (see the module-level docstring for the live incident that found this gap)."""
+        import ai.ollama_health as ollama_health
+        original = ollama_health._last_timeout_at
+        from unittest.mock import patch
+        try:
+            ollama_health._last_timeout_at = None
+            with patch("os.getloadavg", return_value=(0.1, 0.1, 0.1)):
+                self.assertFalse(bot._ollama_congested(), "low load, no recent timeout -- must not be congested")
+                ollama_health.record_timeout()
+                self.assertTrue(bot._ollama_congested(), "a real recent timeout must flag congestion even at trivially low load")
+        finally:
+            ollama_health._last_timeout_at = original
+
+    async def test_a_real_dm_agent_timeout_is_visible_to_ollama_congested(self):
+        """End-to-end: a real narration call that times out actually reaches ai.ollama_health, not just its own local fallback."""
+        import ai.ollama_health as ollama_health
+        import ai.dm_agent as dm_agent_module
+        from unittest.mock import patch
+        original = ollama_health._last_timeout_at
+        try:
+            ollama_health._last_timeout_at = None
+            with patch("ai.dm_agent.requests.post", side_effect=requests.Timeout("simulated slow Ollama")):
+                result = dm_agent_module.narrate_action({"name": "Tester"}, "attacks something", {"hit": True, "damage_dealt": 5})
+            self.assertTrue(result, "must still fall back to real template text, not crash")
+            self.assertTrue(ollama_health.recently_congested())
+        finally:
+            ollama_health._last_timeout_at = original
 
     async def test_ai_party_cohesion_snaps_to_an_active_human_not_an_arbitrary_inactive_one(self):
         """

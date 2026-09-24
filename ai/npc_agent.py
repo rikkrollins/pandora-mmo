@@ -7,6 +7,7 @@ model as dm_agent.py), since dialogue also doesn't need tool calling.
 import requests
 
 import config
+from ai.ollama_health import record_timeout
 from ai.text_cleanup import strip_think_tags, is_placeholder_text
 
 # In-memory NPC registry: npc_id -> {"persona": str, "memory": {(chat_id, telegram_user_id): [(role, text), ...]}}
@@ -205,6 +206,7 @@ def talk_to_npc(npc_id: str, chat_id: int, telegram_user_id: int, player_message
         if is_placeholder_text(reply):
             reply = _TALK_FALLBACK_REPLY
     except (requests.RequestException, ValueError) as e:
+        record_timeout()
         print(f"[npc_agent] NPC call failed, falling back: {e}")
         reply = _TALK_FALLBACK_REPLY
 
@@ -262,6 +264,7 @@ def generate_ambient_line(npc_id: str, chat_id: int, telegram_user_id: int, char
         if is_placeholder_text(line):
             line = ""
     except (requests.RequestException, ValueError) as e:
+        record_timeout()
         print(f"[npc_agent] ambient line failed, skipping: {e}")
         return ""
 

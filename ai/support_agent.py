@@ -22,6 +22,7 @@ import items as items_module
 import races as races_module
 import remnants as remnants_module
 import spells as spells_module
+from ai.ollama_health import record_timeout
 from ai.text_cleanup import strip_think_tags, is_placeholder_text, strip_boxed_notation
 from guilds import GUILDS
 from models import VALID_CLASSES
@@ -1598,6 +1599,7 @@ def answer_support_question(
                 if attempt < len(delays):
                     time.sleep(delays[attempt])
             except (requests.RequestException, ValueError) as e:
+                record_timeout()
                 logger.warning(f"[support_agent] model call failed (attempt {attempt + 1}/{attempts}): {e!r}")
                 if attempt < len(delays):
                     time.sleep(delays[attempt])

@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.687] — fix: congestion detection couldn't see real Ollama slowness caused by hypervisor CPU steal time
+
+Real live investigation (2026-09-24, Coffee: "we arent playing the
+game so if its not working, u need to fix it" — asked while a real
+requested cutscene sample kept timing out with nobody online). Traced
+to genuine hypervisor CPU steal time on this VPS (measured directly
+via `vmstat`, 16-30% during the incident) — a trivial "Say exactly:
+Hello, world." diagnostic call took over 4 minutes. `os.getloadavg()`
+had zero visibility into this the entire time, staying comfortably
+under `_ollama_congested()`'s own threshold — a real blind spot in
+last version's own fix (v1.27.686), not a hypothetical one.
+
+New `ai/ollama_health.py`: a tiny shared module every real `ai/*.py`
+Ollama call site's own timeout/failure handler now reports to
+(`record_timeout()`). `bot._ollama_congested()` now trusts this signal
+too, alongside load average — either firing is enough. This catches
+real slowness regardless of its root cause (steal time, thermal
+throttling, an unusually verbose generation), rather than only the one
+narrow symptom (elevated local CPU load) the original heuristic could
+see.
+
+Note: this doesn't and can't fix the underlying hypervisor contention
+itself (that's a hosting-account matter, not something a code change
+inside the VM can resolve) — it makes the game's own AI narration
+degrade more gracefully and recover faster once that contention is
+happening, and stops AI companions from making the exact same slowdown
+worse for real players by piling more doomed 200s requests onto an
+already-struggling generation slot.
+
+3 new tests, all passing.
+
 ## [1.27.686] — fix: AI companions could block a real player's Ollama slot for 200s on every autonomous turn
 
 Found by the recurring monitoring cron's error-log leg: 101 real

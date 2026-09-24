@@ -17,6 +17,7 @@ picked to avoid it.
 import requests
 
 import config
+from ai.ollama_health import record_timeout
 from ai.text_cleanup import strip_think_tags
 
 ACTION_STYLE_PREAMBLE = """You are role-playing an autonomous character in a \
@@ -241,5 +242,6 @@ def choose_next_action(character: dict, personality: str, situation_facts: str, 
             # First line only, and strip stray wrapping quotes the model likes to add.
             return text.splitlines()[0].strip().strip('"').strip()
     except (requests.RequestException, ValueError) as e:
+        record_timeout()
         print(f"[autonomous_player] action generation failed, defaulting to a safe fallback: {e}")
     return "I look around"

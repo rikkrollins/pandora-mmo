@@ -90,6 +90,7 @@ from ai.dm_agent import (
 )
 from ai.intent_parser import parse_intents
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
+from ai.ollama_health import recently_congested as _ollama_recently_timed_out
 from ai.support_agent import answer_support_question, is_support_call_active
 from ai.text_cleanup import to_speakable_text
 from ai import tts_piper, stt_groq
@@ -1664,7 +1665,25 @@ def _ollama_congested() -> bool:
     flavor post) so it doesn't add to that same queue. Never gates a
     real player's own direct action -- only background flavor no one
     would notice going quiet for a while.
+
+    Real live finding (2026-09-24, Coffee: "we arent playing the game
+    so if its not working, u need to fix it" -- while diagnosing why a
+    real /replay_intro-style cutscene call timed out with nobody
+    online): load average stayed under this same threshold the ENTIRE
+    time a real narration call was measurably stuck at ~3 tokens/sec --
+    even a trivial "Say exactly: Hello, world." diagnostic call took
+    4+ minutes. Root cause confirmed via `vmstat`: real hypervisor CPU
+    steal time (16-30% during the incident) on this VPS, which
+    getloadavg() has no visibility into at all -- a genuine blind spot
+    in this function, not a hypothetical one. Rather than trying to
+    also watch steal time directly (one more indirect proxy for the
+    same underlying question), this now ALSO trusts the one signal
+    that can't lie about it: ai.ollama_health.recently_congested(),
+    which every real ai/*.py call site's own timeout/failure handler
+    now reports to directly. Either signal firing is enough.
     """
+    if _ollama_recently_timed_out():
+        return True
     try:
         return os.getloadavg()[0] > OLLAMA_CONGESTION_LOAD_THRESHOLD
     except OSError:
