@@ -83,6 +83,25 @@ _NAMING_INSTRUCTION = (
     "NEVER the subject of your narration; only the Character: name is."
 )
 
+# Real live bug found 2026-09-24 (narration-cache generation review): a
+# generated chapter_climax entry addressed a player by a hallucinated
+# name ("Arya") that belongs to no real character in this game --
+# _chapter_climax_preamble referenced _NAMING_INSTRUCTION's "whatever is
+# given on the Character: line above" even though this prompt (and
+# several siblings: boss intro/defeat/summon, Remnant summon) never
+# includes a Character: line at all -- these narration types are about
+# a QUEST, BOSS, or REMNANT, never one specific addressed player, so
+# the instruction was actively telling the model to look for a name
+# fact that was never there, and it invented one instead. Same root
+# cause, same fix shape as narrate_arc_opening's own 2026-08-20 "Aria"
+# incident -- just never applied to these siblings until this was found
+# live in the very first real chapter_climax cache generation batch.
+_NO_PLAYER_CHARACTER_NAMED_INSTRUCTION = (
+    "No specific player character is being addressed in this narration -- "
+    "never invent one, never address the reader by a made-up name, and "
+    "never use a name that isn't explicitly given in the real facts above."
+)
+
 # Real live bug (2026-08-14, dev-topic screenshot report): the
 # "Mechanical result" dict handed to you below is internal data for
 # your reference only, in Python syntax -- a real reported occurrence
@@ -1176,7 +1195,7 @@ def _chapter_climax_preamble() -> str:
         "the quest's real title and what it was actually about; narrate "
         f"ONLY these facts ({scaled_sentences(4, 6, boost=3)}), never "
         "inventing a new plot detail, character, or twist beyond what's "
-        f"given. {_NAMING_INSTRUCTION} {style_directive(boost=3)}"
+        f"given. {_NO_PLAYER_CHARACTER_NAMED_INSTRUCTION} {style_directive(boost=3)}"
     )
 
 
@@ -1304,7 +1323,7 @@ def _boss_intro_preamble() -> str:
         "about this boss's own established powers; narrate ONLY these "
         f"facts ({scaled_sentences(3, 5, boost=3)}), building real dread "
         "and stakes without resolving the fight or inventing a new plot "
-        f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} "
+        f"detail, character, or twist beyond what's given. {_NO_PLAYER_CHARACTER_NAMED_INSTRUCTION} "
         f"{style_directive(boost=3)}"
     )
 
@@ -1368,7 +1387,7 @@ def _boss_defeat_preamble() -> str:
         "(when given) a real fact about the powers this boss actually "
         f"wielded in the fight; narrate ONLY these facts ({scaled_sentences(3, 5, boost=3)}), "
         "giving this victory real weight without inventing a new plot "
-        f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} "
+        f"detail, character, or twist beyond what's given. {_NO_PLAYER_CHARACTER_NAMED_INSTRUCTION} "
         f"{style_directive(boost=3)}"
     )
 
@@ -1421,7 +1440,7 @@ def _boss_summon_preamble() -> str:
         f"narrate ONLY these facts ({scaled_sentences(2, 3)}), making the "
         "call for backup feel desperate and real without resolving any "
         "future attack or inventing a new plot detail, character, or "
-        f"twist beyond what's given. {_NAMING_INSTRUCTION} {style_directive()}"
+        f"twist beyond what's given. {_NO_PLAYER_CHARACTER_NAMED_INSTRUCTION} {style_directive()}"
     )
 
 
@@ -1478,7 +1497,7 @@ def _remnant_summon_preamble() -> str:
         "the Remnant itself directs AT that enemy -- ancient, "
         "otherworldly, never friendly banter -- without resolving the "
         "attack's outcome (damage/hit/miss) or inventing a new plot "
-        f"detail, character, or twist beyond what's given. {_NAMING_INSTRUCTION} {style_directive()}"
+        f"detail, character, or twist beyond what's given. {_NO_PLAYER_CHARACTER_NAMED_INSTRUCTION} {style_directive()}"
     )
 
 
@@ -1629,6 +1648,66 @@ def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str, 
     except (requests.RequestException, ValueError) as e:
         record_timeout()
         print(f"[dm_agent] arc opening narration failed, falling back to template: {e}")
+    return f"A new chapter begins. {arc_description}"
+
+
+def _build_arc_opening_prompt_generic(arc_title: str, arc_description: str, quest_title: str) -> str:
+    """
+    Same real facts as _build_arc_opening_prompt, addressed to "the
+    party" collectively instead of one named character -- see
+    narrate_arc_opening_generic's own docstring for why this variant
+    exists.
+    """
+    return (
+        "You are the Dungeon Master narrating the OPENING of a brand new "
+        "chapter of a much longer story, addressed to the whole party "
+        "collectively (never a single named character -- this text is "
+        "reused for every party that reaches this same chapter). You are "
+        "given the chapter's real title and description, and the "
+        f"specific quest that opens it; narrate ONLY these facts "
+        f"({scaled_sentences(3, 5, boost=2)}), setting the mood and "
+        "stakes without resolving anything or inventing a new plot "
+        f"detail, character, or twist beyond what's given. {style_directive(boost=2)}\n\n"
+        f"Real facts (narrate ONLY these, faithfully):\n"
+        f"New chapter beginning: {arc_title}\n"
+        f"What this chapter is about: {arc_description}\n"
+        f"The quest that opens it: {quest_title}\n\n"
+        f"Write the opening now:"
+    )
+
+
+def narrate_arc_opening_generic(arc_title: str, arc_description: str, quest_title: str) -> str:
+    """
+    Real live request (2026-09-24, per Coffee: "find a way so we can
+    still have story line cutscenes" -> "pre-write each chapter's
+    cutscene once, reuse for everyone" -- offered as the reliable
+    alternative to narrate_arc_opening's own per-character live call,
+    which was measurably failing under real hypervisor CPU steal time
+    on this VPS, timing out and falling back to flat template text).
+
+    Party-addressed instead of character-named, specifically so ONE
+    generated result can be cached (scripts/generate_narration_cache.py)
+    and reused instantly for every real character who ever reaches this
+    same chapter, rather than re-generating (and re-risking a timeout)
+    per player. bot._arc_opening_note checks that cache first and only
+    falls back to narrate_arc_opening's own live, personalized call if
+    nothing's cached for this arc yet.
+    """
+    prompt = _build_arc_opening_prompt_generic(arc_title, arc_description, quest_title)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.DM_NARRATION_MODEL, "prompt": prompt, "stream": False, "options": _NARRATION_OPTIONS},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_internal_jargon(strip_think_tags(data.get("response", "")))
+        if text and not is_placeholder_text(text):
+            return text
+    except (requests.RequestException, ValueError) as e:
+        record_timeout()
+        print(f"[dm_agent] generic arc opening narration failed: {e}")
     return f"A new chapter begins. {arc_description}"
 
 

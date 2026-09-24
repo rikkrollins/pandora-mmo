@@ -1701,7 +1701,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         user_id = 888901
         make_basic_character(user_id, "Cutscenetester", current_location="crossroads_tavern")
         sink = []
-        with patch("bot.narrate_arc_opening", return_value="A quiet dread settles over the crossroads.") as mock_narrate, \
+        # _cached_narration forced empty (2026-09-24, narration cache):
+        # this test specifically verifies the LIVE, personalized
+        # fallback path (the real character name reaching the prompt) --
+        # a real cached arc_1_discovery entry (once generated) would
+        # otherwise short-circuit straight past narrate_arc_opening
+        # entirely, which is the whole point of the cache but not what
+        # THIS test is checking.
+        with patch("bot._cached_narration", return_value=None), \
+             patch("bot.narrate_arc_opening", return_value="A quiet dread settles over the crossroads.") as mock_narrate, \
              patch("bot._send_generated_image", new=AsyncMock(return_value=False)) as mock_image:
             await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
         combined = " ".join(sink)
@@ -1734,6 +1742,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         prompt = _build_arc_opening_prompt("Discovery", "Small, strange things.", "A Favor for Grimsby", "Ravenloft")
         self.assertIn("Character: Ravenloft", prompt)
 
+    def test_no_player_character_narration_types_never_invite_a_naming_instruction_with_no_name_given(self):
+        """
+        Real live bug found 2026-09-24 (narration-cache generation
+        review): a real generated chapter_climax entry addressed a
+        player by a hallucinated name ("Arya") that belongs to no real
+        character. Same root cause, same shape as the arc-opening "Aria"
+        bug above -- _chapter_climax_preamble (and 4 siblings: boss
+        intro/defeat/summon, Remnant summon) referenced _NAMING_
+        INSTRUCTION's "whatever is given on the Character: line above"
+        even though none of these prompts ever include a Character:
+        line at all (they're about a QUEST, BOSS, or REMNANT, never one
+        addressed player). Fixed by swapping in
+        _NO_PLAYER_CHARACTER_NAMED_INSTRUCTION instead, which explicitly
+        tells the model not to invent a name.
+        """
+        from ai.dm_agent import (
+            _build_chapter_climax_prompt, _build_boss_intro_prompt, _build_boss_defeat_prompt,
+            _build_boss_summon_prompt, _build_remnant_summon_prompt, _NAMING_INSTRUCTION,
+        )
+        prompts = [
+            _build_chapter_climax_prompt("Quest Title", "What it was about.", "100 XP"),
+            _build_boss_intro_prompt("Big Bad", "The Arena", "A grim place."),
+            _build_boss_defeat_prompt("Big Bad", "The Arena"),
+            _build_boss_summon_prompt("Big Bad", "Goblin, Goblin"),
+            _build_remnant_summon_prompt("A Remnant", "Some lore.", "An Enemy"),
+        ]
+        for prompt in prompts:
+            self.assertNotIn("Character:", prompt, prompt)
+            self.assertNotIn(_NAMING_INSTRUCTION, prompt, prompt)
+            self.assertIn("never invent one", prompt, prompt)
+
     async def test_arc_opening_cutscene_does_not_repeat_mid_chapter(self):
         """Sibling to the test above: a LATER quest in the same arc (not arc["quests"][0]) must not re-trigger the opening cutscene."""
         from unittest.mock import patch
@@ -1747,6 +1786,70 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
         combined = " ".join(sink)
         self.assertFalse(mock_narrate.called)
+
+    # -- Narration cache (2026-09-24, per Coffee: "find a way so we can
+    #    still have story line cutscenes" -> "pre-write each chapter's
+    #    cutscene once, reuse for everyone" -- the real per-character
+    #    live calls were measurably timing out under real hypervisor
+    #    CPU steal time on this VPS, see
+    #    project_ollama_congestion_steal_time_gap_v1_27_687). ----------
+
+    def test_cached_narration_reads_the_real_campaign_key(self):
+        original = bot.CAMPAIGN.get("narration_cache")
+        try:
+            bot.CAMPAIGN["narration_cache"] = {"arc_opening": {"arc_1_discovery": "Cached text."}}
+            self.assertEqual(bot._cached_narration("arc_opening", "arc_1_discovery"), "Cached text.")
+            self.assertIsNone(bot._cached_narration("arc_opening", "no_such_arc"))
+            self.assertIsNone(bot._cached_narration("chapter_climax", "arc_1_discovery"))
+        finally:
+            if original is None:
+                bot.CAMPAIGN.pop("narration_cache", None)
+            else:
+                bot.CAMPAIGN["narration_cache"] = original
+
+    async def test_arc_opening_uses_the_real_cache_instead_of_a_live_call(self):
+        """A cached arc opening is used instantly -- narrate_arc_opening (the live, personalized call) must never even be attempted."""
+        from unittest.mock import patch, AsyncMock
+        original = bot.CAMPAIGN.get("narration_cache")
+        try:
+            bot.CAMPAIGN["narration_cache"] = {"arc_opening": {"arc_1_discovery": "The cached opening, addressed to the whole party."}}
+            use_test_db("tests/tmp/arc_opening_cache_test.db")
+            user_id = 888903
+            make_basic_character(user_id, "CachedCutsceneTester", current_location="crossroads_tavern")
+            sink = []
+            with patch("bot.narrate_arc_opening") as mock_narrate, \
+                 patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+                await bot._do_accept_quest(FakeUpdate(user_id, "I accept the quest", sink), "I accept the quest")
+            combined = " ".join(sink)
+            self.assertFalse(mock_narrate.called, "a real cache hit must never fall through to the live, personalized call")
+            self.assertIn("The cached opening, addressed to the whole party.", combined)
+        finally:
+            if original is None:
+                bot.CAMPAIGN.pop("narration_cache", None)
+            else:
+                bot.CAMPAIGN["narration_cache"] = original
+
+    async def test_chapter_climax_uses_the_real_cache_instead_of_a_live_call(self):
+        """Same real cache-first behavior for a generic climactic-quest ending."""
+        from unittest.mock import patch, AsyncMock
+        original = bot.CAMPAIGN.get("narration_cache")
+        try:
+            bot.CAMPAIGN["narration_cache"] = {"chapter_climax": {"the_first_city_quest": "The cached climax text."}}
+            use_test_db("tests/tmp/climax_cache_test.db")
+            user_id = 888904
+            make_basic_character(user_id, "CachedClimaxTester", current_location="crossroads_tavern")
+            sink = []
+            with patch("bot.narrate_chapter_climax") as mock_narrate, \
+                 patch("bot._maybe_send_chapter_climax_image", new=AsyncMock()):
+                await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_first_city_quest")
+            combined = " ".join(sink)
+            self.assertFalse(mock_narrate.called, "a real cache hit must never fall through to the live call")
+            self.assertIn("The cached climax text.", combined)
+        finally:
+            if original is None:
+                bot.CAMPAIGN.pop("narration_cache", None)
+            else:
+                bot.CAMPAIGN["narration_cache"] = original
         self.assertNotIn("🎬", combined)
 
     async def test_check_quests_shows_current_chapter(self):
@@ -30694,7 +30797,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sink = []
         await bot._do_check_sheet(FakeUpdate(user_id, "check my sheet", sink))
         self.assertTrue(any("Reborn 2x" in m for m in sink), sink)
-        self.assertFalse(any("ability cap" in m for m in sink), sink)
+
+    async def test_check_sheet_no_longer_attaches_the_spell_cast_button_wall(self):
+        """
+        Real live report (2026-09-24, Coffee, dev-bridge screenshot: "You
+        don't have to show push buttons when we look at the character
+        sheets"). Task #176 originally attached _spell_keyboard (one
+        button per known spell/cantrip PLUS one per carried scroll) to
+        this screen -- a real wall of dozens of buttons for a character
+        with a real spellbook, directly under a screen whose whole point
+        is reading your own stats. Only the plain "Menu" nav row should
+        remain; the dedicated Magic menu (magic_menu_callback) still
+        shows the real cast buttons, untouched.
+        """
+        from unittest.mock import patch
+        user_id = 900500
+        make_basic_character(
+            user_id, "ButtonWallTester", char_class="Wizard",
+            known_spells=["fireball", "magic_missile", "shield"],
+            inventory={"scroll_cure_wounds": 3},
+        )
+        captured = {}
+        real_safe_send = bot._safe_send
+
+        async def capture_safe_send(update, text, **kwargs):
+            captured["reply_markup"] = kwargs.get("reply_markup")
+            return await real_safe_send(update, text, **kwargs)
+
+        with patch("bot._safe_send", side_effect=capture_safe_send):
+            await bot._do_check_sheet(FakeUpdate(user_id, "check my sheet", []))
+        reply_markup = captured["reply_markup"]
+        button_labels = [btn.text for row in reply_markup.inline_keyboard for btn in row]
+        self.assertEqual(button_labels, ["📖 Menu"], button_labels)
 
     # -- Auto-assign ability scores at character creation (2026-07-16, per Coffee) --
     def test_auto_assign_ability_scores_uses_each_rolled_value_once(self):

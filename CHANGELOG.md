@@ -2,6 +2,65 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.688] — feature: pre-generated story cutscenes, plus a real naming-hallucination bug fix and a menu cleanup
+
+Direct follow-up to v1.27.687's Ollama-slowness investigation. Coffee:
+"find a way so we can still have story line cutscenes" -> chose
+"pre-write each chapter's cutscene once, reuse for everyone" over a
+per-player async option, then broadened it: "things in the game that
+dont need a AI narration shud be pre written to ease up contention on
+AI aspects of the game... most things shud be hard wired or written
+and then the ai has room to be able to breathe."
+
+**Narration cache (new `campaigns/default/campaign.json` key,
+`narration_cache`):** every chapter-opening cutscene (14/14 story
+arcs) and every generic climactic-quest ending (14/14 non-hand-written
+climax quests) is now pre-generated offline and served instantly from
+the campaign file — zero live Ollama calls, zero timeout risk, for
+content that reads the same for every party anyway. New offline tool
+`scripts/generate_narration_cache.py` (idempotent, incremental-save,
+safe to re-run) did the generating; `bot._cached_narration()` reads
+the cache first at both the arc-opening and chapter-climax call sites,
+falling back to the original live personalized call only for an
+uncached entry (currently just `arc_10_glimmerdeep_grotto`, which
+genuinely exhausted retries under real load and can be picked up by a
+future re-run of the script).
+
+**Real bug found and fixed generating this cache, not caching a
+degradation:** a genuine Ollama timeout during generation falls back
+to a flat, honest-but-plain template line — fine as a one-off live
+degradation, but would have been baked in PERMANENTLY as the cache
+entry for that story beat. The generation script now retries (up to 4
+attempts) and leaves an entry uncached rather than ever writing a
+fallback string into the live cache.
+
+**Real, pre-existing naming-hallucination bug found and fixed (not
+new, unrelated to caching):** `narrate_chapter_climax`, `narrate_
+boss_intro`, `narrate_boss_defeat`, `narrate_boss_summon`, and
+`narrate_remnant_summon` in `ai/dm_agent.py` all referenced the same
+"Character: [exact name]" instruction `narrate_arc_opening` was fixed
+to stop using back on 2026-08-20 — except none of these 5 ever
+actually supply a "Character:" line, so the model was free to invent
+one. The very first full climax-cache generation run caught this for
+real: every single successful entry had a hallucinated name ("Arya",
+"Aria", "Elara") or leaked a literal "Character: [Name]" placeholder.
+Fixed with a new `_NO_PLAYER_CHARACTER_NAMED_INSTRUCTION` swapped into
+all 5 preambles, then the entire climax cache was wiped and
+regenerated clean. Boss intro/defeat/summon and Remnant summon aren't
+cached (still live per-encounter calls) so this prompt fix is what
+protects those going forward.
+
+**Menu cleanup:** `_do_check_sheet` (the character sheet screen) no
+longer attaches a full spell/scroll cast-button wall under a screen
+whose whole purpose is reading your own stats — reported via
+dev-bridge screenshot. The real cast-button keyboard is untouched on
+the dedicated Magic menu.
+
+4 new tests (cache-read behavior, both cache-first call sites, the
+naming-instruction fix across all 5 affected preambles, the sheet
+button removal); all existing arc-opening/chapter-climax/character-
+sheet tests re-confirmed passing.
+
 ## [1.27.687] — fix: congestion detection couldn't see real Ollama slowness caused by hypervisor CPU steal time
 
 Real live investigation (2026-09-24, Coffee: "we arent playing the

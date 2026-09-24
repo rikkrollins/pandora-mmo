@@ -338,7 +338,8 @@
         "connections": [
           "whispering_wood",
           "wrathflame_vault_threshold",
-          "goblin_warrens"
+          "goblin_warrens",
+          "hollow_stump_the_grown_hollow"
         ],
         "sensory_connections": {
           "goblin_warrens": "Somewhere behind the shrine, the ground itself sounds hollow -- goblin chatter, faint but unmistakable, carries up through a gap in the roots."
@@ -381,12 +382,6 @@
             "druidic_secret": "The dark ring isn't fire scarring -- it's what a tree looks like after it's screamed. Something under the roots hurt it badly, once, and it kept growing anyway."
           }
         },
-        "connections": [
-          "whispering_wood",
-          "wrathflame_vault_threshold",
-          "goblin_warrens",
-          "hollow_stump_the_grown_hollow"
-        ],
         "monsters": [],
         "directions": {
           "south": "whispering_wood",
@@ -14342,5 +14337,39 @@
   "_pending_items_note": null,
   "evolved_dungeon_ids": [
     "wrathflame_vault_evolved"
-  ]
+  ],
+  "narration_cache": {
+    "arc_opening": {
+      "arc_1_discovery": "The air hums with unseen whispers, small anomalies lingering like forgotten echoes. These trivialities mask deeper currents beneath surface ease. A Favor for Grimsby waits, its promise heavy yet obscured by familiarity.",
+      "arc_2_descent": "The Descent unfolds beneath a veil of uncertainty. The Wrong Color emerges as catalyst. What follows demands vigilance.",
+      "arc_3_revelation": "The earth whispers secrets buried deep, where light fades into shadow. To uncover its truth lies a quest that unravels the very foundation upon which all stands. Beneath this veil of illusion, a hidden threat waits to awaken.",
+      "arc_4_ascension": "The final confrontation looms, its stakes etched in silence. What the Sky Was Hiding demands revelation.",
+      "arc_5_goblin_warrens": "Beneath veiled secrets lies the chapter's essence; goblins' true nature remains obscured, while shadows whisper of hidden truths. The quest demands confronting what eludes easy recognition. A relic awaits, its fate entwined with peril.",
+      "arc_6_sunken_root_caverns": "Beneath the surface where shadows stir, ancient secrets cling like rusted iron. The Flooded Gallery\u2019s Hold waits, a labyrinth of forgotten peril. What the Roots Kept whispers\u2014what lurks where water clings to stone? The stakes pulse with unseen hands.",
+      "arc_7_stonearch_gorge": "The Gorge Swallowed consumes what dares tread within its depths; here, all that enters becomes part of something greater. The Web Hollow's Brood awaits, its threads entwined with fate\u2019s unseen pull. What lies beyond remains a whisper, yet the weight lingers.",
+      "arc_8_greymoor_downs": "The Downs Still Watches, their silence a testament to forgotten burdens. The burial mound hums with echoes long dormant, guardians of what was lost. Their duty persists, yet shadows linger where once light thrived. This chapter unveils a tale deeper than banditry\u2019s shadow, demanding vigilance beyond comprehension. What unfolds here will test the resolve etched into every stone.",
+      "arc_9_whispering_wood": "The earth beneath the Wood once pulsed with life, now still. Here, roots abandoned their hold, leaving only silence. The Hollow Threshold\u2019s Bound Wolf waits, its purpose etched in shadow.",
+      "arc_11_hollow_verge": "The Hollow Verge awaits its first breath, its promise heavy with unseen threats. The Wraith's Unrest stirs within, a tempest awaiting awakening. What begins as rebirth becomes a test of survival.",
+      "arc_12_wordless_choir": "The silence here breathes heavier than sound, its weight a living thing. Past whispers linger beneath the surface, waiting to resurface. The Remnant's Echo demands their presence, a force both ancient and urgent.",
+      "arc_13_the_unbegun": "Before the waiting shape stirred, only whispers lingered\u2014a fragile promise etched in silence. The Unbegun unfolds its secrets beneath shadowed shores. Stakes pulse with unseen hands.",
+      "arc_14_the_answered": "The air hums with unspoken weight, a silence pressing like stone. The quest demands confronting what lies buried beneath silence, its answer etched in paradox. What remains unsolved haunts the void, a promise deferred yet inevitable. The stage holds its breath, awaiting the moment the veil may finally part.",
+      "arc_10_glimmerdeep_grotto": "The air hums with unspoken warnings; here, light bends to hide what lies beneath. The Pool's Wrought Spider waits, its threads whispering truths too heavy for mortal hands. What the Glow Isn't demands we confront what shadows dare not name."
+    },
+    "chapter_climax": {
+      "seras_resolution": "The resolution concludes with finality; trust remains fragile. \nSarah\u2019s resolve tests under scrutiny. \nEarned 150 XP and 50 gold, yet doubt lingers. \nUnspoken tensions simmer beneath calm surfaces. \nWhispers echo through the chamber\u2019s silence. \nA fragile pact hangs in balance. \nShadows stir beneath the surface. \nThe path ahead demands vigilance. \nConsequences linger like unseen forces.",
+      "borins_resolution": "The Watch Keeps concludes as Borin\u2019s test exposes fractured trust. His earned rewards\u2014150 XP and 50 gold\u2014mark this outcome. Standing watch here tests resolve once more. Past actions cast lingering shadows. Shadows linger, awaiting resolution. A fragile peace persists uncertainly. The path ahead demands careful navigation.",
+      "wrens_resolution": "The revelation hangs heavy in the chamber. \nWren\u2019s choice defines the fate of all who trust her. \nWhispers echo through the cavern walls. \nThe weight of secrets tests every alliance. \nA decision rests on fragile trust. \nThe path forward remains uncertain.",
+      "pips_resolution": "The resolution settles as truth crystallizes. \nPast delays fade into memory\u2019s echo. \nA shift in perception lingers unseen. \nClarity emerges faintly within. \nReflections linger on past struggles. \nThe path ahead remains obscured yet known. \nFinality settles gently. \nClosure concludes here.",
+      "grasks_resolution": "Grask's Choice reverberates through fractured halls, its truth a blade against past self-sacrifice. The quest rewarded defiance with 300 XP and 100 gold. Every step back had been a wound he refused to mend. Yet here, victory lingers, fragile yet present. The party\u2019s demand etched itself into his resolve, unspoken. What was earned remains a silent testament. Defiance persists amid shadows. The past\u2019s weight tests the present\u2019s edge. Resolution settles, unresolved yet acknowledged.",
+      "veshs_resolution": "The return echoes with unresolved shadows from past steps. Only Vesh remains who once sought Glimmerdeep Grotto's forgotten truth. To reclaim what was lost, the party must confront its own history. Rewards earned here bind their fate tightly. The path ahead demands reckoning with buried secrets. What lies ahead tests every step they now tread. Forward comes as a requiem for what was.",
+      "the_first_city_quest": "The completion revealed hidden truths beneath the city\u2019s foundations; its rewards\u20141500 XP and 1000 gold\u2014marked a pivotal shift as the spire\u2019s rhythm shifted.",
+      "the_unmoored_isle_quest": "The ancient entity remains hidden beneath the island's core. Its claim persists despite earned rewards. Shadows stir where light once gleamed. Trust must be reclaimed. Secrets surface anew. Climax approaches. Balance shifts. Truth lingers. Resolution awaits.",
+      "the_verge_wardens_toll": "The completion of The Warden's Toll stands as a testament to resolve. Its tangible rewards\u20142000 XP and gold\u2014are now claimed. The Hollow Verge acknowledges their pivotal role. Echoes of this moment linger in silence. Legacy is both honored and unspoken. A final, quiet resolution settles.",
+      "the_undertones_reckoning": "The hum, once silent, now pulses defiantly. \nIts absence marks a turning point. \nRewards claimed: three thousand XP and two thousand gold. \nThe resonance demands acknowledgment. \nPast whispers fade into clarity. \nTruth crystallizes in finality. \nClosure settles the tale\u2019s end.",
+      "the_unbegun_reckoning": "The Unbegun's Reckoning concludes, its rewards etched in stone. The Crown\u2019s weight demands reckoning, while XP and gold fade. Shadows stir, awaiting truth. Ancient whispers coil, unseen. Consequences loom, unresolved yet present. Paths shift, shadows deepen. Final truths emerge, heavy. Silence settles, waiting.",
+      "the_unaskeds_reckoning": "The final reckoning unfolds as shadows claw at forgotten truths. The accumulated weight of unspoken questions presses upon the gathered truth. In exchange for their sacrifice, 1 million points and gold are claimed. A threshold trembles beneath its weight, whispering secrets only time can reveal. Echoes of past choices linger, demanding reckoning. Pandora's Answer emerges as both prize and punishment. The path ahead whispers a price yet unseen. Victory is measured in echoes left behind.",
+      "the_sunken_reflections_end": "The truth surfaced beneath the island's depths, revealing a reflection that mirrored past betrayals. Its worth was recognized through 950 XP and gold. This revelation anchors the climax. The lens captured what eluded sight before. Shadows now hold new clarity. Every step forward weighed heavy yet necessary. The story's final breath lingers here.",
+      "the_downs_last_watchs_reckoning": "The final act unveils The Downs' Last Watch's true purpose. Its value includes 3200 XP and 1100 gold. This reward solidifies its legacy. The quest's resolution settles long-standing truths. No further steps are implied here. Yet anticipation lingers. Reflection concludes the chapter."
+    }
+  }
 }

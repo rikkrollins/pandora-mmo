@@ -68,7 +68,7 @@ from ai import narration_cache
 from ai.dm_agent import (
     narrate_action, narrate_welcome, narrate_skill_check, narrate_hourly_update,
     narrate_examine, narrate_branching_choice_outcome, narrate_boss_decision,
-    narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_next_step_hint,
+    narrate_story_so_far, narrate_chapter_climax, narrate_arc_opening, narrate_arc_opening_generic, narrate_next_step_hint,
     narrate_boss_intro, narrate_boss_defeat, narrate_boss_summon, narrate_remnant_summon,
     narrate_labyrinth_segment_flavor,
     narrate_boss_confrontation, narrate_reach_location_quest_completion,
@@ -18118,6 +18118,34 @@ async def _maybe_push_quest_offer(update: Update, character: dict, quest_id: str
         await _safe_send(update, card, reply_markup=buttons, speak=False)
 
 
+def _cached_narration(category: str, key: str) -> str | None:
+    """
+    Real live request (2026-09-24, per Coffee: "find a way so we can
+    still have story line cutscenes" -> "pre-write each chapter's
+    cutscene once, reuse for everyone" -- the real per-character live
+    narrate_arc_opening/narrate_chapter_climax calls were measurably
+    timing out under real hypervisor CPU steal time on this VPS, see
+    [[project_ollama_congestion_steal_time_gap_v1_27_687]]). campaign.
+    json's own new "narration_cache" key holds one hand-picked, real
+    AI-generated result per (category, key) -- generated ONCE offline
+    with no live-player time pressure (scripts/generate_narration_
+    cache.py), reused instantly for every character who reaches that
+    same story beat from then on. None (not a KeyError) for any
+    (category, key) not yet cached -- every real call site falls back
+    to its own live, personalized narration call in that case, same
+    as before this existed; nothing regresses for uncached content.
+    """
+    return CAMPAIGN.get("narration_cache", {}).get(category, {}).get(key)
+
+
+async def _real_arc_opening_text(arc_id: str, arc: dict, quest_title: str, character_name: str) -> str:
+    """Cached (instant, party-addressed) if this arc's opening has been pre-generated; otherwise the real, live, personalized call."""
+    cached = _cached_narration("arc_opening", arc_id)
+    if cached:
+        return cached
+    return await asyncio.to_thread(narrate_arc_opening, arc["title"], arc["description"], quest_title, character_name)
+
+
 async def _arc_opening_note(update: Update, character: dict, quest_id: str, quest: dict) -> str:
     """
     Cutscene bookend to _chapter_complete_note's closing beat, per
@@ -18139,9 +18167,7 @@ async def _arc_opening_note(update: Update, character: dict, quest_id: str, ques
     already_touched = set(character["completed_quests"]) | set(character["active_quests"].keys())
     if already_touched & set(arc_quests):
         return ""
-    opening_text = await asyncio.to_thread(
-        narrate_arc_opening, arc["title"], arc["description"], quest["title"], character["name"],
-    )
+    opening_text = await _real_arc_opening_text(arc_id, arc, quest["title"], character["name"])
     await _maybe_send_arc_opening_image(update, arc_id, arc)
     return f"🎬 **{arc['title']}**\n{opening_text}\n\n"
 
@@ -18211,7 +18237,7 @@ async def _do_replay_chapter_intro(update: Update, arc_id: str | None = None) ->
     arc_quests = arc.get("quests", [])
     first_quest = CAMPAIGN["quests"].get(arc_quests[0]) if arc_quests else None
     quest_title = first_quest["title"] if first_quest else arc["title"]
-    opening_text = await asyncio.to_thread(narrate_arc_opening, arc["title"], arc["description"], quest_title, character["name"])
+    opening_text = await _real_arc_opening_text(arc_id, arc, quest_title, character["name"])
     await _safe_send(update, f"🎬 **{arc['title']}**\n{opening_text}")
 
 
@@ -18498,7 +18524,7 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         climax_narration = f"{the_keeps_warden_defeat_line()}\n\n"
         await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest.get("weight") == "climactic":
-        climax_text = await asyncio.to_thread(
+        climax_text = _cached_narration("chapter_climax", quest_id) or await asyncio.to_thread(
             narrate_chapter_climax, quest["title"], quest["description"], reward_text,
         )
         if quest_id == "the_first_city_quest":
@@ -22845,11 +22871,18 @@ async def _do_check_sheet(update: Update, target_name: str | None = None) -> Non
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
-    # Task #176: spell-cast buttons only make sense on the ASKER's own
-    # sheet (target_name is None here) -- nobody can tap a button to
-    # cast someone else's spells.
+    # Real live report (2026-09-24, Coffee, dev-bridge screenshot: "You
+    # don't have to show push buttons when we look at the character
+    # sheets"): Task #176 originally attached the same spell/scroll-cast
+    # button wall the dedicated Magic menu (magic_menu_callback) already
+    # shows -- a real wall of buttons (one per known spell/cantrip PLUS
+    # one per carried scroll) directly under a screen whose whole point
+    # is just reading your own stats. The Magic menu itself is
+    # untouched (still shows this exact keyboard) -- this only removes
+    # it from the sheet display, which now just gets the plain "Menu"
+    # nav row every other screen already ends with.
     await _safe_send(
-        update, _format_character_sheet(character), reply_markup=_with_menu_button(_spell_keyboard(character)),
+        update, _format_character_sheet(character), reply_markup=_with_menu_button(None),
         speak=False,
     )
 
