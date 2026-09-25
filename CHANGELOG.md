@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.690] — CRITICAL fix: weapon attacks never added the attacker's own STR/DEX modifier to damage
+
+Real live report (2026-09-25, dev-bridge, Coffee, on behalf of two
+real players mid-fight: "All of the damage that we are doing, seems
+very low. like something happened to Nerf our characters."). Traced
+live, with a real character's own actual DB stats and equipped weapon
+(Elduinn, level 34, STR 25/+7, a "Starforged Longsword of the Undying"):
+`resolve_attack`'s main weapon-damage roll (`rules/combat.py`) has
+**never** added the attacker's own ability modifier to a normal weapon
+attack's damage — real 5E's single most basic damage rule, and the one
+`resolve_thrown_attack` (the Throw action) already implemented
+correctly. Confirmed via git blame: this exact roll's modifier list
+has only ever grown by ADDING more class-specific bonus terms (rage,
+wild shape, guild bonus, hybrid, Dueling) since the file's original
+2026-07-09 commit — the base STR/DEX modifier was never in it at all.
+
+Invisible at low level (a +1/+2 modifier is a small fraction of a d8
+roll) but severe by level 30+, where the gap (a real +7 STR mod,
+further amplified by this same file's own level-based `power_scale_
+ratio`) becomes a huge chunk of expected damage — exactly the level
+range (34-35) the reporting players were at.
+
+Fixed: the attacker's own ability modifier (the same one already used
+for the attack roll — DEX for a Monk via Martial Arts, STR otherwise,
+including any equipped "+N to a stat" magic item bonus) is now added
+to every real character's weapon-damage roll. Gated on the attacker
+having a real `char_class` so a monster/boss's own already-hand-tuned
+flat `damage_bonus` (campaign.json) is never double-counted with an
+extra modifier it was never balanced to include — monster damage is
+completely unaffected by this fix.
+
+3 new tests (a Fighter's damage now includes STR, a Monk's uses DEX
+per Martial Arts, a monster's stays untouched).
+
 ## [1.27.689] — fix: a wrong riddle guess could silently bench a real party member
 
 Real live incident (2026-09-25, topic-activity signal): a real player

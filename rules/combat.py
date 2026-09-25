@@ -702,6 +702,32 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
                 and not attacker.get("equipped_offhand_weapon")
             ) else 0
         )
+        # Real live bug (2026-09-25, dev-bridge, Coffee, on behalf of two
+        # real players: "All of the damage that we are doing, seems very
+        # low. like something happened to Nerf our characters"). Traced
+        # live: this main weapon-damage roll has NEVER added the
+        # attacker's own ability modifier (STR, or DEX for a Monk/
+        # finesse weapon) -- real 5E's single most basic damage rule,
+        # and the one resolve_thrown_attack already gets right (see its
+        # own "ability modifier always applies to a thrown weapon's
+        # damage, same as any other weapon attack" comment). Confirmed
+        # by git blame: this exact roll_damage call's modifier list has
+        # only ever grown by ADDING more bonus terms (rage/wild_shape/
+        # warden/hybrid/dueling) since the file's original 2026-07-09
+        # commit -- the base ability modifier was never in it to begin
+        # with. Invisible at low level (a +1/+2 STR mod is a small
+        # fraction of a d8 roll) but a huge, very-noticeable gap by
+        # level 30+ (a +7 STR mod on a level-34 Fighter, further
+        # amplified by this same file's own power_scale_ratio a few
+        # lines below) -- exactly the level range the reporting players
+        # were at. Gated to attacker.get("char_class") so a monster's
+        # own already-hand-tuned flat damage_bonus (campaign.json) is
+        # never double-counted with an extra ability-mod bump it was
+        # never balanced to include.
+        ability_bonus = (
+            ability_modifier(attacker.get(attack_ability, 10) + equip_ability_bonus_score)
+            if attacker.get("char_class") else 0
+        )
         # Task #143: a physical-dice-mode player's own reported damage
         # roll (see roll_damage's forced_roll docstring) only ever
         # substitutes into THIS main weapon die -- Sneak Attack's
@@ -710,7 +736,7 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # later swings are for the attack-roll forced_roll above.
         dmg = roll_damage(
             weapon["damage_dice"],
-            modifier=weapon.get("damage_bonus", 0) + rage_bonus + wild_shape_bonus + warden_bonus + hybrid_bonus_gained + dueling_bonus,
+            modifier=weapon.get("damage_bonus", 0) + ability_bonus + rage_bonus + wild_shape_bonus + warden_bonus + hybrid_bonus_gained + dueling_bonus,
             critical=attack_result["critical_hit"],
             extra_dice=savage_attacks_die,
             forced_roll=forced_damage_roll,

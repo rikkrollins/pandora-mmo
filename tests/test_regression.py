@@ -12358,6 +12358,57 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         weapon = bot._weapon_for_attacker(monster)
         self.assertEqual(weapon["ability"], "strength")
 
+    def test_weapon_attack_damage_includes_the_attackers_own_ability_modifier(self):
+        """
+        Real live bug (2026-09-25, dev-bridge, Coffee, on behalf of two
+        real players: "All of the damage that we are doing, seems very
+        low. like something happened to Nerf our characters"). resolve_
+        attack's main weapon-damage roll never added the attacker's own
+        STR/DEX modifier -- real 5E's single most basic damage rule, and
+        the one resolve_thrown_attack already got right (its own
+        docstring: "ability modifier always applies to a thrown weapon's
+        damage, same as any other weapon attack"). Confirmed via git
+        blame: this exact roll_damage call's modifier list only ever
+        grew by ADDING more class-specific bonus terms since the file's
+        original 2026-07-09 commit -- the base ability modifier was
+        never in it. Invisible at low level (a small mod against a d8
+        roll); catastrophic by level 30+ (a real level-34 Fighter's own
+        +7 STR mod, further amplified by this same file's power_scale_
+        ratio) -- exactly the level range the reporting players were at.
+        Direct reproduction: STR 20 (+5 mod), a plain 1d8+0 longsword,
+        forced to roll a 1 on the damage die -- damage_dealt must be
+        1 (die) + 5 (STR) = 6, never just 1.
+        """
+        from rules.combat import resolve_attack
+        attacker = {"name": "Test Fighter", "char_class": "Fighter", "level": 1, "rebirth_count": 0,
+                    "strength": 20, "dexterity": 10, "proficiency_bonus": 2, "conditions": []}
+        defender = {"name": "Dummy", "armor_class": 1, "hp_current": 100, "hp_max": 100, "conditions": []}
+        weapon = {"ability": "strength", "damage_dice": "1d8", "damage_bonus": 0,
+                  "weapon_category": "martial", "damage_type": "physical"}
+        result = resolve_attack(attacker, defender, weapon, forced_roll=15, forced_damage_roll=1)
+        self.assertTrue(result["hit"])
+        self.assertEqual(result["damage_dealt"], 6, "1 (forced die) + 5 (STR mod) must both be present")
+
+    def test_monk_weapon_attack_damage_uses_dexterity_not_strength(self):
+        """Martial Arts (real 5E, Monk): damage from a weapon attack uses DEX instead of STR when it's the better stat -- same real feature the attack-roll side (attack_ability) already implements, now extended to the damage side by the fix above."""
+        from rules.combat import resolve_attack
+        attacker = {"name": "Test Monk", "char_class": "Monk", "level": 1, "rebirth_count": 0,
+                    "strength": 10, "dexterity": 18, "proficiency_bonus": 2, "conditions": []}
+        defender = {"name": "Dummy", "armor_class": 1, "hp_current": 100, "hp_max": 100, "conditions": []}
+        weapon = {"ability": "strength", "damage_dice": "1d6", "damage_bonus": 0,
+                  "weapon_category": "simple", "damage_type": "physical"}
+        result = resolve_attack(attacker, defender, weapon, forced_roll=15, forced_damage_roll=1)
+        self.assertEqual(result["damage_dealt"], 5, "1 (forced die) + 4 (DEX mod) -- Monk damage uses DEX, not the weapon's own STR field")
+
+    def test_monster_natural_attack_damage_is_never_double_counted_with_an_ability_modifier(self):
+        """A monster/NPC attacker (no char_class) must be completely unaffected by the ability-modifier fix above -- campaign.json's damage_bonus for monsters is already a hand-tuned, complete flat number, never balanced to also receive a separate ability-modifier stack on top."""
+        from rules.combat import resolve_attack
+        attacker = {"name": "Goblin", "strength": 16, "dexterity": 10, "damage_dice": "1d6", "damage_bonus": 2, "conditions": []}
+        defender = {"name": "Dummy", "armor_class": 1, "hp_current": 100, "hp_max": 100, "conditions": []}
+        weapon = bot._weapon_for_attacker(attacker)
+        result = resolve_attack(attacker, defender, weapon, forced_roll=15, forced_damage_roll=1)
+        self.assertEqual(result["damage_dealt"], 3, "1 (forced die) + 2 (flat monster damage_bonus) only -- no STR mod stacked on top")
+
     async def test_dead_and_inactive_character_never_gets_natural_healing(self):
         """
         Real live bug (2026-08-21, Coffee: "it is saying im dead.." --
