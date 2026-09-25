@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.693] — fix: Labyrinth wandering-trader shop couldn't be browsed, and was never actually named
+
+Real live report (2026-09-25, dev-bridge, Coffee: "The game is hinting
+to us that there is a travelling merchant, but it wouldn't let me talk
+to them and it wouldn't let us open up the shop either").
+
+Two real, related gaps at a Labyrinth waystation/rest-stop's real
+wandering-trader camp:
+- `list_shop` ("Shop", "what do you have") was never on the Labyrinth
+  action allowlist at all — `buy` was already made Labyrinth-room-aware
+  (2026-09-08, task #5), but browsing first, the much more natural
+  first step, still hit the generic "That doesn't work this deep in
+  the Labyrinth" refusal before ever reaching `_do_list_shop`. Given
+  the same Labyrinth-room-shop-resolution `_do_buy` already has, plus
+  added to the allowlist.
+- The room's own `npcs` list (e.g. `wandering_dungeon_trader`) was set
+  by the generator but never actually displayed anywhere — only
+  mentioned obliquely in flavor-text prose ("a wandering trader has
+  set up camp"). A player had no way to see the NPC's real name to
+  address it by (`talk_npc`'s own name-matching needs it). Monsters
+  already get a "⚔️ Here:" line; NPCs now get a matching "🧑 Here:" one,
+  in the same shared room-text function used by look/move/enter/
+  checkpoint.
+
+2 new tests; 40-test full Labyrinth regression slice re-run clean.
+
 ## [1.27.692] — fix: 11 monsters below the level-15+ damage floor, plus stale test fixtures from v1.27.690
 
 Follow-up audit after v1.27.690's ability-modifier fix, running the

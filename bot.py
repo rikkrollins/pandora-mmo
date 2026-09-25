@@ -10372,6 +10372,20 @@ def _labyrinth_room_text(character: dict, room: dict, run: dict, chat_id: int, a
         names = [cl.get_monster_template(CAMPAIGN, mk)["name"] for mk in room["monsters"] if cl.get_monster_template(CAMPAIGN, mk)]
         if names:
             lines.append(f"⚔️ Here: {', '.join(names)}")
+    # Real live bug (2026-09-25, dev-bridge, Coffee: "The game is
+    # hinting to us that there is a travelling merchant, but it
+    # wouldn't let me talk to them") -- room["npcs"] (e.g. a waystation's
+    # own "wandering_dungeon_trader") was set by rules/labyrinth.py but
+    # never actually displayed anywhere in this shared room-text body,
+    # only mentioned obliquely in the room's own flavor-text prose. A
+    # player had no way to see the NPC's real registered name (needed
+    # for talk_npc's own name-matching) at all -- only that "a trader"
+    # existed somewhere in the description. Named explicitly now, same
+    # "Here:" convention monsters already get.
+    if room.get("npcs"):
+        npc_names = [CAMPAIGN["npcs"][nid]["name"] for nid in room["npcs"] if nid in CAMPAIGN["npcs"]]
+        if npc_names:
+            lines.append(f"🧑 Here: {', '.join(npc_names)}")
     lines.extend(_lockable_callout_lines(room, chat_id))
     exits = _labyrinth_exits(room, run["rooms"], chat_id)
     if exits:
@@ -34662,8 +34676,22 @@ async def _do_list_shop(update: Update) -> None:
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    location = cl.get_location(CAMPAIGN, character["current_location"])
-    shop_id = location.get("shop") if location else None
+    # Labyrinth checkpoint/rest-stop shop (2026-09-25, same real gap
+    # _do_buy's own 2026-09-08 fix already closed for actually
+    # purchasing something -- this is the matching fix for BROWSING
+    # one first. Real dev-bridge report, Coffee: "it wouldn't let us
+    # open up the shop" at a real Labyrinth waystation's wandering-
+    # trader camp). See _do_buy's own comment for why cl.get_location
+    # always returns None here.
+    if character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
+        run = db.get_labyrinth_run(update.effective_chat.id, _labyrinth_party_key(character))
+        room = run["rooms"].get(run["current_room_id"]) if run else None
+        shop_id = room.get("shop") if room else None
+        location_name = room["name"] if room else "here"
+    else:
+        location = cl.get_location(CAMPAIGN, character["current_location"])
+        shop_id = location.get("shop") if location else None
+        location_name = location["name"] if location else "here"
     if not shop_id:
         await update.effective_chat.send_message(
             "There's no shop here.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
@@ -34691,7 +34719,7 @@ async def _do_list_shop(update: Update) -> None:
     # -- confirmed true: this screen listed every real price but never
     # the player's own real gold to weigh them against.
     lines = [
-        f"🛒 **{cl.get_location(CAMPAIGN, character['current_location'])['name']}**",
+        f"🛒 **{location_name}**",
         f"💰 Your gold: {character['gold']}",
     ]
     if shop_data.get("description"):
@@ -39061,6 +39089,13 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         "check_equip_menu", "check_magic", "check_remnants", "check_story", "steal", "buy",
         "check_blacksmith_menu", "check_alchemy_menu", "check_cooking_menu",
         "check_quests", "check_achievements", "check_professions", "check_affinity",
+        # list_shop (2026-09-25, dev-bridge, Coffee: "it wouldn't let us
+        # open up the shop" at a real Labyrinth waystation's wandering-
+        # trader camp) -- "buy" was already allowed (and already
+        # Labyrinth-room-aware, 2026-09-08), but the natural "browse
+        # first" step never was. _do_list_shop is now Labyrinth-room-
+        # aware the same way (see its own comment).
+        "list_shop",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",

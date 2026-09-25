@@ -49820,6 +49820,63 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_descend_labyrinth(FakeUpdate(user_id, "", sink3, chat_id=chat_id))
         self.assertTrue(any("waystation" in s for s in sink3), sink3)
 
+    async def test_labyrinth_shop_can_be_browsed_not_just_bought_from(self):
+        """
+        Real live report (2026-09-25, dev-bridge, Coffee: "The game is
+        hinting to us that there is a travelling merchant, but it
+        wouldn't let me talk to them and it wouldn't let us open up the
+        shop either"). _do_buy already got a real Labyrinth-room-aware
+        fix (2026-09-08, task #5) but list_shop (the natural "browse
+        first" step) was never given the same treatment, and wasn't
+        even on the Labyrinth action allowlist -- any "shop"/"what do
+        you have" message hit the generic "That doesn't work this deep
+        in the Labyrinth" refusal before ever reaching _do_list_shop.
+        """
+        user_id, chat_id = 963091, -963091
+        make_basic_character(user_id, "ShopBrowseTester", chat_id=chat_id, current_location="the_colosseum", hp_max=200)
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        party_key = f"solo:{user_id}"
+        run = db.get_labyrinth_run(chat_id, party_key)
+        rooms = run["rooms"]
+        hub_id = run["current_room_id"]
+        rest_stop_id = "laby_rest_stop_shop_test"
+        rooms[rest_stop_id] = {
+            "id": rest_stop_id, "floor": run["floor"], "name": "A Real Rest Stop",
+            "description": "Safe, for now.", "connections": [hub_id], "monsters": [],
+            "is_rest_stop": True, "shop": "wandering_traders_pack", "npcs": ["wandering_dungeon_trader"],
+        }
+        rooms[hub_id]["connections"].append(rest_stop_id)
+        db.update_labyrinth_run(chat_id, party_key, rooms=rooms, current_room_id=rest_stop_id)
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "Shop", sink, chat_id=chat_id), DummyContext(),
+            {"action": "list_shop", "raw_text": "Shop"}, "Shop",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+        self.assertFalse(any("no shop here" in s.lower() for s in sink), sink)
+        reply = "\n".join(sink)
+        self.assertIn("A Real Rest Stop", reply)
+        self.assertIn("Torch", reply)
+
+    def test_labyrinth_room_text_names_its_own_npcs_not_just_monsters(self):
+        """
+        Real live root cause of the "wouldn't let me talk to them" half
+        of the same report above: room["npcs"] was set by rules/
+        labyrinth.py but never actually shown anywhere -- a player only
+        ever saw the flavor-text prose ("a wandering trader has set up
+        camp"), never the NPC's own real registered name they'd need to
+        address it by. Monsters already got a "Here:" line; NPCs now do too.
+        """
+        room = {
+            "name": "A Wanderer's Rest", "description": "Charred beams cross overhead.",
+            "connections": [], "monsters": [], "npcs": ["wandering_dungeon_trader"], "floor": 13,
+        }
+        run = {"floor": 13, "rooms": {"r1": room}}
+        text = bot._labyrinth_room_text({}, room, run, -999)
+        self.assertIn("A Wandering Trader", text)
+
     async def test_real_human_can_summon_a_bound_remnant_during_a_real_labyrinth_fight(self):
         """
         Real feature gap closed as a side effect of the fix above: since
