@@ -17754,7 +17754,8 @@ async def _do_talk_party(update: Update, action_text: str) -> None:
     context_facts = _party_companion_context_facts(character, location)
     thieves_cant_block = _thieves_cant_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
     druidic_block = _druidic_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
-    combined_facts = "\n\n".join(f for f in (context_facts, thieves_cant_block, druidic_block) if f) or None
+    puzzle_hint_block = _puzzle_hint_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+    combined_facts = "\n\n".join(f for f in (context_facts, thieves_cant_block, druidic_block, puzzle_hint_block) if f) or None
     relationship = db.get_relationship(update.effective_user.id, update.effective_chat.id, npc_id)
     reply = await asyncio.to_thread(
         talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, action_text, character["name"],
@@ -20093,6 +20094,84 @@ async def _do_check_quests(update: Update) -> None:
     )
 
 
+PUZZLE_HINT_ATTEMPT_THRESHOLDS = (3, 6)
+
+
+def _earned_puzzle_hint_for_attempts(puzzle_id: str, attempts: int) -> str | None:
+    """
+    Non-spoiler escalating puzzle hints (2026-09-25, dev-bridge, Coffee,
+    on behalf of two real players stuck on a riddle: "we need a way so
+    if we can't figure out the quest there's a way for us to be able to
+    figure it out"). A puzzle's own "hints" list (campaigns/default/
+    campaign.json) holds 2 hand-authored, non-spoiler strings, vague ->
+    clearer, NEVER the literal accepted answer. `PUZZLE_HINT_ATTEMPT_
+    THRESHOLDS` (3, 6) gates how many real wrong guesses unlock tier 1 /
+    tier 2 respectively. Returns the highest earned tier's text, or
+    None if nothing's earned yet or the puzzle has no hints authored.
+    Takes a plain `attempts` count rather than a character dict so a
+    caller that just freshly bumped the count (db.bump_puzzle_attempt_
+    count's own return value) never has to re-fetch the character to
+    see its own write reflected -- see _earned_puzzle_hint below for
+    the character-dict-reading convenience wrapper every OTHER caller
+    uses instead.
+    """
+    puzzle = CAMPAIGN.get("puzzles", {}).get(puzzle_id)
+    hints = puzzle.get("hints") if puzzle else None
+    if not hints:
+        return None
+    tier = sum(1 for threshold in PUZZLE_HINT_ATTEMPT_THRESHOLDS if attempts >= threshold)
+    tier = min(tier, len(hints))
+    return hints[tier - 1] if tier > 0 else None
+
+
+def _earned_puzzle_hint(character: dict, puzzle_id: str) -> str | None:
+    """Convenience wrapper for every caller reading a character dict that's already known-fresh (ask_clue, dialogue grounding) -- see _earned_puzzle_hint_for_attempts for the shared threshold logic."""
+    attempts = character.get("puzzle_attempts", {}).get(puzzle_id, 0)
+    return _earned_puzzle_hint_for_attempts(puzzle_id, attempts)
+
+
+def _active_solve_puzzle_quest(character: dict) -> tuple[str, str] | None:
+    """Returns (quest_id, puzzle_id) for the character's own active solve_puzzle quest, if any -- shared by _do_ask_clue and the dialogue-grounding helpers below so none of them re-derive this scan separately."""
+    for quest_id in character.get("active_quests", {}):
+        quest = CAMPAIGN["quests"].get(quest_id)
+        if quest and quest.get("trigger", {}).get("type") == "solve_puzzle":
+            return quest_id, quest["trigger"]["puzzle_id"]
+    return None
+
+
+def _puzzle_hint_grounding_block(telegram_user_id: int, chat_id: int, character: dict, npc_id: str) -> str | None:
+    """
+    The "go talk to someone" and "a companion nudge if asked" surfaces
+    for the same earned hint _earned_puzzle_hint computes -- same shape
+    as _thieves_cant_grounding_block/_druidic_grounding_block. A
+    recruitable companion stays generic below "mid" trust (_companion_
+    trust_band) -- this isn't a spoiler-secret like Thieves' Cant, just
+    a nudge, so the bar is lower than "high". A non-recruitable NPC
+    (the 10 purpose-built `role: "puzzle_guardian"` NPCs standing at
+    real puzzle locations, e.g. "The Watching Glyph": "has been asking
+    the same question of everyone who reaches it, for longer than
+    anyone alive") skips the trust gate entirely -- they exist solely
+    to answer this, unconditionally, per their own written personality.
+    """
+    active = _active_solve_puzzle_quest(character)
+    if active is None:
+        return None
+    _quest_id, puzzle_id = active
+    hint = _earned_puzzle_hint(character, puzzle_id)
+    if hint is None:
+        return None
+    npc = CAMPAIGN.get("npcs", {}).get(npc_id, {})
+    if npc.get("recruitable") and _companion_trust_band(telegram_user_id, chat_id, npc_id) == "low":
+        return None
+    return (
+        "The player is genuinely stuck on a real riddle/puzzle tied to "
+        "their current quest. If asked for help or a hint, you may "
+        "share this exact, real, non-spoiler nudge in your own words -- "
+        "never invent a different hint, never state the actual answer "
+        f"outright: {hint}"
+    )
+
+
 async def _do_ask_clue(update: Update, text: str = "") -> None:
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
@@ -20130,6 +20209,10 @@ async def _do_ask_clue(update: Update, text: str = "") -> None:
         quest = CAMPAIGN["quests"].get(quest_id)
         if quest and quest.get("clue"):
             lines.append(f"• *{quest['title']}*: {quest['clue']}")
+            if quest.get("trigger", {}).get("type") == "solve_puzzle":
+                hint = _earned_puzzle_hint(character, quest["trigger"]["puzzle_id"])
+                if hint:
+                    lines.append(f"  🗝️ {hint}")
     if len(lines) == 1:
         lines.append("Nothing concrete yet — keep exploring.")
 
@@ -20155,6 +20238,7 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
     # require an EXACT match against an accepted answer) instead of
     # duplicating that same fix a second time here.
     has_active_puzzle = False
+    wrong_puzzle_hints = []
     for quest_id in list(character["active_quests"].keys()):
         quest = CAMPAIGN["quests"].get(quest_id)
         if not quest or quest.get("trigger", {}).get("type") != "solve_puzzle":
@@ -20167,6 +20251,17 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
         if _guild_curriculum_riddle_answer_matches(text, puzzle["accepted_answers"]):
             await _complete_quest_and_announce(update, telegram_user_id, quest_id)
             return
+        # Non-spoiler escalating hints (2026-09-25, dev-bridge, Coffee):
+        # a real wrong guess against a real active puzzle counts toward
+        # _earned_puzzle_hint_for_attempts's thresholds. Simultaneously-
+        # active puzzles are rare (almost always exactly one); when it
+        # does happen, this still records the attempt for each, it just
+        # only shows a hint below when exactly one was actually checked
+        # this turn, rather than guessing which one's hint to surface.
+        new_count = db.bump_puzzle_attempt_count(telegram_user_id, update.effective_chat.id, puzzle_id)
+        hint = _earned_puzzle_hint_for_attempts(puzzle_id, new_count)
+        if hint:
+            wrong_puzzle_hints.append(hint)
 
     # Real live bug (2026-09-02, Coffee: solved a riddle correctly
     # before, tried the same correct answer again, and got the exact
@@ -20180,8 +20275,11 @@ async def _do_answer_puzzle(update: Update, text: str) -> None:
     # replies, or a correct answer looks indistinguishable from a wrong
     # one whenever the real puzzle simply isn't active right now.
     if has_active_puzzle:
+        reply = "That's not it — think it over some more."
+        if len(wrong_puzzle_hints) == 1:
+            reply += f"\n\n🗝️ {wrong_puzzle_hints[0]}"
         await update.effective_chat.send_message(
-            "That's not it — think it over some more.", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+            reply, message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
     else:
         await update.effective_chat.send_message(
@@ -38176,7 +38274,11 @@ async def _maybe_resolve_npc_reply_from_text(update: Update) -> bool:
         _druidic_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
         if character else None
     )
-    combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block, druidic_block) if f) or None
+    puzzle_hint_block = (
+        _puzzle_hint_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+        if character else None
+    )
+    combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block, druidic_block, puzzle_hint_block) if f) or None
     reply_text = await asyncio.to_thread(
         talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, message.text, character_name,
         relationship["memory_events"], combined_facts, _npc_identity_facts(character),
@@ -39199,7 +39301,11 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
                     _druidic_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
                     if character else None
                 )
-                combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block, druidic_block) if f) or None
+                puzzle_hint_block = (
+                    _puzzle_hint_grounding_block(update.effective_user.id, update.effective_chat.id, character, npc_id)
+                    if character else None
+                )
+                combined_facts = "\n\n".join(f for f in (quest_facts, thieves_cant_block, druidic_block, puzzle_hint_block) if f) or None
                 reply = await asyncio.to_thread(
                     talk_to_npc, npc_id, update.effective_chat.id, update.effective_user.id, text, character_name,
                     relationship["memory_events"], combined_facts, _npc_identity_facts(character),

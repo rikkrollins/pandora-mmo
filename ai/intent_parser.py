@@ -778,9 +778,16 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     ):
         return {**base, "action": "check_sheet", "target": named_sheet_match.group(1)}
 
+    # Real live gap (2026-09-25, topic-activity signal, a real player
+    # stuck on a riddle): "Can i get a hint?" -- a completely natural
+    # way to ask for exactly what this block already covers -- matched
+    # none of these phrases and fell all the way through to silent
+    # chat. "can/could i get/have a hint" is common enough phrasing to
+    # add explicitly rather than waiting on the model to guess it.
     if any(w in lowered for w in ["ask for a clue", "ask for clues", "give me a clue", "any clues",
                                     "what's the clue", "need a hint", "give me a hint",
-                                    "ask for a hint", "what clues"]):
+                                    "ask for a hint", "what clues", "can i get a hint", "can i have a hint",
+                                    "could i get a hint", "could i have a hint", "got a hint", "any hint"]):
         return {**base, "action": "ask_clue"}
 
     # Real live bug (2026-08-18, dev-bridge screenshot, Coffee: "I'm not

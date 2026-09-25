@@ -1209,6 +1209,16 @@ def init_db() -> None:
         if "location_defeat_counts" not in columns:
             conn.execute("ALTER TABLE characters ADD COLUMN location_defeat_counts TEXT NOT NULL DEFAULT '{}'")
 
+        # puzzle_attempts (2026-09-25, non-spoiler escalating puzzle
+        # hints -- per Coffee, dev-bridge, on behalf of two real players
+        # stuck on a riddle: "we need a way so if we can't figure out
+        # the quest there's a way for us to be able to figure it out").
+        # Per-character, {puzzle_id: wrong_attempt_count} -- same exact
+        # shape as location_defeat_counts just above, just keyed by
+        # puzzle_id instead of location_id. See bot._earned_puzzle_hint.
+        if "puzzle_attempts" not in columns:
+            conn.execute("ALTER TABLE characters ADD COLUMN puzzle_attempts TEXT NOT NULL DEFAULT '{}'")
+
         # Real exploit found and fixed (2026-09-14, proactive audit):
         # join_guild's secondary-guild branch granted its real, one-time
         # GUILD_PROMOTION_PCT_BONUS every single time it ran, with
@@ -1349,6 +1359,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d["spell_mastery_pct"] = json.loads(d["spell_mastery_pct"])
     d["element_mastery_pct"] = json.loads(d["element_mastery_pct"])
     d["location_defeat_counts"] = json.loads(d["location_defeat_counts"])
+    d["puzzle_attempts"] = json.loads(d["puzzle_attempts"])
     d["labyrinth_checkpoints_reached"] = json.loads(d["labyrinth_checkpoints_reached"])
     d["labyrinth_solo_checkpoints_reached"] = json.loads(d["labyrinth_solo_checkpoints_reached"])
     return d
@@ -1482,7 +1493,7 @@ def update_character(telegram_user_id: int, chat_id: int, **fields) -> dict | No
     if not fields:
         return get_character(telegram_user_id, chat_id)
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "weapon_type_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "weapon_type_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted", "puzzle_attempts")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -1526,7 +1537,7 @@ def update_character_by_id(character_id: int, **fields) -> dict | None:
             row = conn.execute("SELECT * FROM characters WHERE character_id = ?", (character_id,)).fetchone()
         return _row_to_dict(row) if row else None
 
-    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "weapon_type_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted")
+    json_fields = ("inventory", "known_spells", "completed_quests", "visited_locations", "skill_uses", "active_quests", "feature_uses", "equipped_accessories", "known_monsters", "defeated_monsters", "cleared_locations", "achievements", "map_revealed_locations", "skill_tree_upgrades", "weapon_proficiency_pct", "weapon_type_proficiency_pct", "armor_proficiency_pct", "profession_mastery_pct", "guild_curriculum_state", "secondary_guilds", "secondary_guild_join_levels", "secondary_guild_curriculum_steps", "secondary_guild_curriculum_unlocked_at", "secondary_guild_curriculum_state", "bound_remnants", "dismissed_quest_ids", "spell_mastery_pct", "element_mastery_pct", "location_defeat_counts", "labyrinth_checkpoints_reached", "labyrinth_solo_checkpoints_reached", "guild_promotion_bonus_granted", "puzzle_attempts")
     for key in json_fields:
         if key in fields and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -2799,6 +2810,26 @@ def bump_location_defeat_count(telegram_user_id: int, chat_id: int, location_id:
     counts[location_id] = counts.get(location_id, 0) + 1
     update_character(telegram_user_id, chat_id, location_defeat_counts=counts)
     return counts[location_id]
+
+
+def bump_puzzle_attempt_count(telegram_user_id: int, chat_id: int, puzzle_id: str) -> int:
+    """
+    Non-spoiler escalating puzzle hints (2026-09-25, dev-bridge, Coffee,
+    on behalf of two real players stuck on a riddle: "we need a way so
+    if we can't figure out the quest there's a way for us to be able to
+    figure it out"). Same exact shape as bump_location_defeat_count
+    above, keyed by puzzle_id instead of location_id -- called from
+    bot._do_answer_puzzle on every WRONG guess against an active
+    puzzle. Returns the new count so the caller can check it against
+    bot._earned_puzzle_hint's thresholds without a second read.
+    """
+    character = get_character(telegram_user_id, chat_id)
+    if character is None:
+        return 0
+    counts = character["puzzle_attempts"]
+    counts[puzzle_id] = counts.get(puzzle_id, 0) + 1
+    update_character(telegram_user_id, chat_id, puzzle_attempts=counts)
+    return counts[puzzle_id]
 
 
 def learn_spell(telegram_user_id: int, chat_id: int, spell_id: str) -> dict | None:

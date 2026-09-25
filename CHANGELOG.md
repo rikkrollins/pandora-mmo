@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.691] — feature: non-spoiler escalating puzzle hints for stuck players
+
+Real live report (2026-09-25, dev-bridge, Coffee, on behalf of two
+real players who spent 10+ minutes and ~20 wrong guesses stuck on "The
+One Bare Wall" riddle): "we need a way so if we can't figure out the
+quest there's a way for us to be able to figure it out. Maybe some
+type of journey or go talk to someone or do a mission?!" Presented 4
+possible approaches; all 4 were selected, and turned out to share one
+underlying data model instead of needing 4 separate systems.
+
+Each of the 21 real puzzles now has 2 hand-authored, non-spoiler hint
+tiers (vague -> clearer, never the literal answer). A new per-character
+`puzzle_attempts` count (same shape as the existing `location_defeat_
+counts`) tracks real wrong guesses; at 3 wrong attempts the game itself
+now appends a tier-1 hint to the usual "That's not it" reply, and tier
+2 at 6 attempts. The same earned hint is also now surfaced through
+`/ask_clue` (and natural "give me a hint" phrasing — also widened to
+catch "can I get a hint?", which a real player used and got total
+silence for), through asking a trusted party companion about it, and —
+found while researching this — through 10 already-built-but-inert
+`puzzle_guardian` NPCs (e.g. "The Watching Glyph": *"has been asking
+the same question of everyone who reaches it, for longer than anyone
+alive"*) that existed in the campaign data specifically for this and
+had never been wired to any dialogue logic until now. Also widened a
+few puzzles' `accepted_answers` with obviously-missing synonyms.
+
+7 new tests, including an automated regression guard asserting none of
+the 21 puzzles' hint text ever contains that same puzzle's own answer.
+
 ## [1.27.690] — CRITICAL fix: weapon attacks never added the attacker's own STR/DEX modifier to damage
 
 Real live report (2026-09-25, dev-bridge, Coffee, on behalf of two

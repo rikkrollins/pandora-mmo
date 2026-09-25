@@ -637,6 +637,130 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("think it over some more" in s for s in sink))
         self.assertFalse(any("don't have an unsolved riddle" in s for s in sink))
 
+    async def test_wrong_puzzle_answers_earn_an_escalating_non_spoiler_hint(self):
+        """
+        Real live request (2026-09-25, dev-bridge, Coffee, on behalf of
+        two real players stuck on a riddle: "we need a way so if we
+        can't figure out the quest there's a way for us to be able to
+        figure it out"). The first 2 wrong guesses get no hint at all
+        (below PUZZLE_HINT_ATTEMPT_THRESHOLDS[0]==3); the 3rd wrong
+        guess earns tier 1; the 6th earns tier 2 -- and tier 2 stays
+        shown on every subsequent wrong guess rather than regressing.
+        """
+        uid, chat_id = 800305, -800305
+        make_basic_character(uid, "HintEarner", chat_id=chat_id, current_location="market_row")
+        db.accept_quest(uid, chat_id, "marens_locked_ledger")
+        hints = bot.CAMPAIGN["puzzles"]["marens_riddle"]["hints"]
+
+        for _ in range(2):
+            sink = []
+            await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "a mountain")
+            self.assertFalse(any(hints[0] in s for s in sink), "no hint should appear before 3 wrong attempts")
+
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "a mountain")
+        self.assertTrue(any(hints[0] in s for s in sink), "tier 1 hint must appear on the 3rd wrong attempt")
+
+        for _ in range(2):
+            sink = []
+            await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "a mountain")
+
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "a mountain")
+        self.assertTrue(any(hints[1] in s for s in sink), "tier 2 hint must appear on the 6th wrong attempt")
+
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "a mountain")
+        self.assertTrue(any(hints[1] in s for s in sink), "tier 2 must stay shown, never regress back to tier 1")
+
+    async def test_ask_clue_surfaces_the_earned_puzzle_hint(self):
+        """/ask_clue (and natural 'give me a hint' phrasing) surfaces the same earned hint the automatic wrong-answer escalation does, once earned -- and omits it before."""
+        uid, chat_id = 800306, -800306
+        make_basic_character(uid, "AskClueHintTester", chat_id=chat_id, current_location="market_row")
+        db.accept_quest(uid, chat_id, "marens_locked_ledger")
+        hints = bot.CAMPAIGN["puzzles"]["marens_riddle"]["hints"]
+
+        sink = []
+        await bot._do_ask_clue(FakeUpdate(uid, "", sink, chat_id=chat_id), "")
+        self.assertFalse(any(hints[0] in s for s in sink), "no hint earned yet")
+
+        for _ in range(3):
+            sink = []
+            await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "a mountain")
+
+        sink = []
+        await bot._do_ask_clue(FakeUpdate(uid, "", sink, chat_id=chat_id), "")
+        self.assertTrue(any(hints[0] in s for s in sink), "ask_clue must surface the now-earned tier-1 hint")
+
+    def test_no_puzzle_hint_ever_contains_its_own_accepted_answer(self):
+        """
+        Automated non-spoiler regression guard, per this project's
+        standing "never spoil puzzle answers" rule -- every one of the
+        21 real puzzles' 2 hand-authored hint tiers must never contain
+        any of that SAME puzzle's own accepted_answers as a case-
+        insensitive substring, now or in any future edit to this data.
+        """
+        for puzzle_id, puzzle in bot.CAMPAIGN["puzzles"].items():
+            hints = puzzle.get("hints") or []
+            answers = [a.lower() for a in puzzle.get("accepted_answers", [])]
+            for tier, hint in enumerate(hints):
+                lowered_hint = hint.lower()
+                for answer in answers:
+                    self.assertNotIn(
+                        answer, lowered_hint,
+                        f"{puzzle_id} hint tier {tier} contains its own accepted answer {answer!r}: {hint!r}",
+                    )
+
+    def test_puzzle_hint_grounding_block_gated_by_companion_trust_band(self):
+        """A recruitable companion stays generic (no earned hint shared) below 'mid' trust, and shares it at 'mid'/'high' -- same trust-band gating already used for Thieves' Cant/Druidic secrets, just a lower bar since this is a nudge, not a spoiler-secret."""
+        uid, chat_id = 800307, -800307
+        make_basic_character(uid, "TrustGateTester", chat_id=chat_id, current_location="market_row")
+        db.accept_quest(uid, chat_id, "marens_locked_ledger")
+        for _ in range(3):
+            db.bump_puzzle_attempt_count(uid, chat_id, "marens_riddle")
+        character = db.get_character(uid, chat_id)
+        hint = bot.CAMPAIGN["puzzles"]["marens_riddle"]["hints"][0]
+
+        db.adjust_affinity(uid, chat_id, "sera_wanderer", -100)
+        block = bot._puzzle_hint_grounding_block(uid, chat_id, character, "sera_wanderer")
+        self.assertIsNone(block, "a stranger-trust companion must stay generic, no hint shared")
+
+        db.adjust_affinity(uid, chat_id, "sera_wanderer", 200)
+        block = bot._puzzle_hint_grounding_block(uid, chat_id, character, "sera_wanderer")
+        self.assertIsNotNone(block)
+        self.assertIn(hint, block)
+
+    def test_puzzle_hint_grounding_block_always_available_from_a_puzzle_guardian_npc(self):
+        """
+        The 10 purpose-built `role: "puzzle_guardian"` NPCs (e.g. "The
+        Watching Glyph") exist solely to answer this -- unconditionally,
+        no trust gate, matching their own written personality ("has
+        been asking the same question of everyone who reaches it, for
+        longer than anyone alive").
+        """
+        uid, chat_id = 800308, -800308
+        make_basic_character(uid, "GuardianHintTester", chat_id=chat_id, current_location="the_first_city_watchers_walk")
+        db.accept_quest(uid, chat_id, "the_watchers_riddle")
+        for _ in range(3):
+            db.bump_puzzle_attempt_count(uid, chat_id, "watchers_walk_riddle")
+        character = db.get_character(uid, chat_id)
+        hint = bot.CAMPAIGN["puzzles"]["watchers_walk_riddle"]["hints"][0]
+
+        block = bot._puzzle_hint_grounding_block(uid, chat_id, character, "the_watching_glyph")
+        self.assertIsNotNone(block, "a non-recruitable puzzle_guardian NPC must share the earned hint unconditionally")
+        self.assertIn(hint, block)
+
+    def test_can_i_get_a_hint_phrasings_now_classify_as_ask_clue(self):
+        """
+        Real live gap (2026-09-25, topic-activity signal): a real
+        player's bare "Can i get a hint?" fell through to silent chat --
+        none of the existing ask_clue keyword-fallback phrases matched
+        it. Now covered, along with a few other common phrasings.
+        """
+        for text in ["Can i get a hint?", "can I have a hint", "could i get a hint please",
+                     "Got a hint?", "any hint on this?"]:
+            self.assertEqual(_keyword_fallback(text, [])["action"], "ask_clue", f"text={text!r}")
+
     async def test_stray_space_slash_menu_still_opens_the_menu(self):
         """
         Real live bug (2026-08-11, topic-monitor report): a player typed
@@ -30291,20 +30415,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.update_character(user_id, -999, hp_current=100, level=10)
         player = db.get_character(user_id, -999)
         player["telegram_user_id"] = user_id
-        # hp_current=60 (not 25): ENRAGE_HP_THRESHOLD is 0.3 of hp_max=93
-        # (27.9), and this test's own real crit deals a deterministic 35
-        # damage under these mocks -- starting at 25 was already BELOW
-        # that threshold before the hit even landed, so the 35-damage
-        # crit overkilled the boss outright (hp_current clamped to 0,
-        # failing the "still alive" half of the real summon-trigger
-        # check) instead of actually exercising "drops a boss below
-        # threshold" as the test's own name promises. 60-35=25, which
-        # IS below 27.9 and still alive -- the real scenario this test
-        # was always meant to cover (found stale 2026-08-22, likely
-        # predating one of this session's own damage-scaling changes).
+        # hp_current=85 (not 60): ENRAGE_HP_THRESHOLD is 0.3 of hp_max=93
+        # (27.9), and this test's own real crit deals a deterministic
+        # amount of damage under these mocks -- 60 was already too
+        # little headroom once resolve_attack's own missing-ability-
+        # modifier bug was fixed (v1.27.690: weapon attacks now
+        # correctly add the attacker's own STR/DEX modifier), pushing
+        # this exact crit to 61 damage and overkilling the boss outright
+        # (hp_current clamped to 0, failing the "still alive" half of
+        # the real summon-trigger check) instead of actually exercising
+        # "drops a boss below threshold" as the test's own name
+        # promises. 85-61=24, which IS below 27.9 and still alive -- the
+        # real scenario this test was always meant to cover (found
+        # stale 2026-08-22 for the same reason once already, before
+        # this session's own separate ability-modifier fix stacked
+        # another real damage increase on top).
         boss = {
             "telegram_user_id": -700805, "name": "Goblin Boss", "dexterity": 8, "strength": 12,
-            "armor_class": 1, "hp_current": 60, "hp_max": 93, "proficiency_bonus": 2,
+            "armor_class": 1, "hp_current": 85, "hp_max": 93, "proficiency_bonus": 2,
             "is_ai": 1, "monster_key": "goblin_boss", "is_boss": True,
             "summons": {"monster_key": "goblin", "count": 2},
         }

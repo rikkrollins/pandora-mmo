@@ -14159,6 +14159,10 @@
         "map",
         "a map of the world",
         "a globe"
+      ],
+      "hints": [
+        "Whatever this is holds whole cities, forests, and rivers without any of them actually being there -- think about how you'd picture a whole world without it taking up any real space.",
+        "It's not alive at all -- it's something you'd unroll or hold flat, made just to represent a place rather than actually be one."
       ]
     },
     "elder_glen_riddle": {
@@ -14168,6 +14172,10 @@
         "tree",
         "an old tree",
         "the tree"
+      ],
+      "hints": [
+        "It's not alive the way a person is, but it does grow, and it does keep count of every year it's stood here -- just not with anything you'd call a hand.",
+        "Look up. Whatever this is has rings you could count and arms that reach for the sky, without a single joint or finger among them."
       ]
     },
     "archive_recess_riddle": {
@@ -14176,6 +14184,10 @@
         "an echo",
         "echo",
         "an echo of a sound"
+      ],
+      "hints": [
+        "This isn't a person hiding nearby -- it only exists for a moment, and only because something else made a sound first.",
+        "Shout, and it answers back in your own voice a beat later. That's the whole trick."
       ]
     },
     "hollow_verge_riddle": {
@@ -14185,6 +14197,10 @@
         "a second chance",
         "more time",
         "another chance"
+      ],
+      "hints": [
+        "This isn't a thing you can hold -- it's something you're either given or you aren't, and it only really matters to whoever feels like they've run out.",
+        "Someone who already has plenty of it barely notices one more. Someone who's lost theirs would give almost anything for it."
       ]
     },
     "wordless_choir_riddle": {
@@ -14194,6 +14210,10 @@
         "the silence",
         "quiet",
         "the quiet"
+      ],
+      "hints": [
+        "Every voice in this hall eventually stops -- think about what's actually left once the very last one does.",
+        "It isn't a sound at all. It's the complete absence of one, and it's the loudest thing in this whole chamber once you notice it."
       ]
     },
     "unmoored_isle_loom_riddle": {
@@ -14203,7 +14223,13 @@
         "the circle",
         "a cycle",
         "the cycle",
-        "rebirth"
+        "rebirth",
+        "a loop",
+        "the loop"
+      ],
+      "hints": [
+        "Trace the shape this makes -- follow it all the way around and you'd end up exactly back where you started.",
+        "It has no true beginning or end, just one continuous, repeating shape -- something that keeps looping back on itself."
       ]
     },
     "unopened_seal_riddle": {
@@ -14215,6 +14241,10 @@
         "pandora's box",
         "the truth",
         "the answer"
+      ],
+      "hints": [
+        "Whatever's inside isn't good or bad on its own -- it becomes whichever one the person opening it was already bracing for.",
+        "It's not a feeling or a person. It's something real you could open with your own hands, and once it's open, there's no putting it back."
       ]
     },
     "deep_glade_ring_riddle": {
@@ -14224,7 +14254,13 @@
         "memory",
         "a tree ring",
         "tree rings",
-        "a ring"
+        "a ring",
+        "memories",
+        "growth rings"
+      ],
+      "hints": [
+        "It never leaves this circle, but it never forgets anything that's ever brushed against it either.",
+        "Cut into it, and you could count out every year it's lived -- one layer at a time."
       ]
     },
     "watchers_walk_riddle": {
@@ -14233,6 +14269,10 @@
         "footsteps",
         "steps",
         "footprints"
+      ],
+      "hints": [
+        "Whatever this is isn't something you're holding -- it's the trace you leave behind without meaning to, one at a time, as you go.",
+        "Walk further, and you'll find more of them behind you, not in your hands."
       ]
     },
     "unwritten_hall_riddle": {
@@ -14240,7 +14280,13 @@
       "accepted_answers": [
         "silence",
         "the space between the words",
-        "what's unsaid"
+        "what's unsaid",
+        "quiet",
+        "the unspoken"
+      ],
+      "hints": [
+        "Nobody carved a single letter into this wall, and yet it's completely covered anyway -- think about what fills a page that has no writing on it at all.",
+        "It isn't ink, and it isn't stone. It's the gap where the words would be, if anyone had bothered to write them."
       ]
     },
     "folded_atrium_riddle": {
@@ -14249,6 +14295,10 @@
         "a circle",
         "a loop",
         "a cycle"
+      ],
+      "hints": [
+        "Whatever this is doesn't have a true starting point -- walk it long enough and you'll notice you keep arriving right back where you began.",
+        "It's a shape, not a story -- one that closes back on itself instead of ever reaching a real end."
       ]
     },
     "argument_of_echoes_riddle": {
@@ -14257,6 +14307,10 @@
         "an echo and its source",
         "an echo",
         "a reflection and what it reflects"
+      ],
+      "hints": [
+        "One of these two voices only exists because the other one spoke first -- they're not two separate people at all.",
+        "Say something out loud in here, and you'll hear it answered back a moment later in the exact same voice. That's your second speaker."
       ]
     },
     "ledger_vaults_riddle": {
@@ -14264,7 +14318,12 @@
       "accepted_answers": [
         "a toll",
         "a ledger",
-        "a debt"
+        "a debt",
+        "tolls"
+      ],
+      "hints": [
+        "This isn't a person collecting anything by hand -- it's more like an unpaid account that just keeps a running count of everyone who's passed through.",
+        "Whatever crosses through here leaves owing something behind, whether or not anything physical actually changes hands."
       ]
     },
     "tangled_hollow_riddle": {
@@ -14273,6 +14332,10 @@
         "a root",
         "roots",
         "a net"
+      ],
+      "hints": [
+        "It doesn't have a mouth or hands, but it definitely has a grip -- tangled, woven, and holding this whole hollow together underground.",
+        "Dig down and you'd find it everywhere, threading through the soil in every direction, letting nothing slip past it."
       ]
     },
     "wellsprings_answer_riddle": {
@@ -14281,6 +14344,10 @@
         "water",
         "a river",
         "a current"
+      ],
+      "hints": [
+        "It never holds one shape for long, but it always ends up somewhere lower than where it started.",
+        "Drop something in it and watch it flow downhill -- that's the whole answer, moving right in front of you."
       ]
     },
     "carved_gates_riddle": {
@@ -14288,7 +14355,13 @@
       "accepted_answers": [
         "stone",
         "the gorge",
-        "the mountain"
+        "the mountain",
+        "rock",
+        "the rock"
+      ],
+      "hints": [
+        "This was here long before the bridge, and it'll still be standing long after -- whatever it is, it doesn't age the way wood or rope does.",
+        "It's not built. It was already here, shaped by time rather than by hands -- hard, old, and older than anything constructed nearby."
       ]
     },
     "watchers_perch_riddle": {
@@ -14296,7 +14369,12 @@
       "accepted_answers": [
         "a shadow",
         "the gorge below",
-        "the watcher"
+        "the watcher",
+        "shadows"
+      ],
+      "hints": [
+        "It watches every single crossing from below, but it's never once been the thing anyone actually notices.",
+        "Look down before you look up -- whatever's watching isn't standing where you'd expect, it's cast beneath you instead."
       ]
     },
     "downs_own_marker_riddle": {
@@ -14304,7 +14382,13 @@
       "accepted_answers": [
         "a boundary stone",
         "a marker",
-        "the horizon"
+        "the horizon",
+        "a stone marker",
+        "boundary marker"
+      ],
+      "hints": [
+        "It draws the exact same line every single year without fail -- and it's never once been the one to move.",
+        "It's fixed and unmoving, marking a boundary that stays put no matter how much changes around it."
       ]
     },
     "ash_wardens_riddle": {
@@ -14313,7 +14397,13 @@
         "fire",
         "a fire",
         "flame",
-        "a flame"
+        "a flame",
+        "flames",
+        "fires"
+      ],
+      "hints": [
+        "It isn't alive, but it grows. It has no lungs, but starve it of air and it dies instantly.",
+        "Pour water on it and watch what happens -- that's the one thing it truly can't survive."
       ]
     },
     "root_bound_alcoves_riddle": {
@@ -14322,6 +14412,10 @@
         "a seed",
         "seed",
         "seeds"
+      ],
+      "hints": [
+        "It falls only so it can start again from the ground up -- and it can sleep, buried and still, for far longer than you'd expect.",
+        "Given the right conditions, one single day is all it takes for this thing to wake up and start growing."
       ]
     },
     "choked_reliquarys_riddle": {
@@ -14330,7 +14424,13 @@
         "water",
         "the water",
         "root water",
-        "the root water"
+        "the root water",
+        "a pool",
+        "the pool"
+      ],
+      "hints": [
+        "It has no mouth, but say a name near its surface and the ripples carry on long after your voice goes quiet.",
+        "Whatever sinks below it doesn't come back -- still, reflective, and quietly swallowing anything that goes under."
       ]
     }
   },
