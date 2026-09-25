@@ -13147,7 +13147,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 320,
       "damage_dice": "1d8",
-      "damage_bonus": 32,
+      "damage_bonus": 50,
       "damage_type": "fire"
     },
     "root_touched_stalker": {
@@ -13186,7 +13186,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 330,
       "damage_dice": "1d8",
-      "damage_bonus": 32,
+      "damage_bonus": 50,
       "damage_type": "poison"
     },
     "hollow_root_sentinel": {
@@ -13199,7 +13199,7 @@
       "proficiency_bonus": 6,
       "xp_reward": 450,
       "damage_dice": "1d8",
-      "damage_bonus": 40,
+      "damage_bonus": 50,
       "damage_type": "poison"
     },
     "elder_bramble_husk": {
@@ -13238,7 +13238,7 @@
       "proficiency_bonus": 6,
       "xp_reward": 420,
       "damage_dice": "1d8",
-      "damage_bonus": 44,
+      "damage_bonus": 50,
       "damage_type": "earth",
       "is_boss": false,
       "stealable_items": [
@@ -13340,7 +13340,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 300,
       "damage_dice": "1d8",
-      "damage_bonus": 32,
+      "damage_bonus": 50,
       "damage_type": "force"
     },
     "the_folded_warden": {
@@ -13373,7 +13373,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 250,
       "damage_dice": "1d8",
-      "damage_bonus": 27,
+      "damage_bonus": 50,
       "damage_type": "cold"
     },
     "unmoored_reflection_shard": {
@@ -13386,7 +13386,7 @@
       "proficiency_bonus": 6,
       "xp_reward": 320,
       "damage_dice": "1d8",
-      "damage_bonus": 34,
+      "damage_bonus": 50,
       "damage_type": "cold"
     },
     "the_drowned_reflection": {
@@ -13432,7 +13432,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 270,
       "damage_dice": "1d8",
-      "damage_bonus": 30,
+      "damage_bonus": 50,
       "damage_type": "radiant"
     },
     "unmoored_sunward_watcher": {
@@ -13445,7 +13445,7 @@
       "proficiency_bonus": 6,
       "xp_reward": 380,
       "damage_dice": "1d8",
-      "damage_bonus": 40,
+      "damage_bonus": 50,
       "damage_type": "radiant"
     },
     "the_high_approach_sentinel": {
@@ -14037,7 +14037,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 400,
       "damage_dice": "1d8",
-      "damage_bonus": 38,
+      "damage_bonus": 50,
       "damage_type": "poison"
     },
     "the_silt_bound_current": {
@@ -14089,7 +14089,7 @@
       "proficiency_bonus": 5,
       "xp_reward": 500,
       "damage_dice": "1d8",
-      "damage_bonus": 45,
+      "damage_bonus": 50,
       "damage_type": "force"
     },
     "the_watch_bound_sentry": {

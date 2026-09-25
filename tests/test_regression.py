@@ -1649,11 +1649,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # double the weapon die and complicate the exact-damage check) --
         # retry until a plain hit so those ~10% of rolls don't make this
         # test flaky.
+        #
+        # Real stale-test fix (2026-09-25, v1.27.690's own missing-
+        # ability-modifier fix): this attacker's real STR 16 (+3 mod)
+        # was never being added to damage before that fix, and the
+        # existing real front-row damage bonus (formation_damage_bonus_
+        # pct's own documented default -- a missing formation_row reads
+        # as "front row") was ALSO already quietly baked into the old
+        # expected number by int()-truncation coincidence (9*1.1
+        # truncates back down to 9) -- same real gotcha already
+        # documented on the sneak-attack-scaling test above. Both are
+        # now explicit rather than accidental.
         attacker = {
             "name": "Warden", "dexterity": 14, "strength": 16, "armor_class": 15,
             "hp_current": 20, "hp_max": 20, "char_class": "Fighter", "guild": "silver_wardens",
         }
         weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        front_row_multiplier = 1 + config.FRONT_ROW_DAMAGE_BONUS_PCT / 100
         for _ in range(20):
             defender = {
                 "name": "Shadow Wisp", "dexterity": 18, "armor_class": 1,
@@ -1661,7 +1673,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             }
             result = resolve_attack(attacker, defender, weapon)
             if result["hit"] and not result["critical_hit"]:
-                self.assertEqual(result["damage_dealt"], 3)  # 1 (die) + 2 (warden bonus)
+                # 1 (die) + 3 (STR mod) + 2 (warden bonus), times the real front-row multiplier
+                self.assertEqual(result["damage_dealt"], int((1 + 3 + 2) * front_row_multiplier))
                 return
         self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
 
@@ -1671,6 +1684,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "hp_current": 20, "hp_max": 20, "char_class": "Fighter", "guild": "silver_wardens",
         }
         weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        front_row_multiplier = 1 + config.FRONT_ROW_DAMAGE_BONUS_PCT / 100
         for _ in range(20):
             defender = {
                 "name": "Goblin", "dexterity": 14, "armor_class": 1,
@@ -1678,7 +1692,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             }
             result = resolve_attack(warden_vs_goblin, defender, weapon)
             if result["hit"] and not result["critical_hit"]:
-                self.assertEqual(result["damage_dealt"], 1)  # no bonus vs. non-undead
+                # 1 (die) + 3 (STR mod), no warden bonus vs. non-undead, times the real front-row multiplier
+                self.assertEqual(result["damage_dealt"], int((1 + 3) * front_row_multiplier))
                 return
         self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
 
@@ -1726,7 +1741,9 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "hp_current": 20, "hp_max": 20, "char_class": "Fighter",
             "guild": "forge_guild", "secondary_guilds": ["silver_wardens"],
         }
+        from rules.combat import FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT
         weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        front_row_multiplier = 1 + config.FRONT_ROW_DAMAGE_BONUS_PCT / 100
         for _ in range(20):
             defender = {
                 "name": "Shadow Wisp", "dexterity": 18, "armor_class": 1,
@@ -1734,7 +1751,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             }
             result = resolve_attack(attacker, defender, weapon)
             if result["hit"] and not result["critical_hit"]:
-                self.assertEqual(result["damage_dealt"], 3)  # 1 (die) + 2 (warden bonus)
+                # 1 (die) + 3 (STR mod) + 2 (warden bonus), forge_guild (this attacker's own
+                # PRIMARY guild) applying its own +10% on top, then the real front-row multiplier.
+                pre_front_row = int((1 + 3 + 2) * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100))
+                self.assertEqual(result["damage_dealt"], int(pre_front_row * front_row_multiplier))
                 return
         self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
 
@@ -1747,6 +1767,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "guild": "silver_wardens", "secondary_guilds": ["forge_guild"],
         }
         weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0}
+        front_row_multiplier = 1 + config.FRONT_ROW_DAMAGE_BONUS_PCT / 100
         for _ in range(20):
             defender = {
                 "name": "Goblin", "dexterity": 14, "armor_class": 1,
@@ -1754,7 +1775,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             }
             result = resolve_attack(attacker, defender, weapon)
             if result["hit"] and not result["critical_hit"]:
-                self.assertEqual(result["damage_dealt"], int(1 * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100)))
+                # 1 (die) + 3 (STR mod), no warden bonus vs. non-undead, forge_guild's
+                # (held as a SECONDARY guild here) own +10% on top, then the front-row multiplier.
+                pre_front_row = int((1 + 3) * (1 + FORGE_GUILD_WEAPON_DAMAGE_BONUS_PCT / 100))
+                self.assertEqual(result["damage_dealt"], int(pre_front_row * front_row_multiplier))
                 return
         self.fail("no plain (non-crit) hit landed in 20 tries at AC 1 -- suspiciously unlucky or broken")
 
@@ -29928,23 +29952,37 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(with_offhand_equipped["damage_dealt"], without_dueling["damage_dealt"], "Dueling must not apply once a real off-hand weapon is also equipped")
 
     def test_great_weapon_fighting_rerolls_low_damage_dice_for_a_two_handed_weapon_only(self):
+        """
+        Real stale-test fix (2026-09-25, v1.27.690's own missing-ability-
+        modifier fix): this attacker's STR 16 (+3 mod) was never being
+        added to damage before that fix, and the existing real front-row
+        damage bonus (formation_damage_bonus_pct's own documented
+        default -- a missing formation_row reads as "front row") was
+        ALSO already quietly baked into the old expected numbers by
+        int()-truncation coincidence (9*1.1 truncates back down to 9,
+        1*1.1 truncates back down to 1) -- same real gotcha already
+        documented on the sibling warden/forge-guild damage-bonus tests.
+        Both are now explicit rather than accidental.
+        """
         from unittest.mock import patch
         from rules import combat
         greataxe = items_module.get_item("greataxe")
         longsword = items_module.get_item("longsword")
         attacker = {"name": "Attacker", "strength": 16, "dexterity": 10, "proficiency_bonus": 2, "fighting_style": "Great Weapon Fighting", "char_class": "Fighter"}
         defender = {"name": "Defender", "armor_class": 1, "hp_current": 100, "conditions": []}
+        str_mod = 3
+        front_row_multiplier = 1 + config.FRONT_ROW_DAMAGE_BONUS_PCT / 100
         # forced_roll only substitutes the FIRST rolled die (see roll_damage's own docstring) -- roll() is mocked
         # here instead so every real die in the sequence is forced low, making the reroll's real effect observable.
         with patch("rules.dice.roll", side_effect=[[1], [9]]):
             with_gwf = combat.resolve_attack(dict(attacker), dict(defender), greataxe, forced_roll=15)
-        self.assertEqual(with_gwf["damage_dealt"], 9, "a rolled 1 must be rerolled to the mocked 9 for a two-handed weapon")
+        self.assertEqual(with_gwf["damage_dealt"], int((9 + str_mod) * front_row_multiplier), "a rolled 1 must be rerolled to the mocked 9 for a two-handed weapon")
         with patch("rules.dice.roll", return_value=[1]):
             no_style = combat.resolve_attack(dict({**attacker, "fighting_style": None}), dict(defender), greataxe, forced_roll=15)
-        self.assertEqual(no_style["damage_dealt"], 1, "no reroll without the style")
+        self.assertEqual(no_style["damage_dealt"], int((1 + str_mod) * front_row_multiplier), "no reroll without the style")
         with patch("rules.dice.roll", return_value=[1]):
             one_handed = combat.resolve_attack(dict(attacker), dict(defender), longsword, forced_roll=15)
-        self.assertEqual(one_handed["damage_dealt"], 1, "GWF must never reroll a one-handed weapon's damage die")
+        self.assertEqual(one_handed["damage_dealt"], int((1 + str_mod) * front_row_multiplier), "GWF must never reroll a one-handed weapon's damage die")
 
     async def test_protection_fighting_style_imposes_disadvantage_on_an_ally_attack(self):
         """

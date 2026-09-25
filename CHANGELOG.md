@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.692] — fix: 11 monsters below the level-15+ damage floor, plus stale test fixtures from v1.27.690
+
+Follow-up audit after v1.27.690's ability-modifier fix, running the
+full ~150-test combat/damage regression slice for real confidence
+before calling that fix done.
+
+**Real, pre-existing, unrelated bug found**: `test_all_level_over_15_
+monsters_have_50_damage_bonus_floor` (an existing test enforcing
+Coffee's own 2026-08-19 standing rule: "enemies past lv15... increse
+thier damage bonus to 50 plus") was already failing on `main`, before
+any of today's changes — 11 monsters added since that rule was set
+(`molten_sentinel`, `withering_bramble`, `hollow_root_sentinel`,
+`buried_sentinel`, 5 `unmoored_*` monsters, `the_root_bound_husk`,
+`the_drift_bound_wisp` — including `unmoored_backward_echo`, the exact
+boss from the v1.27.690 report) never got the floor applied. All 11
+raised to the real 50 minimum.
+
+**5 stale test fixtures fixed** (not real bugs — these tests hardcoded
+an exact expected damage number that assumed the pre-v1.27.690 missing
+ability modifier, now correctly higher): `test_silver_wardens_bonus_
+damage_vs_undead`, `test_no_warden_bonus_against_non_undead_or_non_
+member`, `test_warden_bonus_applies_via_a_secondary_promotion_guild`,
+`test_forge_guild_weapon_damage_bonus_applies_via_a_secondary_
+promotion_guild`, `test_great_weapon_fighting_rerolls_low_damage_dice_
+for_a_two_handed_weapon_only`, and `test_a_human_attack_that_drops_a_
+boss_below_threshold_triggers_real_summons` (a boss with too little HP
+headroom, now overkilled by the correctly-higher damage). All 6 now
+compute their expected numbers explicitly from the real ability
+modifier and the real existing front-row damage bonus, instead of a
+hardcoded number that happened to match by int()-truncation luck.
+
 ## [1.27.691] — feature: non-spoiler escalating puzzle hints for stuck players
 
 Real live report (2026-09-25, dev-bridge, Coffee, on behalf of two
