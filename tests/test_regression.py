@@ -5628,6 +5628,54 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["action"], "talk_npc")
         self.assertEqual(result["npc_name"], "Kess, the Unbound")
 
+    def test_model_guessing_bench_party_member_for_a_bare_wrong_puzzle_guess_is_never_trusted(self):
+        """
+        Real live incident (2026-09-25, topic-activity signal, while a
+        real player was stuck on a real riddle): a bare one-word wrong
+        answer guess, "Voices", got classified as bench_party_member
+        with target "Voices" by the model -- there's no real companion
+        by that name and nothing bench-related in the message at all.
+        bench_party_member/unbench_party_member are real roster changes
+        with a real combat consequence, so -- same "never trust the
+        model alone on a consequential action with zero real grounding"
+        fix as leave_guild/leave_party/summon_remnant above -- never
+        trusted from the model unless the raw text actually contains a
+        real trigger word ("bench"/"bring ... back"/"add back"). A real
+        known-companion-name mention doesn't need its own grounding
+        clause here: any message naming one already resolves to
+        talk_npc inside the deterministic keyword fallback itself,
+        before this model-trust check would ever run.
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "bench_party_member", "target": "Voices"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("Voices", [])
+        self.assertNotEqual(result["action"], "bench_party_member")
+
+        # No regression: a real bench phrase still works (matched deterministically, no model call needed).
+        result = intent_parser_module.parse_intent("bench the healer for this fight", [])
+        self.assertEqual(result["action"], "bench_party_member")
+
+        # No regression: "bring ... back" still grounds a real unbench phrase the model agrees with.
+        class FakeResponseUnbench:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "unbench_party_member"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponseUnbench()):
+            result = intent_parser_module.parse_intent("can you bring the healer back into the fight", [])
+        self.assertEqual(result["action"], "unbench_party_member")
+
     def test_bare_take_reclassified_to_examine_when_model_also_says_chat(self):
         """
         Real live bug (2026-08-15, dev-bridge screenshot): "Take the

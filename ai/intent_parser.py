@@ -3108,6 +3108,32 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # raw text actually contains "party".
             if parsed["action"] == "leave_party" and "party" not in text.lower():
                 return fallback
+            # Same real bug class again (2026-09-25, topic-activity signal
+            # while a real player was stuck on a puzzle): a bare one-word
+            # guess, "Voices" (an unsuccessful riddle-answer attempt, not
+            # a party command at all), got classified as bench_party_
+            # member with target "Voices" by the model -- there's no real
+            # companion by that name and no bench-related vocabulary
+            # anywhere in the message. bench_party_member/unbench_party_
+            # member are real roster changes with a real combat
+            # consequence (a benched member sits out the next fight) --
+            # same "never trust the model alone on a consequential action
+            # with zero real grounding" reasoning as leave_guild/
+            # leave_party/summon_remnant above. Grounded on the same
+            # literal trigger words the deterministic fallback itself
+            # requires ("bench"/"bring ... back"/"add back") -- a real
+            # known-NPC-name mention doesn't need its own clause here
+            # (unlike summon_remnant's Remnant-name check below): any
+            # message naming a known companion already resolves to
+            # talk_npc inside _keyword_fallback itself, well before
+            # fallback["action"] != "chat" would even let this model
+            # branch run.
+            if parsed["action"] in ("bench_party_member", "unbench_party_member") and not (
+                "bench" in text.lower()
+                or ("bring" in text.lower() and "back" in text.lower())
+                or "add back" in text.lower()
+            ):
+                return fallback
             # Same defensive pattern again (2026-09-04, topic-activity
             # signal): three different, unrelated real inputs in one
             # evening -- "Stand on the pressure plate", a bare

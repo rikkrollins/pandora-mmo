@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.689] — fix: a wrong riddle guess could silently bench a real party member
+
+Real live incident (2026-09-25, topic-activity signal): a real player
+stuck on a riddle guessed the single word "Voices" as their answer --
+the model classified this as `bench_party_member` with target "Voices"
+even though there's no companion by that name and nothing bench-
+related in the message at all. `bench_party_member`/`unbench_party_
+member` are real roster changes with a real combat consequence (a
+benched member sits out the next fight), so -- same "never trust the
+model alone on a consequential action with zero real grounding" fix
+already applied to `leave_guild`/`leave_party`/`summon_remnant` --
+the model's guess is now only trusted when the raw text actually
+contains "bench", "bring ... back", or "add back".
+
+1 new test (`ai/intent_parser.py`).
+
 ## [1.27.688] — feature: pre-generated story cutscenes, plus a real naming-hallucination bug fix and a menu cleanup
 
 Direct follow-up to v1.27.687's Ollama-slowness investigation. Coffee:
