@@ -2468,6 +2468,101 @@ def the_unspoken_defeat_line() -> str:
     )
 
 
+# ---------------------------------------------------------------------
+# Chapter 3 narrative expansion (2026-09-26), same discipline as
+# Chapters 1-2 above -- every scene shown to Coffee as a calibration
+# sample and explicitly confirmed before being folded in here. Ten
+# quests, two climaxes (the_first_city_quest/The Waking Ember and
+# the_original_spires_reckoning/The Last Glyph, below) -- the 3 solve_
+# puzzle quests (already served by the dedicated hint system, see
+# [[project_puzzle_hint_system_v1_27_691]]) are deliberately out of
+# scope, and the 3 non-climactic defeat_monster "stage" quests get
+# short, proportionate narration-only completion beats rather than a
+# full antagonist voice, same proportionality as Chapter 2's hush_
+# stage1/2.
+# ---------------------------------------------------------------------
+
+def first_city_arrival_scenes(character_name: str) -> list[str]:
+    """
+    Chapter 3's real opener (first_city_arrival, "Beneath Everything")
+    -- replaces the flat generic reach_location AI blurb entirely.
+    Grounded in the location's own real interactable text (the "warm
+    spire" that breathes, the glyphs "repeated so often it starts to
+    feel less like writing and more like counting") -- plants the
+    exact "counting" motif The Last Glyph's own already-existing
+    confrontation_script ("the count is not finished") pays off later,
+    rather than inventing a new theme. Single scene (this arrival is a
+    big reveal, but a short one) -- no need for a Continue-paced
+    2-scene split the way Chapter 1's tavern+wood opener needed.
+    """
+    return [
+        (
+            "*The tunnel doesn't taper off. It just... stops, and the dark opens into something too "
+            "vast to be a cave -- towers, streets, a whole skyline, swallowed and kept down here "
+            "since before anything you've found so far.*\n\n"
+            "Nothing above ground carved like this. Every surface bears the same script, over and "
+            "over, until it stops reading like writing and starts reading like counting.\n\n"
+            f"*{character_name} presses a hand to the nearest wall without quite deciding to. It's "
+            "warm. Not stone-warm -- breathing-warm, the faintest rise and fall under the palm, like "
+            "something enormous asleep and in no hurry to stay that way.*\n\n"
+            "Whatever's down here was never meant to be found. You've already seen it now -- and "
+            "somewhere ahead, past streets nothing living has walked in longer than memory, the "
+            "warmth in the walls just changed rhythm."
+        ),
+    ]
+
+
+def the_waking_ember_confrontation_script() -> str:
+    """
+    the_first_city_quest's real fight-start beat (currently none at
+    all -- it falls through to the generic AI narrate_boss_intro).
+    Deliberately voiceless (SAMPLED, confirmed) -- The Waking Ember is
+    an ancient primal fire-thing, not a schemer like Kess or Vrakk, and
+    the location's own real text already frames it as breathing, never
+    speaking. The quest's own existing hand-written brass-key coda
+    (bot.py's _complete_quest_and_announce, "the_first_city_quest"
+    branch) is left completely untouched -- this only adds the missing
+    fight-start beat before it.
+    """
+    return (
+        "*The warmth in the walls was never ambient -- it was waiting. Something vast uncoils in "
+        "the ember-lit dark ahead, moving the way a fire moves when it decides, all at once, to "
+        "stop banking and start spreading.*\n\n"
+        "*It has no words for you. It doesn't need any. It was old before words were useful for "
+        "anything.*"
+    )
+
+
+def wards_collapse_completion_narration() -> str:
+    """the_wards_collapse's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Whatever wandered these angles doesn't fall so much as finally stop repeating the same "
+        "few motions -- the closest thing this place has left to a shape of its own.*\n\n"
+        "The Forgotten Ward was never built wrong. It was built, and built over, and built over "
+        "again, until nothing here remembers which version anyone actually meant."
+    )
+
+
+def spire_crowns_sentinel_completion_narration() -> str:
+    """the_spire_crowns_sentinel's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*It stood watch long enough that \"standing\" and \"watching\" stopped being two different "
+        "things -- and now it's neither.*\n\n"
+        "More stone than should be possible seals the Crown from the sky above. Whatever it was "
+        "guarding is still up there, sealed in with it, for now."
+    )
+
+
+def forgotten_vaults_secret_completion_narration() -> str:
+    """the_forgotten_vaults_secret's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*It kept its post the same way the vault kept its secret -- quietly, for longer than "
+        "anyone building on top of it ever guessed.*\n\n"
+        "Something was worth burying twice. You still don't know what. You know, now, that someone "
+        "was afraid of it being found even once."
+    )
+
+
 def the_last_glyph_confrontation_script() -> str:
     """
     Chapter 3's real finale ("The Original Spire") -- every glyph in
@@ -2500,6 +2595,25 @@ def the_last_glyph_defeat_line() -> str:
         "**The Last Glyph:** \"...the count is--\"\n\n"
         "*It doesn't finish. For the first time in longer than anyone down here can guess, "
         "nothing in the Original Spire is still counting anything.*"
+    )
+
+
+def the_last_glyph_echo_escalation() -> str:
+    """
+    Chapter 3's real second climax (the_original_spires_reckoning)
+    mid-fight escalation beat -- fires once, the first time its own
+    real `echoes_damage_type` mechanic actually triggers (a free
+    backlash on the third real hit of the same damage type, the exact
+    checkpoint bot.py's echo_backlash_damage handling already uses).
+    SAMPLED, confirmed. Ties the mechanic explicitly to its own "the
+    count is not finished" theme -- it isn't just echoing damage, it's
+    still counting, and the party's own attacks are now part of what
+    it's counting.
+    """
+    return (
+        "*The third real strike doesn't just land -- it comes back. Not slower. Not weaker. "
+        "Exactly the same, down to the follow-through, like it's been counting your swings too.*\n\n"
+        "**The Last Glyph:** \"...the count includes you now. the count is not finished.\""
     )
 
 

@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.701] — Chapter 3 narrative expansion: real multi-scene cutscenes, reader-paced delivery
+
+Third chapter of the Chapters 1-8 narrative project (same process:
+research the real quest/NPC data first, sample before writing).
+Chapter 3 (`arc_3_revelation`, "What Was Buried") is the biggest yet —
+10 quests, two climaxes — and reuses the shared cutscene mechanic
+unchanged.
+
+- `first_city_arrival` ("Beneath Everything"): the flat generic
+  arrival blurb is replaced with the real reveal of the buried First
+  City, grounded in the location's own real text (a spire that
+  breathes, glyphs "repeated so often it starts to feel less like
+  writing and more like counting") — plants the exact "counting" motif
+  The Last Glyph's own existing confrontation script ("the count is
+  not finished") already pays off.
+- `the_wards_collapse`/`the_spire_crowns_sentinel`/
+  `the_forgotten_vaults_secret`: three previously-bare middle stages
+  each get a short, proportionate narration-only completion beat.
+- `the_first_city_quest` (first climax, The Waking Ember): gets a real
+  fight-start beat for the first time — deliberately voiceless, since
+  it's an ancient primal fire-thing, not a talker. Its existing
+  hand-written brass-key ending is untouched.
+- `the_original_spires_reckoning` (second climax, The Last Glyph):
+  existing confrontation/defeat lines unchanged; a new mid-fight
+  escalation now fires the first time its own real `echoes_damage_type`
+  mechanic triggers (the 3rd hit of the same damage type) — it claims
+  the party's own attacks are now part of "the count." Every other
+  echoing boss (e.g. The Undertone) keeps the plain generic line.
+- The 3 solve_puzzle quests in this arc were deliberately left out of
+  scope — they're already served by the dedicated puzzle-hint system.
+
+7 new regression tests.
+
 ## [1.27.700] — Chapter 2 narrative expansion: real multi-scene cutscenes, reader-paced delivery
 
 Second chapter of the Chapters 1-8 narrative project (same process as

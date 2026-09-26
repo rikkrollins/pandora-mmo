@@ -9802,6 +9802,135 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("wonderful company, terrible conversationalists", combined)
         sessions.end_session(-999)
 
+    # -- Chapter 3 narrative expansion (2026-09-26): real multi-scene
+    #    cutscenes for first_city_arrival/the_wards_collapse/the_spire_
+    #    crowns_sentinel/the_forgotten_vaults_secret, The Waking
+    #    Ember's real fight-start beat, and The Last Glyph's real
+    #    mid-fight echo escalation. Every scene below was shown to
+    #    Coffee as a calibration sample and explicitly confirmed before
+    #    being folded in. -----------------------------------------------
+    async def test_first_city_arrival_uses_the_real_reveal_scene(self):
+        """Chapter 3's real opener replaces the flat generic reach_location AI blurb with the real First City reveal, planting the counting motif."""
+        user_id = 900985
+        make_basic_character(user_id, "Elduinn", current_location="the_first_city")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "first_city_arrival")
+        combined = "\n".join(sink)
+        self.assertIn("Elduinn", combined)
+        self.assertIn("counting", combined)
+        quest = bot.CAMPAIGN["quests"]["first_city_arrival"]
+        self.assertIn(str(quest["reward_xp"]), combined)
+
+    async def test_wards_collapse_uses_its_real_completion_narration(self):
+        """the_wards_collapse (currently zero bespoke content) now gets a real, proportionate narration-only beat."""
+        user_id = 900986
+        make_basic_character(user_id, "WardWitness", current_location="the_first_city_forgotten_ward")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_wards_collapse")
+        combined = "\n".join(sink)
+        self.assertIn("Forgotten Ward", combined)
+
+    async def test_spire_crowns_sentinel_uses_its_real_completion_narration(self):
+        """the_spire_crowns_sentinel (currently zero bespoke content) now gets a real, proportionate narration-only beat."""
+        user_id = 900987
+        make_basic_character(user_id, "CrownWitness", current_location="the_first_city_spire_crown")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_spire_crowns_sentinel")
+        combined = "\n".join(sink)
+        self.assertIn("Crown", combined)
+
+    async def test_forgotten_vaults_secret_uses_its_real_completion_narration(self):
+        """the_forgotten_vaults_secret (currently zero bespoke content) now gets a real, proportionate narration-only beat."""
+        user_id = 900988
+        make_basic_character(user_id, "VaultWitness", current_location="the_first_city_forgotten_vault")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_forgotten_vaults_secret")
+        combined = "\n".join(sink)
+        self.assertIn("buried twice", combined.lower())
+
+    async def test_starting_combat_with_the_waking_ember_fires_the_real_voiceless_intro(self):
+        """End-to-end: starting a fight with the_waking_ember must route through the hand-written voiceless intro, not the generic narrate_boss_intro AI path."""
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 900989
+        make_basic_character(
+            user_id, "EmberWitness", chat_id=-997, char_class="Fighter", current_location="the_first_city",
+        )
+        db.update_character(user_id, -997, level=35, hp_current=8000, hp_max=8000)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the waking ember", sink, chat_id=-997),
+                                        monster_key="the_waking_ember", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("no words for you", combined)
+        sessions.end_session(-997)
+
+    async def test_the_last_glyphs_third_hit_fires_the_real_echo_escalation(self):
+        """The Last Glyph's own real echoes_damage_type mechanic (3rd hit of the same damage type) fires the real escalation line instead of the generic echo line."""
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-999)
+        user_id = 996110
+        make_basic_character(user_id, "GlyphAttacker", current_location="the_first_city_the_original_spire")
+        db.update_character(user_id, -999, hp_current=500, hp_max=500, level=1)
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -700970, "name": "The Last Glyph", "dexterity": 12, "strength": 20,
+            "armor_class": 21, "hp_current": 8500, "hp_max": 8500, "proficiency_bonus": 8,
+            "is_ai": 1, "monster_key": "the_last_glyph", "echoes_damage_type": True,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700970: "enemy"})
+        session.turn_order = [user_id, -700970]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.roll_damage", return_value={"total": 10}), \
+             patch("rules.combat.roll_damage", return_value={"total": 10}), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            for _ in range(3):
+                await bot._do_attack(FakeUpdate(user_id, "attack The Last Glyph", sink), "attack The Last Glyph", forced_roll=20)
+                await _drain_narration_queue()
+        combined = "\n".join(sink)
+        self.assertIn("the count includes you now", combined)
+        self.assertNotIn("echoes the damage right back", combined)  # the real escalation replaces the generic line
+        sessions.end_session(-999)
+
+    async def test_a_different_echoing_boss_still_uses_the_plain_generic_echo_line(self):
+        """Every OTHER echoes_damage_type boss (e.g. The Undertone) keeps the exact original generic line -- confirms the override is scoped to The Last Glyph only."""
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-999)
+        user_id = 996111
+        make_basic_character(user_id, "OtherEchoAttacker", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, hp_current=500, hp_max=500, level=1)
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -700971, "name": "The Undertone", "dexterity": 12, "strength": 16,
+            "armor_class": 18, "hp_current": 4000, "hp_max": 4000, "proficiency_bonus": 5,
+            "is_ai": 1, "monster_key": "the_undertone", "echoes_damage_type": True,
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700971: "enemy"})
+        session.turn_order = [user_id, -700971]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.roll_damage", return_value={"total": 10}), \
+             patch("rules.combat.roll_damage", return_value={"total": 10}), \
+             patch("bot.narrate_action", return_value="A blow lands."), \
+             patch("bot._advance_turn_and_resolve_ai_turns", new=AsyncMock()):
+            for _ in range(3):
+                await bot._do_attack(FakeUpdate(user_id, "attack The Undertone", sink), "attack The Undertone", forced_roll=20)
+                await _drain_narration_queue()
+        combined = "\n".join(sink)
+        self.assertIn("echoes the damage right back", combined)
+        self.assertNotIn("the count includes you now", combined)
+        sessions.end_session(-999)
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------

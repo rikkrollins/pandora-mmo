@@ -83,6 +83,9 @@ from ai.dm_agent import (
     sarah_recruitment_scene, grask_recruitment_scene,
     vesh_grotto_conversation_scene, glimmerdeep_grotto_opening_scenes,
     hush_below_arrival_scene, shadow_wisp_completion_narration, the_unspoken_silence_escalation,
+    first_city_arrival_scenes, the_waking_ember_confrontation_script,
+    wards_collapse_completion_narration, spire_crowns_sentinel_completion_narration,
+    forgotten_vaults_secret_completion_narration, the_last_glyph_echo_escalation,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -9733,6 +9736,13 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             # to these already-shipped bosses stays completely untouched.
             if monster_key == "goblin_boss":
                 intro = goblin_boss_confrontation_script()
+            elif monster_key == "the_waking_ember":
+                # Chapter 3 narrative expansion (2026-09-26, SAMPLED,
+                # confirmed): the_first_city_quest's own real fight-start
+                # beat -- previously none at all, fell through to the
+                # generic AI narrate_boss_intro below. Deliberately
+                # voiceless (an ancient primal fire-thing, not a talker).
+                intro = the_waking_ember_confrontation_script()
             elif monster_key == "the_unspoken":
                 intro = the_unspoken_confrontation_script(requester["name"])
             elif monster_key == "the_last_glyph":
@@ -13979,11 +13989,25 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             # that's the primary attack's job, not an echo's.
             if result.get("echo_backlash_damage"):
                 attacker["hp_current"] = max(attacker["hp_current"] - result["echo_backlash_damage"], 1)
-                await _safe_send(
-                    update,
-                    f"🔊 **{target['name']}** echoes the damage right back — **{attacker['name']}** takes "
-                    f"**{result['echo_backlash_damage']}** damage!",
-                )
+                # Chapter 3 narrative expansion (2026-09-26, SAMPLED,
+                # confirmed): The Last Glyph's own real mid-fight
+                # escalation -- fires once, the first time its own real
+                # echoes_damage_type mechanic actually triggers, same
+                # "rules decide, narration only reports" checkpoint as
+                # Vrakk's bloodied taunt / The Unspoken's silence
+                # escalation, just hooked to THIS entity's own real
+                # mechanic. Every other boss with echoes_damage_type
+                # (and every later echo this same fight) keeps the
+                # plain generic line, unchanged.
+                if (target.get("monster_key") == "the_last_glyph" and not target.get("_last_glyph_escalation_fired")):
+                    target["_last_glyph_escalation_fired"] = True
+                    await _safe_send(update, the_last_glyph_echo_escalation(), speak=False)
+                else:
+                    await _safe_send(
+                        update,
+                        f"🔊 **{target['name']}** echoes the damage right back — **{attacker['name']}** takes "
+                        f"**{result['echo_backlash_damage']}** damage!",
+                    )
 
             # General weapon mastery (2026-08-08, per Coffee: "make
             # proficiencies for all weapons and armors also for
@@ -18636,6 +18660,28 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # deliberately voiceless), building dread toward The Unspoken
         # (SAMPLED, confirmed).
         await _send_cutscene(update_like, [shadow_wisp_completion_narration()])
+    elif quest_id == "first_city_arrival":
+        # Chapter 3 narrative expansion (2026-09-26): replaces the flat
+        # generic reach_location AI blurb entirely -- the real reveal
+        # of the buried First City, plants the "counting" motif The
+        # Last Glyph's own existing confrontation_script pays off later
+        # (SAMPLED, confirmed).
+        await _send_cutscene(update_like, first_city_arrival_scenes(character["name"]))
+    elif quest_id == "the_wards_collapse":
+        # Chapter 3 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage (SAMPLED, confirmed).
+        await _send_cutscene(update_like, [wards_collapse_completion_narration()])
+    elif quest_id == "the_spire_crowns_sentinel":
+        # Chapter 3 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage (SAMPLED, confirmed).
+        await _send_cutscene(update_like, [spire_crowns_sentinel_completion_narration()])
+    elif quest_id == "the_forgotten_vaults_secret":
+        # Chapter 3 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage (SAMPLED, confirmed).
+        await _send_cutscene(update_like, [forgotten_vaults_secret_completion_narration()])
     elif quest_id == "kess_first_reckoning":
         # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic
