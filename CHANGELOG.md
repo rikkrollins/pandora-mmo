@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.696] — fix: "Can we have a hint?" also fell through to silent chat
+
+Caught live the day after v1.27.695 fixed the same gap for "Can I get
+a hint?" — a second real player asked "Can we have a hint?" and hit
+the same silent-chat wall, since that fix only enumerated "i" phrasing
+combinations, not "we". Generalized to a regex covering can/could x
+i/we x get/have instead of hand-enumerating every combination, so this
+class of gap can't recur a third time for the same reason.
+
 ## [1.27.695] — widen "The One Bare Wall" riddle's accepted answers
 
 Real live signal (2026-09-26, topic-activity, watched right after

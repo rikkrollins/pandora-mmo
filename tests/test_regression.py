@@ -755,10 +755,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         Real live gap (2026-09-25, topic-activity signal): a real
         player's bare "Can i get a hint?" fell through to silent chat --
         none of the existing ask_clue keyword-fallback phrases matched
-        it. Now covered, along with a few other common phrasings.
+        it. Fixed, then caught AGAIN the very next day (2026-09-26,
+        topic-activity, a second real player): "Can we have a hint?"
+        -- the original fix only enumerated "i" phrasings, missing
+        "we". Generalized to a regex covering can/could x i/we x
+        get/have instead of hand-enumerating every combination.
         """
         for text in ["Can i get a hint?", "can I have a hint", "could i get a hint please",
-                     "Got a hint?", "any hint on this?"]:
+                     "Can we have a hint?", "could we get a hint", "Got a hint?", "any hint on this?"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "ask_clue", f"text={text!r}")
 
     async def test_stray_space_slash_menu_still_opens_the_menu(self):
