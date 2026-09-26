@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.699] — Grask Emberscale's own recruitment scene
+
+Follow-up to v1.27.698: Grask's real recruitment scene (sampled and
+confirmed after the rest of Chapter 1 shipped) is now folded into
+`_do_recruit_npc`'s override hook alongside Sarah's — a captive
+dragonborn testing whether the party's actually here to free him or
+just passing through, dry gallows humor about the chain not having
+taken. Every other recruitable NPC is unaffected.
+
+1 new test, 1 existing test extended to cover him.
+
 ## [1.27.698] — Chapter 1 narrative expansion: real multi-scene cutscenes, reader-paced delivery
 
 First chapter of a larger project (per Coffee: "i like it - lock it in

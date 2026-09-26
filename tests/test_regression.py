@@ -9662,8 +9662,26 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Her real personal quest is still offered, exactly as before.
         self.assertIn('Say "I accept the quest"', combined)
 
+    async def test_recruiting_grask_uses_his_own_scene_not_the_flat_line(self):
+        """Grask's real recruitment scene (SAMPLED, confirmed) replaces the flat template line FOR HIM SPECIFICALLY, still ending on the same real party-join fact."""
+        chat_id = -900980
+        player_id = 900980
+        make_basic_character(player_id, "GraskFreer", current_location="goblin_warrens", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(player_id, "recruit Grask Emberscale", sink, chat_id=chat_id), "Grask Emberscale")
+        combined = "\n".join(sink)
+        self.assertIn("Grask:", combined)
+        self.assertIn("GraskFreer", combined)  # his scene substitutes in the real recruiting character's own name
+        self.assertNotIn("Grask Emberscale joins your party!", combined)  # the flat template line, replaced for him specifically
+        self.assertIn("🤝", combined)  # the real party-join fact is still conveyed
+        player = db.get_character(player_id, chat_id)
+        companion = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Grask Emberscale")
+        self.assertEqual(companion.get("party_id"), player["party_id"])
+        # His real personal quest is still offered, exactly as before.
+        self.assertIn('Say "I accept the quest"', combined)
+
     async def test_recruiting_pip_still_uses_the_original_flat_line(self):
-        """Every recruitable NPC other than Sarah (and Grask, once sampled) keeps the exact original shared template -- confirms the override is scoped, not a global template change."""
+        """Every recruitable NPC other than Sarah/Grask keeps the exact original shared template -- confirms the override is scoped, not a global template change."""
         chat_id = -900979
         player_id = 900979
         make_basic_character(player_id, "PipRecruiter", current_location="crossroads_tavern", chat_id=chat_id)
@@ -23658,15 +23676,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_recruit_npc(FakeUpdate(player_id, f"recruit {name}", sink), name)
             reply = "\n".join(sink)
             self.assertNotIn("already full", reply.lower(), f"{name} failed to join: {reply}")
-            if name == "Sarah":
-                # Chapter 1 narrative expansion (2026-09-26): Sarah gets
-                # her own real recruitment scene instead of the flat
-                # template line -- see test_recruiting_sarah_uses_her_
-                # own_scene_not_the_flat_line below for the full check;
-                # here it's just enough to confirm she still actually
-                # joined (the party-summary line the scene is followed
-                # by, not the flat "joins your party" text every other
-                # companion still gets).
+            if name in ("Sarah", "Grask Emberscale"):
+                # Chapter 1 narrative expansion (2026-09-26): Sarah and
+                # Grask each get their own real recruitment scene instead
+                # of the flat template line -- see test_recruiting_
+                # sarah_/grask_uses_..._not_the_flat_line below for the
+                # full check; here it's just enough to confirm they still
+                # actually joined (the party-summary line the scene is
+                # followed by, not the flat "joins your party" text every
+                # other companion still gets).
                 self.assertIn("🤝", reply, f"{name} didn't actually join: {reply}")
             else:
                 self.assertIn("joins your party", reply.lower(), f"{name} didn't actually join: {reply}")

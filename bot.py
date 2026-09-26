@@ -80,7 +80,7 @@ from ai.dm_agent import (
     goblin_boss_confrontation_script, goblin_boss_defeat_line,
     crossroads_tavern_opening_scenes, hollow_stump_shrine_scene,
     goblin_warrens_bloodied_taunt, goblin_warrens_tolls_payoff_narration,
-    sarah_recruitment_scene,
+    sarah_recruitment_scene, grask_recruitment_scene,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -14546,15 +14546,20 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         party_summary = _format_party_names(db.get_party_members_by_id(party_id))
 
     # Chapter 1 narrative expansion (2026-09-26, SAMPLED, confirmed):
-    # a narrow per-NPC override -- Sarah (npc_id sera_wanderer) gets her
-    # own real recruitment scene instead of the flat template line,
-    # still ending on the same real party-join fact this function
-    # already computed (party_summary) so the mechanical outcome stays
-    # exactly as clear as before. Every other recruitable NPC in the
-    # game (Grask's own scene is sampled separately, not yet folded in)
-    # keeps this exact original flat line, completely unchanged.
-    if npc_id == "sera_wanderer":
-        await _send_cutscene(update, [sarah_recruitment_scene(recruiter["name"] if recruiter else "The party")])
+    # a narrow per-NPC override -- Sarah (npc_id sera_wanderer) and
+    # Grask (npc_id grask_emberscale) each get their own real
+    # recruitment scene instead of the flat template line, still ending
+    # on the same real party-join fact this function already computed
+    # (party_summary) so the mechanical outcome stays exactly as clear
+    # as before. Every other recruitable NPC in the game keeps this
+    # exact original flat line, completely unchanged.
+    recruit_scene_by_npc_id = {
+        "sera_wanderer": sarah_recruitment_scene,
+        "grask_emberscale": grask_recruitment_scene,
+    }
+    scene_fn = recruit_scene_by_npc_id.get(npc_id)
+    if scene_fn is not None:
+        await _send_cutscene(update, [scene_fn(recruiter["name"] if recruiter else "The party")])
         await _safe_send(update, f"🤝 {party_summary}", speak=False)
     else:
         await _safe_send(update, f"🤝 {npc['name']} joins your party! {party_summary}")

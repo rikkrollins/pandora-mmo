@@ -2266,6 +2266,39 @@ def sarah_recruitment_scene(character_name: str) -> str:
     )
 
 
+def grask_recruitment_scene(character_name: str) -> str:
+    """
+    Grask Emberscale's real recruitment scene (npc_id grask_emberscale,
+    found in the Goblin Warrens during clear_the_warrens), replacing
+    the flat "joins your party!" line FOR HIM SPECIFICALLY (see
+    bot._do_recruit_npc's narrow per-NPC override hook) -- every other
+    recruitable NPC keeps the original shared template unchanged.
+    SAMPLED, confirmed by Coffee. Grounded in his real campaign.json
+    data (Dragonborn/Barbarian/Chaotic Good, "captured but never quite
+    managed to break, still watching the tunnel entrance for a chance
+    worth taking"): testing whether the party is actually here to free
+    him or just passing through, dry gallows humor about captivity,
+    gruff rather than grateful. His real `pronouns` ("he/him") are
+    used throughout -- pulled from data, never inferred from his name.
+    """
+    return (
+        "*He's chained to the same post they must have dragged him to weeks ago, and it hasn't taken. "
+        "Scarred knuckles, a grin that's mostly daring you to be one more disappointment.*\n\n"
+        "**Grask:** \"Come to gawk, or come to finish the job whoever locked me up here started?\"\n\n"
+        f"**{character_name}:** \"We're cutting you loose.\"\n\n"
+        "**Grask:** *(the grin doesn't move, but something behind it does)* \"That's what the last two "
+        "who wandered down here said. Then they heard something upstairs and remembered someplace better "
+        "to be.\"\n\n"
+        f"**{character_name}:** \"We're still here.\"\n\n"
+        "**Grask:** *(testing the chain anyway, out of habit more than hope)* \"Huh.\" *(a beat, then, "
+        "quieter)* \"They took my axe. Didn't take the part of me that remembers how to use one.\"\n\n"
+        "*He doesn't wait for the chain to fully give before he's already sizing up the nearest exit -- "
+        "not out of distrust, just a dragonborn who's spent too long deciding for himself when it's time "
+        "to move.*\n\n"
+        "**Grask:** \"Free is free. I'll worry about owing you one *after* we're both breathing outside.\""
+    )
+
+
 def the_unspoken_confrontation_script(character_name: str) -> str:
     """
     Chapter 2's real finale ("What Answers Back") -- the quest's own
