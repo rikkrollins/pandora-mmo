@@ -10150,6 +10150,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
         self.assertEqual(bot._bloodied_announcement(ordinary), "🩸 **A Timber Wolf is bloodied!**")
 
+    # -- Chapter 7 narrative expansion (2026-09-26): real completion
+    #    beats for the 6 previously-bare non-climactic quests, plus
+    #    The Keep's Warden's own real mid-fight enrage escalation.
+    #    This is the LAST chapter this project needs to touch (Chapter
+    #    8/Kess is already the reference bar). Built directly against
+    #    the established tone bar, no further prose preview shown in
+    #    chat. -----------------------------------------------------------
+    async def test_chapter7_non_climax_stages_use_their_real_completion_narration(self):
+        """The 6 previously-bare quests in arc_7_stonearch_gorge each get a real, proportionate narration-only beat."""
+        cases = [
+            ("web_hollows_brood", "clearly had a very long time to work"),
+            ("silked_nooks_hatchling", "well away from the rest of the brood"),
+            ("deep_currents_keeper", "distant, slow rhythm"),
+            ("the_undertows_elder", "nothing swept downstream would ever be able to climb back out"),
+            ("the_lower_battlements_watchman", "meant to defend it"),
+            ("the_lower_spans_widow", "something old had"),
+        ]
+        for i, (quest_id, expected_snippet) in enumerate(cases):
+            user_id = 901030 + i
+            make_basic_character(user_id, f"Ch7StageWitness{i}", current_location="stonearch_gorge")
+            sink = []
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, quest_id)
+            combined = "\n".join(sink)
+            self.assertIn(expected_snippet, combined, f"{quest_id} missing its real completion narration: {combined}")
+
+    def test_the_keeps_warden_enrage_uses_its_own_real_escalation(self):
+        """The Keep's Warden (already hand-written, previously missing any mid-fight escalation) gets its own real enrage line instead of the generic one -- every other boss keeps the plain generic line."""
+        warden = {"name": "The Keep's Warden", "monster_key": "the_keeps_warden"}
+        self.assertIn("wasn't fair", bot._enrage_announcement(warden))
+        ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
+        self.assertEqual(
+            bot._enrage_announcement(ordinary),
+            "🔥 **A Timber Wolf flies into a desperate rage — its attacks hit even harder for the rest of this fight!**",
+        )
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------

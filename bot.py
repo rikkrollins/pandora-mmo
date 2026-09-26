@@ -101,6 +101,10 @@ from ai.dm_agent import (
     hollow_wellsprings_elder_completion_narration, cleared_chokes_stalker_completion_narration,
     smugglers_cuts_lurker_completion_narration, smugglers_ends_warden_completion_narration,
     deep_currents_shard_completion_narration,
+    keeps_warden_enrage_escalation, web_hollows_brood_completion_narration,
+    silked_nooks_hatchling_completion_narration, deep_currents_keeper_completion_narration,
+    undertows_elder_completion_narration, lower_battlements_watchman_completion_narration,
+    lower_spans_widow_completion_narration,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -1416,6 +1420,23 @@ def _bloodied_announcement(target: dict) -> str:
     if target.get("monster_key") == "the_keeping_current":
         return keeping_current_bloodied_escalation()
     return f"🩸 **{target['name']} is bloodied!**"
+
+
+def _enrage_announcement(target: dict) -> str:
+    """
+    Real line to send the first time a participant crosses the game's
+    own already-computed enrage checkpoint (ENRAGE_HP_THRESHOLD/
+    ENRAGE_ROUND_THRESHOLD, rules/combat.py + bot.py) -- shared by
+    every "flies into a desperate rage" call site in this file, same
+    dict-dispatch shape as _bloodied_announcement above. Chapter 7
+    narrative expansion (2026-09-26): The Keep's Warden gets its own
+    real mid-fight escalation here instead of the generic line, tied
+    to its own real extra_attack_when_enraged mechanic. Every other
+    monster/boss keeps the plain generic line, unchanged.
+    """
+    if target.get("monster_key") == "the_keeps_warden":
+        return keeps_warden_enrage_escalation()
+    return f"🔥 **{target['name']} flies into a desperate rage — its attacks hit even harder for the rest of this fight!**"
 
 
 # ---------------------------------------------------------------------
@@ -8636,11 +8657,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                     await _safe_send(update, f"⚠️ **{current['name']}** is starting to falter — dragging this out further looks dangerous.")
                 if session.round_number >= ENRAGE_ROUND_THRESHOLD and not current.get("enraged"):
                     current["enraged"] = True
-                    await _safe_send(
-                        update,
-                        f"🔥 **{current['name']} flies into a desperate rage — its attacks hit "
-                        f"even harder for the rest of this fight!**",
-                    )
+                    await _safe_send(update, _enrage_announcement(current))
             # Real AI class-ability usage (2026-08-13, per Coffee: "I
             # want AI to be able to use all thier abilities, spells
             # cantrips and anything that there character has or levels
@@ -14174,11 +14191,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
             if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
                 await _announce_reaction(update, target, result)
             if result.get("enrage_triggered"):
-                await _safe_send(
-                    update,
-                    f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
-                    f"even harder for the rest of this fight!**",
-                )
+                await _safe_send(update, _enrage_announcement(target))
             if result.get("bloodied_triggered"):
                 await _safe_send(update, _bloodied_announcement(target))
             await _maybe_summon_minions(update, session, target)
@@ -18819,6 +18832,21 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         await _send_cutscene(update_like, [smugglers_ends_warden_completion_narration()])
     elif quest_id == "the_deep_currents_shard":
         await _send_cutscene(update_like, [deep_currents_shard_completion_narration()])
+    elif quest_id == "web_hollows_brood":
+        # Chapter 7 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage.
+        await _send_cutscene(update_like, [web_hollows_brood_completion_narration()])
+    elif quest_id == "silked_nooks_hatchling":
+        await _send_cutscene(update_like, [silked_nooks_hatchling_completion_narration()])
+    elif quest_id == "deep_currents_keeper":
+        await _send_cutscene(update_like, [deep_currents_keeper_completion_narration()])
+    elif quest_id == "the_undertows_elder":
+        await _send_cutscene(update_like, [undertows_elder_completion_narration()])
+    elif quest_id == "the_lower_battlements_watchman":
+        await _send_cutscene(update_like, [lower_battlements_watchman_completion_narration()])
+    elif quest_id == "the_lower_spans_widow":
+        await _send_cutscene(update_like, [lower_spans_widow_completion_narration()])
     elif quest_id == "kess_first_reckoning":
         # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic
@@ -27379,10 +27407,7 @@ async def _do_use_environment(update: Update) -> None:
             if (enemy.get("is_boss") and not enemy.get("enraged") and enemy["hp_current"] > 0
                     and enemy["hp_current"] <= enemy.get("hp_max", enemy["hp_current"]) * ENRAGE_HP_THRESHOLD):
                 enemy["enraged"] = True
-                lines.append(
-                    f"🔥 **{enemy['name']} flies into a desperate rage — its attacks hit "
-                    f"even harder for the rest of this fight!**"
-                )
+                lines.append(_enrage_announcement(enemy))
             if (not enemy.get("bloodied") and enemy["hp_current"] > 0
                     and enemy["hp_current"] <= enemy.get("hp_max", enemy["hp_current"]) * BLOODIED_HP_THRESHOLD):
                 enemy["bloodied"] = True
@@ -36785,11 +36810,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                 }
                 await _post_narrated(update, character, text, full_result, session, action_label=spell["name"])
                 if enrage_triggered:
-                    await _safe_send(
-                        update,
-                        f"🔥 **{target['name']} flies into a desperate rage — its attacks hit "
-                        f"even harder for the rest of this fight!**",
-                    )
+                    await _safe_send(update, _enrage_announcement(target))
                 if bloodied_triggered:
                     await _safe_send(update, _bloodied_announcement(target))
                 if result.get("eldritch_smite_bonus"):

@@ -3156,6 +3156,99 @@ def the_keeps_warden_defeat_line() -> str:
     )
 
 
+def keeps_warden_enrage_escalation() -> str:
+    """
+    Chapter 7's real mid-fight escalation for the_old_keeps_warden --
+    hooked to its own real extra_attack_when_enraged mechanic (the
+    SAME generic enrage checkpoint every boss's own "flies into a
+    desperate rage" line already fires from -- see bot._enrage_
+    announcement, mirroring _bloodied_announcement's own shape). Ties
+    directly to its established "fair fight, or no fight at all" rule
+    from the_keeps_warden_confrontation_script -- the escalation is the
+    Warden catching itself breaking its own rule and correcting for it,
+    not losing composure the way a lesser entity would.
+    """
+    return (
+        "*For one strike, the lightning comes faster than a fair fight should allow -- and the "
+        "Warden seems to notice that itself, before anyone else does.*\n\n"
+        "**The Keep's Warden:** \"...that wasn't fair. Won't happen twice.\"\n\n"
+        "*It doesn't apologize again. It also, genuinely, doesn't do it again.*"
+    )
+
+
+# ---------------------------------------------------------------------
+# Chapter 7 narrative expansion (2026-09-26). arc_7_stonearch_gorge
+# ("What the Gorge Swallowed") -- this is the LAST chapter this
+# project needs to touch (Chapter 8/Kess is already the reference
+# bar). It carries TWO climactic quests: the_scouting_grounds_warning
+# (Kess's own scripts, untouched) and the_old_keeps_warden (above,
+# already hand-written from the earlier pass, now given its real
+# mid-fight escalation). The 6 quests below carry a real, already-
+# existing thread: a web/current/undertow line building toward
+# nothing in particular (a red herring, deliberately -- not every
+# thread in this world resolves, matching the game's own "escalate,
+# don't always resolve" craft bar) alongside a real fortification/
+# crossing-defense thread leading toward the Old Keep itself.
+# ---------------------------------------------------------------------
+
+def web_hollows_brood_completion_narration() -> str:
+    """web_hollows_brood's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Layer over layer of silk, thick enough that whatever's still spinning down here has "
+        "clearly had a very long time to work -- it stops working now.*\n\n"
+        "Nothing about this hollow was ever guarding anything. It was just growing, quietly, for "
+        "longer than anyone thought to check."
+    )
+
+
+def silked_nooks_hatchling_completion_narration() -> str:
+    """the_silked_nooks_hatchling's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A narrow gap in the web hollow's silk, easy to miss -- something small had been left "
+        "here to grow, well away from the rest of the brood.*\n\n"
+        "It never got the chance to."
+    )
+
+
+def deep_currents_keeper_completion_narration() -> str:
+    """deep_currents_keeper's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Where the gorge's water finally goes, funneled into a current that runs toward the same "
+        "distant, slow rhythm that fills the depths above -- and, for a moment, it runs quieter.*\n\n"
+        "Whatever that rhythm actually is, it's further away than this current alone can reach."
+    )
+
+
+def undertows_elder_completion_narration() -> str:
+    """the_undertows_elder's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A den built low against the pull, exactly where nothing swept downstream would ever be "
+        "able to climb back out -- it kept whatever it caught for a very long time.*\n\n"
+        "Not everything the gorge swallowed was ever meant to be found again. This was."
+    )
+
+
+def lower_battlements_watchman_completion_narration() -> str:
+    """the_lower_battlements_watchman's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Real fortification, cut into the gorge wall above the bridge -- whoever built this "
+        "crossing meant to defend it, and something's been standing that post ever since, long "
+        "after any reason to.*\n\n"
+        "The bridge below is undefended again, for the first time in longer than it should have "
+        "needed defending at all."
+    )
+
+
+def lower_spans_widow_completion_narration() -> str:
+    """the_lower_spans_widow's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A real, lower span of the gorge, well below the bridge itself -- something old had "
+        "clearly claimed it, and claimed it thoroughly.*\n\n"
+        "Whatever this span was originally built to carry, it hasn't carried anything but silence "
+        "in a very long time."
+    )
+
+
 def narrate_scouting_grounds_ending(character_name: str) -> str:
     """
     Chapter 7's real finale beat, closing "Fresh Tracks"

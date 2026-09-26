@@ -2,6 +2,34 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.705] — Chapter 7 narrative expansion: real multi-scene cutscenes, reader-paced delivery
+
+Seventh chapter of the Chapters 1-8 narrative project — the LAST
+chapter this project needs to touch, since Chapter 8 (Kess) is already
+the reference bar (though see the same day's follow-up entry: a real,
+separate gap was found in Chapter 8's own non-Kess content while
+scoping this one).
+
+Chapter 7 (`arc_7_stonearch_gorge`, "What the Gorge Swallowed") carries
+two climactic quests — Kess's own scouting encounter (untouched) and
+The Keep's Warden, already hand-written from the earlier pass but
+missing any mid-fight escalation until now.
+
+- The Keep's Warden gets a real mid-fight escalation the first time it
+  enrages, tied to its own established "fair fight, or no fight at
+  all" rule — it catches itself breaking that rule and corrects for
+  it. New shared `_enrage_announcement` helper (mirroring
+  `_bloodied_announcement`'s own dict-dispatch shape) now covers all 4
+  of this file's "flies into a desperate rage" call sites.
+- 6 previously-bare quests each get a real, proportionate completion
+  beat.
+- Also added `CUTSCENE_VIDEO_PROMPTS.md`: a running, growing list of
+  visual (not narration) prompts for turning this project's key
+  cutscene moments into real short videos via an external AI video
+  tool, per Coffee's request — updated alongside each future chapter.
+
+2 new regression tests.
+
 ## [1.27.704] — Chapter 6 narrative expansion: real multi-scene cutscenes, reader-paced delivery
 
 Sixth chapter of the Chapters 1-8 narrative project. Chapter 6
