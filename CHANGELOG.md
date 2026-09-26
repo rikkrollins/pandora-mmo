@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.695] — widen "The One Bare Wall" riddle's accepted answers
+
+Real live signal (2026-09-26, topic-activity, watched right after
+v1.27.694 deployed): once the Labyrinth-blocking bug was fixed, both
+real players' wrong guesses started earning real attempt credit again
+— and their guesses ("space", "blank", "empty space", "gaps") turned
+out to be genuinely reasonable restatements of the real answer, just
+not exact matches against the puzzle's own narrow `accepted_answers`
+list. Widened it with the obvious missing synonyms.
+
+Found the same pass would have made tier 2's own hint text literally
+contain one of the newly-added accepted answers verbatim ("the gap"),
+which the existing automated non-spoiler regression guard
+(`test_no_puzzle_hint_ever_contains_its_own_accepted_answer`) caught
+immediately — the hint was reworded to keep the same meaning without
+handing over a literal accepted answer.
+
 ## [1.27.694] — fix: campaign-quest riddle answers were silently blocked while inside the Labyrinth
 
 Real live gap (2026-09-26, topic-activity signal): a real campaign

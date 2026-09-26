@@ -14282,11 +14282,20 @@
         "the space between the words",
         "what's unsaid",
         "quiet",
-        "the unspoken"
+        "the unspoken",
+        "space",
+        "the space",
+        "a gap",
+        "the gap",
+        "gaps",
+        "a blank space",
+        "blank space",
+        "blank",
+        "empty space"
       ],
       "hints": [
         "Nobody carved a single letter into this wall, and yet it's completely covered anyway -- think about what fills a page that has no writing on it at all.",
-        "It isn't ink, and it isn't stone. It's the gap where the words would be, if anyone had bothered to write them."
+        "It isn't ink, and it isn't stone. It's what's missing where the words would be, if anyone had bothered to write them."
       ]
     },
     "folded_atrium_riddle": {
