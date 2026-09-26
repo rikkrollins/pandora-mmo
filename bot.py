@@ -39096,6 +39096,23 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         # first" step never was. _do_list_shop is now Labyrinth-room-
         # aware the same way (see its own comment).
         "list_shop",
+        # answer_puzzle/ask_clue (2026-09-26, topic-activity signal): a
+        # real campaign-quest riddle (e.g. the_unwritten_halls_answer)
+        # stays "active" regardless of the character's physical
+        # location -- a player can genuinely be standing inside the
+        # Labyrinth while still carrying that quest and trying to
+        # answer it (quests aren't scoped to one location once
+        # accepted). Confirmed live: the exact player from the original
+        # v1.27.691 puzzle-hint report kept guessing while inside a
+        # real Labyrinth run days later, and every guess hit this
+        # generic refusal instead of ever reaching _do_answer_puzzle --
+        # silently discarding both the guess AND its real escalating-
+        # hint credit (db.bump_puzzle_attempt_count never ran). Both
+        # handlers only ever read character["active_quests"]/
+        # CAMPAIGN["quests"]/CAMPAIGN["puzzles"] -- never cl.get_location
+        # or CAMPAIGN["locations"] -- so both are Labyrinth-safe by the
+        # same test as check_story above.
+        "answer_puzzle", "ask_clue",
     ):
         await update.effective_chat.send_message(
             "That doesn't work this deep in the Labyrinth. Try moving, looking around, fighting, or leaving.",

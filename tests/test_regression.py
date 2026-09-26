@@ -49820,6 +49820,46 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_descend_labyrinth(FakeUpdate(user_id, "", sink3, chat_id=chat_id))
         self.assertTrue(any("waystation" in s for s in sink3), sink3)
 
+    async def test_answer_puzzle_and_ask_clue_work_while_inside_the_labyrinth(self):
+        """
+        Real live gap (2026-09-26, topic-activity signal): a real
+        campaign-quest riddle stays "active" regardless of the
+        character's physical location -- the exact player from the
+        original v1.27.691 puzzle-hint report kept guessing days later
+        while genuinely standing inside a real Labyrinth run, and every
+        guess hit the generic "doesn't work this deep" refusal instead
+        of ever reaching _do_answer_puzzle, silently discarding both
+        the guess and its real escalating-hint credit. Neither handler
+        touches cl.get_location/CAMPAIGN["locations"] at all, so both
+        are Labyrinth-safe by construction.
+        """
+        user_id, chat_id = 963095, -963095
+        make_basic_character(user_id, "LabyrinthPuzzleTester", chat_id=chat_id, current_location="market_row", hp_max=200)
+        db.accept_quest(user_id, chat_id, "marens_locked_ledger")
+        db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"], current_location="the_colosseum", hp_current=200)
+        await bot._do_enter_labyrinth(FakeUpdate(user_id, "", [], chat_id=chat_id))
+        character = db.get_character(user_id, chat_id)
+        self.assertEqual(character["current_location"], bot.LABYRINTH_LOCATION_SENTINEL)
+        self.assertIn("marens_locked_ledger", character["active_quests"], "the quest must stay active while inside the Labyrinth")
+
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "the answer is a mountain", sink, chat_id=chat_id), DummyContext(),
+            {"action": "answer_puzzle", "raw_text": "the answer is a mountain"}, "the answer is a mountain",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink), sink)
+        self.assertTrue(any("think it over some more" in s for s in sink), sink)
+        character_after = db.get_character(user_id, chat_id)
+        self.assertEqual(character_after["puzzle_attempts"].get("marens_riddle"), 1, "a real wrong guess must still earn its attempt credit while inside the Labyrinth")
+
+        sink2 = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "give me a clue", sink2, chat_id=chat_id), DummyContext(),
+            {"action": "ask_clue", "raw_text": "give me a clue"}, "give me a clue",
+        )
+        self.assertFalse(any("doesn't work this deep" in s for s in sink2), sink2)
+        self.assertTrue(any("What you know" in s for s in sink2), sink2)
+
     async def test_labyrinth_shop_can_be_browsed_not_just_bought_from(self):
         """
         Real live report (2026-09-25, dev-bridge, Coffee: "The game is

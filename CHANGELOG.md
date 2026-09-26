@@ -2,6 +2,32 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.694] — fix: campaign-quest riddle answers were silently blocked while inside the Labyrinth
+
+Real live gap (2026-09-26, topic-activity signal): a real campaign
+quest riddle stays "active" regardless of the character's physical
+location — quests aren't scoped to one location once accepted. The
+exact player from the original v1.27.691 puzzle-hint report was still
+guessing at the same riddle days later, this time while genuinely
+standing inside a real Labyrinth run — every single guess ("Is the
+answer secrets", "spirits", "ink", "words", "glyphs", ...) hit the
+generic "That doesn't work this deep in the Labyrinth" refusal instead
+of ever reaching `_do_answer_puzzle`, because `answer_puzzle` (and
+`ask_clue`) were never on the Labyrinth action allowlist at all. This
+silently discarded both the guess AND its real escalating-hint credit
+(`db.bump_puzzle_attempt_count` never ran) — the exact hint system
+built for this player never had a chance to fire for them a second
+time.
+
+Both handlers only ever read `character["active_quests"]`/
+`CAMPAIGN["quests"]`/`CAMPAIGN["puzzles"]` — never `cl.get_location` or
+`CAMPAIGN["locations"]` — so both are Labyrinth-safe by construction.
+Added to the allowlist.
+
+1 new test confirming both a wrong guess and `/ask_clue` now work, and
+that the wrong guess still earns its real attempt credit, while inside
+a real Labyrinth run.
+
 ## [1.27.693] — fix: Labyrinth wandering-trader shop couldn't be browsed, and was never actually named
 
 Real live report (2026-09-25, dev-bridge, Coffee: "The game is hinting
