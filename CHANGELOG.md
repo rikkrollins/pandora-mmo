@@ -2,6 +2,26 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.704] — Chapter 6 narrative expansion: real multi-scene cutscenes, reader-paced delivery
+
+Sixth chapter of the Chapters 1-8 narrative project. Chapter 6
+(`arc_6_sunken_root_caverns`, "What the Roots Kept") had one real
+climactic quest (The Keeping Current) and one reach_location quest
+(`the_kept_shrines_vigil`) already hand-written from earlier work —
+the real gap was entirely in 8 non-climactic quests.
+
+- The Keeping Current's existing confrontation/defeat lines are
+  untouched; it gets a light-touch bloodied escalation (its own real
+  hook, `resists_dot_stacking`, has no existing player-visible
+  narration checkpoint at all).
+- 8 previously-bare quests each get a real, proportionate completion
+  beat, grounded in their own location text — two real threads run
+  through them: the water/current imagery leading to the climax, and
+  a smuggler's route ("Not a Goblin Tunnel") that's a genuine
+  continuation of Chapter 5's own "it was about a network" thread.
+
+2 new regression tests.
+
 ## [1.27.703] — Chapter 5 narrative expansion: real multi-scene cutscenes, reader-paced delivery
 
 Fifth chapter of the Chapters 1-8 narrative project. Chapter 5

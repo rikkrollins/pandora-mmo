@@ -3007,6 +3007,116 @@ def the_keeping_current_defeat_line() -> str:
     )
 
 
+def keeping_current_bloodied_escalation() -> str:
+    """
+    Light-touch mid-fight escalation for the_keeping_current -- its
+    only real mechanical hook (resists_dot_stacking) has no existing
+    player-visible narration checkpoint at all (rules/combat.py halves
+    the bonus die silently), so this reuses the same generic bloodied-
+    HP checkpoint Vrakk's/The Sentinel's/The Paymaster's Shadow's own
+    escalations use. Keeps its established patient, unbothered tone
+    even while losing.
+    """
+    return (
+        "*It's slower now, genuinely slower, for the first time since the fight began -- and it "
+        "doesn't seem bothered by that either.*\n\n"
+        "**The Keeping Current:** \"Slower isn't the same as stopped. I've had a very long time to "
+        "learn the difference.\""
+    )
+
+
+# ---------------------------------------------------------------------
+# Chapter 6 narrative expansion (2026-09-26). arc_6_sunken_root_caverns
+# ("What the Roots Kept") -- one real climactic quest (the_sources_
+# reckoning/The Keeping Current above, already hand-written) plus
+# the_kept_shrines_vigil (already Kess's own real shrine-vigil beat,
+# kess_shrine_vigil_script, untouched). The 8 quests below carry two
+# real, already-existing threads: the water/current imagery leading to
+# The Keeping Current, and a smuggler's route ("Not a Goblin Tunnel")
+# that's a real continuation of Chapter 5's own "it was about a
+# network" thread, not a new one. Built directly against the
+# established tone bar, no prose preview shown in chat.
+# ---------------------------------------------------------------------
+
+def flooded_gallerys_hold_completion_narration() -> str:
+    """flooded_gallerys_hold's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Ankle-deep water, black with root-rot, disturbed constantly by something moving through "
+        "it just out of sight -- it stops moving now, all at once.*\n\n"
+        "Whatever was using this flooded gallery wasn't hiding from the light. It was hiding from "
+        "being counted."
+    )
+
+
+def side_pools_straggler_completion_narration() -> str:
+    """the_side_pools_straggler's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A smaller offshoot of the flooded gallery, easy enough to wade past without ever "
+        "noticing -- something small had been squatting here, well out of the way of the main "
+        "tunnels.*\n\n"
+        "It wasn't guarding anything. It was just staying out of everyone's way, right up until it "
+        "couldn't."
+    )
+
+
+def channels_keeper_completion_narration() -> str:
+    """the_channels_keeper's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A single channel, cut with the same exact precision as the cistern's own drainage, "
+        "leading further down than anything else in these caverns goes.*\n\n"
+        "The stonework here isn't goblin work. It isn't natural either. Whoever cut this built it "
+        "to last."
+    )
+
+
+def hollow_wellsprings_elder_completion_narration() -> str:
+    """the_hollow_wellsprings_elder's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Past the channel, the water finally pools somewhere real -- a wellspring sunk so deep "
+        "that whatever drank from it hasn't seen the surface in longer than anyone's kept track.*\n\n"
+        "It's quiet now, for the first time in longer than that."
+    )
+
+
+def cleared_chokes_stalker_completion_narration() -> str:
+    """the_cleared_chokes_stalker's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The rubble that used to choke this passage almost shut has clearly been cleared on "
+        "purpose, more than once -- whatever's been keeping it open wanted through badly enough to "
+        "keep doing the work.*\n\n"
+        "It won't need to clear it again."
+    )
+
+
+def smugglers_cuts_lurker_completion_narration() -> str:
+    """the_smugglers_cuts_lurker's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A real, deliberate cut through the rock, wide enough for someone carrying real cargo -- "
+        "not a goblin tunnel at all.*\n\n"
+        "Someone built a real route down here, for real reasons that had nothing to do with these "
+        "caverns' own goblins."
+    )
+
+
+def smugglers_ends_warden_completion_narration() -> str:
+    """the_smugglers_ends_warden's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The route finally ends here, well guarded, well away from anything a goblin would ever "
+        "think to defend.*\n\n"
+        "Whoever built this route protected its end far more carefully than its beginning -- the "
+        "same shape as the network Vrakk's own warning pointed at, one more thread of it."
+    )
+
+
+def deep_currents_shard_completion_narration() -> str:
+    """the_deep_currents_shard's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The water moves with real force here, deep enough that the bottom's never actually been "
+        "seen -- until now, and only barely.*\n\n"
+        "Whatever kept this current moving this hard, it's closer than anyone's gotten to it yet."
+    )
+
+
 def the_keeps_warden_confrontation_script() -> str:
     """
     Arc_7's OTHER real finale ("The Old Keep" / the_old_keeps_warden) --

@@ -10118,6 +10118,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
         self.assertEqual(bot._bloodied_announcement(ordinary), "🩸 **A Timber Wolf is bloodied!**")
 
+    # -- Chapter 6 narrative expansion (2026-09-26): real completion
+    #    beats for the 8 previously-bare non-climactic quests, plus
+    #    The Keeping Current's own light-touch bloodied escalation.
+    #    Built directly against the established tone bar, no further
+    #    prose preview shown in chat. ------------------------------------
+    async def test_chapter6_non_climax_stages_use_their_real_completion_narration(self):
+        """The 8 previously-bare quests in arc_6_sunken_root_caverns each get a real, proportionate narration-only beat."""
+        cases = [
+            ("flooded_gallerys_hold", "black with root-rot"),
+            ("the_side_pools_straggler", "well out of the way of the main tunnels"),
+            ("the_channels_keeper", "isn't goblin work"),
+            ("the_hollow_wellsprings_elder", "wellspring sunk so deep"),
+            ("the_cleared_chokes_stalker", "cleared on purpose, more than once"),
+            ("the_smugglers_cuts_lurker", "not a goblin tunnel at all"),
+            ("the_smugglers_ends_warden", "network Vrakk's own warning pointed at"),
+            ("the_deep_currents_shard", "bottom's never actually been seen"),
+        ]
+        for i, (quest_id, expected_snippet) in enumerate(cases):
+            user_id = 901020 + i
+            make_basic_character(user_id, f"Ch6StageWitness{i}", current_location="sunken_root_caverns")
+            sink = []
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, quest_id)
+            combined = "\n".join(sink)
+            self.assertIn(expected_snippet, combined, f"{quest_id} missing its real completion narration: {combined}")
+
+    async def test_the_keeping_current_bloodied_uses_its_own_light_touch_escalation(self):
+        """The Keeping Current (no player-visible narration checkpoint for its own real hook) gets its light-touch escalation from the shared bloodied checkpoint instead of the generic line."""
+        current = {"name": "The Keeping Current", "monster_key": "the_keeping_current"}
+        self.assertIn("learn the difference", bot._bloodied_announcement(current))
+        ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
+        self.assertEqual(bot._bloodied_announcement(ordinary), "🩸 **A Timber Wolf is bloodied!**")
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------

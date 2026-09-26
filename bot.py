@@ -96,6 +96,11 @@ from ai.dm_agent import (
     deeper_rubbles_lurker_completion_narration, old_seams_secret_completion_narration,
     idol_chambers_warden_completion_narration, paymasters_route_completion_narration,
     toll_masters_den_completion_narration,
+    keeping_current_bloodied_escalation, flooded_gallerys_hold_completion_narration,
+    side_pools_straggler_completion_narration, channels_keeper_completion_narration,
+    hollow_wellsprings_elder_completion_narration, cleared_chokes_stalker_completion_narration,
+    smugglers_cuts_lurker_completion_narration, smugglers_ends_warden_completion_narration,
+    deep_currents_shard_completion_narration,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -1404,6 +1409,12 @@ def _bloodied_announcement(target: dict) -> str:
     # its escalation reuses this same generic checkpoint too.
     if target.get("monster_key") == "the_paymasters_shadow":
         return paymasters_shadow_bloodied_escalation()
+    # Chapter 6 narrative expansion (2026-09-26): The Keeping Current's
+    # own real hook (resists_dot_stacking) has no existing player-
+    # visible narration checkpoint either, so its escalation reuses
+    # this same generic checkpoint too.
+    if target.get("monster_key") == "the_keeping_current":
+        return keeping_current_bloodied_escalation()
     return f"🩸 **{target['name']} is bloodied!**"
 
 
@@ -18789,6 +18800,25 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         await _send_cutscene(update_like, [paymasters_route_completion_narration()])
     elif quest_id == "the_toll_masters_den":
         await _send_cutscene(update_like, [toll_masters_den_completion_narration()])
+    elif quest_id == "flooded_gallerys_hold":
+        # Chapter 6 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage.
+        await _send_cutscene(update_like, [flooded_gallerys_hold_completion_narration()])
+    elif quest_id == "the_side_pools_straggler":
+        await _send_cutscene(update_like, [side_pools_straggler_completion_narration()])
+    elif quest_id == "the_channels_keeper":
+        await _send_cutscene(update_like, [channels_keeper_completion_narration()])
+    elif quest_id == "the_hollow_wellsprings_elder":
+        await _send_cutscene(update_like, [hollow_wellsprings_elder_completion_narration()])
+    elif quest_id == "the_cleared_chokes_stalker":
+        await _send_cutscene(update_like, [cleared_chokes_stalker_completion_narration()])
+    elif quest_id == "the_smugglers_cuts_lurker":
+        await _send_cutscene(update_like, [smugglers_cuts_lurker_completion_narration()])
+    elif quest_id == "the_smugglers_ends_warden":
+        await _send_cutscene(update_like, [smugglers_ends_warden_completion_narration()])
+    elif quest_id == "the_deep_currents_shard":
+        await _send_cutscene(update_like, [deep_currents_shard_completion_narration()])
     elif quest_id == "kess_first_reckoning":
         # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic
