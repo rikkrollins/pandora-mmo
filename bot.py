@@ -78,6 +78,9 @@ from ai.dm_agent import (
     kess_shrine_vigil_script, kess_scouting_confrontation_script, kess_scouting_flees_line,
     narrate_scouting_grounds_ending,
     goblin_boss_confrontation_script, goblin_boss_defeat_line,
+    crossroads_tavern_opening_scenes, hollow_stump_shrine_scene,
+    goblin_warrens_bloodied_taunt, goblin_warrens_tolls_payoff_narration,
+    sarah_recruitment_scene,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -1250,6 +1253,131 @@ async def boss_confrontation_dialog_callback(update: Update, context: ContextTyp
     if boss["hp_current"] <= 0:
         removed = session.remove_defeated()
         await _announce_defeats(update, session, removed)
+
+
+# Chapter 1-8 narrative expansion (2026-09-26, per Coffee: "before any
+# (monumental moments) give them a continue button to push so they can
+# read the narrations" -- simplified, after an AskUserQuestion
+# clarification, to a single "Continue" button per scene rather than
+# branching choices, auto-advancing on its own after
+# CUTSCENE_AUTO_ADVANCE_SECONDS so nobody gets stuck if they never tap
+# it; tapping early just skips ahead faster). Same per-message state-
+# dict convention as _SENT_IMAGE_PROMPTS/_SENT_NPC_MESSAGES above:
+# chat_id -> {message_id: {"scenes": [...], "index": int,
+# "telegram_user_id": int, "shown_at": float}}. In-memory only, resets
+# on restart -- an abandoned cutscene mid-restart just stops advancing
+# (the player still has every scene shown so far), same acceptable
+# limit every other in-memory-only pending state in this file already
+# accepts.
+_CUTSCENE_PROGRESS: dict[int, dict[int, dict]] = {}
+CUTSCENE_AUTO_ADVANCE_SECONDS = 18
+
+
+def _cutscene_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Continue", callback_data="cutscene|next")]])
+
+
+async def _send_cutscene(update: Update, scenes: list[str]) -> None:
+    """
+    Sends a real multi-scene cutscene one scene at a time, reader-paced:
+    every scene but the last carries a "▶️ Continue" button (tapping it,
+    or letting CUTSCENE_AUTO_ADVANCE_SECONDS elapse -- see
+    _check_cutscene_timeouts -- edits the SAME message forward to the
+    next scene). A single-scene call is just an ordinary narration send,
+    no button at all.
+
+    `scenes` must be non-empty. Only the message's own original
+    recipient (update.effective_user.id) can advance it early --
+    cutscene_continue_callback enforces this -- so another party
+    member's tap in the same shared chat can't skip someone else's read
+    pace.
+    """
+    if not scenes:
+        return
+    reply_markup = _cutscene_keyboard() if len(scenes) > 1 else None
+    message_id = await _safe_send(update, scenes[0], reply_markup=reply_markup)
+    if message_id is None or len(scenes) <= 1:
+        return
+    _chat_scoped_dict(_CUTSCENE_PROGRESS, update.effective_chat.id)[message_id] = {
+        "scenes": scenes,
+        "index": 0,
+        "telegram_user_id": update.effective_user.id,
+        "shown_at": time.time(),
+    }
+
+
+async def _advance_cutscene(bot, chat_id: int, message_id: int) -> None:
+    """
+    Shared advance step for both a real Continue tap
+    (cutscene_continue_callback) and the auto-advance timer
+    (_check_cutscene_timeouts) -- edits the tracked message forward to
+    its next scene, dropping the Continue button (and the tracked
+    entry) once the final scene is reached.
+    """
+    tracked = _chat_scoped_dict(_CUTSCENE_PROGRESS, chat_id)
+    record = tracked.get(message_id)
+    if record is None:
+        return
+    record["index"] += 1
+    scenes = record["scenes"]
+    index = record["index"]
+    is_last = index >= len(scenes) - 1
+    try:
+        await bot.edit_message_text(
+            scenes[index], chat_id=chat_id, message_id=message_id,
+            reply_markup=None if is_last else _cutscene_keyboard(),
+        )
+    except TelegramError as e:
+        logger.warning(f"[cutscene] advance edit failed (likely a stale message): {e!r}")
+    if is_last:
+        del tracked[message_id]
+    else:
+        record["shown_at"] = time.time()
+
+
+async def cutscene_continue_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles a real tap on a cutscene's own "▶️ Continue" button (see _send_cutscene)."""
+    query = update.callback_query
+    await _safe_answer(query)
+    chat_id = update.effective_chat.id
+    message_id = query.message.message_id
+    record = _chat_scoped_dict(_CUTSCENE_PROGRESS, chat_id).get(message_id)
+    if record is None or record["telegram_user_id"] != update.effective_user.id:
+        return  # stale message, or someone else's cutscene -- never advance another player's read pace
+    await _advance_cutscene(context.bot, chat_id, message_id)
+
+
+async def _check_cutscene_timeouts(bot) -> None:
+    """
+    Periodic auto-advance (same architecture as _check_combat_timeouts/
+    _check_pending_loot_votes, run from the same _idle_inactivity_loop)
+    for any cutscene scene that's sat unread past
+    CUTSCENE_AUTO_ADVANCE_SECONDS, so a player who never taps Continue
+    still moves through the whole scene at a natural reading pace
+    instead of getting stuck on it forever.
+    """
+    now = time.time()
+    for chat_id, tracked in list(_CUTSCENE_PROGRESS.items()):
+        for message_id, record in list(tracked.items()):
+            if now - record["shown_at"] >= CUTSCENE_AUTO_ADVANCE_SECONDS:
+                await _advance_cutscene(bot, chat_id, message_id)
+
+
+def _bloodied_announcement(target: dict) -> str:
+    """
+    Real line to send the first time a participant crosses the game's
+    own already-computed BLOODIED_HP_THRESHOLD (rules/combat.py) --
+    shared by every "is bloodied!" call site in this file. Chapter 1
+    narrative expansion (2026-09-26, SAMPLED, confirmed): Vrakk
+    (monster_key "goblin_boss", Chapter 1's real climax) gets his own
+    real mid-fight escalation taunt here instead of the generic line --
+    pure flavor swapped in at the exact same rules-decided checkpoint
+    every other monster already uses, no new mechanic invented. Every
+    other monster/boss keeps the plain generic line, unchanged.
+    """
+    if target.get("monster_key") == "goblin_boss":
+        return goblin_warrens_bloodied_taunt()
+    return f"🩸 **{target['name']} is bloodied!**"
 
 
 # ---------------------------------------------------------------------
@@ -8584,7 +8712,7 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
             if result["shield_reaction_triggered"] or result["uncanny_dodge_triggered"]:
                 await _announce_reaction(update, target, result)
             if result.get("bloodied_triggered"):
-                await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+                await _safe_send(update, _bloodied_announcement(target))
             # Synergy Phase 9 echoes_damage_type (2026-08-14, The
             # Undertone) -- same real backlash-to-attacker convention as
             # bot._do_attack's own handling of this field; only ever set
@@ -13957,7 +14085,7 @@ async def _do_attack(update: Update, action_text: str, forced_roll: int | None =
                     f"even harder for the rest of this fight!**",
                 )
             if result.get("bloodied_triggered"):
-                await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+                await _safe_send(update, _bloodied_announcement(target))
             await _maybe_summon_minions(update, session, target)
             if mastery_strike_dmg:
                 await _safe_send(update, f"🗡️ **Weapon mastery!** {attacker['name']}'s practice pays off — **+{mastery_strike_dmg} bonus damage!**")
@@ -14417,7 +14545,19 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         # the global _party_summary_text()" comment).
         party_summary = _format_party_names(db.get_party_members_by_id(party_id))
 
-    await _safe_send(update, f"🤝 {npc['name']} joins your party! {party_summary}")
+    # Chapter 1 narrative expansion (2026-09-26, SAMPLED, confirmed):
+    # a narrow per-NPC override -- Sarah (npc_id sera_wanderer) gets her
+    # own real recruitment scene instead of the flat template line,
+    # still ending on the same real party-join fact this function
+    # already computed (party_summary) so the mechanical outcome stays
+    # exactly as clear as before. Every other recruitable NPC in the
+    # game (Grask's own scene is sampled separately, not yet folded in)
+    # keeps this exact original flat line, completely unchanged.
+    if npc_id == "sera_wanderer":
+        await _send_cutscene(update, [sarah_recruitment_scene(recruiter["name"] if recruiter else "The party")])
+        await _safe_send(update, f"🤝 {party_summary}", speak=False)
+    else:
+        await _safe_send(update, f"🤝 {npc['name']} joins your party! {party_summary}")
 
     # Per Coffee (2026-07-14): each recruitable should mention "a task,
     # mission, journey or adventure" once they join, so the party can
@@ -18437,8 +18577,24 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     # decided fact (the quest's own title/description/reward), never
     # invented by the model.
     climax_narration = ""
-    if quest_id == "kess_first_reckoning":
-        # Kess Arc Phase 2 (2026-08-28): the real Kefka-style
+    if quest_id == "welcome_to_the_crossroads":
+        # Chapter 1 narrative expansion (2026-09-26): replaces the flat
+        # generic reach_location AI blurb entirely -- the game's real
+        # opening hook, delivered as a real 2-scene, reader-paced
+        # cutscene (see bot._send_cutscene) instead of one message.
+        # climax_narration stays empty; the scenes themselves carry the
+        # narrative weight, the default completion message below just
+        # adds the real reward line after them.
+        await _send_cutscene(update_like, crossroads_tavern_opening_scenes(character["name"]))
+    elif quest_id == "the_hollow_stump":
+        # Chapter 1 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- pairs the quest's real completion with
+        # Wren Hollowbrook's own recruitment tone in one scene (SAMPLED,
+        # confirmed by Coffee). Single scene, so _send_cutscene sends it
+        # with no Continue button -- same call either way.
+        await _send_cutscene(update_like, [hollow_stump_shrine_scene(character["name"])])
+    elif quest_id == "kess_first_reckoning":
+        # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic
         # climactic AI flourish below. She doesn't die in this fight
         # (see _announce_defeats' real flee mechanic); this picks the
@@ -18481,7 +18637,16 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # own clue already promises ("something bigger among them") for
         # Chapter 5's real payoff much later. Hand-written, zero Ollama
         # calls, same discipline as every Kess beat.
-        climax_narration = f"{goblin_boss_defeat_line()}\n\n"
+        #
+        # Chapter 1 narrative expansion (2026-09-26, SAMPLED, confirmed):
+        # a real throughline payoff appended right after his unchanged
+        # dying line, tying it explicitly back to Grimsby's own already-
+        # seeded tolls/bandits clue from welcome_to_the_crossroads --
+        # see goblin_warrens_tolls_payoff_narration's own docstring. The
+        # mid-fight escalation beat itself (goblin_warrens_bloodied_
+        # taunt) fires separately, from the real bloodied-HP checkpoint
+        # (see _bloodied_announcement), not from here.
+        climax_narration = f"{goblin_boss_defeat_line()}\n\n{goblin_warrens_tolls_payoff_narration()}\n\n"
         await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest_id == "the_hush_stage3_the_unspoken":
         # Chapter 1-8 story completion pass (2026-09-09): Chapter 2's
@@ -18608,8 +18773,8 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
     # and Main-topic announcement, so reaching it actually feels
     # different from every quest completion that came before it.
     if quest_id == "the_unaskeds_reckoning":
-        # The true hidden final boss (2026-07-25, per Coffee: an FF6/FF7-
-        # style ultimate secret superboss). Its own distinct completion
+        # The true hidden final boss (2026-07-25, per Coffee: a classic-
+        # JRPG-style ultimate secret superboss). Its own distinct completion
         # message, one tier more unmistakable than even the_unbegun_
         # reckoning's -- reaching this is meant to feel like finishing
         # the actual game, ties together every other secret final boss
@@ -18650,8 +18815,8 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # Kess Arc Phase 2 (2026-08-28, per Coffee: Kess is "the boss of
         # the game" -- she gets the same bespoke, one-of-a-kind ending
         # weight as the_unasked/the_unbegun above, not the generic
-        # reused "climactic quest" wrapper). The FF6 "the Fall" beat:
-        # the fight is won, the war isn't -- plan_succeeded_fact is the
+        # reused "climactic quest" wrapper). The "won the battle, not
+        # the war" beat: the fight is won, the war isn't -- plan_succeeded_fact is the
         # one real, already-decided consequence, hand-written here (not
         # a mechanical world-state flag; her defeat being in this
         # character's own real completed_quests IS the queryable fact
@@ -26995,7 +27160,7 @@ async def _do_use_environment(update: Update) -> None:
             if (not enemy.get("bloodied") and enemy["hp_current"] > 0
                     and enemy["hp_current"] <= enemy.get("hp_max", enemy["hp_current"]) * BLOODIED_HP_THRESHOLD):
                 enemy["bloodied"] = True
-                lines.append(f"🩸 **{enemy['name']} is bloodied!**")
+                lines.append(_bloodied_announcement(enemy))
         await _safe_send(update, "\n".join(lines))
 
         removed = session.remove_defeated()
@@ -36400,7 +36565,7 @@ async def _do_cast_spell(update: Update, text: str, force_scroll_item_id: str | 
                         f"even harder for the rest of this fight!**",
                     )
                 if bloodied_triggered:
-                    await _safe_send(update, f"🩸 **{target['name']} is bloodied!**")
+                    await _safe_send(update, _bloodied_announcement(target))
                 if result.get("eldritch_smite_bonus"):
                     await _safe_send(
                         update,
@@ -43130,6 +43295,10 @@ async def _idle_inactivity_loop(application: Application) -> None:
         except Exception as e:
             logger.error(f"[loot_vote] background loop failed this cycle: {e!r}")
         try:
+            await _check_cutscene_timeouts(application.bot)
+        except Exception as e:
+            logger.error(f"[cutscene] background loop failed this cycle: {e!r}")
+        try:
             await _check_pending_trades(application.bot)
         except Exception as e:
             logger.error(f"[trade] background loop failed this cycle: {e!r}")
@@ -43551,6 +43720,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(item_menu_callback, pattern=r"^item\|"))
     application.add_handler(CallbackQueryHandler(support_vote_callback, pattern=r"^supportvote\|"))
     application.add_handler(CallbackQueryHandler(boss_confrontation_dialog_callback, pattern=r"^bossdlg\|"))
+    application.add_handler(CallbackQueryHandler(cutscene_continue_callback, pattern=r"^cutscene\|"))
     application.add_handler(CallbackQueryHandler(craft_menu_callback, pattern=r"^craft\|"))
     application.add_handler(CallbackQueryHandler(forge_menu_callback, pattern=r"^forge\|"))
     application.add_handler(CallbackQueryHandler(enchant_menu_callback, pattern=r"^enchant\|"))

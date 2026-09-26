@@ -1806,9 +1806,9 @@ def narrate_boss_confrontation(
 # real ending to this chapter) -- so it's hand-written here, the same
 # way `the_unasked`/`the_unbegun`'s own bespoke endings in bot.py are
 # already fully hand-written prose with zero Ollama calls. This
-# guarantees the FF6-style script format, the Kafka-inspired calm/
-# philosophical voice for Kess (2026-08-28 dev-bridge reference: "Use
-# this as an example on how to characteristically build Kess"), and
+# guarantees the fixed script format, the calm/philosophical villain
+# voice for Kess (2026-08-28 dev-bridge reference: "Use this as an
+# example on how to characteristically build Kess"), and
 # the exact tone Coffee approved live, 100% of the time -- no risk of
 # a wrong pronoun, an empty response, or an invented detail. Only
 # `{character_name}`/party facts are ever substituted in, via plain
@@ -1875,9 +1875,9 @@ def _kess_arc_quest_id_for_title(quest_title: str) -> str | None:
 
 def kess_first_confrontation_script(character_name: str) -> str:
     """
-    Hand-written FF6-style confrontation script for the party's FIRST
-    real meeting with Kess (Kess Arc Phase 2) -- the Kafka (Honkai:
-    Star Rail) voice reference Coffee gave (2026-08-28 dev-bridge:
+    Hand-written confrontation script for the party's FIRST
+    real meeting with Kess (Kess Arc Phase 2) -- the villain voice
+    reference Coffee gave (2026-08-28 dev-bridge:
     "Use this as an example on how to characteristically build Kess"):
     calm manipulation over snarling threats, references to a script
     she's following that isn't her own. Grounded in her real,
@@ -2085,6 +2085,184 @@ def goblin_boss_defeat_line() -> str:
         "going, next time...\"\n\n"
         "*Whatever he meant by it, there's no one left down here to ask -- just a warren that's "
         "finally quiet, and a debt owed to someone who never showed his face.*"
+    )
+
+
+# ---------------------------------------------------------------------
+# Chapter 1 narrative expansion (2026-09-26), per Coffee: "i want this
+# story to feel like our research... i want characters talking to
+# eachother, developments, escalations/conflicts." Every scene below
+# was shown to Coffee as a calibration sample and explicitly confirmed
+# ("i liked that sample" / "i like it" / "i like it - jus make sure
+# pronouns are properly being used") before being folded in here,
+# same hand-written, zero-Ollama-call discipline as every other Kess-
+# arc/story-completion-pass function in this file. Delivered via
+# bot._send_cutscene (the new reader-paced "Continue" mechanic) rather
+# than a single wall of text -- see that function's own docstring.
+# ---------------------------------------------------------------------
+
+def crossroads_tavern_opening_scenes(character_name: str) -> list[str]:
+    """
+    Chapter 1's real opener (welcome_to_the_crossroads, "A Favor for
+    Grimsby") -- replaces the flat 2-4 sentence AI blurb entirely.
+    Two scenes: the tavern hook (Grimsby + a background patron, seeding
+    the tolls/bandits thread already sitting in the quest's own real
+    `clue` field verbatim -- see campaign.json) and the Whispering Wood
+    arrival, which deliberately ends on escalation/foreboding rather
+    than resolution. Grimsby has no `pronouns` field in campaign.json
+    (his dialogue never needs a third-person pronoun here); the
+    unnamed patron is intentionally never named or gendered.
+    """
+    return [
+        (
+            "*The fire's down to embers. Grimsby wipes the same mug three times before he finally sets it down.*\n\n"
+            f"**Grimsby:** \"You're new blood, aren't you. Good. Means you haven't heard enough of my "
+            "stories to walk out before I finish one.\"\n\n"
+            f"**{character_name}:** \"Try me.\"\n\n"
+            "**Grimsby:** *(lower)* \"Something's wrong out past the treeline. Whispering Wood. Nothing "
+            "you'd put in a report -- a hunter swears the birds went quiet three days before anything "
+            "happened. A trader's mule wouldn't cross the old bridge, not for grain, not for the whip. "
+            "Small things. Things a sensible man forgets by morning.\"\n\n"
+            "*A patron at the end of the bar -- doesn't look up from his cup.*\n\n"
+            "**Patron:** \"Tell them about the tolls, Grimsby.\"\n\n"
+            "**Grimsby:** *(waving him off)* \"That's a different complaint.\"\n\n"
+            "**Patron:** \"Is it?\" *(finally looks over)* \"Toll-men on the east road doubled their take "
+            "last month. Doubled. For roads that see less traffic than my grandmother's grave. Where's "
+            "that coin going, if not to whoever's paying the bandits to look the other way?\"\n\n"
+            "**Grimsby:** *(quiet beat)* \"...You didn't hear that from him.\"\n\n"
+            f"**{character_name}:** \"Hear what?\"\n\n"
+            "**Grimsby:** *(almost a smile)* \"Good. You catch on. Look -- I'm not asking you to solve "
+            "the world's problems over one ale. Just walk out to the treeline. Tell me if the birds are "
+            "still quiet. That's all I need tonight.\"\n\n"
+            "*A beat. He slides the mug back -- still not clean.*\n\n"
+            "**Grimsby:** \"Everything after that... we'll see what 'after that' looks like.\""
+        ),
+        (
+            "*The road narrows to a deer-track. Your own footsteps are the loudest thing in the world.*\n\n"
+            "No birds. Grimsby was right about that much -- and somehow that's worse than if he'd been "
+            "wrong. Ahead, where the old bridge should creak under the first real gust of evening wind, "
+            "it doesn't creak at all. It doesn't move. Someone jammed it still, and troubled themselves "
+            "to hide the tool marks doing it.\n\n"
+            "*Something in the underbrush -- not fast, not close, but real. Watching, unhurried, in no "
+            "rush to be found.*\n\n"
+            "Whatever's out here isn't hiding from the village. It's hiding FOR something. And it's in "
+            "no hurry, because it already knows you're not the one it's waiting on."
+        ),
+    ]
+
+
+def hollow_stump_shrine_scene(character_name: str) -> str:
+    """
+    the_hollow_stump's real completion scene, pairing it with Wren
+    Hollowbrook's own recruitment in one beat (currently zero bespoke
+    content -- the flat AI blurb). Wren is warier and quieter than
+    Grimsby/Sarah, softening only because the party proves itself by
+    NOT touching anything; ends with the quest's real `reward_item`
+    (waterlogged_journal) half-revealed rather than handed over, kept
+    as a real discovery beat instead of a transaction. Her real
+    campaign.json `pronouns` ("she/her") are used throughout -- pulled
+    from data, never inferred from her name or role.
+    """
+    return (
+        "*The shrine isn't grand -- a hollowed-out ancient stump, ringed with offerings gone soft with "
+        "moss. Nothing here has been touched in a long time. Nothing here has been touched by anything "
+        "with teeth, either, which is the part that doesn't sit right.*\n\n"
+        "*A woman straightens up from the undergrowth so unhurried you'd swear she'd been part of it a "
+        "second ago -- soil on her hands, a look that isn't quite hostile but isn't far from it "
+        "either.*\n\n"
+        "**Wren:** \"You're standing very close to something you don't understand.\"\n\n"
+        f"**{character_name}:** \"We're not here to disturb it.\"\n\n"
+        "**Wren:** *(studying you, in no rush to believe that yet)* \"Everyone says that. Then they "
+        "poke at the offerings, or pocket something 'just to look at later,' and the shrine remembers "
+        "being poked at long after they've forgotten doing it.\" *(beat)* \"You haven't touched anything "
+        "yet. That's more than most manage in the first minute.\"\n\n"
+        f"**{character_name}:** \"The offerings -- nothing's been at them. No animals, no rot, "
+        "nothing.\"\n\n"
+        "**Wren:** *(the hostility easing, just slightly -- this is clearly the correct thing to have "
+        "noticed)* \"...No. Nothing has. Not in longer than it should be possible for nothing to.\" "
+        "*(kneels back down, moving aside a curtain of leaves without disturbing them)* \"I don't like "
+        "what that means any more than you're about to.\"\n\n"
+        "*Underneath, half-swallowed by root and old moss, something waterlogged and deliberately "
+        "hidden -- not lost, hidden.*\n\n"
+        "**Wren:** \"That wasn't left as an offering. Someone put that there to be found by exactly the "
+        "right person, and buried it well enough that you're clearly not supposed to be them.\" *(looks "
+        "up, something unreadable crossing her face)* \"And yet. Here it is, coming up out of the ground "
+        "the moment strangers who don't touch things finally showed.\"\n\n"
+        "*She doesn't hand it over yet. She just looks at it, and then at you, like she's re-deciding "
+        "something she'd already decided years ago.*"
+    )
+
+
+def goblin_warrens_bloodied_taunt() -> str:
+    """
+    Chapter 1's real climax (clear_the_warrens) mid-fight escalation
+    beat -- fires once, the first time Vrakk crosses the game's own
+    real, already-computed BLOODIED_HP_THRESHOLD (rules/combat.py),
+    the exact same rules-decided checkpoint every other monster's
+    generic "is bloodied!" line already fires from (see
+    bot._bloodied_announcement). Pure flavor -- no new mechanic
+    invented, same "rules decide, narration only reports" discipline
+    as everywhere else. Slots between his existing, unchanged
+    confrontation line (goblin_boss_confrontation_script) and defeat
+    line (goblin_boss_defeat_line) to give the fight a real mid-point
+    instead of two isolated beats with nothing between them.
+    """
+    return (
+        "*The fight turns hard once he's bloodied -- he stops posturing and starts actually trying.*\n\n"
+        "**Vrakk:** *(between blows, genuinely rattled for the first time)* \"You're not toll-collectors. "
+        "Toll-collectors don't hit this hard.\" *(barking something in Goblin -- two more shapes peel off "
+        "the warren walls)* \"FINE. Fine! Nobody said you'd be the expensive kind!\""
+    )
+
+
+def goblin_warrens_tolls_payoff_narration() -> str:
+    """
+    Real throughline payoff, fired right after goblin_boss_defeat_line
+    (unchanged) as clear_the_warrens' own real completion beat -- ties
+    his dying "ask the coin -- the tolls" line explicitly back to
+    Grimsby's own already-seeded clue from welcome_to_the_crossroads
+    (campaign.json's real `clue` field: "travelers grumbling that the
+    tolls... feel like they're funding something worse than the
+    bandits collecting them"), giving Chapter 1 a real throughline
+    across all 3 quests instead of 3 isolated beats.
+    """
+    return (
+        "He goes still before finishing the thought. Whatever he actually knew died with him -- but "
+        "Grimsby's own words come back uninvited: travelers grumbling that the tolls feel like they're "
+        "funding something worse than the bandits collecting them. Vrakk collected. He didn't fund. "
+        "Somewhere above him, on a road with a toll-gate on it, someone still does."
+    )
+
+
+def sarah_recruitment_scene(character_name: str) -> str:
+    """
+    Sarah's real recruitment scene (npc_id sera_wanderer, real `name`
+    "Sarah" despite the id), replacing the single flat "joins your
+    party!" line FOR HER SPECIFICALLY (see bot._do_recruit_npc's
+    narrow per-NPC override hook) -- every other recruitable NPC keeps
+    the original shared template unchanged. A clipped, observant,
+    testing-you voice grounded in her real campaign.json data (Ranger/
+    Elf/Chaotic Good, "quiet, capable... sizing up anyone who might be
+    worth traveling with"). Her real `pronouns` ("she/her") are used
+    throughout -- pulled from data, never inferred from her name.
+    """
+    return (
+        "*She's been leaning against the doorframe the whole time you've been talking to Grimsby -- not "
+        "eavesdropping, exactly, just close enough that not listening would take more effort than "
+        "listening does.*\n\n"
+        "**Sarah:** \"Whispering Wood. That's the job, then.\"\n\n"
+        f"**{character_name}:** \"Word travels fast in here.\"\n\n"
+        "**Sarah:** *(a small, dry not-quite-smile)* \"Word travels fast wherever Grimsby's mug hasn't "
+        "been washed in a week.\" *(pushes off the doorframe, unhurried)* \"I've been circling that "
+        "treeline for two days on my own dime, looking for a reason it's worth circling. Company would "
+        "speed that up.\"\n\n"
+        f"**{character_name}:** \"You always this forward with strangers?\"\n\n"
+        "**Sarah:** \"No.\" *(studying you, plainly, not unkindly)* \"You're the first ones through that "
+        "door in a week who didn't flinch when he said 'wrong.' Most people flinch.\" *(shoulders her "
+        "bow)* \"That's usually the part worth paying attention to.\"\n\n"
+        "*She falls into step beside you like it was already decided, because -- you get the sense -- "
+        "it was, several minutes ago.*\n\n"
+        "**Sarah:** \"Try to keep up. I don't repeat myself on the road twice.\""
     )
 
 
@@ -2366,7 +2544,7 @@ def narrate_kess_transformation(
 ) -> str:
     """
     Hand-written, not AI-generated (Kess Arc Phase 2) -- the real
-    Kefka-style "she breaks, something else answers" beat, picked back
+    "she breaks, something else answers" beat, picked back
     up right after Kess flees the first fight (kess_flees_line above),
     not a corpse reanimating. Fires once, as kess_first_reckoning's own
     real completion flourish, grounded in kess_the_unbound's own
@@ -2391,8 +2569,8 @@ def narrate_chapter_8_epilogue(boss_name: str, party_names: str, plan_succeeded_
     `the_unasked`-tier unique ending treatment for kess_the_unbound_
     reckoning (Kess is "the boss of the game" per Coffee), same real
     "hand-write the true ending" discipline bot.py already uses for
-    the_unasked/the_unbegun. The FF6 "the Fall" beat: winning the fight
-    doesn't mean winning the war. `plan_succeeded_fact` is the one
+    the_unasked/the_unbegun. The "won the battle, not the war" beat:
+    winning the fight doesn't mean winning the war. `plan_succeeded_fact` is the one
     real, already-decided fact bot.py computes and folds in verbatim.
 
     Per Coffee (2026-08-28): Kess stays the ENTIRE focus of this

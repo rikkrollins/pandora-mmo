@@ -9486,6 +9486,192 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         prompt_arg = mock_image.await_args.args[1]
         self.assertIn("Clear the Goblin Warrens", prompt_arg)
 
+    # -- Chapter 1 narrative expansion (2026-09-26): real multi-scene
+    #    cutscenes, reader-paced via a "Continue" button, for Chapter
+    #    1's 3 quests + Sarah's recruitment. Every scene below was
+    #    shown to Coffee as a calibration sample and explicitly
+    #    confirmed before being folded in -- see [[feedback_chapter_
+    #    narrative_expansion_sample_confirmed]]. -----------------------
+    async def test_send_cutscene_advances_scene_by_scene_on_continue_tap(self):
+        user_id = 900970
+        make_basic_character(user_id, "CutsceneWitness")
+        sink = []
+        chat_id = -900970
+        update = FakeUpdate(user_id, "", sink, chat_id=chat_id)
+        bot._CUTSCENE_PROGRESS.pop(chat_id, None)  # isolate from any other test's leftover state at this chat_id
+        await bot._send_cutscene(update, ["Scene one.", "Scene two.", "Scene three."])
+        self.assertEqual(sink, ["Scene one."])
+        message_id = update.effective_chat.last_sent_message.message_id
+        tracked = bot._chat_scoped_dict(bot._CUTSCENE_PROGRESS, chat_id)
+        record = tracked[message_id]
+        self.assertEqual(record["index"], 0)
+        self.assertEqual(record["telegram_user_id"], user_id)
+
+        # cutscene_continue_callback advances via context.bot.edit_message_text
+        # (the same real Bot method the auto-advance timer also uses --
+        # there's no query to edit through on that path, so both share
+        # this one real call shape rather than the query's own edit).
+        context = DummyContext(bot=FakeBot())
+        tap = FakeCallbackUpdate(user_id, "cutscene|next", [], chat_id=chat_id, message_id=message_id)
+        await bot.cutscene_continue_callback(tap, context)
+        self.assertEqual(context.bot.edits[-1][2], "Scene two.")
+        self.assertEqual(record["index"], 1)
+
+        await bot.cutscene_continue_callback(
+            FakeCallbackUpdate(user_id, "cutscene|next", [], chat_id=chat_id, message_id=message_id), context,
+        )
+        self.assertEqual(context.bot.edits[-1][2], "Scene three.")
+        # Final scene -- no button, and the tracked entry is dropped so a
+        # stale later tap can't advance a cutscene that's already over.
+        self.assertNotIn(message_id, tracked)
+
+    async def test_send_cutscene_single_scene_sends_no_button_and_tracks_nothing(self):
+        user_id = 900971
+        make_basic_character(user_id, "SingleSceneWitness")
+        sink = []
+        chat_id = -900971
+        update = FakeUpdate(user_id, "", sink, chat_id=chat_id)
+        bot._CUTSCENE_PROGRESS.pop(chat_id, None)
+        await bot._send_cutscene(update, ["The only scene."])
+        self.assertEqual(sink, ["The only scene."])
+        message_id = update.effective_chat.last_sent_message.message_id
+        self.assertNotIn(message_id, bot._chat_scoped_dict(bot._CUTSCENE_PROGRESS, chat_id))
+
+    async def test_cutscene_continue_tap_from_a_different_user_is_refused(self):
+        """Another party member tapping a shared-chat cutscene message must never skip the original recipient's own read pace."""
+        owner_id = 900972
+        other_id = 900973
+        make_basic_character(owner_id, "SceneOwner")
+        sink = []
+        chat_id = -900972
+        update = FakeUpdate(owner_id, "", sink, chat_id=chat_id)
+        bot._CUTSCENE_PROGRESS.pop(chat_id, None)
+        await bot._send_cutscene(update, ["Scene one.", "Scene two."])
+        message_id = update.effective_chat.last_sent_message.message_id
+
+        context = DummyContext(bot=FakeBot())
+        tap = FakeCallbackUpdate(other_id, "cutscene|next", [], chat_id=chat_id, message_id=message_id)
+        await bot.cutscene_continue_callback(tap, context)
+        self.assertEqual(context.bot.edits, [], "a different user's tap must not advance someone else's cutscene")
+        record = bot._chat_scoped_dict(bot._CUTSCENE_PROGRESS, chat_id)[message_id]
+        self.assertEqual(record["index"], 0)
+
+    async def test_check_cutscene_timeouts_auto_advances_a_stale_scene(self):
+        """A player who never taps Continue still moves through the scene once CUTSCENE_AUTO_ADVANCE_SECONDS has genuinely passed."""
+        user_id = 900974
+        make_basic_character(user_id, "TimeoutWitness")
+        sink = []
+        chat_id = -900974
+        update = FakeUpdate(user_id, "", sink, chat_id=chat_id)
+        bot._CUTSCENE_PROGRESS.pop(chat_id, None)
+        await bot._send_cutscene(update, ["Scene one.", "Scene two."])
+        message_id = update.effective_chat.last_sent_message.message_id
+        tracked = bot._chat_scoped_dict(bot._CUTSCENE_PROGRESS, chat_id)
+
+        fake_bot = FakeBot()
+        await bot._check_cutscene_timeouts(fake_bot)
+        self.assertEqual(fake_bot.edits, [], "must not advance before the real threshold has elapsed")
+
+        tracked[message_id]["shown_at"] -= bot.CUTSCENE_AUTO_ADVANCE_SECONDS + 1
+        await bot._check_cutscene_timeouts(fake_bot)
+        self.assertEqual(len(fake_bot.edits), 1)
+        edited_chat_id, edited_message_id, edited_text, _ = fake_bot.edits[0]
+        self.assertEqual((edited_chat_id, edited_message_id, edited_text), (chat_id, message_id, "Scene two."))
+        self.assertNotIn(message_id, tracked, "the final scene must clear its own tracked entry")
+
+    def test_bloodied_announcement_gives_vrakk_his_own_taunt(self):
+        """The shared bloodied-announcement helper swaps in Vrakk's real mid-fight escalation taunt, every other monster keeps the plain generic line."""
+        vrakk = {"name": "Goblin Boss", "monster_key": "goblin_boss"}
+        self.assertIn("Vrakk:", bot._bloodied_announcement(vrakk))
+        self.assertIn("expensive kind", bot._bloodied_announcement(vrakk))
+
+        ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
+        self.assertEqual(bot._bloodied_announcement(ordinary), "🩸 **A Timber Wolf is bloodied!**")
+
+    async def test_clear_the_warrens_payoff_ties_back_to_grimsbys_own_clue(self):
+        """The real throughline: Vrakk's unchanged dying line is now followed by a payoff naming Grimsby's own tolls/bandits clue from welcome_to_the_crossroads."""
+        from unittest.mock import patch, AsyncMock
+        user_id = 900975
+        make_basic_character(user_id, "ThroughlineWitness", current_location="goblin_warrens")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "clear_the_warrens")
+        combined = "\n".join(sink)
+        self.assertIn("Vrakk", combined)
+        self.assertIn("Grimsby", combined)
+        self.assertIn("tolls", combined)
+        # Real reward facts (title/XP/gold/item) must stay exactly what
+        # campaign.json says, unchanged by any of the new narration.
+        quest = bot.CAMPAIGN["quests"]["clear_the_warrens"]
+        self.assertIn(str(quest["reward_xp"]), combined)
+        self.assertIn(str(quest["reward_gold"]), combined)
+        character = db.get_character(user_id, -999)
+        self.assertIn(quest["reward_item"], character["inventory"])
+
+    async def test_welcome_to_the_crossroads_uses_the_real_tavern_and_wood_scenes(self):
+        """Chapter 1's real opener replaces the flat generic reach_location AI blurb with the confirmed 2-scene cutscene."""
+        user_id = 900976
+        make_basic_character(user_id, "Elduinn")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "welcome_to_the_crossroads")
+        combined = "\n".join(sink)
+        self.assertIn("Grimsby", combined)
+        self.assertIn("Elduinn", combined)  # the real character name, substituted in for the player's own lines
+        self.assertIn("tolls", combined)
+        self.assertIn("Whispering Wood", combined)
+        quest = bot.CAMPAIGN["quests"]["welcome_to_the_crossroads"]
+        self.assertIn(str(quest["reward_xp"]), combined)
+
+    async def test_the_hollow_stump_uses_wrens_real_shrine_scene(self):
+        """the_hollow_stump (currently zero bespoke content) now pairs its real completion with Wren's own recruitment tone."""
+        user_id = 900977
+        make_basic_character(user_id, "Elduinn")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_hollow_stump")
+        combined = "\n".join(sink)
+        self.assertIn("Wren:", combined)
+        self.assertIn("Elduinn", combined)
+        self.assertIn("waterlogged", combined)  # the reward item, half-revealed in the scene rather than named/handed over
+        # Real reward fact unaffected: the item is still actually granted.
+        quest = bot.CAMPAIGN["quests"]["the_hollow_stump"]
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["inventory"].get(quest["reward_item"]), 1)
+
+    async def test_recruiting_sarah_uses_her_own_scene_not_the_flat_line(self):
+        """Sarah's real recruitment scene replaces the flat template line FOR HER SPECIFICALLY, still ending on the same real party-join fact."""
+        # A dedicated chat_id (not the shared -999 default), same
+        # reasoning as this file's own _resync_ tests: recruiting Sarah
+        # here must not leave a real companion behind in -999 for a
+        # LATER, unrelated test (e.g. the recruit-all-6-companions test)
+        # to trip over via _do_recruit_npc's own already_recruited check.
+        chat_id = -900978
+        player_id = 900978
+        make_basic_character(player_id, "SarahRecruiter", current_location="crossroads_tavern", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(player_id, "recruit Sarah", sink, chat_id=chat_id), "Sarah")
+        combined = "\n".join(sink)
+        self.assertIn("Sarah:", combined)
+        self.assertIn("SarahRecruiter", combined)  # her scene substitutes in the real recruiting character's own name
+        self.assertNotIn("Sarah joins your party!", combined)  # the flat template line, replaced for her specifically
+        self.assertIn("🤝", combined)  # the real party-join fact is still conveyed
+        # The real mechanical outcome is untouched: a genuine companion
+        # character exists, in the recruiter's own real party.
+        player = db.get_character(player_id, chat_id)
+        companion = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Sarah")
+        self.assertEqual(companion.get("party_id"), player["party_id"])
+        # Her real personal quest is still offered, exactly as before.
+        self.assertIn('Say "I accept the quest"', combined)
+
+    async def test_recruiting_pip_still_uses_the_original_flat_line(self):
+        """Every recruitable NPC other than Sarah (and Grask, once sampled) keeps the exact original shared template -- confirms the override is scoped, not a global template change."""
+        chat_id = -900979
+        player_id = 900979
+        make_basic_character(player_id, "PipRecruiter", current_location="crossroads_tavern", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(player_id, "recruit Pip Thistledown", sink, chat_id=chat_id), "Pip Thistledown")
+        combined = "\n".join(sink)
+        self.assertIn("Pip Thistledown joins your party!", combined)
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------
@@ -23472,7 +23658,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_recruit_npc(FakeUpdate(player_id, f"recruit {name}", sink), name)
             reply = "\n".join(sink)
             self.assertNotIn("already full", reply.lower(), f"{name} failed to join: {reply}")
-            self.assertIn("joins your party", reply.lower(), f"{name} didn't actually join: {reply}")
+            if name == "Sarah":
+                # Chapter 1 narrative expansion (2026-09-26): Sarah gets
+                # her own real recruitment scene instead of the flat
+                # template line -- see test_recruiting_sarah_uses_her_
+                # own_scene_not_the_flat_line below for the full check;
+                # here it's just enough to confirm she still actually
+                # joined (the party-summary line the scene is followed
+                # by, not the flat "joins your party" text every other
+                # companion still gets).
+                self.assertIn("🤝", reply, f"{name} didn't actually join: {reply}")
+            else:
+                self.assertIn("joins your party", reply.lower(), f"{name} didn't actually join: {reply}")
 
         player = db.get_character(player_id, -999)
         self.assertEqual(db.get_party_size(player["party_id"]), 7)  # player + all 6 companions
@@ -27793,7 +27990,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hesitates", reason)
 
     def test_narrate_kess_transformation_is_hand_written(self):
-        """The real Kefka-style transformation beat is hand-written (Kess Arc Phase 2) -- always the same real, reliable scene, no network call."""
+        """The real transformation beat is hand-written (Kess Arc Phase 2) -- always the same real, reliable scene, no network call."""
         import ai.dm_agent as dm_agent_module
 
         result = dm_agent_module.narrate_kess_transformation(

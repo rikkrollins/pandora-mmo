@@ -218,19 +218,30 @@ class FakeUpdate:
         self.effective_message = self.message
 
 
+class FakeQueryMessage:
+    """Bare stand-in for CallbackQuery.message -- just enough for a handler that reads query.message.message_id."""
+    def __init__(self, message_id):
+        self.message_id = message_id
+
+
 class FakeCallbackQuery:
     """
     Minimal stand-in for python-telegram-bot's CallbackQuery, real enough
     to drive the button-tap handlers (battle_menu_callback and task #176's
     shop_menu_callback/spell_menu_callback/quest_menu_callback) end-to-end.
     `sink` collects .answer() calls the same way FakeChat collects sent
-    messages, so a test can assert a tap was acknowledged.
+    messages, so a test can assert a tap was acknowledged. `message_id`
+    (2026-09-26, cutscene_continue_callback's own real query.message.
+    message_id read) populates .message the same shape a real Telegram
+    CallbackQuery always carries -- None (the original default) for every
+    existing caller that never needed it.
     """
-    def __init__(self, data, sink):
+    def __init__(self, data, sink, message_id=None):
         self.data = data
         self._sink = sink
         self.answered = None
         self.last_edited_text = None
+        self.message = FakeQueryMessage(message_id) if message_id is not None else None
 
     async def answer(self, text=None, show_alert=False):
         self.answered = text or "<ack>"
@@ -246,10 +257,10 @@ class FakeCallbackQuery:
 
 class FakeCallbackUpdate:
     """A FakeUpdate-equivalent for a button tap (callback_query), not a typed message."""
-    def __init__(self, user_id, data, sink, chat_id=None):
+    def __init__(self, user_id, data, sink, chat_id=None, message_id=None):
         self.effective_user = FakeUser(user_id)
         self.effective_chat = FakeChat(sink, chat_id=chat_id if chat_id is not None else -999)
-        self.callback_query = FakeCallbackQuery(data, sink)
+        self.callback_query = FakeCallbackQuery(data, sink, message_id=message_id)
         self.message = None
         self.effective_message = None
 
@@ -271,12 +282,23 @@ class FakeBot:
     drive code paths that call context.bot.get_chat_member (e.g.
     _is_group_owner/_is_group_admin_or_owner in bot.py). `status`
     controls what every get_chat_member call reports back.
+
+    edit_message_text (2026-09-26, _advance_cutscene's own real
+    application.bot.edit_message_text(chat_id=..., message_id=...) call,
+    used by both a real Continue tap and the auto-advance timer, neither
+    of which have a query to edit through) records every edit in
+    `edits` (chat_id, message_id, text, reply_markup) so a test can
+    assert what a cutscene actually advanced to.
     """
     def __init__(self, status="creator"):
         self.status = status
+        self.edits = []
 
     async def get_chat_member(self, chat_id, user_id):
         return FakeChatMember(self.status)
+
+    async def edit_message_text(self, text, chat_id=None, message_id=None, reply_markup=None):
+        self.edits.append((chat_id, message_id, text, reply_markup))
 
 
 class DummyContext:

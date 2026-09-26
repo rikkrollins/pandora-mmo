@@ -2,6 +2,59 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.698] — Chapter 1 narrative expansion: real multi-scene cutscenes, reader-paced delivery
+
+First chapter of a larger project (per Coffee: "i like it - lock it in
+- lets do all chapters from 1 to the end of chapter 8") bringing every
+chapter up to the same narrative bar the Kess storyline (Chapter 8)
+already hit. Every scene below was shown to Coffee as a calibration
+sample and explicitly confirmed before being written here.
+
+**New shared mechanic**: `_send_cutscene` sends a multi-scene cutscene
+one scene at a time, each with a real "▶️ Continue" button
+(`cutscene_continue_callback`) that edits the same message forward.
+Nobody gets stuck waiting on it either — `_check_cutscene_timeouts`
+(added to the existing `_idle_inactivity_loop` background poller)
+auto-advances any scene that's sat unread for 18 seconds, the same way
+a real tap would. Only the message's own original recipient can
+advance it early, so another party member's tap in a shared chat can't
+skip someone else's read pace.
+
+**Chapter 1 content**, all hand-written (zero Ollama calls), grounded
+throughout in campaign.json's own already-real quest/NPC data:
+- `welcome_to_the_crossroads` ("A Favor for Grimsby"): the flat generic
+  arrival blurb is replaced entirely with a real 2-scene cutscene — the
+  tavern hook (Grimsby + a background patron seeding the tolls/bandits
+  clue already sitting in the quest's own data) and the Whispering
+  Wood arrival, ending on escalation rather than resolution.
+- `the_hollow_stump`: previously zero bespoke content at all. A new
+  shrine scene pairs the quest's real completion with Wren
+  Hollowbrook's own voice — warier and quieter than Grimsby, softening
+  only because the party proves itself by not touching anything, ending
+  on the real reward item half-revealed rather than handed over.
+- `clear_the_warrens` (Chapter 1's real climax): Vrakk's two existing
+  fixed beats (confrontation + defeat lines) now have a real mid-fight
+  escalation between them — a taunt that fires the first time he
+  crosses the game's own already-computed bloodied-HP threshold (the
+  same real checkpoint every monster's generic "is bloodied!" line
+  already used) — plus a new closing narration tying his dying words
+  explicitly back to Grimsby's own tolls/bandits clue, giving Chapter 1
+  a real throughline across all 3 quests instead of 3 isolated beats.
+- Sarah's recruitment (npc_id `sera_wanderer`) gets her own real scene
+  — a clipped, observant, testing-you voice — replacing the flat
+  "joins your party!" template for her specifically; every other
+  recruitable NPC keeps that exact original line unchanged.
+
+10 new regression tests (the cutscene mechanic end-to-end, all 3
+quest completions, Sarah's recruitment override plus a control test
+confirming every other NPC is unaffected), 1 existing test updated to
+match Sarah's new narration. Also scrubbed several pre-existing,
+never-player-visible comment references to outside media (Chrono
+Trigger/Final Fantasy/Kefka/a Honkai: Star Rail character) down to
+generic craft language, per the project's standing no-trademarked-
+names rule — none of this ever reached a player, but it doesn't belong
+in the repo either way.
+
 ## [1.27.697] — fix: a typo'd wrong riddle guess got classified as a party invite
 
 Real live incident (2026-09-26, topic-activity signal, watched live
@@ -10115,7 +10168,7 @@ codebase already used for `the_unasked`/`the_unbegun`.
   from the general free-form NPC chat memory entirely.
 - Kess's own two confrontation cutscenes, in a real script format
   (narration + quoted dialogue, not a prose paragraph) -- her voice
-  leans into the Kafka (Honkai: Star Rail) reference Coffee gave:
+  leans into the villain-voice reference Coffee gave:
   calm and controlled rather than snarling, hinting at a script she
   didn't write for herself. Shows a real, human crack in her
   composure in the first meeting -- the party can genuinely try to

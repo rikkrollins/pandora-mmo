@@ -909,8 +909,8 @@ ITEMS = {
         "description": "Just enough light left in it to see by.",
     },
 
-    # The true hidden final boss (2026-07-25, per Coffee: an FF6/FF7-
-    # style ultimate secret superboss, gated on 10 rebirths AND having
+    # The true hidden final boss (2026-07-25, per Coffee: a classic-
+    # JRPG-style ultimate secret superboss, gated on 10 rebirths AND having
     # already defeated every other secret final boss in the game). The
     # single strongest item that exists -- upgraded to real mythic tier
     # (2026-08-02, magic item system Phase 6) with real mechanical
