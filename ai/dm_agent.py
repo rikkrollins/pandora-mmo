@@ -2865,6 +2865,113 @@ def the_paymasters_shadow_defeat_line() -> str:
     )
 
 
+def paymasters_shadow_bloodied_escalation() -> str:
+    """
+    Light-touch mid-fight escalation for the_paymasters_shadow -- its
+    only real mechanical hooks (counters_rage/extra_attack_when_
+    enraged) have no existing player-visible narration checkpoint at
+    all (rules/combat.py applies both silently), so this reuses the
+    same generic bloodied-HP checkpoint Vrakk's/The Sentinel's own
+    escalations use rather than inventing a new announcement mechanic.
+    Keeps its established resigned, bureaucratic tone even while
+    losing -- not suddenly desperate.
+    """
+    return (
+        "*The borrowed light flickers, just once, closer to the shape of a real, tired person than "
+        "it's shown yet.*\n\n"
+        "**The Paymaster's Shadow:** \"...you're better at this than the last ones. That's going to "
+        "be a very short-lived advantage.\""
+    )
+
+
+# ---------------------------------------------------------------------
+# Chapter 5 narrative expansion (2026-09-26). arc_5_goblin_warrens
+# ("What the Warren Was Hiding") is a different, deeper warren than
+# Chapter 1's -- one real climactic quest (the_true_paymasters_
+# reckoning/The Paymaster's Shadow above, already hand-written from
+# the earlier story-completion pass and explicitly naming Vrakk),
+# and the_ledger_vaults_answer (solve_puzzle) stays out of scope per
+# this project's own standing rule. Built directly against the
+# established tone bar, no further prose preview shown in chat (per
+# Coffee's own "no more spoilers" request).
+# ---------------------------------------------------------------------
+
+def supply_tunnels_veteran_completion_narration() -> str:
+    """supply_tunnels_veteran's real completion scene -- currently zero base narration (only Grask's own separate, conditional reactive line). Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Crates and stolen sacks, stacked deep -- and guarded far better than the warren's own "
+        "front door ever was.*\n\n"
+        "Whoever's really running this warren clearly cares more about what's kept back here than "
+        "about anyone getting in at all."
+    )
+
+
+def collapsed_tunnels_survivor_completion_narration() -> str:
+    """the_collapsed_tunnels_survivor's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The cave-in happened long before any goblin moved in -- most of this passage is rubble "
+        "now, and something's clearly been squatting in what's left of it ever since.*\n\n"
+        "Whatever it was hiding from, it wasn't the goblins."
+    )
+
+
+def deep_larders_elder_completion_narration() -> str:
+    """deep_larders_elder's real completion scene -- currently zero base narration (only Grask's own separate, conditional reactive line). Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Floor to ceiling, hoarded supplies -- enough to keep a warren far bigger than the one "
+        "anyone's actually seen down here fed for a very long time.*\n\n"
+        "Someone's been provisioning for a lot more goblins than are left to eat any of it."
+    )
+
+
+def deeper_rubbles_lurker_completion_narration() -> str:
+    """deeper_rubbles_lurker's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The cave-in goes back much further than anyone squatting near the entrance ever bothered "
+        "to dig -- this deep, it was never really about the goblins at all.*\n\n"
+        "Whatever was buried down here, someone wanted it buried deep enough that a lazy dig would "
+        "never find it."
+    )
+
+
+def old_seams_secret_completion_narration() -> str:
+    """the_old_seams_secret's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A real, deliberate seam cut into the rock -- clean, straight, and cut by tools no goblin "
+        "in this entire warren has ever owned.*\n\n"
+        "Something else was down here first, and it came prepared."
+    )
+
+
+def idol_chambers_warden_completion_narration() -> str:
+    """the_idol_chambers_warden's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The goblins propped this up and started worshipping it without any real idea what it "
+        "actually is -- and whatever was guarding their new faith clearly took the job more "
+        "seriously than they did.*\n\n"
+        "It's still not clear what they were praying to. It's very clear they should have asked first."
+    )
+
+
+def paymasters_route_completion_narration() -> str:
+    """the_paymasters_route's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A route worn smooth by real, regular foot traffic -- someone's been walking this exact "
+        "path, on a real schedule, for a very long time.*\n\n"
+        "Whoever it was never expected anyone to be walking it back the other way."
+    )
+
+
+def toll_masters_den_completion_narration() -> str:
+    """the_toll_masters_den's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Whoever actually ran this warren's finances kept their own den here -- well guarded, well "
+        "away from the goblins they were using the entire time.*\n\n"
+        "The ledgers are gone, moved recently, in a hurry. Whoever's above the Toll Master already "
+        "knew someone would eventually get this far."
+    )
+
+
 def the_keeping_current_confrontation_script() -> str:
     """
     Chapter 6's real finale ("The Source") -- the real payoff of arc_6's

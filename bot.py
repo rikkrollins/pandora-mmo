@@ -91,6 +91,11 @@ from ai.dm_agent import (
     the_drowned_reflection_confrontation_script, the_drowned_reflection_defeat_line,
     drifting_halls_threshold_completion_narration, drifting_halls_warden_completion_narration,
     mirrored_thresholds_echo_completion_narration, radiant_stairs_climb_completion_narration,
+    paymasters_shadow_bloodied_escalation, supply_tunnels_veteran_completion_narration,
+    collapsed_tunnels_survivor_completion_narration, deep_larders_elder_completion_narration,
+    deeper_rubbles_lurker_completion_narration, old_seams_secret_completion_narration,
+    idol_chambers_warden_completion_narration, paymasters_route_completion_narration,
+    toll_masters_den_completion_narration,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -1393,6 +1398,12 @@ def _bloodied_announcement(target: dict) -> str:
     # same generic checkpoint instead.
     if target.get("monster_key") == "the_high_approach_sentinel":
         return high_approach_sentinel_bloodied_escalation()
+    # Chapter 5 narrative expansion (2026-09-26): The Paymaster's
+    # Shadow's own real hooks (counters_rage/extra_attack_when_enraged)
+    # have no existing player-visible narration checkpoint at all, so
+    # its escalation reuses this same generic checkpoint too.
+    if target.get("monster_key") == "the_paymasters_shadow":
+        return paymasters_shadow_bloodied_escalation()
     return f"🩸 **{target['name']} is bloodied!**"
 
 
@@ -18756,6 +18767,28 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # bespoke content -- narration-only, proportionate to this
         # non-climactic stage.
         await _send_cutscene(update_like, [radiant_stairs_climb_completion_narration()])
+    elif quest_id == "supply_tunnels_veteran":
+        # Chapter 5 narrative expansion (2026-09-26): base narration
+        # was previously zero (only Grask's own separate, conditional
+        # reactive line below fires on top of this) -- narration-only,
+        # proportionate to this non-climactic stage.
+        await _send_cutscene(update_like, [supply_tunnels_veteran_completion_narration()])
+    elif quest_id == "the_collapsed_tunnels_survivor":
+        await _send_cutscene(update_like, [collapsed_tunnels_survivor_completion_narration()])
+    elif quest_id == "deep_larders_elder":
+        # Chapter 5 narrative expansion (2026-09-26): same base-
+        # narration gap as supply_tunnels_veteran above.
+        await _send_cutscene(update_like, [deep_larders_elder_completion_narration()])
+    elif quest_id == "deeper_rubbles_lurker":
+        await _send_cutscene(update_like, [deeper_rubbles_lurker_completion_narration()])
+    elif quest_id == "the_old_seams_secret":
+        await _send_cutscene(update_like, [old_seams_secret_completion_narration()])
+    elif quest_id == "the_idol_chambers_warden":
+        await _send_cutscene(update_like, [idol_chambers_warden_completion_narration()])
+    elif quest_id == "the_paymasters_route":
+        await _send_cutscene(update_like, [paymasters_route_completion_narration()])
+    elif quest_id == "the_toll_masters_den":
+        await _send_cutscene(update_like, [toll_masters_den_completion_narration()])
     elif quest_id == "kess_first_reckoning":
         # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic

@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.703] — Chapter 5 narrative expansion: real multi-scene cutscenes, reader-paced delivery
+
+Fifth chapter of the Chapters 1-8 narrative project. Chapter 5
+(`arc_5_goblin_warrens`, "What the Warren Was Hiding" — a different,
+deeper warren than Chapter 1's) had one real climactic quest, already
+hand-written from the earlier story-completion pass and explicitly
+naming Vrakk (Chapter 1's own antagonist) — a real, already-existing
+cross-chapter payoff of the "whoever's really paying for all this"
+thread.
+
+- The Paymaster's Shadow's existing confrontation/defeat lines are
+  untouched; it gets a light-touch bloodied escalation (its own real
+  hooks — `counters_rage`/`extra_attack_when_enraged` — have no
+  existing player-visible narration checkpoint at all).
+- 8 previously-bare non-climactic quests each get a real,
+  proportionate completion beat, grounded in their own location text
+  (which already carried a consistent "someone bigger is really
+  running this" thread). Two of them (`supply_tunnels_veteran`,
+  `deep_larders_elder`) previously had ZERO base narration at all —
+  only Grask Emberscale's own separate, party-conditional reactive
+  line fired on top of nothing; that reaction is untouched and still
+  fires exactly as before.
+- `the_ledger_vaults_answer` (solve_puzzle) stays out of scope — same
+  standing rule as every other chapter's puzzle quests.
+
+3 new regression tests.
+
 ## [1.27.702] — Chapter 4 narrative expansion: real multi-scene cutscenes, reader-paced delivery
 
 Fourth chapter of the Chapters 1-8 narrative project. Chapter 4

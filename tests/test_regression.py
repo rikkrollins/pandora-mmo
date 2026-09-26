@@ -10071,6 +10071,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
         self.assertEqual(bot._bloodied_announcement(ordinary), "🩸 **A Timber Wolf is bloodied!**")
 
+    # -- Chapter 5 narrative expansion (2026-09-26): real completion
+    #    beats for the 8 previously-bare non-climactic quests, plus
+    #    The Paymaster's Shadow's own light-touch bloodied escalation.
+    #    Built directly against the established tone bar, no further
+    #    prose preview shown in chat. ------------------------------------
+    async def test_chapter5_non_climax_stages_use_their_real_completion_narration(self):
+        """The 8 previously-bare quests in arc_5_goblin_warrens each get a real, proportionate narration-only beat."""
+        cases = [
+            ("supply_tunnels_veteran", "guarded far better than the warren's own"),
+            ("the_collapsed_tunnels_survivor", "cave-in happened long before"),
+            ("deep_larders_elder", "Floor to ceiling, hoarded supplies"),
+            ("deeper_rubbles_lurker", "goes back much further"),
+            ("the_old_seams_secret", "tools no goblin"),
+            ("the_idol_chambers_warden", "started worshipping it without"),
+            ("the_paymasters_route", "worn smooth by real, regular foot traffic"),
+            ("the_toll_masters_den", "well guarded, well away from the goblins"),
+        ]
+        for i, (quest_id, expected_snippet) in enumerate(cases):
+            user_id = 901000 + i
+            make_basic_character(user_id, f"Ch5StageWitness{i}", current_location="goblin_warrens")
+            sink = []
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, quest_id)
+            combined = "\n".join(sink)
+            self.assertIn(expected_snippet, combined, f"{quest_id} missing its real completion narration: {combined}")
+
+    async def test_supply_tunnels_veteran_still_fires_grasks_own_reaction_alongside_the_new_narration(self):
+        """The new base narration is purely additive -- Grask's own existing conditional reactive line still fires exactly as before when he's present."""
+        from unittest.mock import patch
+        user_id = 901010
+        chat_id = -901010
+        make_basic_character(user_id, "GraskPartyLeader", current_location="goblin_warrens", chat_id=chat_id)
+        db.accept_quest(user_id, chat_id, "supply_tunnels_veteran")
+        await bot._do_recruit_npc(FakeUpdate(user_id, "recruit Grask Emberscale", [], chat_id=chat_id), "Grask Emberscale")
+        sink = []
+        with patch("bot._chapter_complete_note", return_value=""):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink, chat_id=chat_id), user_id, "supply_tunnels_veteran")
+        combined = "\n".join(sink)
+        self.assertIn("guarded far better than the warren's own", combined)  # the new base narration
+        self.assertIn("Never once thought to ask who they were handing it to.", combined)  # Grask's own existing reaction, unchanged
+
+    async def test_the_paymasters_shadow_bloodied_uses_its_own_light_touch_escalation(self):
+        """The Paymaster's Shadow (no player-visible narration checkpoint for its own real hooks) gets its light-touch escalation from the shared bloodied checkpoint instead of the generic line."""
+        shadow = {"name": "The Paymaster's Shadow", "monster_key": "the_paymasters_shadow"}
+        self.assertIn("very short-lived advantage", bot._bloodied_announcement(shadow))
+        ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
+        self.assertEqual(bot._bloodied_announcement(ordinary), "🩸 **A Timber Wolf is bloodied!**")
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------
