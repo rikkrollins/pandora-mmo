@@ -3119,6 +3119,15 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
             # raw text actually contains "party".
             if parsed["action"] == "leave_party" and "party" not in text.lower():
                 return fallback
+            # Same real bug class again (2026-09-26, topic-activity
+            # signal, a real player mid-puzzle): a wrong riddle guess
+            # with a typo, "The answer os hollow" -- nothing to do with
+            # anyone's party at all -- got classified as invite_to_party
+            # with target "hollow" by the model. Same "never trust the
+            # model alone unless the raw text actually contains 'party'"
+            # fix as leave_party right above.
+            if parsed["action"] == "invite_to_party" and "party" not in text.lower():
+                return fallback
             # Same real bug class again (2026-09-25, topic-activity signal
             # while a real player was stuck on a puzzle): a bare one-word
             # guess, "Voices" (an unsuccessful riddle-answer attempt, not

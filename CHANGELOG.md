@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.697] — fix: a typo'd wrong riddle guess got classified as a party invite
+
+Real live incident (2026-09-26, topic-activity signal, watched live
+while the same two players kept working the same riddle): "The answer
+os hollow" (a typo, "os" for "is") — nothing to do with anyone's
+party — got classified as `invite_to_party` with target "hollow" by
+the model. Same recurring bug class already fixed for `leave_party`/
+`leave_guild`/`bench_party_member`/`summon_remnant`: never trusted
+from the model alone unless the raw text actually contains "party".
+
+1 new test.
+
 ## [1.27.696] — fix: "Can we have a hint?" also fell through to silent chat
 
 Caught live the day after v1.27.695 fixed the same gap for "Can I get

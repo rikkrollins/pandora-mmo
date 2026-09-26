@@ -5717,6 +5717,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = intent_parser_module.parse_intent("I want to leave my party", [])
         self.assertEqual(result["action"], "leave_party")
 
+    def test_model_guessing_invite_to_party_for_a_typo_riddle_guess_is_never_trusted(self):
+        """
+        Real live incident (2026-09-26, topic-activity signal, a real
+        player mid-puzzle): a wrong riddle guess with a typo, "The
+        answer os hollow" -- nothing to do with anyone's party at all
+        -- got classified as invite_to_party with target "hollow" by
+        the model. Same fix as leave_party/leave_guild right above:
+        never trusted from the model alone unless the raw text actually
+        contains "party".
+        """
+        from unittest.mock import patch
+        import ai.intent_parser as intent_parser_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": '{"action": "invite_to_party", "target": "hollow"}'}
+
+        with patch("ai.intent_parser.requests.post", return_value=FakeResponse()):
+            result = intent_parser_module.parse_intent("The answer os hollow", [])
+        self.assertNotEqual(result["action"], "invite_to_party")
+
+        # No regression: a real invite phrase the model happens to agree with still works
+        # (matched deterministically, no model call needed).
+        result = intent_parser_module.parse_intent("please invite Hollow to my party", [])
+        self.assertEqual(result["action"], "invite_to_party")
+
     def test_model_guessing_summon_remnant_for_unrelated_text_is_never_trusted(self):
         """
         Real live incident (2026-09-04, topic-activity signal): three
