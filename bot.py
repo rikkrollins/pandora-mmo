@@ -81,6 +81,8 @@ from ai.dm_agent import (
     crossroads_tavern_opening_scenes, hollow_stump_shrine_scene,
     goblin_warrens_bloodied_taunt, goblin_warrens_tolls_payoff_narration,
     sarah_recruitment_scene, grask_recruitment_scene,
+    vesh_grotto_conversation_scene, glimmerdeep_grotto_opening_scenes,
+    hush_below_arrival_scene, shadow_wisp_completion_narration, the_unspoken_silence_escalation,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -8773,7 +8775,22 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                 skip_narration=time.monotonic() - turns_started_at > AI_TURN_NARRATION_BUDGET_SECONDS,
             )
             if applied_condition:
-                await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
+                # Chapter 2 narrative expansion (2026-09-26, SAMPLED,
+                # confirmed): The Unspoken's own real mid-fight
+                # escalation -- fires once, the first time it actually
+                # silences a real party member (its own real
+                # on_hit_condition), same "rules decide, narration only
+                # reports" checkpoint as Vrakk's bloodied taunt
+                # (_bloodied_announcement), just hooked to this entity's
+                # own real mechanic instead of a generic HP threshold.
+                # Every other monster/every later silence this same
+                # fight keeps the plain generic line, unchanged.
+                if (current.get("monster_key") == "the_unspoken" and applied_condition == "silenced"
+                        and not current.get("_unspoken_escalation_fired")):
+                    current["_unspoken_escalation_fired"] = True
+                    await _safe_send(update, the_unspoken_silence_escalation(), speak=False)
+                else:
+                    await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
             if resisted_condition:
                 trait = _racial_immunity_trait_name(target, resisted_condition)
                 await _safe_send(update, f"🛡️ **{target['name']}'s {trait} shrugs off the {resisted_condition}!**")
@@ -14545,17 +14562,20 @@ async def _do_recruit_npc(update: Update, npc_name: str) -> None:
         # the global _party_summary_text()" comment).
         party_summary = _format_party_names(db.get_party_members_by_id(party_id))
 
-    # Chapter 1 narrative expansion (2026-09-26, SAMPLED, confirmed):
-    # a narrow per-NPC override -- Sarah (npc_id sera_wanderer) and
-    # Grask (npc_id grask_emberscale) each get their own real
-    # recruitment scene instead of the flat template line, still ending
-    # on the same real party-join fact this function already computed
-    # (party_summary) so the mechanical outcome stays exactly as clear
-    # as before. Every other recruitable NPC in the game keeps this
-    # exact original flat line, completely unchanged.
+    # Chapter 1-2 narrative expansion (2026-09-26, SAMPLED, confirmed):
+    # a narrow per-NPC override -- Sarah (sera_wanderer), Grask
+    # (grask_emberscale), and Vesh (vesh_nightglass, Chapter 2 --
+    # reuses her real the_wrong_color scene verbatim, since recruiting
+    # her naturally happens in that same grotto conversation) each get
+    # their own real recruitment scene instead of the flat template
+    # line, still ending on the same real party-join fact this function
+    # already computed (party_summary) so the mechanical outcome stays
+    # exactly as clear as before. Every other recruitable NPC in the
+    # game keeps this exact original flat line, completely unchanged.
     recruit_scene_by_npc_id = {
         "sera_wanderer": sarah_recruitment_scene,
         "grask_emberscale": grask_recruitment_scene,
+        "vesh_nightglass": vesh_grotto_conversation_scene,
     }
     scene_fn = recruit_scene_by_npc_id.get(npc_id)
     if scene_fn is not None:
@@ -18598,6 +18618,24 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # confirmed by Coffee). Single scene, so _send_cutscene sends it
         # with no Continue button -- same call either way.
         await _send_cutscene(update_like, [hollow_stump_shrine_scene(character["name"])])
+    elif quest_id == "the_wrong_color":
+        # Chapter 2 narrative expansion (2026-09-26): replaces the flat
+        # generic reach_location AI blurb entirely -- the real
+        # investigation payoff (Vesh's own scene) plus a short
+        # escalation coda, delivered via the Continue-paced cutscene
+        # mechanic (SAMPLED, confirmed).
+        await _send_cutscene(update_like, glimmerdeep_grotto_opening_scenes(character["name"]))
+    elif quest_id == "the_hush_stage1_signs":
+        # Chapter 2 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- a short, proportionate atmospheric beat
+        # for this lead-in stage (SAMPLED, confirmed).
+        await _send_cutscene(update_like, [hush_below_arrival_scene()])
+    elif quest_id == "the_hush_stage2_the_wisp":
+        # Chapter 2 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only (the Shadow Wisp is
+        # deliberately voiceless), building dread toward The Unspoken
+        # (SAMPLED, confirmed).
+        await _send_cutscene(update_like, [shadow_wisp_completion_narration()])
     elif quest_id == "kess_first_reckoning":
         # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic

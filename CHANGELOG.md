@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.700] — Chapter 2 narrative expansion: real multi-scene cutscenes, reader-paced delivery
+
+Second chapter of the Chapters 1-8 narrative project (same process as
+Chapter 1: research the real quest/NPC data first, sample before
+writing). Reuses the shared "▶️ Continue" cutscene mechanic built for
+Chapter 1 — no new mechanic needed here.
+
+- `the_wrong_color` ("The Wrong Color"): the flat generic arrival blurb
+  is replaced with a real 2-scene cutscene — Vesh Nightglass's own
+  scene at Glimmerdeep Grotto (grounded in her real campaign.json
+  data: stranded tiefling sorcerer, been down here "adjusting her
+  plans" for longer than she'll admit), which also ties explicitly
+  back to Chapter 1's tolls/bandits clue — a real cross-chapter
+  throughline that was already sitting in this quest's own `clue`
+  field, just never dramatized — plus a short escalation coda.
+- `the_hush_stage1_signs`/`the_hush_stage2_the_wisp`: both previously
+  zero bespoke content. Short, proportionate atmospheric beats (the
+  Shadow Wisp is deliberately left voiceless, matching its own quest
+  text) building dread toward the real climax.
+- `the_hush_stage3_the_unspoken` (Chapter 2's real climax): its
+  existing confrontation/defeat lines are unchanged; a new mid-fight
+  escalation now fires the first time it actually silences a real
+  party member (its own real `on_hit_condition` mechanic, the same
+  "rules decide, narration only reports" checkpoint Chapter 1's bloodied
+  taunt uses) — it borrows Vesh's own voice for one line, tying the
+  chapter's opener directly into its climax. Every later silence this
+  same fight keeps the plain generic line; this is a one-time reveal,
+  not a repeated flourish.
+- Vesh's recruitment reuses her real grotto scene verbatim (replacing
+  the flat template line for her specifically) — the same narrow
+  per-NPC override pattern as Sarah/Grask.
+
+8 new regression tests.
+
 ## [1.27.699] — Grask Emberscale's own recruitment scene
 
 Follow-up to v1.27.698: Grask's real recruitment scene (sampled and

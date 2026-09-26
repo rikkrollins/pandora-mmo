@@ -2299,6 +2299,139 @@ def grask_recruitment_scene(character_name: str) -> str:
     )
 
 
+# ---------------------------------------------------------------------
+# Chapter 2 narrative expansion (2026-09-26), same discipline as
+# Chapter 1 above -- every scene shown to Coffee as a calibration
+# sample and explicitly confirmed ("Approve as-is") before being
+# folded in here.
+# ---------------------------------------------------------------------
+
+def vesh_grotto_conversation_scene(character_name: str) -> str:
+    """
+    Vesh Nightglass's real scene at Glimmerdeep Grotto (npc_id
+    vesh_nightglass) -- the payoff for the_wrong_color's own "investigate"
+    hook, and reused verbatim (see bot._do_recruit_npc's narrow per-NPC
+    override hook) as her real recruitment scene, since recruiting her
+    would naturally happen in this same conversation. Grounded in her
+    real campaign.json data (Tiefling/Sorcerer/Chaotic Neutral,
+    "stranded... living off crystal-glow for longer than she'll admit,"
+    goal: "finding someone who actually knows the way back to the
+    surface"). Plants the real cross-chapter throughline already
+    sitting in the_wrong_color's own `clue` field (the tolls thread
+    from welcome_to_the_crossroads and the wrong-colored crystals
+    "started around the same time") rather than inventing new lore.
+    Her real `pronouns` ("she/her") are used throughout -- pulled from
+    data, never inferred from her name.
+    """
+    return (
+        "*The crystals here don't just glow -- they pulse, slow and steady, like the whole cavern is "
+        "breathing around you. Most of them burn the same soft blue they must have for a thousand "
+        "years. A few don't.*\n\n"
+        "**Vesh:** *(not turning around, like she already heard you coming several minutes ago)* "
+        "\"You're the first new voices down here in... I want to say weeks. Could be longer. Time gets "
+        "strange when the light's doing that.\"\n\n"
+        f"**{character_name}:** \"You've been down here alone?\"\n\n"
+        "**Vesh:** *(a short, not-quite-steady laugh)* \"Alone's generous. I've had the crystals. "
+        "Wonderful company, terrible conversationalists.\" *(finally turns -- eyes a shade too bright)* "
+        "\"I came down chasing a light I was sure was the way back up. Wasn't. Been... adjusting my "
+        "plans since.\"\n\n"
+        f"**{character_name}:** \"There's talk up top about the tolls doubling around the same time "
+        "this started.\"\n\n"
+        "**Vesh:** *(genuinely still for a second)* \"...Huh. That's the first thing about up top "
+        "that's actually made me want to go back and ask someone a real question.\" *(already "
+        "gathering the little she has)* \"Whatever's down here, whatever's happening on your surface "
+        "roads -- I'd bet real coin, if I had any left worth betting, that they're not two different "
+        "problems wearing two different colors.\""
+    )
+
+
+def glimmerdeep_grotto_opening_scenes(character_name: str) -> list[str]:
+    """
+    Chapter 2's real opener (the_wrong_color, "The Wrong Color") --
+    replaces the flat generic reach_location AI blurb entirely. Two
+    scenes: the real investigation payoff (Vesh's own conversation,
+    vesh_grotto_conversation_scene above) and a short escalation coda
+    staying in the grotto but pushing toward what's deeper, ending on
+    foreboding rather than resolution -- matching the exact "escalate,
+    don't resolve" bar confirmed for Chapter 1.
+    """
+    return [
+        vesh_grotto_conversation_scene(character_name),
+        (
+            "*The wrong-colored crystals don't just look different up close -- they pulse a half-beat "
+            "out of time with all the rest, like something down here is breathing on its own rhythm, "
+            "not the cavern's.*\n\n"
+            "The deeper passage isn't lit at all. Whatever's changing these crystals didn't come from "
+            "in here. It came from further down, and it's still going."
+        ),
+    ]
+
+
+def hush_below_arrival_scene() -> str:
+    """
+    the_hush_stage1_signs' real completion scene ("Into the Hush") --
+    currently zero bespoke content. A short, single, narration-only
+    beat (no dialogue -- nobody's down here to talk to) matching the
+    location's own real description almost word for word, deliberately
+    proportionate to this stage's own small reward (100 XP/50 gold) --
+    not a full multi-scene treatment, just enough dread to earn the
+    next stage.
+    """
+    return (
+        "*The cavern doesn't echo. It should. Every step should come back off these walls, and instead "
+        "it just... doesn't. Your own footsteps arrive a half-second late, like the silence itself "
+        "needed a moment to decide whether to let the sound through at all.*\n\n"
+        "Something crystalline hums, once, from somewhere that isn't in front of you.\n\n"
+        "Nothing living wants to be here. That includes, with each step, increasingly you."
+    )
+
+
+def shadow_wisp_completion_narration() -> str:
+    """
+    the_hush_stage2_the_wisp's real completion scene ("What Watches in
+    the Dark") -- currently zero bespoke content. The Shadow Wisp
+    itself is deliberately left voiceless (its own quest text already
+    frames it as "something pale and quick," not a character with
+    lines) -- narration-only, grounded in its real on_hit_condition
+    ("blinded") and the quest's own clue ("footprints... something
+    else is already down here"), building dread toward The Unspoken
+    rather than resolving anything.
+    """
+    return (
+        "*It doesn't fight like it wants to win -- it fights like it's buying time for something else "
+        "to notice you first.*\n\n"
+        "Once it's gone still, the false-daylight sting behind your eyes finally fades enough to see "
+        "the footprints properly: fresh, human-shaped, and not any of your own.\n\n"
+        "Whatever left them is still down here. It knows you're coming."
+    )
+
+
+def the_unspoken_silence_escalation() -> str:
+    """
+    Chapter 2's real climax (the_hush_stage3_the_unspoken) mid-fight
+    escalation beat -- fires once, the first time The Unspoken actually
+    silences a real party member (its own real on_hit_condition), the
+    exact same "rules decide, narration only reports" checkpoint
+    Vrakk's own bloodied taunt uses (see bot._bloodied_announcement for
+    that one; this one hooks the on_hit_condition="silenced" apply site
+    instead, since that's the mechanic this specific entity is actually
+    built on). SAMPLED, confirmed. Ties directly back to Vesh
+    Nightglass's own real line from vesh_grotto_conversation_scene --
+    the entity borrowing a voice it was never present to hear firsthand
+    is the whole point: it's been listening to everyone in these
+    caverns, not just whoever's standing in front of it right now.
+    """
+    return (
+        "*The first voice it takes isn't yours -- for one terrible half-second it's Vesh's, thin and a "
+        "little too bright, borrowed perfectly.*\n\n"
+        "**The Unspoken:** *(in her voice, not its own)* \"...wonderful company, terrible "
+        "conversationalists...\"\n\n"
+        "*And then, in its own voice again, almost pleased with itself:*\n\n"
+        "**The Unspoken:** \"She talks so much too, you know. Everyone does, eventually. I've had a "
+        "very long time to listen.\""
+    )
+
+
 def the_unspoken_confrontation_script(character_name: str) -> str:
     """
     Chapter 2's real finale ("What Answers Back") -- the quest's own

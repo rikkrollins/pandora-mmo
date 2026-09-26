@@ -9690,6 +9690,118 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         combined = "\n".join(sink)
         self.assertIn("Pip Thistledown joins your party!", combined)
 
+    # -- Chapter 2 narrative expansion (2026-09-26): real multi-scene
+    #    cutscenes for the_wrong_color/the_hush_stage1/the_hush_stage2,
+    #    Vesh's recruitment scene, and The Unspoken's real mid-fight
+    #    escalation. Every scene below was shown to Coffee as a
+    #    calibration sample and explicitly confirmed before being
+    #    folded in. -----------------------------------------------------
+    async def test_the_wrong_color_uses_vesh_and_the_real_tolls_throughline(self):
+        """Chapter 2's real opener replaces the flat generic reach_location AI blurb with Vesh's own scene, tying back to Chapter 1's tolls clue."""
+        user_id = 900981
+        make_basic_character(user_id, "Elduinn", current_location="glimmerdeep_grotto")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_wrong_color")
+        combined = "\n".join(sink)
+        self.assertIn("Vesh:", combined)
+        self.assertIn("Elduinn", combined)
+        self.assertIn("tolls", combined)
+        quest = bot.CAMPAIGN["quests"]["the_wrong_color"]
+        self.assertIn(str(quest["reward_xp"]), combined)
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["inventory"].get(quest["reward_item"]), 1)
+
+    async def test_the_hush_stage1_uses_the_real_arrival_scene(self):
+        """the_hush_stage1_signs (currently zero bespoke content) now gets a real, proportionate atmospheric beat."""
+        user_id = 900982
+        make_basic_character(user_id, "HushWitness1", current_location="the_hush_below")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_hush_stage1_signs")
+        combined = "\n".join(sink)
+        self.assertIn("doesn't echo", combined)
+
+    async def test_the_hush_stage2_uses_the_real_wisp_completion_narration(self):
+        """the_hush_stage2_the_wisp (currently zero bespoke content) now gets a real, voiceless narration beat building toward The Unspoken."""
+        user_id = 900983
+        make_basic_character(user_id, "HushWitness2", current_location="the_hush_below")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_hush_stage2_the_wisp")
+        combined = "\n".join(sink)
+        self.assertIn("footprints", combined.lower())
+
+    async def test_recruiting_vesh_reuses_her_real_grotto_scene(self):
+        """Vesh's recruitment reuses her real the_wrong_color scene verbatim, replacing the flat template line for her specifically."""
+        chat_id = -900984
+        player_id = 900984
+        make_basic_character(player_id, "VeshFreer", current_location="glimmerdeep_grotto", chat_id=chat_id)
+        sink = []
+        await bot._do_recruit_npc(FakeUpdate(player_id, "recruit Vesh Nightglass", sink, chat_id=chat_id), "Vesh Nightglass")
+        combined = "\n".join(sink)
+        self.assertIn("Vesh:", combined)
+        self.assertNotIn("Vesh Nightglass joins your party!", combined)
+        self.assertIn("🤝", combined)
+        player = db.get_character(player_id, chat_id)
+        companion = next(p for p in bot._get_party_members(chat_id) if p["name"] == "Vesh Nightglass")
+        self.assertEqual(companion.get("party_id"), player["party_id"])
+
+    async def test_the_unspoken_first_silence_fires_the_real_escalation(self):
+        """The first time The Unspoken actually silences a real party member, its own real mid-fight escalation fires instead of the generic condition-applied line."""
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        user_id = 996100
+        make_basic_character(user_id, "UnspokenTarget", current_location="the_hush_below")
+        db.update_character(user_id, -999, hp_current=200, hp_max=200, level=1)
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -700960, "name": "The Unspoken", "dexterity": 16, "strength": 14,
+            "armor_class": 16, "hp_current": 3800, "hp_max": 3800, "proficiency_bonus": 3,
+            "is_ai": 1, "monster_key": "the_unspoken", "on_hit_condition": "silenced",
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700960: "enemy"})
+        session.turn_order = [-700960, user_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("rules.dice.roll_d20", return_value=20), patch("bot.narrate_action", return_value="It attacks."):
+            await bot._resolve_ai_turns(FakeUpdate(user_id, "combat", sink), session)
+            await _drain_narration_queue()
+        combined = "\n".join(sink)
+        self.assertIn("wonderful company, terrible conversationalists", combined)
+        self.assertNotIn("is now SILENCED!", combined)  # the real escalation replaces the generic line the first time
+        self.assertTrue(enemy.get("_unspoken_escalation_fired"))
+        sessions.end_session(-999)
+
+    async def test_the_unspoken_second_silence_uses_the_plain_generic_line(self):
+        """Once the real escalation has already fired this fight, any later silence falls back to the plain generic line -- the reveal is a one-time beat, not spammed."""
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        user_id = 996101
+        make_basic_character(user_id, "UnspokenTarget2", current_location="the_hush_below")
+        db.update_character(user_id, -999, hp_current=200, hp_max=200, level=1)
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -700961, "name": "The Unspoken", "dexterity": 16, "strength": 14,
+            "armor_class": 16, "hp_current": 3800, "hp_max": 3800, "proficiency_bonus": 3,
+            "is_ai": 1, "monster_key": "the_unspoken", "on_hit_condition": "silenced",
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+            "_unspoken_escalation_fired": True,  # already fired earlier this same fight
+        }
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700961: "enemy"})
+        session.turn_order = [-700961, user_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("rules.dice.roll_d20", return_value=20), patch("bot.narrate_action", return_value="It attacks."):
+            await bot._resolve_ai_turns(FakeUpdate(user_id, "combat", sink), session)
+            await _drain_narration_queue()
+        combined = "\n".join(sink)
+        self.assertIn("is now SILENCED!", combined)
+        self.assertNotIn("wonderful company, terrible conversationalists", combined)
+        sessions.end_session(-999)
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------
