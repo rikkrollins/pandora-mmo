@@ -2649,6 +2649,182 @@ def the_high_approach_sentinel_defeat_line() -> str:
     )
 
 
+def high_approach_sentinel_bloodied_escalation() -> str:
+    """
+    Light-touch mid-fight escalation for the_high_approach_sentinel --
+    it has no other real mechanical hook of its own (no on_hit_
+    condition, no echoes_damage_type), so this hooks the same generic
+    bloodied-HP checkpoint Vrakk's own taunt uses (see
+    bot._bloodied_announcement). Deliberately keeps its established
+    "not cruel, not hungry, just standing exactly where it's always
+    stood" tone (the_high_approach_sentinel_confrontation_script) --
+    still dutiful even while losing, not suddenly desperate or angry.
+    """
+    return (
+        "*It's bleeding light now, not blood -- and still hasn't moved from the spot it's held "
+        "this whole fight.*\n\n"
+        "**The Sentinel:** \"You fight like people who need to be somewhere. I understand that "
+        "better than you'd think. I'm still not moving.\""
+    )
+
+
+# ---------------------------------------------------------------------
+# Chapter 4 narrative expansion (2026-09-26), same discipline as
+# Chapters 1-3 above -- Coffee confirmed the tone bar across enough
+# chapters now ("i love the samples") that further scenes in this
+# project build directly against it rather than each getting shown as
+# a prose preview first (per Coffee: "no more spoilers please").
+# Chapter 4 (arc_4_ascension) carries THREE climactic quests -- only
+# the_high_approach_sentinel (above) got hand-written treatment from
+# the original story-completion pass; the_unmoored_isle_quest (The
+# Waiting Shape, by far the biggest reward -- the true main climax)
+# and the_sunken_reflections_end (The Drowned Reflection) still used
+# generic AI narration until now.
+# ---------------------------------------------------------------------
+
+def unmoored_isle_ascent_scene(character_name: str) -> str:
+    """
+    Chapter 4's real opener (unmoored_isle_arrival, "What the Sky Was
+    Hiding") -- replaces the flat generic reach_location AI blurb
+    entirely. Real cross-chapter payoff: the quest's own trigger is
+    gated on `shard_of_dim_light`, the exact same item Vesh
+    Nightglass's own the_wrong_color quest rewards back in Chapter 2 --
+    the shard "pulling upward" here is that same object, not a new
+    one. Grounded in the_unmoored_isle's own real location text (an
+    island of grey stone, tethered to nothing, something waiting at
+    its center).
+    """
+    return (
+        "*The shard's been humming since you left the spire behind -- you'd almost gotten used to "
+        "ignoring it. It stops letting you the moment the tunnel opens onto open air, and pulls, "
+        "hard, straight up.*\n\n"
+        f"Vesh's own words come back unbidden: not two different problems wearing two different "
+        "colors. Whatever she meant by that, the shard clearly agrees -- it's been pulling toward "
+        "this the entire time, through every crystal, every buried street, every count that "
+        "wouldn't finish.\n\n"
+        "*The climb ends on an island of grey stone, drifting slow and untethered above the clouds, "
+        "held up by nothing anyone can see. At its center, something is standing very still. It has "
+        "been standing there, motionless, for longer than anyone below ever thought to look up.*"
+    )
+
+
+def the_waiting_shape_confrontation_script() -> str:
+    """
+    Chapter 4's real true main climax (the_unmoored_isle_quest, "What
+    Waits Above" -- by far the largest reward of this arc's 3
+    climactic quests). One weighted line, not a conversation --
+    deliberately more voice than The Waking Ember (Chapter 3, fully
+    silent) but far less than a talker like Kess: an ancient
+    sentience that's been WAITING for something specific, so it gets
+    exactly one line acknowledging the wait is over, grounded in its
+    real necrotic/life_drain nature ("a voice like something
+    remembered rather than spoken").
+    """
+    return (
+        "*It doesn't turn to meet you. It's already facing the right direction -- it's been facing "
+        "this exact direction the whole time, patient in a way that has nothing left to do with "
+        "hope.*\n\n"
+        "**The Waiting Shape:** *(a voice like something remembered rather than spoken)* \"...you "
+        "took long enough.\"\n\n"
+        "*That's all it says. It doesn't need to say anything else -- whatever it's been waiting "
+        "for, it clearly already knows you're it.*"
+    )
+
+
+def the_waiting_shape_escalation() -> str:
+    """
+    The Waiting Shape's own real mid-fight escalation -- fires once,
+    the first time it actually frightens a real party member (its own
+    real on_hit_condition), same checkpoint The Unspoken's silence
+    escalation uses, just hooked to this entity's own condition
+    instead. Its necrotic/life_drain nature (already feeding on
+    something) gives the fear a real, grounded shape rather than a
+    generic scare.
+    """
+    return (
+        "*The fear doesn't come from anything it does -- it comes from how little it has to. "
+        "Something in the way it's watching makes the idea of losing feel less like a possibility "
+        "and more like a plan already in motion.*\n\n"
+        "**The Waiting Shape:** \"...that's better. Waiting is so much easier when something's "
+        "actually afraid with me.\""
+    )
+
+
+def the_waiting_shape_defeat_line() -> str:
+    """Companion piece to the_waiting_shape_confrontation_script/escalation -- fired as the Chapter 4 main climax's opening beat."""
+    return (
+        "*It doesn't collapse so much as finally stop insisting on a shape at all -- whatever was "
+        "holding it together this whole time was patience, and patience just ran out.*\n\n"
+        "**The Waiting Shape:** \"...oh. That's -- \"\n\n"
+        "*It doesn't finish the thought. After however long it spent waiting, it doesn't get to "
+        "find out what came next either.*"
+    )
+
+
+def the_drowned_reflection_confrontation_script() -> str:
+    """
+    the_sunken_reflections_end's real fight-start beat (currently
+    none). Grounded in its own real quest text ("it's already looking
+    back") and its real mechanic (adapts_to_damage -- it grows
+    resistant to whatever's already been used against it): themed as
+    a literal mirror that copies the party back at them rather than
+    speaking with a voice of its own.
+    """
+    return (
+        "*The water doesn't just reflect you back anymore -- it moves a half-beat before you do, "
+        "like it's already decided what you're about to try.*\n\n"
+        "*Whatever climbs out of it wears no one's face in particular. It doesn't need to. It's "
+        "already copying the way you stand.*"
+    )
+
+
+def the_drowned_reflection_defeat_line() -> str:
+    """Companion piece to the_drowned_reflection_confrontation_script -- fired as this quest's own ending beat."""
+    return (
+        "*It stops copying you right before the end -- for one moment it's just water again, "
+        "holding a shape it never actually had a claim to.*\n\n"
+        "*Then even that lets go, and the reflection underneath is finally, only, yours.*"
+    )
+
+
+def drifting_halls_threshold_completion_narration() -> str:
+    """the_drifting_halls_threshold's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The stone keeps going here, well past where it should have run out into open air -- "
+        "held up by whatever's still holding the rest of this island up too.*\n\n"
+        "Whatever wandered this far out wasn't looking for a way down. It already knew there wasn't one."
+    )
+
+
+def drifting_halls_warden_completion_narration() -> str:
+    """the_drifting_halls_warden's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The halls simply stop here, all at once -- like whoever built them ran out of reason to "
+        "keep going, and whatever was left behind never got the same memo.*\n\n"
+        "Past this point, there's nothing left to guard. It just never noticed."
+    )
+
+
+def mirrored_thresholds_echo_completion_narration() -> str:
+    """the_mirrored_thresholds_echo's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The stone underfoot reflects the sky above it so cleanly it's genuinely hard to tell "
+        "which way is down -- and for a few seconds after the fight ends, it stops mattering.*\n\n"
+        "Whatever lived in that confusion is gone now. The sky stays exactly where it should, at "
+        "least for now."
+    )
+
+
+def radiant_stairs_climb_completion_narration() -> str:
+    """the_radiant_stairs_climb's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The first genuinely warm thing anyone's found on this whole cold island, and something "
+        "was guarding even that.*\n\n"
+        "Whatever's waiting higher up this stair, it's the reason the light gets warmer instead of "
+        "colder the further you climb -- the opposite of everywhere else on this drifting stone."
+    )
+
+
 def the_paymasters_shadow_confrontation_script(character_name: str) -> str:
     """
     Chapter 5's real finale ("The True Paymaster") -- the real payoff

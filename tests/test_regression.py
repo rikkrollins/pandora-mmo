@@ -9931,6 +9931,146 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("the count includes you now", combined)
         sessions.end_session(-999)
 
+    # -- Chapter 4 narrative expansion (2026-09-26): real multi-scene
+    #    cutscenes for unmoored_isle_arrival/the 4 middle stages, The
+    #    Waiting Shape's real fight-start+escalation+ending (the true
+    #    main climax of this arc), The Drowned Reflection's real
+    #    fight-start+ending, and The Sentinel's bloodied escalation.
+    #    Every beat below was confirmed with Coffee before being
+    #    folded in (built directly against the established tone bar
+    #    per his own "no more spoilers" request, not shown as a full
+    #    prose preview here). -------------------------------------------
+    async def test_unmoored_isle_arrival_ties_back_to_veshs_own_line(self):
+        """Chapter 4's real opener replaces the flat generic reach_location AI blurb, tying back to Vesh's own Chapter 2 line via the real shard_of_dim_light item."""
+        user_id = 900990
+        make_basic_character(user_id, "Elduinn", current_location="the_unmoored_isle")
+        sink = []
+        await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "unmoored_isle_arrival")
+        combined = "\n".join(sink)
+        self.assertIn("Elduinn", combined)
+        self.assertIn("Vesh", combined)
+        quest = bot.CAMPAIGN["quests"]["unmoored_isle_arrival"]
+        self.assertIn(str(quest["reward_xp"]), combined)
+
+    async def test_completing_the_unmoored_isle_quest_fires_the_real_ending(self):
+        """The Waiting Shape (the true main climax of Chapter 4) gets a real hand-written ending instead of the generic AI narrate_chapter_climax path."""
+        from unittest.mock import patch, AsyncMock
+        user_id = 900991
+        make_basic_character(user_id, "WaitingShapeWitness", current_location="the_unmoored_isle")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_unmoored_isle_quest")
+        combined = "\n".join(sink)
+        self.assertIn("The Waiting Shape:", combined)
+        quest = bot.CAMPAIGN["quests"]["the_unmoored_isle_quest"]
+        self.assertIn(str(quest["reward_xp"]), combined)
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["inventory"].get(quest["reward_item"]), 1)
+
+    async def test_completing_the_sunken_reflections_end_fires_the_real_ending(self):
+        """The Drowned Reflection gets a real hand-written ending instead of the generic AI narrate_chapter_climax path."""
+        from unittest.mock import patch, AsyncMock
+        user_id = 900992
+        make_basic_character(user_id, "ReflectionWitness", current_location="the_unmoored_isle")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_sunken_reflections_end")
+        combined = "\n".join(sink)
+        self.assertIn("reflection underneath is finally, only, yours", combined)
+        quest = bot.CAMPAIGN["quests"]["the_sunken_reflections_end"]
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["inventory"].get(quest["reward_item"]), 1)
+
+    async def test_chapter4_middle_stages_use_their_real_completion_narration(self):
+        """The 4 previously-bare middle stages of Chapter 4 each get a real, proportionate narration-only beat."""
+        cases = [
+            ("the_drifting_halls_threshold", "well past where it should have run out"),
+            ("the_drifting_halls_warden", "halls simply stop here"),
+            ("the_mirrored_thresholds_echo", "which way is down"),
+            ("the_radiant_stairs_climb", "warm thing anyone's found"),
+        ]
+        for i, (quest_id, expected_snippet) in enumerate(cases):
+            user_id = 900993 + i
+            make_basic_character(user_id, f"Ch4StageWitness{i}", current_location="the_unmoored_isle")
+            sink = []
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, quest_id)
+            combined = "\n".join(sink)
+            self.assertIn(expected_snippet, combined, f"{quest_id} missing its real completion narration: {combined}")
+
+    async def test_starting_combat_with_the_waiting_shape_fires_the_real_confrontation(self):
+        """End-to-end: starting a fight with the_waiting_shape must route through the hand-written confrontation, not the generic narrate_boss_intro AI path."""
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 900997
+        make_basic_character(
+            user_id, "ShapeFightWitness", chat_id=-997, char_class="Fighter", current_location="the_unmoored_isle",
+        )
+        db.update_character(user_id, -997, level=45, hp_current=9000, hp_max=9000)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the waiting shape", sink, chat_id=-997),
+                                        monster_key="the_waiting_shape", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("you took long enough", combined)
+        sessions.end_session(-997)
+
+    async def test_starting_combat_with_the_drowned_reflection_fires_the_real_confrontation(self):
+        """End-to-end: starting a fight with the_drowned_reflection must route through the hand-written confrontation, not the generic narrate_boss_intro AI path."""
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 900998
+        make_basic_character(
+            user_id, "ReflectionFightWitness", chat_id=-997, char_class="Fighter", current_location="the_unmoored_isle",
+        )
+        db.update_character(user_id, -997, level=32, hp_current=4000, hp_max=4000)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the drowned reflection", sink, chat_id=-997),
+                                        monster_key="the_drowned_reflection", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("already copying the way you stand", combined)
+        sessions.end_session(-997)
+
+    async def test_the_waiting_shapes_first_fright_fires_the_real_escalation(self):
+        """The first time The Waiting Shape actually frightens a real party member, its own real mid-fight escalation fires instead of the generic condition-applied line."""
+        from unittest.mock import patch
+        import sessions
+        sessions.end_session(-999)
+        user_id = 996120
+        make_basic_character(user_id, "ShapeTarget", current_location="the_unmoored_isle")
+        db.update_character(user_id, -999, hp_current=300, hp_max=300, level=1)
+        player = db.get_character(user_id, -999)
+        player["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -700980, "name": "The Waiting Shape", "dexterity": 14, "strength": 18,
+            "armor_class": 23, "hp_current": 9500, "hp_max": 9500, "proficiency_bonus": 6,
+            "is_ai": 1, "monster_key": "the_waiting_shape", "on_hit_condition": "frightened",
+            "resistances": [], "vulnerabilities": [], "immunities": [],
+        }
+        session = sessions.start_session(-999, [player, enemy], {user_id: "party", -700980: "enemy"})
+        session.turn_order = [-700980, user_id]
+        session.current_turn_index = 0
+        sink = []
+        with patch("rules.dice.roll_d20", return_value=20), patch("bot.narrate_action", return_value="It attacks."):
+            await bot._resolve_ai_turns(FakeUpdate(user_id, "combat", sink), session)
+            await _drain_narration_queue()
+        combined = "\n".join(sink)
+        self.assertIn("actually afraid with me", combined)
+        self.assertNotIn("is now FRIGHTENED!", combined)
+        self.assertTrue(enemy.get("_waiting_shape_escalation_fired"))
+        sessions.end_session(-999)
+
+    async def test_the_sentinel_bloodied_uses_its_own_light_touch_escalation(self):
+        """The Sentinel (no other real mechanical hook of its own) gets its light-touch escalation from the shared bloodied checkpoint instead of the generic line."""
+        sentinel = {"name": "The High Approach Sentinel", "monster_key": "the_high_approach_sentinel"}
+        self.assertIn("still not moving", bot._bloodied_announcement(sentinel))
+        ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
+        self.assertEqual(bot._bloodied_announcement(ordinary), "🩸 **A Timber Wolf is bloodied!**")
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------

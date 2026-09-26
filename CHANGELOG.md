@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.702] — Chapter 4 narrative expansion: real multi-scene cutscenes, reader-paced delivery
+
+Fourth chapter of the Chapters 1-8 narrative project. Chapter 4
+(`arc_4_ascension`, "What Waits Above") carries THREE climactic
+quests — only one (The High Approach Sentinel) had hand-written
+treatment from the earlier story-completion pass.
+
+- `unmoored_isle_arrival`: the flat generic arrival blurb is replaced
+  with the real ascent — a genuine cross-chapter payoff, since this
+  quest's own trigger is gated on `shard_of_dim_light`, the exact same
+  item Vesh Nightglass's Chapter 2 quest rewards. The scene explicitly
+  ties back to her own line.
+- The Waiting Shape (`the_unmoored_isle_quest`, by far this arc's
+  biggest reward — its true main climax) gets a real fight-start line,
+  a mid-fight escalation the first time it frightens a party member
+  (its own real `on_hit_condition`), and a real ending — previously
+  all generic AI narration.
+- The Drowned Reflection (`the_sunken_reflections_end`) gets a real
+  fight-start beat (a literal mirror, themed on its own real
+  `adapts_to_damage` mechanic) and ending — previously zero bespoke
+  content.
+- The High Approach Sentinel's existing confrontation/defeat lines are
+  untouched; it gets a light-touch bloodied escalation (it has no
+  other real mechanical hook of its own).
+- 4 previously-bare middle stages each get a short, proportionate
+  narration-only completion beat.
+
+8 new regression tests.
+
 ## [1.27.701] — Chapter 3 narrative expansion: real multi-scene cutscenes, reader-paced delivery
 
 Third chapter of the Chapters 1-8 narrative project (same process:

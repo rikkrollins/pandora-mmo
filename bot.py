@@ -86,6 +86,11 @@ from ai.dm_agent import (
     first_city_arrival_scenes, the_waking_ember_confrontation_script,
     wards_collapse_completion_narration, spire_crowns_sentinel_completion_narration,
     forgotten_vaults_secret_completion_narration, the_last_glyph_echo_escalation,
+    high_approach_sentinel_bloodied_escalation, unmoored_isle_ascent_scene,
+    the_waiting_shape_confrontation_script, the_waiting_shape_escalation, the_waiting_shape_defeat_line,
+    the_drowned_reflection_confrontation_script, the_drowned_reflection_defeat_line,
+    drifting_halls_threshold_completion_narration, drifting_halls_warden_completion_narration,
+    mirrored_thresholds_echo_completion_narration, radiant_stairs_climb_completion_narration,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -1382,6 +1387,12 @@ def _bloodied_announcement(target: dict) -> str:
     """
     if target.get("monster_key") == "goblin_boss":
         return goblin_warrens_bloodied_taunt()
+    # Chapter 4 narrative expansion (2026-09-26): The Sentinel has no
+    # other real mechanical hook of its own (no on_hit_condition, no
+    # echoes_damage_type), so its light-touch escalation reuses this
+    # same generic checkpoint instead.
+    if target.get("monster_key") == "the_high_approach_sentinel":
+        return high_approach_sentinel_bloodied_escalation()
     return f"🩸 **{target['name']} is bloodied!**"
 
 
@@ -8788,10 +8799,18 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
                 # own real mechanic instead of a generic HP threshold.
                 # Every other monster/every later silence this same
                 # fight keeps the plain generic line, unchanged.
+                # Chapter 4 narrative expansion (2026-09-26): The
+                # Waiting Shape gets the exact same one-time treatment,
+                # hooked to its own real on_hit_condition ("frightened")
+                # instead of "silenced" -- same discipline as above.
                 if (current.get("monster_key") == "the_unspoken" and applied_condition == "silenced"
                         and not current.get("_unspoken_escalation_fired")):
                     current["_unspoken_escalation_fired"] = True
                     await _safe_send(update, the_unspoken_silence_escalation(), speak=False)
+                elif (current.get("monster_key") == "the_waiting_shape" and applied_condition == "frightened"
+                        and not current.get("_waiting_shape_escalation_fired")):
+                    current["_waiting_shape_escalation_fired"] = True
+                    await _safe_send(update, the_waiting_shape_escalation(), speak=False)
                 else:
                     await _safe_send(update, f"☠️ **{target['name']} is now {applied_condition.upper()}!**")
             if resisted_condition:
@@ -9743,6 +9762,19 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # generic AI narrate_boss_intro below. Deliberately
                 # voiceless (an ancient primal fire-thing, not a talker).
                 intro = the_waking_ember_confrontation_script()
+            elif monster_key == "the_waiting_shape":
+                # Chapter 4 narrative expansion (2026-09-26): the true
+                # main climax of arc_4_ascension (the_unmoored_isle_
+                # quest, by far its biggest reward) -- previously fell
+                # through to the generic AI narrate_boss_intro below.
+                intro = the_waiting_shape_confrontation_script()
+            elif monster_key == "the_drowned_reflection":
+                # Chapter 4 narrative expansion (2026-09-26): the_sunken_
+                # reflections_end's own real fight-start beat -- a
+                # literal mirror, themed on its own real adapts_to_
+                # damage mechanic, previously fell through to the
+                # generic AI narrate_boss_intro below.
+                intro = the_drowned_reflection_confrontation_script()
             elif monster_key == "the_unspoken":
                 intro = the_unspoken_confrontation_script(requester["name"])
             elif monster_key == "the_last_glyph":
@@ -18682,6 +18714,48 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # bespoke content -- narration-only, proportionate to this
         # non-climactic stage (SAMPLED, confirmed).
         await _send_cutscene(update_like, [forgotten_vaults_secret_completion_narration()])
+    elif quest_id == "unmoored_isle_arrival":
+        # Chapter 4 narrative expansion (2026-09-26): replaces the flat
+        # generic reach_location AI blurb entirely -- the real ascent,
+        # tying explicitly back to Vesh's own Chapter 2 line via the
+        # shard_of_dim_light item this quest is gated on (SAMPLED,
+        # confirmed).
+        await _send_cutscene(update_like, [unmoored_isle_ascent_scene(character["name"])])
+    elif quest_id == "the_unmoored_isle_quest":
+        # Chapter 4 narrative expansion (2026-09-26): the true main
+        # climax of this arc (by far its biggest reward) -- previously
+        # fell through to the generic AI narrate_chapter_climax path.
+        # The mid-fight escalation (the_waiting_shape_escalation) fires
+        # separately, from the real on_hit_condition="frightened"
+        # checkpoint, not from here.
+        climax_narration = f"{the_waiting_shape_defeat_line()}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
+    elif quest_id == "the_sunken_reflections_end":
+        # Chapter 4 narrative expansion (2026-09-26): the_sunken_
+        # reflections_end's own real ending beat -- previously fell
+        # through to the generic AI narrate_chapter_climax path.
+        climax_narration = f"{the_drowned_reflection_defeat_line()}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
+    elif quest_id == "the_drifting_halls_threshold":
+        # Chapter 4 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage.
+        await _send_cutscene(update_like, [drifting_halls_threshold_completion_narration()])
+    elif quest_id == "the_drifting_halls_warden":
+        # Chapter 4 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage.
+        await _send_cutscene(update_like, [drifting_halls_warden_completion_narration()])
+    elif quest_id == "the_mirrored_thresholds_echo":
+        # Chapter 4 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage.
+        await _send_cutscene(update_like, [mirrored_thresholds_echo_completion_narration()])
+    elif quest_id == "the_radiant_stairs_climb":
+        # Chapter 4 narrative expansion (2026-09-26): currently zero
+        # bespoke content -- narration-only, proportionate to this
+        # non-climactic stage.
+        await _send_cutscene(update_like, [radiant_stairs_climb_completion_narration()])
     elif quest_id == "kess_first_reckoning":
         # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic
