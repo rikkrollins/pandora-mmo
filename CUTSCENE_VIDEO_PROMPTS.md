@@ -97,16 +97,55 @@ in-game hookup point (function name + file) once a video is wired in.
   than fast. No visible humanoid form — the water itself is the
   entity. Calm, patient, ancient. Blue-black palette, minimal light.
 
-## Chapter 7 — What the Gorge Swallowed (in progress)
+## Chapter 7 — What the Gorge Swallowed
 
-*(prompts to be added as this chapter's scenes are finalized)*
+- [ ] **The web hollow** (companion beat to `web_hollows_brood_completion_narration`)
+  — A deep vertical gorge wall, cracks and ledges thickly overgrown
+  with layers of old, dust-pale silk, some strands still faintly
+  trembling. No visible spinner. Camera cranes slowly down the gorge
+  wall, following one silk strand from top to bottom. Muted, dusty
+  light, unsettling stillness rather than jump-scare motion.
+- [ ] **The Keep's Warden** (`the_keeps_warden_confrontation_script`)
+  — Inside an old stone keep's great hall, static electricity arcs
+  silently between weathered pillars, gathering rather than
+  discharging. A single armored, weathered figure steps into a shaft
+  of light, unhurried, already facing the camera before it arrives.
+  Cold blue-white lightning glow against dark stone. Disciplined,
+  waiting stillness — a sentinel, not a monster.
 
-## Chapter 8 — What the Downs Still Watches (Kess's own arc + newly
-found gaps, in progress)
+## Chapter 8 — What the Downs Still Watches
 
-*(prompts to be added — Kess's own confrontation/transformation beats
-are strong existing candidates once this list catches up to them, plus
-the newly-found third climax, The Downs' Last Watch)*
+Kess's own beats are the strongest candidates in the whole project —
+listed first even though they predate this file, since her arc is
+still this game's own reference bar.
+
+- [ ] **Kess, first confrontation** (`kess_first_confrontation_script`)
+  — A lone woman standing at a narrow crossing at dusk, unhurried,
+  like she's been waiting for exactly this arrival. She doesn't reach
+  for a weapon; for a moment she just looks tired. Warm dying light
+  behind her, long shadow stretching toward the camera. Quiet,
+  human-scaled tension before anything violent.
+- [ ] **Kess's transformation** (`narrate_kess_transformation`) — She
+  falls, and something rises through her body, taller, wrong in the
+  joints, wearing what's left of her like water wearing a borrowed
+  shape. One continuous, unbroken take — no cut between her and it.
+  Practical-horror body distortion, not a separate monster design;
+  the wrongness is in the movement, not a new silhouette. Dim,
+  desaturated battlefield light.
+- [ ] **The Downs' Last Watch** (`the_downs_last_watch_confrontation_script`)
+  — An ancient, dust-and-rot-covered armored shape sitting motionless
+  in a collapsed underground watch-post for what looks like centuries,
+  slowly, laboriously lifting its head as if remembering how. No
+  aggression in the motion — exhaustion and relief, not menace. Cold
+  underground light, heavy dust falling as it moves for the first time.
+
+---
+
+**Follow-up note (2026-09-27)**: this file fell one chapter behind
+during the Chapter 7/8 push — Chapters 7 and 8 shipped before their
+entries were added here. Caught and backfilled in the same session,
+but worth remembering: add each chapter's entries in the SAME turn it
+ships, not as a separate catch-up pass, per the note below.
 
 ---
 
