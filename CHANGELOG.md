@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.710] — fix: "Answer is X" (no leading "The") silently fell through to chat
+
+Found in the same investigation as v1.27.709, via the same topic-
+activity log: a player typed "Answer is shape" and got no reply at
+all. Root cause: the intent classifier's own answer_puzzle keyword
+list only recognized "the answer is", never the bare "answer is" a
+player just as naturally drops the article from — even though the
+MATCHING side (`bot._RIDDLE_ANSWER_PREFIXES`, reached only once a
+message is actually classified as answer_puzzle) already handled both
+forms. The classification side just never matched it.
+
+1 new test.
+
 ## [1.27.709] — fix: riddle answers rejected for missing an article ("circle" vs. "a circle")
 
 Real live report caught via topic-activity monitoring: two players

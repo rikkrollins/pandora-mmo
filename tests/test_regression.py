@@ -1306,6 +1306,21 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         result = _keyword_fallback("Is the answer an echo?", [])
         self.assertEqual(result["action"], "answer_puzzle")
 
+    def test_bare_answer_is_without_leading_the_now_classifies_as_answer_puzzle(self):
+        """
+        Real live bug (2026-09-27, topic-activity monitoring): "Answer
+        is shape" (dropping the leading "the") fell through to the same
+        silent 'chat' default -- this classification list only ever
+        recognized "the answer is", never the bare "answer is" a player
+        just as naturally drops the article from. The matching side
+        (bot._RIDDLE_ANSWER_PREFIXES, once a message IS classified as
+        answer_puzzle) already handles both forms; this closes the gap
+        on the classification side to match.
+        """
+        for text in ("Answer is shape", "answer is loop", "my answer is circle"):
+            result = _keyword_fallback(text, [])
+            self.assertEqual(result["action"], "answer_puzzle", text)
+
     # -- 7 previously-orphaned magic items now have a real acquisition
     #    path (shops or quest rewards) (v1.9.2) ------------------------
     def test_no_orphaned_items_remain_in_shops_or_quest_rewards(self):

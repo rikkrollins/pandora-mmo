@@ -1830,8 +1830,17 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # player got no response at all and had to fall back to a bare
     # one-word guess to get it recognized -- "is the answer" closes
     # that specific reported gap.
-    if any(w in lowered for w in ["the answer is", "my answer is", "i think it's", "i think the answer is",
-                                    "could it be", "is the answer"]):
+    #
+    # Real live bug (2026-09-27, topic-activity monitoring): "Answer is
+    # shape" (dropping the leading "the") fell through to the exact same
+    # silent 'chat' default -- this list only ever recognized "the
+    # answer is", never the bare "answer is" a player just as naturally
+    # drops the article from. bot._RIDDLE_ANSWER_PREFIXES (the matching
+    # side, once a message IS classified as answer_puzzle) already
+    # strips both "the answer is " and "answer is " as separate
+    # prefixes -- this classification check just never matched that.
+    if any(w in lowered for w in ["the answer is", "answer is", "my answer is", "i think it's",
+                                    "i think the answer is", "could it be", "is the answer"]):
         return {**base, "action": "answer_puzzle"}
 
     if any(w in lowered for w in ["gamble", "wager", "place a bet", "i bet", "let's bet", "lets bet",
