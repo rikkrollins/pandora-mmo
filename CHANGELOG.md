@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.707] — fix: Clarifying Drops (and any cure_condition item) couldn't be used on a party member
+
+Real live dev-bridge report (Coffee, screenshot mid-fight against The
+Last Glyph): "It didnt let me use this on a party member." Root cause:
+the battle-menu's own item-use button only offers a target picker for
+items whose effect is `heal`/`cure_poison`/`restore_spell_slots` —
+`cure_condition` (Clarifying Drops for blindness, Vocal Tonic for
+silence) was never added to that list when it shipped, so tapping it
+always skipped straight to using it on self with no recipient named at
+all. Same exact gap shape already fixed twice before for other effect
+types (`heal`/`cure_poison` in an earlier pass, `restore_spell_slots`
+in v1.27's Greater Spell Tonic fix) — this closes the same class of
+bug for the third effect type that needed it.
+
+1 new test.
+
 ## [1.27.706] — Chapter 8 gap-fill: a real third climax the original pass never noticed
 
 Found while scoping Chapter 7 (per Coffee: "if chapter 7 or 8 seems

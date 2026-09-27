@@ -4356,7 +4356,17 @@ async def _battle_menu_callback_inner(update: Update, context: ContextTypes.DEFA
         # condition never included it, so it always skipped straight to
         # "use {item_name}" with no name, defaulting to self exactly
         # like the original 2026-07-19 bug.
-        if item and item.get("effect") in ("heal", "cure_poison", "restore_spell_slots"):
+        #
+        # Real live bug (2026-09-26, dev-bridge screenshot, Coffee: "It
+        # didnt let me use this on a party member" -- Clarifying Drops,
+        # mid-fight against The Last Glyph): the exact same gap shape a
+        # third time. "cure_condition" (Clarifying Drops/Vocal Tonic,
+        # added 2026-08-26) is just as real a per-target consumable as
+        # the three effects already listed here -- _do_use_item's own
+        # cure_condition branch already supports a named recipient --
+        # but this picker's condition never included it either, so it
+        # fell through to the same no-name self-default.
+        if item and item.get("effect") in ("heal", "cure_poison", "restore_spell_slots", "cure_condition"):
             own_side = session.sides.get(user_id)
             allies = session.living_on_side(own_side) if own_side else []
             if len(allies) > 1:

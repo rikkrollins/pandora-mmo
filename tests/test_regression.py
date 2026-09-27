@@ -26145,6 +26145,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.get_character(user_id, -999)["spell_slots_current"], 4)  # unchanged
         sessions.end_session(-999)
 
+    async def test_clarifying_drops_via_battle_menu_offers_an_ally_target_picker(self):
+        """
+        Real live dev-bridge report (2026-09-26, Coffee, screenshot mid-
+        fight against The Last Glyph): "It didnt let me use this on a
+        party member" -- Clarifying Drops (effect "cure_condition") is
+        just as real a per-target consumable as heal/cure_poison/
+        restore_spell_slots -- _do_use_item's own cure_condition branch
+        already supports a named recipient -- but the battle-menu
+        button's target-picker condition never included it either, so
+        it always skipped straight to using it on self with no name at
+        all in the synthesized text. Same exact gap shape as the
+        restore_spell_slots fix above, one effect type later.
+        """
+        import sessions
+        sessions.end_session(-999)
+        user_id, ally_id = 950944, 950945
+        make_basic_character(user_id, "DropsUser", current_location="crossroads_tavern",
+                              inventory={"clarifying_drops": 1})
+        make_basic_character(ally_id, "BlindedAlly", current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, -999)
+        db.update_character(ally_id, -999, party_id=party_id)
+        user = db.get_character(user_id, -999)
+        user["telegram_user_id"] = user_id
+        ally = db.get_character(ally_id, -999)
+        ally["telegram_user_id"] = ally_id
+        ally["conditions"] = ["blinded"]
+        enemy = {"telegram_user_id": -5200912, "name": "DropsGoblin", "dexterity": 10, "hp_current": 20, "hp_max": 20}
+        session = sessions.start_session(-999, [user, ally, enemy], {user_id: "party", ally_id: "party", -5200912: "enemy"})
+        session.turn_order = [user_id, ally_id, -5200912]
+
+        async def tap(data):
+            sink = []
+            await bot.battle_menu_callback(FakeCallbackUpdate(user_id, data, sink), DummyContext())
+            return "\n".join(sink)
+
+        picker = await tap("bm|use|clarifying_drops")
+        self.assertIn("BlindedAlly", picker)
+        self.assertIn(f"bm|usetarget|clarifying_drops|{ally_id}", picker)
+
+        await tap(f"bm|usetarget|clarifying_drops|{ally_id}")
+        live_ally = next(p for p in session.participants if p["telegram_user_id"] == ally_id)
+        self.assertNotIn("blinded", live_ally.get("conditions", []))  # the chosen ally was actually cured, not self
+        sessions.end_session(-999)
+
     async def test_single_target_revive_item_via_battle_menu_offers_the_dead_roster(self):
         """
         Same real gap, the other per-target consumable shape: a
