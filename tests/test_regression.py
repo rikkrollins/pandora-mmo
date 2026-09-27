@@ -611,6 +611,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(uid, -999)
         self.assertIn("marens_locked_ledger", character.get("completed_quests") or [])
 
+    def test_riddle_answer_matcher_ignores_a_leading_article_on_either_side(self):
+        """
+        Real live bug (2026-09-27, topic-activity monitoring): two real
+        players guessed "circle"/"cycle" 8 times between them against
+        folded_atrium_riddle's own real accepted_answers (["a circle",
+        "a loop", "a cycle"]) and never once landed, even though those
+        are exactly right -- a real player overwhelmingly answers a
+        riddle with the bare noun, not campaign.json's own article-
+        prefixed phrasing. Fixed at the matcher (strips a leading
+        a/an/the from BOTH sides before comparing), not by hand-
+        patching this one puzzle's data, since a repo-wide check found
+        most puzzles only list the article-prefixed form.
+        """
+        accepted = ["a circle", "a loop", "a cycle"]
+        for text in ("The answer is circle", "the answer is cycle", "circle", "loop", "The answer is a circle"):
+            self.assertTrue(bot._guild_curriculum_riddle_answer_matches(text, accepted), text)
+        for wrong in ("sky", "river", "labyrinth", "path", "history", "hall"):
+            self.assertFalse(bot._guild_curriculum_riddle_answer_matches("the answer is " + wrong, accepted), wrong)
+
+    async def test_completing_the_folded_atriums_riddle_accepts_the_bare_noun_answer(self):
+        """End-to-end: the exact real live case, through the real _do_answer_puzzle handler against the real campaign quest/puzzle."""
+        uid, chat_id = 800304, -800304
+        make_basic_character(uid, "BareNounAnswerer", chat_id=chat_id, current_location="unmoored_isle_the_folded_atrium")
+        db.accept_quest(uid, chat_id, "the_folded_atriums_riddle")
+        sink = []
+        await bot._do_answer_puzzle(FakeUpdate(uid, "", sink, chat_id=chat_id), "The answer is circle")
+        character = db.get_character(uid, chat_id)
+        self.assertIn("the_folded_atriums_riddle", character.get("completed_quests") or [])
+
     async def test_do_answer_puzzle_says_so_when_no_puzzle_is_active_at_all(self):
         """
         Real live bug (2026-09-02, Coffee: solved a riddle correctly

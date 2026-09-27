@@ -31283,7 +31283,28 @@ def _guild_curriculum_riddle_answer_matches(text: str, accepted_answers: list[st
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix):].strip()
             break
-    accepted_normalized = {re.sub(r"[^\w\s']", "", a.lower()).strip() for a in accepted_answers}
+    # Real live bug (2026-09-27, topic-activity monitoring): two real
+    # players guessed "circle"/"cycle" 8 times between them against
+    # folded_atrium_riddle's own real accepted_answers (["a circle", "a
+    # loop", "a cycle"]) and never once landed, even though those are
+    # exactly the right answer -- a real player overwhelmingly answers
+    # a riddle with the bare noun ("The answer is circle"), not its own
+    # article-prefixed campaign.json phrasing. A repo-wide check found
+    # this is a SYSTEMIC gap, not one puzzle's own data bug -- most
+    # puzzles in campaign.json only list an article-prefixed accepted
+    # answer, a few already duplicate both forms by hand. Fixed at the
+    # matcher itself (strip a leading a/an/the from BOTH sides before
+    # comparing) rather than hand-patching every puzzle's own accepted_
+    # answers list, so this can't recur for any future puzzle either --
+    # purely additive (can only make more real restatements match,
+    # never loosens what already matched) since every puzzle's accepted
+    # answers are already just alternate phrasings of ONE right concept,
+    # never meaningfully different answers that differ only by article.
+    _leading_article = re.compile(r"^(?:a|an|the)\s+")
+    normalized = _leading_article.sub("", normalized)
+    accepted_normalized = {
+        _leading_article.sub("", re.sub(r"[^\w\s']", "", a.lower()).strip()) for a in accepted_answers
+    }
     return normalized in accepted_normalized
 
 

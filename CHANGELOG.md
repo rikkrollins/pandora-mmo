@@ -2,6 +2,24 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.709] — fix: riddle answers rejected for missing an article ("circle" vs. "a circle")
+
+Real live report caught via topic-activity monitoring: two players
+guessed "circle"/"cycle" 8 times between them against a real riddle
+whose accepted answers are `["a circle", "a loop", "a cycle"]` and
+never landed, even though those were exactly right — the exact-match
+checker required the leading article, but the natural way to answer a
+riddle in chat drops it. A repo-wide check found this is systemic
+(most of the game's 20+ puzzles only list the article-prefixed form),
+so it's fixed at the matcher itself — a leading a/an/the is now
+stripped from both the player's answer and every accepted answer
+before comparing — rather than hand-patching one puzzle's data. Purely
+additive: confirmed every puzzle's own accepted answers still
+self-match, and unrelated wrong guesses still correctly fail.
+
+2 new regression tests; 33 adjacent puzzle/riddle tests re-verified
+with no regressions.
+
 ## [1.27.708] — fix: "Cast a spell tonic" misclassified as a real spell cast
 
 Real live report caught via topic-activity monitoring: "Cast a spell
