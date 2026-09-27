@@ -10185,6 +10185,75 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             "🔥 **A Timber Wolf flies into a desperate rage — its attacks hit even harder for the rest of this fight!**",
         )
 
+    # -- Chapter 8 gap-fill (2026-09-26): a real THIRD climactic quest
+    #    (the_downs_last_watchs_reckoning) the original story-
+    #    completion pass never noticed, plus 5 previously-bare
+    #    non-climactic quests. Kess's own storyline is untouched --
+    #    this only fills the gap in the SURROUNDING arc content, per
+    #    Coffee's own "if chapter 7 or 8 seems small or lack depth"
+    #    prompt. Built directly against the established tone bar, no
+    #    prose preview shown in chat. --------------------------------
+    async def test_starting_combat_with_the_downs_last_watch_fires_the_real_confrontation(self):
+        """End-to-end: starting a fight with the_downs_last_watch must route through the hand-written confrontation, not the generic narrate_boss_intro AI path."""
+        from unittest.mock import patch, AsyncMock
+        import sessions
+        sessions.end_session(-997)
+        user_id = 901040
+        make_basic_character(
+            user_id, "LastWatchWitness", chat_id=-997, char_class="Fighter", current_location="greymoor_downs",
+        )
+        db.update_character(user_id, -997, level=95, hp_current=15000, hp_max=15000)
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the downs last watch", sink, chat_id=-997),
+                                        monster_key="the_downs_last_watch", count=1)
+        combined = "\n".join(sink)
+        self.assertIn("relief. Finally", combined)
+        sessions.end_session(-997)
+
+    async def test_completing_the_downs_last_watchs_reckoning_fires_the_real_ending(self):
+        """The Downs' Last Watch (arc_8's real third climax, missed by the original pass) gets a real hand-written ending instead of the generic AI narrate_chapter_climax path."""
+        from unittest.mock import patch, AsyncMock
+        user_id = 901041
+        make_basic_character(user_id, "LastWatchEndWitness", current_location="greymoor_downs")
+        sink = []
+        with patch("bot._send_generated_image", new=AsyncMock(return_value=False)):
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "the_downs_last_watchs_reckoning")
+        combined = "\n".join(sink)
+        self.assertIn("relieved, then", combined)
+        quest = bot.CAMPAIGN["quests"]["the_downs_last_watchs_reckoning"]
+        self.assertIn(str(quest["reward_xp"]), combined)
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["inventory"].get(quest["reward_item"]), 1)
+
+    def test_the_downs_last_watch_enrage_uses_its_own_real_escalation(self):
+        """The Downs' Last Watch gets its own real enrage line instead of the generic one -- every other boss keeps the plain generic line."""
+        watch = {"name": "The Downs' Last Watch", "monster_key": "the_downs_last_watch"}
+        self.assertIn("that's not me", bot._enrage_announcement(watch))
+        ordinary = {"name": "A Timber Wolf", "monster_key": "timber_wolf"}
+        self.assertEqual(
+            bot._enrage_announcement(ordinary),
+            "🔥 **A Timber Wolf flies into a desperate rage — its attacks hit even harder for the rest of this fight!**",
+        )
+
+    async def test_chapter8_non_climax_stages_use_their_real_completion_narration(self):
+        """The 5 previously-bare non-Kess quests in arc_8_greymoor_downs each get a real, proportionate narration-only beat."""
+        cases = [
+            ("watchtowers_stalker", "every way that isn't"),
+            ("the_tower_cellars_pup", "only shelter left standing"),
+            ("the_vantage_belows_alpha", "was never alone up there"),
+            ("the_barrow_depths_bound", "considerably less willing to share"),
+            ("the_sunken_cellars_warden", "kept exactly as it was left"),
+        ]
+        for i, (quest_id, expected_snippet) in enumerate(cases):
+            user_id = 901042 + i
+            make_basic_character(user_id, f"Ch8StageWitness{i}", current_location="greymoor_downs")
+            sink = []
+            await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, quest_id)
+            combined = "\n".join(sink)
+            self.assertIn(expected_snippet, combined, f"{quest_id} missing its real completion narration: {combined}")
+
     # -- Chapter 2's real finale (2026-09-09, story completion pass,
     #    3/7): a named speaking antagonist that repeats the party's
     #    own words back at them ------------------------------------

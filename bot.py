@@ -105,6 +105,10 @@ from ai.dm_agent import (
     silked_nooks_hatchling_completion_narration, deep_currents_keeper_completion_narration,
     undertows_elder_completion_narration, lower_battlements_watchman_completion_narration,
     lower_spans_widow_completion_narration,
+    the_downs_last_watch_confrontation_script, downs_last_watch_enrage_escalation,
+    the_downs_last_watch_defeat_line, watchtowers_stalker_completion_narration,
+    tower_cellars_pup_completion_narration, vantage_belows_alpha_completion_narration,
+    barrow_depths_bound_completion_narration, sunken_cellars_warden_completion_narration,
     the_unspoken_confrontation_script, the_unspoken_defeat_line,
     the_last_glyph_confrontation_script, the_last_glyph_defeat_line,
     the_high_approach_sentinel_confrontation_script, the_high_approach_sentinel_defeat_line,
@@ -1436,6 +1440,10 @@ def _enrage_announcement(target: dict) -> str:
     """
     if target.get("monster_key") == "the_keeps_warden":
         return keeps_warden_enrage_escalation()
+    # Chapter 8 gap-fill (2026-09-26): The Downs' Last Watch's own real
+    # mid-fight escalation, same checkpoint.
+    if target.get("monster_key") == "the_downs_last_watch":
+        return downs_last_watch_enrage_escalation()
     return f"🔥 **{target['name']} flies into a desperate rage — its attacks hit even harder for the rest of this fight!**"
 
 
@@ -9829,6 +9837,12 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # missed by the original 7-chapter pass, which only
                 # treated this arc's Kess-tied quest as "Chapter 7."
                 intro = the_keeps_warden_confrontation_script()
+            elif monster_key == "the_downs_last_watch":
+                # Chapter 8 gap-fill (2026-09-26): arc_8's real THIRD
+                # climactic quest, never noticed by the original
+                # story-completion pass -- previously fell through to
+                # the generic AI narrate_boss_intro below.
+                intro = the_downs_last_watch_confrontation_script()
             else:
                 intro = await asyncio.to_thread(
                     narrate_boss_intro, template["name"], fight_location["name"], fight_location["description"],
@@ -18847,6 +18861,19 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         await _send_cutscene(update_like, [lower_battlements_watchman_completion_narration()])
     elif quest_id == "the_lower_spans_widow":
         await _send_cutscene(update_like, [lower_spans_widow_completion_narration()])
+    elif quest_id == "watchtowers_stalker":
+        # Chapter 8 gap-fill (2026-09-26): currently zero bespoke
+        # content -- narration-only, proportionate to this
+        # non-climactic stage.
+        await _send_cutscene(update_like, [watchtowers_stalker_completion_narration()])
+    elif quest_id == "the_tower_cellars_pup":
+        await _send_cutscene(update_like, [tower_cellars_pup_completion_narration()])
+    elif quest_id == "the_vantage_belows_alpha":
+        await _send_cutscene(update_like, [vantage_belows_alpha_completion_narration()])
+    elif quest_id == "the_barrow_depths_bound":
+        await _send_cutscene(update_like, [barrow_depths_bound_completion_narration()])
+    elif quest_id == "the_sunken_cellars_warden":
+        await _send_cutscene(update_like, [sunken_cellars_warden_completion_narration()])
     elif quest_id == "kess_first_reckoning":
         # Kess Arc Phase 2 (2026-08-28): the real
         # transformation beat -- hand-written, not the generic
@@ -18956,6 +18983,16 @@ async def _complete_quest_and_announce(update_like, telegram_user_id: int, quest
         # docstring for the mechanical hook (counters_sneak_attack +
         # extra_attack_when_enraged) its voice is built on.
         climax_narration = f"{the_keeps_warden_defeat_line()}\n\n"
+        await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
+    elif quest_id == "the_downs_last_watchs_reckoning":
+        # Chapter 8 gap-fill (2026-09-26): arc_8's real THIRD climactic
+        # quest -- never noticed by the original story-completion pass,
+        # which only ever treated Kess's own two quests as "Chapter 8."
+        # Its own level-95 target is the single highest-level entity
+        # this whole narrative expansion project has touched. The
+        # mid-fight escalation fires separately, from the real enrage
+        # checkpoint, not from here.
+        climax_narration = f"{the_downs_last_watch_defeat_line()}\n\n"
         await _maybe_send_chapter_climax_image(update_like, quest_id, quest)
     elif quest.get("weight") == "climactic":
         climax_text = _cached_narration("chapter_climax", quest_id) or await asyncio.to_thread(

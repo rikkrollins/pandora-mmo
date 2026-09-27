@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.706] — Chapter 8 gap-fill: a real third climax the original pass never noticed
+
+Found while scoping Chapter 7 (per Coffee: "if chapter 7 or 8 seems
+small or lack depth please make them longer and better"). Kess's own
+storyline is genuinely deep already and needed no more work — but
+`arc_8_greymoor_downs` carries a THIRD climactic quest
+(`the_downs_last_watchs_reckoning`) that the original story-completion
+pass never noticed at all, plus 5 more completely bare quests. Its
+real target is level 95 — the single highest-level entity this entire
+narrative expansion project has touched.
+
+- The Downs' Last Watch gets a real fight-start beat, a mid-fight
+  enrage escalation (via the same shared `_enrage_announcement`
+  helper Chapter 7's Keep's Warden uses), and a real ending —
+  previously all generic AI narration. An ancient sentinel that isn't
+  fighting out of malice or duty anymore, just genuine exhaustion —
+  "waiting to be relieved."
+- 5 previously-bare non-Kess quests each get a real, proportionate
+  completion beat.
+- Kess's own two quests and all of her existing hand-written content
+  are completely untouched.
+
+4 new regression tests.
+
 ## [1.27.705] — Chapter 7 narrative expansion: real multi-scene cutscenes, reader-paced delivery
 
 Seventh chapter of the Chapters 1-8 narrative project — the LAST

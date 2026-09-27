@@ -3366,3 +3366,118 @@ def narrate_chapter_8_epilogue(boss_name: str, party_names: str, plan_succeeded_
         f"{party_names.split(',')[0].strip()} already senses it -- the way forward "
         f"isn't just levels anymore. It's evolution.*"
     )
+
+
+# ---------------------------------------------------------------------
+# Chapter 8 gap-fill (2026-09-26). Kess's own storyline above is
+# genuinely deep already and needs no more work -- but arc_8_
+# greymoor_downs carries a THIRD climactic quest the original story-
+# completion pass never noticed (the_downs_last_watchs_reckoning, its
+# real target level 95 -- the single highest-level entity this whole
+# narrative expansion project has touched), plus 5 completely bare
+# non-climactic quests. Found while scoping Chapter 7 per Coffee's own
+# "if chapter 7 or 8 seems small or lack depth" prompt. Built directly
+# against the established tone bar, no prose preview shown in chat.
+# ---------------------------------------------------------------------
+
+def the_downs_last_watch_confrontation_script() -> str:
+    """
+    the_downs_last_watchs_reckoning's real fight-start beat (currently
+    none -- previously fell through to the generic AI narrate_boss_
+    intro). Grounded in its own real quest text ("waiting a very long
+    time to be relieved") and necrotic/insect_plague nature: an
+    ancient sentinel that isn't fighting out of malice or even duty
+    anymore, just genuine, weary exhaustion -- distinct from Chapter
+    4's Sentinel (still finds meaning in the post) and Chapter 7's
+    Keep's Warden (still enforces its own rule) by having neither left
+    -- only the waiting itself remains.
+    """
+    return (
+        "*It doesn't rise to meet you so much as finally, slowly, remember how -- centuries of "
+        "dust lifting off a shape that stopped expecting anyone to come.*\n\n"
+        "**The Downs' Last Watch:** *(a voice like something spoken through rot, patient past all "
+        "reason)* \"...relief. Finally. Or replacement. I've stopped being able to tell which one "
+        "you are.\"\n\n"
+        "*It doesn't matter to it either way -- whichever you turn out to be, the post gets "
+        "answered either way it's always answered.*\n\n"
+        "**The Downs' Last Watch:** \"Come to relieve the watch, then. One way or the other, "
+        "someone always does, eventually.\""
+    )
+
+
+def downs_last_watch_enrage_escalation() -> str:
+    """
+    The Downs' Last Watch's own real mid-fight escalation -- fires
+    once, the first time it enrages (its own real extra_attack_when_
+    enraged mechanic, the SAME generic enrage checkpoint every boss's
+    "flies into a desperate rage" line already fires from -- see
+    bot._enrage_announcement). Its necrotic decay finally shows
+    through under real pressure -- not rage in the usual sense, just
+    the rot underneath losing its patience before the watcher does.
+    """
+    return (
+        "*Something under the rot moves faster than the rest of it should still be able to -- "
+        "whatever's actually kept this watch standing this long isn't quite as patient as the "
+        "watcher itself.*\n\n"
+        "**The Downs' Last Watch:** \"...that's not me. That's just what's left holding me up. "
+        "Ignore it if you can. I mostly do.\""
+    )
+
+
+def the_downs_last_watch_defeat_line() -> str:
+    """Companion piece to the_downs_last_watch_confrontation_script/escalation -- fired as this quest's own real ending beat."""
+    return (
+        "*It doesn't fall so much as finally, genuinely stop -- the way something stops when the "
+        "one thing keeping it upright was simply refusing to leave the post.*\n\n"
+        "**The Downs' Last Watch:** \"...relieved, then. Good. That's -- that's good.\"\n\n"
+        "*Whatever comes after this watch, it isn't this thing's problem anymore. For the first "
+        "time in longer than it could count, that's a relief and not a failure.*"
+    )
+
+
+def watchtowers_stalker_completion_narration() -> str:
+    """watchtowers_stalker's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*From the top of what's left of this collapsed watchtower, the whole bridge crossing is "
+        "fully visible -- every safe way across, and every way that isn't. Something's been using "
+        "that view for a very long time.*\n\n"
+        "It won't be watching that crossing anymore. Whatever crosses next, it crosses unwatched."
+    )
+
+
+def tower_cellars_pup_completion_narration() -> str:
+    """the_tower_cellars_pup's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A half-buried storeroom under the watchtower's own foundation, easy to miss beneath the "
+        "rubble -- something small had been using it to stay out of the wind.*\n\n"
+        "It wasn't guarding the tower. It was just the only shelter left standing near it."
+    )
+
+
+def vantage_belows_alpha_completion_narration() -> str:
+    """the_vantage_belows_alpha's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*The watchtower's collapsed base opens further down than it looks from the ridge -- "
+        "whatever's been using the ruin as a perch was never alone up there.*\n\n"
+        "The rest scatter once the one they were following stops leading them."
+    )
+
+
+def barrow_depths_bound_completion_narration() -> str:
+    """the_barrow_depths_bound's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*Past the sunken barrow's own supply cache, the hillside opens into a real den -- deeper, "
+        "older, and considerably less willing to share its territory than anything closer to the "
+        "surface.*\n\n"
+        "Whatever claimed this den first, it held it for a very long time."
+    )
+
+
+def sunken_cellars_warden_completion_narration() -> str:
+    """the_sunken_cellars_warden's real completion scene -- currently zero bespoke content. Narration-only, proportionate to a non-climactic stage."""
+    return (
+        "*A real hall, kept exactly as it was left -- and something had been keeping it that way, "
+        "faithfully, for however long it's actually been since anyone else last stood in it.*\n\n"
+        "It's just a hall now. Whatever it was being kept for, no one left to ask is still keeping "
+        "score."
+    )
