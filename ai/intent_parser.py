@@ -1010,6 +1010,28 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # matters most (using an item ON someone). Moved here so naming the
     # target no longer defeats it.
     if any(w in lowered for w in ["cast ", "i cast"]) or ("scroll" in lowered and re.search(r"\buse\b", lowered)):
+        # Real live bug (2026-09-27, topic-activity monitoring): "Cast a
+        # spell tonic on elduinn" matched the bare "cast " check above
+        # and short-circuited straight to cast_spell -- but "Spell
+        # Tonic" (and Greater/Supreme Spell Tonic) are real, ordinary
+        # consumable ITEMS, never actual spells; their own name just
+        # happens to contain the word "spell". The player had to retry
+        # with "Use a spell tonic on elduinn" 14 seconds later to get
+        # the right classification. A real carried-item name mentioned
+        # here (excluding scrolls, which SHOULD still cast) means this
+        # is really a use_item request phrased loosely with "cast" --
+        # classified directly as use_item (bot._do_use_item re-parses
+        # the same raw_text itself to find the item/target, so nothing
+        # else needs extracting here) rather than falling through to
+        # the later spell-only checks, which would otherwise land this
+        # on the silent "chat" default with no real spell to match
+        # either. Confirmed no real spell name collides with any real
+        # item name across the whole catalog before adding this.
+        _cast_line_item_id = items_module.find_item_mentioned_in_text(lowered)
+        _cast_line_item = items_module.get_item(_cast_line_item_id) if _cast_line_item_id else None
+        _cast_line_is_non_scroll_item = _cast_line_item is not None and _cast_line_item.get("type") != "scroll"
+        if _cast_line_is_non_scroll_item:
+            return {**base, "action": "use_item"}
         return {**base, "action": "cast_spell"}
 
     # "Use <spell>"/"cast <spell>" (2026-08-13, real live bug found via

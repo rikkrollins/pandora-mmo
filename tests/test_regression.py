@@ -37063,6 +37063,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("I use my breath weapon", [])["action"], "breath_weapon")
         self.assertEqual(_keyword_fallback("use my own dice", [])["action"], "toggle_manual_dice")
 
+    def test_cast_a_real_item_whose_name_contains_spell_classifies_as_use_item(self):
+        """
+        Real live bug (2026-09-27, topic-activity monitoring): "Cast a
+        spell tonic on elduinn" matched the bare "cast " check (the
+        very first check in this priority chain) and short-circuited
+        straight to cast_spell -- but Spell Tonic/Greater Spell Tonic/
+        Supreme Spell Tonic are real, ordinary consumable ITEMS, never
+        actual spells; their own name just happens to contain the word
+        "spell". The player had to retry with "Use a spell tonic on
+        elduinn" 14 seconds later to get the right classification.
+        Generalizes beyond just the reported item: any real item
+        (potion, antitoxin, etc.) loosely phrased with "cast" instead
+        of "use" now correctly resolves to use_item too.
+        """
+        from ai.intent_parser import _keyword_fallback
+        for text in (
+            "cast a spell tonic on elduinn", "cast a greater spell tonic",
+            "cast the supreme spell tonic on grask", "cast a healing potion on elduinn",
+            "cast antitoxin on the poisoned ally",
+        ):
+            intent = _keyword_fallback(text, ["Grask"])
+            self.assertEqual(intent["action"], "use_item", text)
+
+    def test_cast_a_real_scroll_or_spell_still_classifies_as_cast_spell(self):
+        """Regression guard for the fix above: a real scroll or an actual real spell name after "cast" must still classify as cast_spell, unchanged."""
+        from ai.intent_parser import _keyword_fallback
+        for text in (
+            "cast a scroll of revivify on wren", "cast a scroll of radiant lance",
+            "cast fireball", "i cast eldritch blast on the goblin", "i cast magic missile",
+        ):
+            intent = _keyword_fallback(text, ["Wren"])
+            self.assertEqual(intent["action"], "cast_spell", text)
+
     async def test_do_cast_spell_resolves_a_typo_of_a_bare_spell_name(self):
         """
         Companion fix to the intent-classification test above:

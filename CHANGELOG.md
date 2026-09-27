@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.708] — fix: "Cast a spell tonic" misclassified as a real spell cast
+
+Real live report caught via topic-activity monitoring: "Cast a spell
+tonic on elduinn" was classified as `cast_spell` instead of `use_item`
+— the player had to retry with "Use a spell tonic on elduinn" 14
+seconds later to get the right result. Root cause: `_keyword_
+fallback`'s very first check treats any message containing "cast " as
+a spell cast, with no check for whether a real, ordinary consumable
+item (not a spell) is actually being named — Spell Tonic/Greater Spell
+Tonic/Supreme Spell Tonic all happen to have "spell" in their own
+item name. Now checks whether a real, non-scroll item is mentioned
+first and classifies as `use_item` in that case; a real scroll or an
+actual spell name still classifies as `cast_spell` exactly as before.
+Generalizes beyond the reported item — any potion/tonic loosely
+phrased with "cast" instead of "use" now resolves correctly too.
+
+2 new regression tests; 35 adjacent cast_spell/use_item tests
+re-verified with no regressions.
+
 ## [1.27.707] — fix: Clarifying Drops (and any cure_condition item) couldn't be used on a party member
 
 Real live dev-bridge report (Coffee, screenshot mid-fight against The
