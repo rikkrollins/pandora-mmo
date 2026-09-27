@@ -3622,7 +3622,7 @@ def _hp_status_emoji(hp_current: int, hp_max: int) -> str:
 # for status effects."). Every real condition string this game's own
 # combat code actually applies to a participant's `conditions` list
 # (bot.py: prone/poisoned/blinded/silenced/paralyzed/frightened/
-# banished -- confirmed by grep, not guessed) gets one real emoji.
+# banished/grappled -- confirmed by grep, not guessed) gets one real emoji.
 _CONDITION_EMOJI = {
     "prone": "🔻",
     "poisoned": "☠️",
@@ -3631,6 +3631,7 @@ _CONDITION_EMOJI = {
     "paralyzed": "⚡",
     "frightened": "😱",
     "banished": "🌀",
+    "grappled": "🤼",
 }
 
 
@@ -16240,6 +16241,7 @@ def _condition_tags(character: dict) -> str:
         "prone": "🛌", "poisoned": "😷", "blinded": "🙈", "silenced": "🔇",
         "paralyzed": "⛓️", "frightened": "😱", "invisible": "👻", "faerie_fire": "✨",
         "protected": "🛡️", "charmed": "💞", "death_warded": "⛑️", "blessed": "🌟",
+        "grappled": "🤼",
     }
     conditions = character.get("conditions", [])
     return "".join(icons.get(c, "") for c in conditions)
@@ -16417,6 +16419,191 @@ async def _do_shove(update: Update, action_text: str, forced_roll: int | None = 
         await _advance_turn_and_resolve_ai_turns(update, session)
 
 
+async def _do_grapple(update: Update, action_text: str, forced_roll: int | None = None) -> None:
+    """
+    A real 5E core combat action (feature-wishlist audit, 2026-09-27) --
+    previously entirely missing from this engine. A contested STR
+    (Athletics) check to grab and restrain an enemy, distinct from
+    _do_shove (which knocks prone): success applies the real 'grappled'
+    condition instead, and its one real, meaningful mechanical effect
+    in THIS engine (no positioning/movement system to hook 5E's actual
+    "speed becomes 0" onto) is _resolve_flee_attempt's own new check --
+    a grappled character can't flee combat until they escape (see
+    _do_escape_grapple). `target["grappled_by"]` records who's holding
+    them, so the escape check knows who to contest against, and
+    sessions.Session.remove_defeated/remove_dead_player both release
+    the grapple automatically if the grappler is removed from the
+    fight first. Mirrors _do_shove's exact structure (same contested-
+    check shape, same physical-dice-mode support, same turn/session
+    guards) since this is genuinely the same kind of action, just a
+    different real effect on success.
+    """
+    chat_id = update.effective_chat.id
+    async with _held_session(chat_id, update.effective_user.id) as session:
+        if session is None:
+            await _safe_send(update, "No combat is active right now.")
+            return
+
+        user_id = update.effective_user.id
+        if session.current_participant_id() != user_id:
+            await _self_heal_stuck_ai_turn(update, session)
+            session = sessions.get_session_for_user(chat_id, user_id)
+            if session is None:
+                await _safe_send(update, "Combat had stalled and just resolved itself — nothing active right now.")
+                return
+        if session.current_participant_id() != user_id:
+            current_name = session.current_participant()["name"]
+            await _safe_send(update, f"It's not your turn — it's **{current_name}**'s turn.")
+            return
+
+        attacker = session.current_participant()
+        if attacker["hp_current"] <= 0:
+            await _safe_send(update, "You're unconscious (0 HP) and can't act until healed.")
+            return
+
+        opposing = session.living_on_side(session.opposing_side(user_id))
+        if not opposing:
+            if not await _try_end_stale_combat(update, session):
+                await _safe_send(update, "No valid targets remain.")
+            return
+        target = _pick_target(action_text, opposing)
+
+        if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+            forced_roll = _extract_combined_roll(action_text)
+        if forced_roll is None and attacker.get("manual_dice_enabled") and not attacker.get("is_ai"):
+            _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[user_id] = _new_pending_roll("grapple", action_text, update.effective_chat.id)
+            await _safe_send(update, f"🎲 **{attacker['name']}**, roll a d20 for your grapple attempt and tell me the result (you have 1 minute, or I'll roll for you).")
+            return
+
+        attacker_result = roll_ability_check(attacker, "strength", proficient=True, forced_roll=forced_roll)
+        attacker_result["total"] += _effective_ability_check_bonus(attacker, "strength")
+        target_raw = roll_d20()
+        target_str_mod = ability_modifier(target.get("strength", 10)) + _effective_ability_check_bonus(target, "strength")
+        target_dex_mod = ability_modifier(target.get("dexterity", 10)) + _effective_ability_check_bonus(target, "dexterity")
+        target_mod = max(target_str_mod, target_dex_mod)
+        target_total = target_raw + target_mod
+        success = attacker_result["total"] > target_total  # ties favor the defender, per 5E contest rules
+
+        if success:
+            target.setdefault("conditions", [])
+            if "grappled" not in target["conditions"]:
+                target["conditions"].append("grappled")
+            target["grappled_by"] = attacker["telegram_user_id"]
+
+        flavor = await asyncio.to_thread(
+            narrate_skill_check, attacker, action_text, "strength",
+            {"raw_roll": attacker_result["raw_roll"], "total": attacker_result["total"],
+             "success": success},
+        )
+        banner = "✨ **Success!**" if success else "💨 **Failure...**"
+        message = (
+            f"{banner}\n> {flavor}\n\n"
+            f"🎲 **Grapple contest:** {attacker['name']} {attacker_result['total']} vs "
+            f"{target['name']} {target_total}"
+        )
+        if success:
+            message += f"\n🤼 **{target['name']} is now GRAPPLED** — they can't flee this fight until they break free."
+        await _safe_send(update, message)
+
+        await _advance_turn_and_resolve_ai_turns(update, session)
+
+
+async def _do_escape_grapple(update: Update, action_text: str, forced_roll: int | None = None) -> None:
+    """
+    Companion action to _do_grapple -- a grappled character spending
+    their own turn/action trying to break free. Real 5E rule: the
+    escaping creature can use either Athletics OR Acrobatics (whichever
+    is better), contested against the grappler's own Athletics -- same
+    "best of two" shape _do_shove/_do_grapple's own target-side check
+    already uses. No target-picking needed (you're always escaping
+    your OWN grapple); the grappler is looked up via `grappled_by`
+    (set by _do_grapple), defensively auto-releasing instead of
+    crashing if that grappler is somehow no longer in this fight
+    (should never happen in practice -- sessions.Session.remove_
+    defeated/remove_dead_player both release the grapple the moment
+    the grappler themselves leaves combat).
+    """
+    chat_id = update.effective_chat.id
+    async with _held_session(chat_id, update.effective_user.id) as session:
+        if session is None:
+            await _safe_send(update, "No combat is active right now.")
+            return
+
+        user_id = update.effective_user.id
+        if session.current_participant_id() != user_id:
+            await _self_heal_stuck_ai_turn(update, session)
+            session = sessions.get_session_for_user(chat_id, user_id)
+            if session is None:
+                await _safe_send(update, "Combat had stalled and just resolved itself — nothing active right now.")
+                return
+        if session.current_participant_id() != user_id:
+            current_name = session.current_participant()["name"]
+            await _safe_send(update, f"It's not your turn — it's **{current_name}**'s turn.")
+            return
+
+        escaping = session.current_participant()
+        if escaping["hp_current"] <= 0:
+            await _safe_send(update, "You're unconscious (0 HP) and can't act until healed.")
+            return
+        if "grappled" not in (escaping.get("conditions") or []):
+            await _safe_send(update, "You're not currently grappled — there's nothing to escape.")
+            return
+
+        grappler = next(
+            (p for p in session.participants if p["telegram_user_id"] == escaping.get("grappled_by")), None,
+        )
+        if grappler is None:
+            # Defensive only -- whoever grappled you should already have
+            # released it the moment they left this fight. If it
+            # somehow didn't, don't leave the player permanently stuck.
+            escaping["conditions"].remove("grappled")
+            escaping.pop("grappled_by", None)
+            await _safe_send(update, f"🤼 Whatever was holding {escaping['name']} isn't in this fight anymore — free to act normally.")
+            await _advance_turn_and_resolve_ai_turns(update, session)
+            return
+
+        if forced_roll is None and escaping.get("manual_dice_enabled") and not escaping.get("is_ai"):
+            forced_roll = _extract_combined_roll(action_text)
+        if forced_roll is None and escaping.get("manual_dice_enabled") and not escaping.get("is_ai"):
+            _chat_scoped_dict(_PENDING_DICE_ROLLS, update.effective_chat.id)[user_id] = _new_pending_roll("escape_grapple", action_text, update.effective_chat.id)
+            await _safe_send(update, f"🎲 **{escaping['name']}**, roll a d20 to break free and tell me the result (you have 1 minute, or I'll roll for you).")
+            return
+
+        escaping_str_mod = ability_modifier(escaping.get("strength", 10)) + _effective_ability_check_bonus(escaping, "strength")
+        escaping_dex_mod = ability_modifier(escaping.get("dexterity", 10)) + _effective_ability_check_bonus(escaping, "dexterity")
+        use_dex = escaping_dex_mod > escaping_str_mod
+        escaping_result = roll_ability_check(
+            escaping, "dexterity" if use_dex else "strength", proficient=True, forced_roll=forced_roll,
+        )
+        escaping_result["total"] += (escaping_dex_mod if use_dex else escaping_str_mod)
+        grappler_raw = roll_d20()
+        grappler_total = grappler_raw + ability_modifier(grappler.get("strength", 10)) + _effective_ability_check_bonus(grappler, "strength")
+        success = escaping_result["total"] > grappler_total  # ties favor the grappler, per 5E contest rules
+
+        if success:
+            escaping["conditions"].remove("grappled")
+            escaping.pop("grappled_by", None)
+
+        flavor = await asyncio.to_thread(
+            narrate_skill_check, escaping, action_text, "dexterity" if use_dex else "strength",
+            {"raw_roll": escaping_result["raw_roll"], "total": escaping_result["total"],
+             "success": success},
+        )
+        banner = "✨ **Success!**" if success else "💨 **Failure...**"
+        message = (
+            f"{banner}\n> {flavor}\n\n"
+            f"🎲 **Escape contest:** {escaping['name']} {escaping_result['total']} vs "
+            f"{grappler['name']} {grappler_total}"
+        )
+        if success:
+            message += f"\n🤼‍♂️ **{escaping['name']} breaks free!**"
+        else:
+            message += f"\n🤼 Still grappled — {grappler['name']} isn't letting go."
+        await _safe_send(update, message)
+
+        await _advance_turn_and_resolve_ai_turns(update, session)
+
+
 async def _resolve_flee_attempt(update, session: sessions.Session, action_text: str, forced_roll: int | None = None) -> None:
     """
     Real core of a flee attempt, shared by _do_flee (a human player,
@@ -16433,6 +16620,21 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     if fleeing["hp_current"] <= 0:
         await update.effective_chat.send_message(
             "You're unconscious (0 HP) and can't act until healed.",
+            message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
+        )
+        return
+
+    # Real 5E grapple rule (feature-wishlist audit, 2026-09-27): a
+    # grappled creature's speed is 0 -- this engine has no positioning
+    # system to hook that onto directly, so the one real, meaningful
+    # place it matters is right here: you genuinely cannot retreat
+    # while something's holding onto you. Break the grapple first (see
+    # _do_escape_grapple) -- same "no fleeing this fight" shape as the
+    # unfleeable-boss check just below, but a real mechanical hold
+    # instead of a story-critical one.
+    if "grappled" in (fleeing.get("conditions") or []):
+        await update.effective_chat.send_message(
+            "🤼 You're grappled — you can't flee until you break free first.",
             message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure"),
         )
         return
@@ -38872,7 +39074,7 @@ def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int, 
 # actual combat actions/class features that consume a turn.
 FORMATION_ACTIONS = {"set_front_row", "set_back_row"}
 REAL_TURN_ACTIONS = {
-    "attack", "cast_spell", "shove", "throw_weapon", "use_item", "flee",
+    "attack", "cast_spell", "shove", "grapple", "escape_grapple", "throw_weapon", "use_item", "flee",
     "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "divine_sense", "arcane_recovery",
     "channel_divinity", "action_surge", "reckless_attack", "divine_smite",
     "flurry_of_blows", "wild_shape", "breath_weapon",
@@ -39081,6 +39283,10 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
             await _do_gather(update, pending_roll["action_text"], forced_roll=manual_value)
         elif pending_roll["kind"] == "shove":
             await _do_shove(update, pending_roll["action_text"], forced_roll=manual_value)
+        elif pending_roll["kind"] == "grapple":
+            await _do_grapple(update, pending_roll["action_text"], forced_roll=manual_value)
+        elif pending_roll["kind"] == "escape_grapple":
+            await _do_escape_grapple(update, pending_roll["action_text"], forced_roll=manual_value)
         elif pending_roll["kind"] == "flee":
             await _do_flee(update, pending_roll["action_text"], forced_roll=manual_value)
         elif pending_roll["kind"] == "steal":
@@ -39941,6 +40147,10 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_skill_check(update, intent.get("ability") or "dexterity", text)
     elif action == "shove":
         await _do_shove(update, text)
+    elif action == "grapple":
+        await _do_grapple(update, text)
+    elif action == "escape_grapple":
+        await _do_escape_grapple(update, text)
     elif action == "flee":
         await _do_flee(update, text)
     elif action == "resolve_choice":
@@ -43289,6 +43499,10 @@ async def _maybe_auto_roll_pending_dice(bot) -> None:
                 await _do_gather(update_like, pending["action_text"], forced_roll=auto_value)
             elif pending["kind"] == "shove":
                 await _do_shove(update_like, pending["action_text"], forced_roll=auto_value)
+            elif pending["kind"] == "grapple":
+                await _do_grapple(update_like, pending["action_text"], forced_roll=auto_value)
+            elif pending["kind"] == "escape_grapple":
+                await _do_escape_grapple(update_like, pending["action_text"], forced_roll=auto_value)
             elif pending["kind"] == "flee":
                 await _do_flee(update_like, pending["action_text"], forced_roll=auto_value)
             elif pending["kind"] == "steal":

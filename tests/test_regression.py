@@ -42415,6 +42415,142 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot.waypoint_menu_callback(FakeCallbackUpdate(user_id, "waypoint|go|market_row", sink), DummyContext())
         self.assertEqual(db.get_character(user_id, -999)["current_location"], "market_row")
 
+    # -- Real 5E core action, previously entirely missing from this
+    #    engine (2026-09-27, feature-wishlist audit): Grapple, distinct
+    #    from the existing Shove (restrains instead of knocking prone).
+    #    Its one real mechanical effect in this engine (no positioning/
+    #    movement system to hook 5E's actual "speed becomes 0" onto) is
+    #    blocking _do_flee until the grapple is broken. -----------------
+    def test_grapple_and_escape_grapple_classify_correctly(self):
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("I grapple the goblin", [])["action"], "grapple")
+        self.assertEqual(_keyword_fallback("I grab hold of the bandit", [])["action"], "grapple")
+        self.assertEqual(_keyword_fallback("I try to restrain it", [])["action"], "grapple")
+        self.assertEqual(_keyword_fallback("I break free", [])["action"], "escape_grapple")
+        self.assertEqual(_keyword_fallback("I try to wriggle free", [])["action"], "escape_grapple")
+        # Shove must still classify as shove, unaffected by the new checks.
+        self.assertEqual(_keyword_fallback("I shove the goblin", [])["action"], "shove")
+
+    async def test_grapple_success_applies_the_real_condition_and_blocks_fleeing(self):
+        """End-to-end: a winning grapple contest applies the real 'grappled' condition, and a grappled character genuinely cannot flee until they break free."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        user_id = 950900
+        make_basic_character(
+            user_id, "GrappleAttacker", current_location="crossroads_tavern",
+            ability_scores={"strength": 18, "dexterity": 10, "constitution": 12,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        db.update_character(user_id, -999, hp_current=100, hp_max=100, level=5)
+        attacker = db.get_character(user_id, -999)
+        attacker["telegram_user_id"] = user_id
+        enemy = {
+            "telegram_user_id": -800900, "name": "Grapple Target", "dexterity": 8, "strength": 8,
+            "armor_class": 10, "hp_current": 50, "hp_max": 50, "is_ai": 1,
+        }
+        session = sessions.start_session(-999, [attacker, enemy], {user_id: "party", -800900: "enemy"})
+        session.turn_order = [user_id, -800900]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.roll_d20", return_value=1), \
+             patch("bot.narrate_skill_check", return_value="A solid grab."):  # the target's own contest roll -- guarantees the attacker wins
+            await bot._do_grapple(FakeUpdate(user_id, "I grapple the target", sink), "I grapple the target", forced_roll=20)
+        combined = "\n".join(sink)
+        self.assertIn("is now GRAPPLED", combined)
+        live_target = next(p for p in session.participants if p["telegram_user_id"] == -800900)
+        self.assertIn("grappled", live_target.get("conditions", []))
+        self.assertEqual(live_target.get("grappled_by"), user_id)
+
+        # A grappled character genuinely cannot flee.
+        session.turn_order = [-800900, user_id]
+        session.current_turn_index = 0  # the grappled target's own turn
+        flee_sink = []
+        await bot._do_flee(FakeUpdate(-800900, "I flee", flee_sink, chat_id=-999), "I flee")
+        self.assertTrue(any("can't flee until you break free" in s for s in flee_sink))
+        sessions.end_session(-999)
+
+    async def test_escape_grapple_success_frees_the_target_and_allows_fleeing_again(self):
+        """End-to-end: a winning escape contest clears the real 'grappled' condition, and fleeing works normally again afterward."""
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        grappler_id = 950901
+        target_id = 950902
+        make_basic_character(grappler_id, "Grappler", current_location="crossroads_tavern")
+        make_basic_character(
+            target_id, "EscapingTarget", current_location="crossroads_tavern",
+            ability_scores={"strength": 8, "dexterity": 18, "constitution": 12,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+        )
+        db.update_character(target_id, -999, hp_current=100, hp_max=100, level=5)
+        grappler = db.get_character(grappler_id, -999)
+        grappler["telegram_user_id"] = grappler_id
+        target = db.get_character(target_id, -999)
+        target["telegram_user_id"] = target_id
+        target["conditions"] = ["grappled"]
+        target["grappled_by"] = grappler_id
+        enemy = {"telegram_user_id": -800901, "name": "Bystander", "dexterity": 10, "strength": 10, "hp_current": 10, "hp_max": 10, "is_ai": 1}
+        session = sessions.start_session(-999, [grappler, target, enemy], {grappler_id: "party", target_id: "party", -800901: "enemy"})
+        session.turn_order = [target_id, grappler_id, -800901]
+        session.current_turn_index = 0
+
+        sink = []
+        with patch("bot.roll_d20", return_value=1), \
+             patch("bot.narrate_skill_check", return_value="A desperate wriggle."):  # the grappler's own contest roll -- guarantees the escape succeeds
+            await bot._do_escape_grapple(FakeUpdate(target_id, "I break free", sink, chat_id=-999), "I break free", forced_roll=20)
+        combined = "\n".join(sink)
+        self.assertIn("breaks free", combined)
+        live_target = next(p for p in session.participants if p["telegram_user_id"] == target_id)
+        self.assertNotIn("grappled", live_target.get("conditions", []))
+        self.assertIsNone(live_target.get("grappled_by"))
+
+        # Fleeing works normally again now that the grapple is broken.
+        session.current_turn_index = 0
+        flee_sink = []
+        with patch("bot.roll_d20", return_value=20), patch("rules.dice.roll_d20", return_value=20), \
+             patch("bot.narrate_skill_check", return_value="A clean escape."):
+            await bot._do_flee(FakeUpdate(target_id, "I flee", flee_sink, chat_id=-999), "I flee", forced_roll=20)
+        self.assertFalse(any("can't flee until you break free" in s for s in flee_sink))
+        sessions.end_session(-999)
+
+    async def test_grapple_releases_automatically_when_the_grappler_is_defeated(self):
+        """A grapple can't outlast the grappler -- defeating them (remove_defeated) must free anyone they were holding."""
+        import sessions
+        sessions.end_session(-999)
+        user_id = 950903
+        make_basic_character(user_id, "SurvivingTarget", current_location="crossroads_tavern")
+        target = db.get_character(user_id, -999)
+        target["telegram_user_id"] = user_id
+        target["conditions"] = ["grappled"]
+        target["grappled_by"] = -800902
+        grappler = {"telegram_user_id": -800902, "name": "Defeated Grappler", "dexterity": 10, "strength": 10, "hp_current": 0, "hp_max": 20, "is_ai": 1}
+        session = sessions.start_session(-999, [target, grappler], {user_id: "party", -800902: "enemy"})
+        session.turn_order = [user_id, -800902]
+
+        removed = session.remove_defeated()
+        self.assertEqual(len(removed), 1)
+        live_target = next(p for p in session.participants if p["telegram_user_id"] == user_id)
+        self.assertNotIn("grappled", live_target.get("conditions", []))
+        self.assertIsNone(live_target.get("grappled_by"))
+        sessions.end_session(-999)
+
+    async def test_escape_grapple_rejected_when_not_actually_grappled(self):
+        user_id = 950904
+        make_basic_character(user_id, "NotGrappled", current_location="crossroads_tavern")
+        target = db.get_character(user_id, -999)
+        target["telegram_user_id"] = user_id
+        enemy = {"telegram_user_id": -800903, "name": "Idle Enemy", "dexterity": 10, "strength": 10, "hp_current": 10, "hp_max": 10, "is_ai": 1}
+        import sessions
+        sessions.end_session(-999)
+        session = sessions.start_session(-999, [target, enemy], {user_id: "party", -800903: "enemy"})
+        session.turn_order = [user_id, -800903]
+        sink = []
+        await bot._do_escape_grapple(FakeUpdate(user_id, "I break free", sink, chat_id=-999), "I break free")
+        self.assertTrue(any("not currently grappled" in s for s in sink))
+        sessions.end_session(-999)
+
 
 class SlowLiveTests(unittest.IsolatedAsyncioTestCase):
     """

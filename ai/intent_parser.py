@@ -112,6 +112,9 @@ Set "ability" to whichever of the 6 abilities best fits the action (dexterity fo
 for lifting/breaking, intelligence for recalling lore, wisdom for perceiving/insight, charisma for \
 persuading/deceiving, constitution for enduring/resisting).
 - "shove" is specifically for trying to knock an enemy down/prone (shoving, tackling, tripping).
+- "grapple" is specifically for trying to grab/seize/hold/restrain an enemy so they can't get away — distinct \
+from "shove" (which knocks prone, not restrains). Set "target" to the enemy, if named.
+- "escape_grapple" is for a currently-grappled character trying to break free, wriggle loose, or escape a grapple.
 - "show_map" is for asking to see the map or where they've explored.
 - "gather" is for foraging, harvesting, mining, or collecting raw materials (herbs, ore, flowers) from the \
 environment — NOT picking a lock (that's skill_check).
@@ -2758,6 +2761,18 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in unconditional_shove_words) or knock_down_phrasing:
         return {**base, "action": "shove"}
 
+    # Real 5E core action, previously entirely missing from this engine
+    # (2026-09-27, feature-wishlist audit) -- a real grapple, distinct
+    # from shove (restrains, doesn't knock prone). Checked for the
+    # ESCAPING side first ("break free"/"escape" while already
+    # grappled) since "escape the grapple" would otherwise also match
+    # the grapple-initiation words below ("grab"/"hold"/"grapple").
+    if any(w in lowered for w in ["break free", "escape the grapple", "escape grapple",
+                                    "wriggle free", "wriggle loose", "struggle free", "shake off the grapple"]):
+        return {**base, "action": "escape_grapple"}
+    if any(w in lowered for w in ["grapple", "grab hold of", "seize", "restrain", "wrestle", "pin down", "hold them down"]):
+        return {**base, "action": "grapple"}
+
     if any(w in lowered for w in ["show me the map", "the map", "where have i explored", "where have i been",
                                     "my map", "show map"]):
         return {**base, "action": "show_map"}
@@ -3012,7 +3027,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "check_sheet", "check_inventory", "check_party", "talk_npc", "move", "look",
                 "buy", "sell", "steal", "cast_spell", "join_guild", "leave_guild",
                 "summon_remnant", "recruit_npc", "rest",
-                "go_inactive", "skill_check", "shove", "show_map", "gather", "craft",
+                "go_inactive", "skill_check", "shove", "grapple", "escape_grapple", "show_map", "gather", "craft",
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",

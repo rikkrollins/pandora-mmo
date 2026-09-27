@@ -2,6 +2,40 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.711] — feature: real Grapple / Escape Grapple, a genuine 5E core action that was entirely missing
+
+Direct audit of `FEATURE_WISHLIST.md` (Coffee's pasted 5E-reference
+backlog, "some of it is already built, some is a real gap worth
+picking up") — a repo-wide grep found no "grapple" and no "restrained"
+condition anywhere in the codebase, despite it being a real 5E core
+action and a close sibling to the already-real Shove.
+
+Built as a faithful sibling to `_do_shove`'s own contested-check shape,
+distinct from it: Shove knocks a target prone; Grapple restrains them
+instead. A successful grapple (Athletics vs. the target's best of
+Str/Dex) applies a new "grappled" condition and records who's holding
+them. This engine has no positioning/movement system to hook 5E's
+literal "speed becomes 0" onto, so the one real, meaningful mechanical
+effect adapted for this game is the one that actually matters here:
+**a grappled character cannot flee combat until they break free.**
+Breaking free is now its own real action (`_do_escape_grapple`) — a
+contested check, escaper's best of Athletics/Acrobatics vs. the
+grappler's Athletics — and a grapple can never outlast the grappler
+themselves: defeat, death, or fleeing on the grappler's side now
+auto-releases anyone they were holding (`Session._release_grapples_
+held_by`), so nobody is ever left stuck with no one left to contest.
+
+Full physical-dice-mode support mirrored from Shove/Flee's own pending-
+roll pattern. New "🤼" condition emoji. New `grapple`/`escape_grapple`
+intent classification, allowlisted the same way every other real game
+action is (per this project's AI-output security boundary — model
+output only ever earns a spot in the fixed `valid_actions` allowlist,
+never a new unchecked action path).
+
+5 new regression tests (classification, a real grapple blocking a real
+flee attempt, a real escape re-enabling it, auto-release on the
+grappler's defeat, and rejecting escape when not actually grappled).
+
 ## [1.27.710] — fix: "Answer is X" (no leading "The") silently fell through to chat
 
 Found in the same investigation as v1.27.709, via the same topic-

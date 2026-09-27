@@ -327,8 +327,23 @@ class Session:
             for r in removed:
                 if _USER_SESSION.get(r["telegram_user_id"]) == self.session_id:
                     _USER_SESSION.pop(r["telegram_user_id"], None)
+                self._release_grapples_held_by(r["telegram_user_id"])
 
         return removed
+
+    def _release_grapples_held_by(self, telegram_user_id: int) -> None:
+        """
+        Real 5E grapple (feature-wishlist audit, 2026-09-27): a grapple
+        can't outlast the grappler themselves. Called whenever a
+        participant leaves this fight (defeated, dead, or fled) so
+        anyone they were holding is never stuck permanently grappled
+        with no one left to contest an escape against.
+        """
+        for p in self.participants:
+            if p.get("grappled_by") == telegram_user_id:
+                if "grappled" in (p.get("conditions") or []):
+                    p["conditions"].remove("grappled")
+                p.pop("grappled_by", None)
 
     def remove_dead_player(self, telegram_user_id: int) -> None:
         """
@@ -355,6 +370,7 @@ class Session:
         self.turn_order.remove(telegram_user_id)
         if _USER_SESSION.get(telegram_user_id) == self.session_id:
             _USER_SESSION.pop(telegram_user_id, None)
+        self._release_grapples_held_by(telegram_user_id)
         if not self.turn_order:
             self.current_turn_index = 0
         elif current_id in self.turn_order:
