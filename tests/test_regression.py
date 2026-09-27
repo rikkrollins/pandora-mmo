@@ -15319,6 +15319,60 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._ai_party_act_one_turn(None, actor)
         mock_choose.assert_called_once()
 
+    async def test_ai_party_tick_skips_a_chat_when_no_real_player_has_been_active_recently(self):
+        """
+        Real load-reduction request (2026-09-27, Coffee: "anything we
+        can do to reduce the AI load would be awesome, would #1 affect
+        the game at all?"): a companion's own autonomous turn used to
+        fire every AI_PARTY_TICK_INTERVAL_SECONDS forever, even in a
+        chat nobody real has touched in hours -- real, wasted Ollama
+        load with no one there to see it. _ai_party_autonomous_tick now
+        skips a chat entirely once nobody real has acted there in the
+        last WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS. Confirms: (1) a
+        chat with no real character at all is skipped, (2) a chat whose
+        one real player went quiet past the threshold is skipped, and
+        (3) an actual, recently-active play session is completely
+        unaffected -- the companion still gets its normal turn.
+        """
+        import sessions
+        from datetime import datetime, timezone, timedelta
+        sessions.end_session(-998)
+        bot._LAST_AI_PARTY_TICK_AT = None
+        db.set_setting("ai_party_enabled", "1")  # AI_PARTY_ENABLED's own seed default is off
+
+        from unittest.mock import patch, MagicMock
+        mock_act = MagicMock()
+
+        async def fake_act(*args, **kwargs):
+            mock_act(*args, **kwargs)
+
+        # Case 1: no real character has ever played in this chat at all.
+        with patch("bot.db.get_all_chat_ids", return_value=[-998]), \
+             patch("bot._ai_party_act_one_turn", side_effect=fake_act):
+            await bot._ai_party_autonomous_tick(None)
+        mock_act.assert_not_called()
+
+        # Case 2: a real player exists but went quiet well past the threshold.
+        make_basic_character(950977, "IdleRealPlayer", chat_id=-998)
+        stale = (datetime.now(timezone.utc) - timedelta(seconds=bot.WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS + 60)).isoformat()
+        db.update_character(950977, -998, last_active_at=stale)
+        bot._LAST_AI_PARTY_TICK_AT = None
+        mock_act.reset_mock()
+        with patch("bot.db.get_all_chat_ids", return_value=[-998]), \
+             patch("bot._ai_party_act_one_turn", side_effect=fake_act):
+            await bot._ai_party_autonomous_tick(None)
+        mock_act.assert_not_called()
+
+        # Case 3: a real player was active moments ago -- normal play, unaffected.
+        db.update_character(950977, -998, last_active_at=datetime.now(timezone.utc).isoformat())
+        bot._LAST_AI_PARTY_TICK_AT = None
+        mock_act.reset_mock()
+        with patch("bot.db.get_all_chat_ids", return_value=[-998]), \
+             patch("bot._ai_party_act_one_turn", side_effect=fake_act):
+            await bot._ai_party_autonomous_tick(None)
+        mock_act.assert_called_once()
+        sessions.end_session(-998)
+
     def test_ollama_health_recently_congested_reflects_a_real_recorded_timeout(self):
         """
         Real live gap found 2026-09-24 (Coffee: "we arent playing the

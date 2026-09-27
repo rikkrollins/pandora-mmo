@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.712] — reduce background Ollama load during genuinely dead chats
+
+Per Coffee: "anything we can do to reduce the AI load would be
+awesome." An AI companion's own autonomous turn (a real Ollama
+decision call) previously fired every ~15 minutes forever, in every
+chat, regardless of whether any real player had been around recently
+— real, spent inference capacity with nobody there to see it happen.
+
+Fix: `_ai_party_autonomous_tick` now skips a chat's companion turn
+entirely once no real player has acted there in the last 20 minutes
+(the same "genuinely nobody's here" bar `_maybe_post_world_heartbeat`
+already uses), resuming immediately once real activity brings the
+chat back under that threshold. An actual play session is completely
+unaffected — this only trims traffic during real dead stretches
+(overnight, everyone offline), where the "world kept living while you
+were away" illusion is realized on return anyway, not in the unwatched
+moment itself. The other ambient Ollama calls (world heartbeat, hourly
+status update) were already this tightly bounded and didn't need
+changing; Moltbook's own social presence is bot-wide, not tied to any
+one chat's idle state, and was left alone.
+
+3 new regression tests; 7 adjacent AI-party/congestion tests re-run
+with no regressions.
+
 ## [1.27.711] — feature: real Grapple / Escape Grapple, a genuine 5E core action that was entirely missing
 
 Direct audit of `FEATURE_WISHLIST.md` (Coffee's pasted 5E-reference

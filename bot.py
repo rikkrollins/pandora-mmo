@@ -1885,6 +1885,27 @@ def _ollama_congested() -> bool:
         return False
 
 
+def _chat_real_player_idle_seconds(chat_id: int) -> float | None:
+    """
+    Seconds since any real (non-AI) character last acted in this chat,
+    or None if no real character has ever played here. Same "how long
+    has everyone actually been quiet" signal _maybe_post_world_heartbeat
+    below already computes inline for its own idle-gating -- factored
+    out so a second real caller (_ai_party_autonomous_tick's own load-
+    reduction check, 2026-09-27 per Coffee: "anything we can do to
+    reduce the AI load would be awesome") can reuse the same query
+    instead of duplicating it.
+    """
+    with db.get_connection() as conn:
+        row = conn.execute(
+            "SELECT MAX(last_active_at) AS m FROM characters WHERE is_ai = 0 AND is_deleted = 0 AND chat_id = ?",
+            (chat_id,),
+        ).fetchone()
+    if not row or not row["m"]:
+        return None
+    return (datetime.now(timezone.utc) - datetime.fromisoformat(row["m"])).total_seconds()
+
+
 async def _maybe_post_world_heartbeat(bot, chat_id: int) -> None:
     """
     "The world keeps living while everyone's away" — if real players
@@ -43607,6 +43628,25 @@ async def _ai_party_autonomous_tick(bot) -> None:
         _ensure_ai_party_exists(chat_id)
         roster = [c for c in db.get_ai_controlled_characters() if c["chat_id"] == chat_id]
         if not roster:
+            continue
+
+        # Real load-reduction request (2026-09-27, Coffee: "anything we
+        # can do to reduce the AI load would be awesome"): a companion's
+        # own autonomous turn is a real Ollama call every single tick,
+        # forever, even in a chat nobody real has touched in hours --
+        # nobody's there to see it happen in the moment, and the "world
+        # kept living while you were away" illusion this game deliberately
+        # goes for (see CLAUDE.md) is only ever realized on RETURN anyway
+        # (that's exactly what _maybe_post_world_heartbeat, above, already
+        # exists for). Skip this chat's companion turn entirely once
+        # nobody real has acted here in the last WORLD_HEARTBEAT_IDLE_
+        # THRESHOLD_SECONDS -- reusing that same "genuinely nobody's here"
+        # bar rather than inventing a second one -- and resume normally
+        # the instant a real player's own activity brings the chat back
+        # under that threshold, so an actual play session is never
+        # affected by this at all.
+        idle_seconds = _chat_real_player_idle_seconds(chat_id)
+        if idle_seconds is None or idle_seconds >= WORLD_HEARTBEAT_IDLE_THRESHOLD_SECONDS:
             continue
 
         # Whoever's acted least recently goes next — a simple, fair rotation.
