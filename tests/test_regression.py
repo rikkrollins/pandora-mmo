@@ -42103,6 +42103,103 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_forge_guild_artificer_and_forgemaster_tiers_are_real_and_ordered(self):
+        """
+        Forge Guild 1-100 curriculum plan, Batch 3 (2026-09-30): the
+        Artificer + Legendary Forgemaster tiers (forge_12-forge_17)
+        extend Batch 2's 11 steps to 17, capped at min_level 95 (not a
+        literal 100 -- rules.leveling.MAX_LEVEL is really 99, so a
+        level-100 gate could never actually be satisfied). Every real
+        name used confirmed against campaign data before use.
+        """
+        import guild_curriculum as gc
+        import rules.leveling as leveling
+        curriculum = gc.get_curriculum("forge_guild")
+        self.assertEqual(len(curriculum), 17)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(
+            ids[11:],
+            [
+                "forge_12_what_an_artificer_sees", "forge_13_the_ember_hall_again", "forge_14_a_legends_real_weight",
+                "forge_15_the_forgemasters_nerve", "forge_16_teach_the_apprentice", "forge_17_the_final_forge",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+        self.assertLessEqual(curriculum[-1]["min_level"], leveling.MAX_LEVEL, "the capstone must be reachable under the real level cap")
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("wrathflame_vault_ember_hall", campaign["locations"]["underground"])
+        import items as items_module
+        self.assertIn("glimmerdeep_moss", items_module.ITEMS)
+
+    async def test_forge_guild_artificer_tier_credits_via_real_checkpoints(self):
+        """End-to-end: walks forge_12 through forge_16 (indices 11-15) via the same real checkpoints used everywhere else in this curriculum."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951022
+        make_basic_character(user_id, "ArtificerTester", char_class="Fighter", current_location="market_row")
+        db.update_character(user_id, -999, guild="forge_guild", level=95, guild_curriculum_step=11)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            npc_id = bot._find_npc_id_by_name("Borin Ironjaw")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Borin about legend", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Borin about legend",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 12, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="wrathflame_vault_ember_hall",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 13, sink)
+
+            db.add_item(user_id, -999, "glimmerdeep_moss", 5)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="glimmerdeep_moss",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 14, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["forge_guild"]),
+                    DummyContext(), "forge_guild",
+                )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 15, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Borin about teach apprentice", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Borin about teach apprentice",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 16, sink)
+
+    async def test_forge_guild_final_forge_alignment_choice_completes_the_whole_curriculum(self):
+        """The Level 95 capstone (forge_17) resolves correctly and, once credited, the whole 17-step curriculum reads as genuinely complete."""
+        import guild_curriculum as gc
+        user_id = 951023
+        make_basic_character(user_id, "FinalForgeTester", char_class="Fighter")
+        db.update_character(user_id, -999, guild="forge_guild", level=95, guild_curriculum_step=16)
+
+        sink = []
+        await bot.guild_curriculum_callback(
+            FakeCallbackUpdate(user_id, "gcurr|forge_guild|16|forge_a_legend", sink), DummyContext(),
+        )
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 17)
+        self.assertTrue(gc.is_curriculum_complete("forge_guild", char["guild_curriculum_step"]))
+
     def test_forge_guild_master_smith_tier_steps_are_real_and_ordered(self):
         """
         Forge Guild 1-100 curriculum plan, Batch 2 (2026-09-30): the
@@ -42114,11 +42211,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         """
         import guild_curriculum as gc
         curriculum = gc.get_curriculum("forge_guild")
-        self.assertEqual(len(curriculum), 11)
+        self.assertGreaterEqual(len(curriculum), 11)  # Batch 3+ extends this further; never shrinks
         ids = [s["id"] for s in curriculum]
         self.assertEqual(ids[:4], ["forge_1_first_ore", "forge_2_borins_word", "forge_3_proving_the_steel", "forge_4_temper_the_steel"])
         self.assertEqual(
-            ids[4:],
+            ids[4:11],
             [
                 "forge_5_the_deep_forge", "forge_6_borins_real_measure", "forge_7_the_ember_halls_stockpile",
                 "forge_8_the_champions_test", "forge_9_nerve_under_heat", "forge_10_the_wrathflame_trial",
@@ -42218,7 +42315,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(char["alignment_good_evil"], good_evil_before + 15)
         self.assertEqual(char["alignment_law_chaos"], law_chaos_before)
         import guild_curriculum as gc
-        self.assertTrue(gc.is_curriculum_complete("forge_guild", char["guild_curriculum_step"]))
+        self.assertFalse(
+            gc.is_curriculum_complete("forge_guild", char["guild_curriculum_step"]),
+            "forge_11 is the Master Smith tier's own capstone, not the whole curriculum's -- Batch 3 extends past it",
+        )
 
     async def test_forge_guild_final_curriculum_step_grants_the_forge_tome(self):
         """

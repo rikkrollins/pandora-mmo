@@ -586,6 +586,124 @@ GUILD_CURRICULUM = {
             "reward_mastery_profession": "blacksmithing",
             "reward_mastery_pct": 5.0,
         },
+        # Artificer + Legendary Forgemaster tiers (2026-09-30, Forge
+        # Guild 1-100 curriculum plan, Batch 3). MAX_LEVEL is really 99
+        # (rules/leveling.py), so the capstone sits at 95, not a literal
+        # 100 that could never actually be reached. Real trigger
+        # vocabulary only, same as every tier before this -- no new
+        # mechanics wired in this batch. defeat_monster is deliberately
+        # NOT used again here: guild_curriculum's own checkpoint only
+        # credits a FRESH kill after a step is already active, and this
+        # game's true late-game story bosses are one-time climax fights,
+        # not guaranteed-repeatable ones the way colosseum_champion/the_
+        # wrathflame_unbound (both used in the Master Smith tier above)
+        # genuinely are -- reach_location/npc_dialogue/gather_material/
+        # dice_challenge/alignment_choice stay safely repeatable at any
+        # level a player happens to reach this tier.
+        {
+            "id": "forge_12_what_an_artificer_sees",
+            "title": "What an Artificer Sees",
+            "flavor": (
+                "A blade is easy. An artifact remembers what it was made from. Ask Borin, plainly, what "
+                "separates the two."
+            ),
+            "min_level": 45,
+            "trigger": {"type": "npc_dialogue", "npc": "borin_ironjaw", "keywords": ["artifact", "legend"]},
+            "reward_xp": 220,
+            "reward_gold": 90,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 4.0,
+        },
+        {
+            "id": "forge_13_the_ember_hall_again",
+            "title": "The Ember Hall, Again",
+            "flavor": (
+                "You walked past the Ember Hall's real work as an apprentice without understanding half of "
+                "what you saw there. Go back and actually look this time."
+            ),
+            "min_level": 55,
+            "trigger": {"type": "reach_location", "location": "wrathflame_vault_ember_hall"},
+            "reward_xp": 240,
+            "reward_gold": 100,
+        },
+        {
+            "id": "forge_14_a_legends_real_weight",
+            "title": "A Legend's Real Weight",
+            "flavor": (
+                "Genuine legendary material doesn't announce itself. Gather glimmerdeep moss in real "
+                "quantity, the same patient way every Artificer before you actually had to."
+            ),
+            "min_level": 65,
+            "trigger": {"type": "gather_material", "material": "glimmerdeep_moss", "count": 5},
+            "reward_xp": 260,
+            "reward_gold": 110,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 5.0,
+        },
+        {
+            "id": "forge_15_the_forgemasters_nerve",
+            "title": "The Forgemaster's Nerve",
+            "flavor": (
+                "Every real Forgemaster's hands shake exactly once — the first time they realize a mistake "
+                "here can't be undone. Say \"try my luck\" and prove yours don't, not anymore."
+            ),
+            "min_level": 78,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 280,
+            "reward_gold": 120,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 5.0,
+        },
+        {
+            "id": "forge_16_teach_the_apprentice",
+            "title": "Teach the Apprentice",
+            "flavor": (
+                "The Guild's last real lesson is always the same one: you don't actually know a craft until "
+                "you've had to explain it to someone who doesn't. Ask Borin what he wishes someone had told him."
+            ),
+            "min_level": 88,
+            "trigger": {"type": "npc_dialogue", "npc": "borin_ironjaw", "keywords": ["teach", "apprentice"]},
+            "reward_xp": 300,
+            "reward_gold": 130,
+        },
+        {
+            "id": "forge_17_the_final_forge",
+            "title": "The Final Forge",
+            "flavor": (
+                "There's no recipe left to hand you. Whatever you make here — worthy of being remembered, or "
+                "worth more sold quietly and never spoken of again — is entirely your own decision now."
+            ),
+            "min_level": 95,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "The Guild steps back and offers nothing but the forge itself. No recipe, no material "
+                    "list, no grading. What you walk away with is whatever you actually decide to make."
+                ),
+                "choices": {
+                    "forge_a_legend": {
+                        "label": "forge something meant to be remembered",
+                        "reward_xp": 400,
+                        "reward_gold": 100,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "You put everything you actually know into one real piece, with no buyer in mind at all — just to see if you still could.",
+                    },
+                    "forge_for_coin": {
+                        "label": "forge whatever will sell fastest, quietly",
+                        "reward_xp": 400,
+                        "reward_gold": 400,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": -10,
+                        "outcome": "You make something forgettable and sell it before the ink on the receipt dries. It's still real, honest work — it just isn't the work you're capable of.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 5.0,
+        },
     ],
     "enchanters_guild": [
         {

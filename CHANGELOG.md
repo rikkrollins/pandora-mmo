@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.718] — Forge Guild curriculum, Batch 3: Artificer + Legendary Forgemaster (levels 45-95), Forge Guild now complete 1-95
+
+Third and final Forge Guild batch — the curriculum now runs the real
+full distance, 17 steps from level 5 to 95 (95, not a literal 100:
+`rules/leveling.py`'s real `MAX_LEVEL` is 99, so the capstone is
+calibrated to a level that's actually reachable). Adds the Artificer
+and Legendary Forgemaster tiers: What an Artificer Sees, The Ember
+Hall Again, A Legend's Real Weight, The Forgemaster's Nerve, Teach the
+Apprentice, and The Final Forge — a real, no-recipe alignment choice
+capstone about what kind of legend to leave behind.
+
+Every name used is real and confirmed against campaign data
+beforehand. Deliberately avoids `defeat_monster` triggers in this
+batch (unlike the Master Smith tier's Colosseum Champion/Wrathflame
+Unbound fights) — this game's true late-game story bosses are one-time
+climax fights, not guaranteed-repeatable ones, so the higher tiers
+stay on `reach_location`/`npc_dialogue`/`gather_material`/
+`dice_challenge`/`alignment_choice` instead.
+
+3 new tests; 6 adjacent Forge/Enchanters' Guild curriculum tests
+re-run — 2 needed real updates (their own assertions assumed forge_11
+was the curriculum's final step, which Batch 3 correctly extends past;
+fixed to assert the actual current behavior, not a stale one).
+
+Forge Guild's 1-100 curriculum is now complete. Enchanters' Guild's
+own 1-100 curriculum (Batches 4-5) is next.
+
 ## [1.27.717] — Forge Guild 1-100 curriculum, Batch 2: Master Smith tier (levels 10-38)
 
 Second batch of the planned Forge Guild + Enchanters' Guild 1-100
