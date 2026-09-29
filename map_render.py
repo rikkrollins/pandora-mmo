@@ -178,6 +178,34 @@ def _labyrinth_room_image_prompt(room: dict) -> str:
     )
 
 
+def _fetch_image_with_retry(url: str, attempts: int = 2) -> Image.Image | None:
+    """
+    Real live report (2026-09-28, Coffee, dev-bridge screenshot: two
+    Labyrinth map cells rendered as a flat gray/purple block instead of
+    their generated room art -- "make sure that it generated an image
+    for anything that is a gray block"). Root cause: both tile-fetch
+    functions below made exactly one requests.get attempt and silently
+    gave up on ANY failure (timeout, transient network hiccup, a cold
+    Pollinations request that just needed a moment longer) -- already
+    self-healing on the NEXT map render since a failed fetch is never
+    cached (see _fetch_labyrinth_room_tile's own docstring), but that
+    still means "reopen the map and hope," not a real guarantee for the
+    render the player is looking at right now. One retry, same 60s
+    timeout each attempt, catches exactly the transient case this was
+    reported for without turning a single map render into an unbounded
+    retry loop.
+    """
+    for attempt in range(attempts):
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+            return Image.open(io.BytesIO(resp.content)).convert("RGB")
+        except Exception:
+            if attempt == attempts - 1:
+                return None
+    return None
+
+
 def _fetch_labyrinth_room_tile(room: dict) -> Image.Image | None:
     """
     Real per-room-CONCEPT art for the Labyrinth's own map (2026-09-04,
@@ -212,11 +240,8 @@ def _fetch_labyrinth_room_tile(room: dict) -> Image.Image | None:
     url = images_module.generate_image_url(
         _labyrinth_room_image_prompt(room), width=CELL_SIZE, height=CELL_SIZE, seed=seed,
     )
-    try:
-        resp = requests.get(url, timeout=60)
-        resp.raise_for_status()
-        tile = Image.open(io.BytesIO(resp.content)).convert("RGB")
-    except Exception:
+    tile = _fetch_image_with_retry(url)
+    if tile is None:
         return None
     try:
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
@@ -247,17 +272,14 @@ def _fetch_location_tile(layer_name: str, loc_id: str, location: dict) -> Image.
     url = images_module.generate_image_url(
         _location_image_prompt(location), width=CELL_SIZE, height=CELL_SIZE, seed=_location_image_seed(loc_id),
     )
-    try:
-        # 60s, matching bot.py's _send_generated_image's own proven
-        # pre-warm timeout for this exact service -- a genuinely cold
-        # (first-ever-requested) Pollinations image can take a while to
-        # finish generating server-side; a shorter timeout here would
-        # abort before it ever finishes, the same real failure mode
-        # already solved once in bot.py.
-        resp = requests.get(url, timeout=60)
-        resp.raise_for_status()
-        tile = Image.open(io.BytesIO(resp.content)).convert("RGB")
-    except Exception:
+    # 60s per attempt, matching bot.py's _send_generated_image's own
+    # proven pre-warm timeout for this exact service -- a genuinely cold
+    # (first-ever-requested) Pollinations image can take a while to
+    # finish generating server-side; a shorter timeout here would abort
+    # before it ever finishes, the same real failure mode already solved
+    # once in bot.py.
+    tile = _fetch_image_with_retry(url)
+    if tile is None:
         return None
     try:
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)

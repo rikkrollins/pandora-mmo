@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.713] — fix: Labyrinth/overworld map cells occasionally rendering as flat gray blocks
+
+Real dev-bridge report (2026-09-28, Coffee, screenshot): two cells on
+a Labyrinth floor map showed a flat gray/purple block instead of their
+generated room art. Root cause: both map-tile fetch functions
+(`_fetch_labyrinth_room_tile`, `_fetch_location_tile` in
+`map_render.py`) made exactly one request to the image service and
+silently gave up on any failure — a transient timeout or a cold
+generation that just needed a moment longer produced a permanent-
+looking blank cell for that render (though not truly permanent:
+failed fetches were never cached, so the next map view would retry
+fresh). Both now share one retry (2 attempts total, same 60s timeout
+each) before giving up, closing the gap between "usually fine" and
+"reliably fine" for the render the player is actually looking at.
+
+1 new test (a mocked first-attempt failure recovered by the retry, and
+confirmation total failure still degrades cleanly to `None`); 8
+adjacent map-render tests re-run with no regressions.
+
+Also logged `GUILD_CURRICULUM_RESEARCH.md` — a detailed Forge Guild /
+Enchanters' Guild level 20-100 curriculum design Coffee shared "for
+research and future implementation," not a build for this cycle.
+
 ## [1.27.712] — reduce background Ollama load during genuinely dead chats
 
 Per Coffee: "anything we can do to reduce the AI load would be

@@ -39088,6 +39088,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("market_row", visited_here)
         self.assertNotIn("market_row", revealed_here)
 
+    def test_fetch_image_with_retry_recovers_from_one_transient_failure(self):
+        """
+        Real live report (2026-09-28, Coffee, dev-bridge screenshot):
+        two Labyrinth map cells rendered as a flat gray block instead of
+        their generated room art. Root cause was a single-attempt fetch
+        in both _fetch_labyrinth_room_tile and _fetch_location_tile that
+        gave up on ANY failure -- now shared through _fetch_image_with_
+        retry, which gets one retry before giving up. Confirms: (1) a
+        transient failure on the first attempt is recovered by the
+        second, and (2) a failure on every attempt still returns None
+        cleanly (no crash), matching the existing degrade-to-flat-cell
+        behavior.
+        """
+        import io
+        from unittest.mock import patch, MagicMock
+        import map_render
+        import requests as requests_module
+        from PIL import Image
+
+        real_png = io.BytesIO()
+        Image.new("RGB", (4, 4), color=(10, 20, 30)).save(real_png, format="PNG")
+        real_png_bytes = real_png.getvalue()
+
+        good_resp = MagicMock()
+        good_resp.raise_for_status = MagicMock()
+        good_resp.content = real_png_bytes
+
+        with patch("map_render.requests.get", side_effect=[requests_module.exceptions.Timeout("cold"), good_resp]):
+            tile = map_render._fetch_image_with_retry("https://example.invalid/img.png")
+        self.assertIsNotNone(tile)
+
+        with patch("map_render.requests.get", side_effect=requests_module.exceptions.Timeout("still cold")):
+            tile = map_render._fetch_image_with_retry("https://example.invalid/img.png")
+        self.assertIsNone(tile)
+
     def test_render_layer_map_produces_a_valid_png(self):
         """
         No network dependency in the regular suite (2026-08-20): a real
