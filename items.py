@@ -1227,6 +1227,18 @@ ITEMS = {
     # ladders.
     "godshard": {"name": "Godshard", "type": "material", "rarity": "mythic", "price": 0, "weight": 0.1, "description": "A splinter of something that was never meant to be small enough to hold. It doesn't feel like it belongs to this world's weight."},
 
+    # Exotic metals (2026-09-30, Forge Guild 1-100 curriculum plan, per
+    # Coffee: build what the guild-curriculum research matches real
+    # scope for). Real, gatherable materials feeding new, stronger
+    # enchant variants (see rules/crafting.py's ENCHANT_RECIPES) --
+    # existing base recipes are untouched, these are purely additive
+    # upgrades a Forge Guild curriculum step teaches how to source.
+    "embersteel": {"name": "Embersteel", "type": "material", "rarity": "rare", "price": 80, "weight": 3, "description": "Forged and cooled inside volcanic rock, still faintly warm no matter how long it sits."},
+    "frostsilver": {"name": "Frostsilver", "type": "material", "rarity": "rare", "price": 80, "weight": 3, "description": "Found beneath frozen ruins, cold enough to sting an ungloved hand."},
+    "umbral_iron": {"name": "Umbral Iron", "type": "material", "rarity": "rare", "price": 80, "weight": 3, "description": "Mined from places touched by real darkness. It seems to swallow torchlight rather than reflect it."},
+    "storm_bronze": {"name": "Storm Bronze", "type": "material", "rarity": "rare", "price": 80, "weight": 3, "description": "Formed only during real magical storms. It hums faintly when the air pressure changes."},
+    "sunsteel": {"name": "Sunsteel", "type": "material", "rarity": "rare", "price": 80, "weight": 3, "description": "Requires real solar exposure to forge properly. It stays warm to the touch long after the sun sets."},
+
     # --- Cooking (2026-07-15: raw_fish was gatherable but had zero
     # recipe using it -- a real cooking recipe below turns it, plus
     # wood for the fire, into an actually usable food item) ---

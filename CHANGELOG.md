@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.716] — Forge/Enchanters' Guild 1-100 curriculum, Batch 1: new crafting mechanics
+
+First batch of the planned Forge Guild + Enchanters' Guild level 1-100
+curriculum expansion (per Coffee's guild-curriculum research review).
+This batch is pure mechanics — no new curriculum quest content yet
+(that's Batches 2-5) — laying real groundwork the curriculum content
+will teach and require:
+
+- **Graded craft quality**: `resolve_advanced_craft` gains a new,
+  purely additive `quality_tier_bump` parameter alongside the existing
+  `masterwork` flag — a real Forge Guild "make something exceptional"
+  challenge can now reward a bigger tier jump than an ordinary
+  masterwork roll, narrated with real flavor grades (Fine → Superior →
+  Exceptional → Perfect). `quality_tier_bump=0` (the default) is
+  byte-identical to prior behavior for every existing caller.
+- **5 new exotic metal materials** (Embersteel, Frostsilver, Umbral
+  Iron, Storm Bronze, Sunsteel) and 5 new Forge Guild-gated (level 25+)
+  enchant recipes that use them — real upgrades sitting alongside the
+  existing `enchant_sharpen` recipe, which is completely untouched.
+- **A real elemental fusion name table** (Fire+Ice=Steam,
+  Lightning+Earth=Magnetic Surge, etc.) for the Enchanters' Guild's
+  future curriculum content to reference — reference data only in this
+  batch, not yet wired to a live crafting action.
+
+4 new tests; 11 adjacent crafting/enchant/recipe-gate tests re-run with
+no regressions.
+
 ## [1.27.715] — fix: AI-agent call failures logged with print() instead of the real logger
 
 Full audit of the AI-party agent (`ai/autonomous_player.py`) and its

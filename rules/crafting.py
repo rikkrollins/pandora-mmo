@@ -625,7 +625,25 @@ def next_tier_up(tier: str) -> str:
     return TIERS[min(idx + 1, len(TIERS) - 1)]
 
 
-def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int = 0, masterwork: bool = False) -> dict:
+# Real, named grades for a craft result that goes beyond the ordinary
+# masterwork bump (2026-09-30, Forge Guild 1-100 curriculum plan, per
+# Coffee: build what the guild-curriculum research matches real scope
+# for). Purely a narration label over `next_tier_up` applied N times --
+# no new field on the item itself, no change to existing masterwork
+# behavior (a plain masterwork=True craft with quality_tier_bump=0
+# still produces byte-identical results to before this was added).
+FORGE_QUALITY_GRADE_NAMES = {0: "Fine", 1: "Superior", 2: "Exceptional", 3: "Perfect"}
+
+
+def forge_quality_grade_name(total_tier_bump: int) -> str:
+    """The flavor name for a total tier bump (masterwork + quality_tier_bump combined), capped at the highest named grade."""
+    return FORGE_QUALITY_GRADE_NAMES[min(total_tier_bump, max(FORGE_QUALITY_GRADE_NAMES))]
+
+
+def resolve_advanced_craft(
+    character: dict, recipe_id: str, practiced_bonus: int = 0, masterwork: bool = False,
+    quality_tier_bump: int = 0,
+) -> dict:
     """
     Same shape/convention as resolve_craft above (materials only consumed
     on success, practiced_bonus added to the roll here in the rules
@@ -641,6 +659,15 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
     real tier higher than the recipe's own fixed tier via next_tier_up,
     so a highly practiced crafter's SAME recipe can meaningfully
     outclass a fresh one's.
+
+    `quality_tier_bump` (2026-09-30, Forge Guild 1-100 curriculum): an
+    ADDITIONAL real tier bump on top of masterwork's own +1, for a
+    caller that wants to reward an exceptional result beyond the
+    ordinary masterwork roll (e.g. a Forge Guild curriculum step's own
+    "forge something worthy of the Master's Hammer" challenge). Purely
+    additive -- 0 (the default) behaves identically to before this
+    parameter existed. See `forge_quality_grade_name` for the real
+    flavor name to narrate for the combined bump.
     """
     recipe = ADVANCED_RECIPES.get(recipe_id)
     if recipe is None:
@@ -660,9 +687,11 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
 
     generated_item = None
     result_tier = recipe["tier"]
+    total_tier_bump = 0
     if success:
-        if masterwork:
-            result_tier = next_tier_up(recipe["tier"])
+        total_tier_bump = (1 if masterwork else 0) + max(quality_tier_bump, 0)
+        for _ in range(total_tier_bump):
+            result_tier = next_tier_up(result_tier)
         generated_item = generate_item(
             item_type=recipe["item_type"], base_id=recipe.get("base_id"), tier=result_tier,
         )
@@ -676,6 +705,8 @@ def resolve_advanced_craft(character: dict, recipe_id: str, practiced_bonus: int
         "dc": recipe["dc"],
         "ability": recipe["ability"],
         "masterwork": masterwork if success else False,
+        "quality_tier_bump": total_tier_bump if success else 0,
+        "quality_grade": forge_quality_grade_name(total_tier_bump) if success else None,
     }
 
 
@@ -1015,7 +1046,77 @@ ENCHANT_RECIPES = {
         "ability": "strength", "dc": 18, "profession": "blacksmithing",
         "requires_guild": "forge_guild", "min_level": 20,
     },
+
+    # Exotic metal enchants (2026-09-30, Forge Guild 1-100 curriculum
+    # plan, per Coffee: build what the research matches real scope
+    # for). Same "elemental_damage_bonus" affix kind as enchant_sharpen
+    # above (a real, already-proven, damage-type-agnostic numeric
+    # bonus, handled by the existing _do_enchant_item path -- not the
+    # separate elemental-retype path enchant_flame/enchant_frost/etc.
+    # use), just a stronger value gated behind a real exotic material
+    # and the Forge Guild's own advanced tier, so it reads as a genuine
+    # upgrade a Master Smith learns rather than a straight replacement
+    # for the base recipe. Purely additive -- enchant_sharpen itself is
+    # completely untouched.
+    "enchant_embersteel_edge": {
+        "materials": {"embersteel": 1, "iron_ore": 2},
+        "affix": {"kind": "elemental_damage_bonus", "value": 25},
+        "applies_to": ("weapon",),
+        "ability": "strength", "dc": 18, "profession": "blacksmithing",
+        "requires_guild": "forge_guild", "min_level": 25,
+    },
+    "enchant_frostsilver_edge": {
+        "materials": {"frostsilver": 1, "iron_ore": 2},
+        "affix": {"kind": "elemental_damage_bonus", "value": 25},
+        "applies_to": ("weapon",),
+        "ability": "strength", "dc": 18, "profession": "blacksmithing",
+        "requires_guild": "forge_guild", "min_level": 25,
+    },
+    "enchant_umbral_iron_edge": {
+        "materials": {"umbral_iron": 1, "iron_ore": 2},
+        "affix": {"kind": "elemental_damage_bonus", "value": 25},
+        "applies_to": ("weapon",),
+        "ability": "strength", "dc": 18, "profession": "blacksmithing",
+        "requires_guild": "forge_guild", "min_level": 25,
+    },
+    "enchant_storm_bronze_edge": {
+        "materials": {"storm_bronze": 1, "iron_ore": 2},
+        "affix": {"kind": "elemental_damage_bonus", "value": 25},
+        "applies_to": ("weapon",),
+        "ability": "strength", "dc": 18, "profession": "blacksmithing",
+        "requires_guild": "forge_guild", "min_level": 25,
+    },
+    "enchant_sunsteel_edge": {
+        "materials": {"sunsteel": 1, "iron_ore": 2},
+        "affix": {"kind": "elemental_damage_bonus", "value": 25},
+        "applies_to": ("weapon",),
+        "ability": "strength", "dc": 18, "profession": "blacksmithing",
+        "requires_guild": "forge_guild", "min_level": 25,
+    },
 }
+
+
+# Elemental fusion names (2026-09-30, Enchanters' Guild 1-100
+# curriculum plan): a pure, real reference table naming what a
+# combination of two existing ENCHANT_RECIPES damage types represents,
+# per the research's own "Fire+Ice=Steam" framing. Data only -- no live
+# item mutation reads this yet (that lands with the actual Enchanters'
+# Guild curriculum content that teaches it, per the approved plan's
+# staged batches). Keyed by a sorted tuple so lookup order never
+# matters; only pairs the research explicitly named are included, never
+# invented combinations.
+ELEMENTAL_FUSION_NAMES = {
+    ("cold", "fire"): "Steam",
+    ("earth", "lightning"): "Magnetic Surge",
+    ("fire", "lightning"): "Wildfire",
+    ("lightning", "poison"): "Chain Conduction",
+    ("cold", "lightning"): "Stormfrost",
+}
+
+
+def elemental_fusion_name(damage_type_a: str, damage_type_b: str) -> str | None:
+    """The real named result of fusing two elemental damage types, or None if this exact pair isn't a recognized fusion."""
+    return ELEMENTAL_FUSION_NAMES.get(tuple(sorted((damage_type_a, damage_type_b))))
 
 
 def get_enchant_recipe(recipe_id: str) -> dict | None:

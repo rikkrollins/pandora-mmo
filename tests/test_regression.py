@@ -17967,6 +17967,76 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next_tier_up("rare"), "very_rare")
         self.assertEqual(next_tier_up("mythic"), "mythic")  # never overflows past the top tier
 
+    def test_quality_tier_bump_stacks_additively_on_top_of_masterwork(self):
+        """
+        Forge Guild 1-100 curriculum plan (2026-09-30): quality_tier_bump
+        is a NEW, purely additive parameter on resolve_advanced_craft --
+        0 (the default) must be byte-identical to pre-existing behavior,
+        and a real bump stacks on top of (not instead of) masterwork's
+        own +1, capped the same way next_tier_up already caps at mythic.
+        """
+        from rules.crafting import resolve_advanced_craft, next_tier_up, forge_quality_grade_name
+        character = make_basic_character(950932, "QualityTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(950932, -999, "iron_ore", 6)
+        db.add_item(950932, -999, "moonpetal", 1)
+        character = db.get_character(950932, -999)
+
+        # Default (0 bump, no masterwork) -- identical to today's plain result.
+        result = resolve_advanced_craft(character, "masterwork_longsword", practiced_bonus=50)
+        self.assertEqual(result["outcome"], "success")
+        self.assertEqual(result["generated_item"]["rarity"], "rare")
+        self.assertEqual(result["quality_tier_bump"], 0)
+        self.assertEqual(result["quality_grade"], "Fine")
+
+        db.add_item(950932, -999, "iron_ore", 6)
+        db.add_item(950932, -999, "moonpetal", 1)
+        character = db.get_character(950932, -999)
+        # masterwork (+1) plus a real +2 quality bump stacks to +3 total.
+        result = resolve_advanced_craft(character, "masterwork_longsword", practiced_bonus=50, masterwork=True, quality_tier_bump=2)
+        self.assertEqual(result["outcome"], "success")
+        expected_tier = next_tier_up(next_tier_up(next_tier_up("rare")))
+        self.assertEqual(result["generated_item"]["rarity"], expected_tier)
+        self.assertEqual(result["quality_tier_bump"], 3)
+        self.assertEqual(result["quality_grade"], "Perfect")
+        self.assertEqual(forge_quality_grade_name(1), "Superior")
+
+    def test_exotic_metal_enchant_recipes_are_real_and_guild_gated(self):
+        """
+        Forge Guild 1-100 curriculum plan: the 5 new exotic-metal enchant
+        recipes are real ENCHANT_RECIPES entries (auto-picked up by every
+        existing recipe-listing/name-matching site, no hardcoded list to
+        update), gated to the Forge Guild at level 25, and never mutate
+        or replace the pre-existing enchant_sharpen recipe they sit
+        alongside.
+        """
+        from rules.crafting import ENCHANT_RECIPES, recipe_requirement_gate
+        for recipe_id in (
+            "enchant_embersteel_edge", "enchant_frostsilver_edge", "enchant_umbral_iron_edge",
+            "enchant_storm_bronze_edge", "enchant_sunsteel_edge",
+        ):
+            recipe = ENCHANT_RECIPES.get(recipe_id)
+            self.assertIsNotNone(recipe, recipe_id)
+            self.assertEqual(recipe["requires_guild"], "forge_guild")
+            self.assertEqual(recipe["min_level"], 25)
+            self.assertEqual(recipe["affix"]["kind"], "elemental_damage_bonus")
+
+        self.assertEqual(ENCHANT_RECIPES["enchant_sharpen"]["affix"]["value"], 15)  # untouched by this change
+
+        character = make_basic_character(950933, "ExoticTester", char_class="Fighter", current_location="crossroads_tavern")
+        character = db.get_character(950933, -999)
+        character["level"] = 5  # below the real gate
+        rejection = recipe_requirement_gate(character, ENCHANT_RECIPES["enchant_embersteel_edge"])
+        self.assertIsNotNone(rejection)
+        self.assertIn("Forge Guild", rejection)
+
+    def test_elemental_fusion_name_returns_real_pairs_and_none_for_unlisted(self):
+        """Enchanters' Guild 1-100 curriculum plan: a pure reference lookup, order-independent, never invents a combination the research didn't actually name."""
+        from rules.crafting import elemental_fusion_name
+        self.assertEqual(elemental_fusion_name("fire", "cold"), "Steam")
+        self.assertEqual(elemental_fusion_name("cold", "fire"), "Steam")  # order-independent
+        self.assertEqual(elemental_fusion_name("lightning", "earth"), "Magnetic Surge")
+        self.assertIsNone(elemental_fusion_name("fire", "radiant"))  # not a real listed pair -- never guessed
+
     async def test_enchant_flame_requires_a_known_fire_spell(self):
         """
         Real feature (2026-08-11, per Coffee: "enchanters shud be able
