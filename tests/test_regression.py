@@ -42103,6 +42103,173 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_adventurers_guild_full_tier_ladder_is_real_and_ordered(self):
+        """
+        Remaining-5-guilds 1-99 curriculum plan (2026-09-29, per Coffee:
+        "plan the other guilds so they get full lv1-99 upgrades as well
+        ... be creative and make them unique"). Adventurers' Guild
+        extends its original 4 steps to 17, real Journeyman/Veteran/
+        Elite/Legendary tiers, capped under the real MAX_LEVEL (99).
+        Every name confirmed real against campaign/remnants data.
+        """
+        import guild_curriculum as gc
+        import rules.leveling as leveling
+        curriculum = gc.get_curriculum("adventurers_guild")
+        self.assertEqual(len(curriculum), 17)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(
+            ids[:4],
+            ["adv_1_the_lay_of_the_land", "adv_2_clear_the_roads", "adv_3_reading_the_odds", "adv_4_the_quiet_wrinkle"],
+        )
+        self.assertEqual(
+            ids[4:],
+            [
+                "adv_5_the_colosseum_itself", "adv_6_grimsbys_ledger", "adv_7_provisioning_for_the_road",
+                "adv_8_the_champions_floor", "adv_9_a_veterans_nerve", "adv_10_a_name_worth_knowing",
+                "adv_11_what_the_roots_remember", "adv_12_the_sympathetic_mark", "adv_13_the_downs_at_a_veterans_pace",
+                "adv_14_an_elites_real_reserves", "adv_15_the_deepest_record", "adv_16_an_elites_composure",
+                "adv_17_what_legends_are_actually_made_of",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+        self.assertLessEqual(curriculum[-1]["min_level"], leveling.MAX_LEVEL)
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("the_colosseum", campaign["locations"]["surface"])
+        self.assertIn("grimsby", campaign["npcs"])
+        self.assertIn("greymoor_downs", campaign["locations"]["surface"])
+        self.assertIn("the_root_that_remembers", campaign["monsters"])
+        self.assertIn("the_deepest_record", campaign["monsters"])
+        import remnants
+        self.assertIn("the_root_that_remembers", remnants.REMNANTS)
+        self.assertIn("the_deepest_record", remnants.REMNANTS)
+
+    async def test_adventurers_guild_full_tier_ladder_credits_via_real_checkpoints(self):
+        """End-to-end: walks adv_5 through adv_16 (indices 4-15) via the same real checkpoints used everywhere else in this curriculum."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951028
+        make_basic_character(user_id, "AdventurerLadderTester", char_class="Fighter", current_location="market_row")
+        db.update_character(user_id, -999, guild="adventurers_guild", level=92, guild_curriculum_step=4)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="the_colosseum",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 5, sink)
+
+            npc_id = bot._find_npc_id_by_name("Grimsby")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Grimsby about reputation", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Grimsby about reputation",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 6, sink)
+
+            db.add_item(user_id, -999, "iron_ore", 8)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="iron_ore",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 7, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"colosseum_champion"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 8, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+                    DummyContext(), "adventurers_guild",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 9, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Grimsby about my name", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Grimsby about my name",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 10, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"the_root_that_remembers"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 11, sink)
+
+            # adv_12 is the mid-ladder alignment_choice -- resolved separately below via guild_curriculum_callback.
+            db.update_character(user_id, -999, guild_curriculum_step=12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="greymoor_downs",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 13, sink)
+
+            db.add_item(user_id, -999, "silverleaf_herb", 10)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="silverleaf_herb",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 14, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"the_deepest_record"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 15, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["adventurers_guild"]),
+                    DummyContext(), "adventurers_guild",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 16, sink)
+
+    async def test_adventurers_guild_mid_and_final_alignment_choices_credit_correctly(self):
+        """
+        adv_12 (The Sympathetic Mark) and adv_17 (the real capstone)
+        both resolve correctly for either branch. Cooldown patched to 0
+        -- the FIRST callback's own _complete_guild_curriculum_step sets
+        a fresh guild_curriculum_step_unlocked_at, which would otherwise
+        block the SECOND callback's own real-time cooldown gate right
+        after this test manually jumps the step index forward.
+        """
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951029
+        make_basic_character(user_id, "AdventurerChoiceTester", char_class="Fighter")
+        db.update_character(user_id, -999, guild="adventurers_guild", level=92, guild_curriculum_step=11)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|adventurers_guild|11|let_them_go", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 12)
+
+            db.update_character(user_id, -999, guild_curriculum_step=16)
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|adventurers_guild|16|the_quiet_mercy", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 17)
+        self.assertTrue(gc.is_curriculum_complete("adventurers_guild", char["guild_curriculum_step"]))
+
     def test_enchanters_guild_arcane_master_grand_tiers_are_real_and_ordered(self):
         """
         Enchanters' Guild curriculum plan, Batch 5 (2026-09-30, FINAL

@@ -146,6 +146,222 @@ GUILD_CURRICULUM = {
             "reward_xp": 0,
             "reward_gold": 0,
         },
+        # Journeyman -> Veteran -> Elite -> Legendary Adventurer tiers
+        # (2026-09-29, per Coffee: "plan the other guilds so they get
+        # full lv1-99 upgrades as well... be creative and make them
+        # unique"). Unlike Forge/Enchanters', this guild has no single
+        # class mechanic of its own -- themed on general reputation/
+        # bounty work instead, the same real flavor its own first 4
+        # steps already lean on. Real trigger vocabulary only; every
+        # name confirmed against campaign data. defeat_monster steps
+        # only ever target confirmed-repeatable fights (the_colosseum's
+        # own champion, or a real Remnant-bound boss per remnants.py --
+        # never a one-time story climax).
+        {
+            "id": "adv_5_the_colosseum_itself",
+            "title": "The Colosseum Itself",
+            "flavor": (
+                "Every real reputation in this Guild eventually gets tested in the same one place. See the "
+                "Colosseum with your own eyes before you ever have to fight there."
+            ),
+            "min_level": 10,
+            "trigger": {"type": "reach_location", "location": "the_colosseum"},
+            "reward_xp": 90,
+            "reward_gold": 30,
+        },
+        {
+            "id": "adv_6_grimsbys_ledger",
+            "title": "Grimsby's Ledger",
+            "flavor": (
+                "Grimsby's heard every adventurer's story at least twice before it was ever true. Ask him, "
+                "plainly, what the Guild's own regulars actually think of you so far."
+            ),
+            "min_level": 15,
+            "trigger": {"type": "npc_dialogue", "npc": "grimsby", "keywords": ["reputation"]},
+            "reward_xp": 100,
+            "reward_gold": 25,
+        },
+        {
+            "id": "adv_7_provisioning_for_the_road",
+            "title": "Provisioning for the Road",
+            "flavor": (
+                "A Journeyman who runs out of iron on the road is a Journeyman who doesn't come back. "
+                "Stockpile it the way the Guild actually recommends."
+            ),
+            "min_level": 20,
+            "trigger": {"type": "gather_material", "material": "iron_ore", "count": 8},
+            "reward_xp": 110,
+            "reward_gold": 35,
+        },
+        {
+            "id": "adv_8_the_champions_floor",
+            "title": "The Champion's Floor",
+            "flavor": (
+                "The Colosseum Champion doesn't care what Guild sent you. Put your real Journeyman training "
+                "up against it and see what actually holds."
+            ),
+            "min_level": 26,
+            "trigger": {"type": "defeat_monster", "monster": "colosseum_champion", "count": 1},
+            "reward_xp": 140,
+            "reward_gold": 50,
+        },
+        {
+            "id": "adv_9_a_veterans_nerve",
+            "title": "A Veteran's Nerve",
+            "flavor": (
+                "A Journeyman gambles because they don't know better yet. A Veteran gambles because they've "
+                "learned exactly when it's worth it. Say \"try my luck\" and prove which one you are."
+            ),
+            "min_level": 32,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 130,
+            "reward_gold": 45,
+        },
+        {
+            "id": "adv_10_a_name_worth_knowing",
+            "title": "A Name Worth Knowing",
+            "flavor": (
+                "Grimsby's stopped treating you like every other traveler through his door. Ask him what "
+                "actually changed."
+            ),
+            "min_level": 40,
+            "trigger": {"type": "npc_dialogue", "npc": "grimsby", "keywords": ["name", "known"]},
+            "reward_xp": 150,
+            "reward_gold": 40,
+        },
+        {
+            "id": "adv_11_what_the_roots_remember",
+            "title": "What the Roots Remember",
+            "flavor": (
+                "The Root That Remembers is real, bindable Remnant work — genuinely optional, genuinely "
+                "dangerous, and exactly the kind of fight a Veteran is actually supposed to seek out."
+            ),
+            "min_level": 48,
+            "trigger": {"type": "defeat_monster", "monster": "the_root_that_remembers", "count": 1},
+            "reward_xp": 190,
+            "reward_gold": 70,
+        },
+        {
+            "id": "adv_12_the_sympathetic_mark",
+            "title": "The Sympathetic Mark",
+            "flavor": (
+                "The bounty board's target turns out to have a real, sympathetic reason for what they did. "
+                "The coin's the same either way."
+            ),
+            "min_level": 55,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "Turning them in completes the bounty exactly as posted. Letting them go means walking "
+                    "away from real, guaranteed coin for a stranger's reasons you can't actually verify."
+                ),
+                "choices": {
+                    "complete_the_bounty": {
+                        "label": "complete the bounty as posted",
+                        "reward_xp": 160,
+                        "reward_gold": 180,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": -10,
+                        "outcome": "The Guild pays out exactly what the board promised. Whether it was the right call isn't really the Guild's question to answer.",
+                    },
+                    "let_them_go": {
+                        "label": "let them go and eat the loss",
+                        "reward_xp": 160,
+                        "reward_gold": 20,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "You walk away from real coin for a reason you can't prove to anyone else. It still feels like the actual right call.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
+        {
+            "id": "adv_13_the_downs_at_a_veterans_pace",
+            "title": "The Downs, at a Veteran's Pace",
+            "flavor": (
+                "Greymoor Downs isn't just the Silver Wardens' own ground. An Elite adventurer needs to know "
+                "it too, on their own real terms."
+            ),
+            "min_level": 62,
+            "trigger": {"type": "reach_location", "location": "greymoor_downs"},
+            "reward_xp": 220,
+            "reward_gold": 80,
+        },
+        {
+            "id": "adv_14_an_elites_real_reserves",
+            "title": "An Elite's Real Reserves",
+            "flavor": (
+                "An Elite adventurer never runs dry mid-expedition. Stockpile real silverleaf in the "
+                "quantity the Guild actually expects at this rank."
+            ),
+            "min_level": 68,
+            "trigger": {"type": "gather_material", "material": "silverleaf_herb", "count": 10},
+            "reward_xp": 240,
+            "reward_gold": 90,
+        },
+        {
+            "id": "adv_15_the_deepest_record",
+            "title": "The Deepest Record",
+            "flavor": (
+                "The Deepest Record is a genuinely harder Remnant than anything you've faced so far under "
+                "this Guild's own banner. That's exactly why it's here."
+            ),
+            "min_level": 75,
+            "trigger": {"type": "defeat_monster", "monster": "the_deepest_record", "count": 1},
+            "reward_xp": 300,
+            "reward_gold": 130,
+        },
+        {
+            "id": "adv_16_an_elites_composure",
+            "title": "An Elite's Composure",
+            "flavor": (
+                "The stakes are real now — say \"try my luck\" and prove an Elite's nerve doesn't crack any "
+                "differently than a Journeyman's ever did, just because more is riding on it."
+            ),
+            "min_level": 80,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 280,
+            "reward_gold": 110,
+        },
+        {
+            "id": "adv_17_what_legends_are_actually_made_of",
+            "title": "What Legends Are Actually Made Of",
+            "flavor": (
+                "The Guild's last real lesson: a legend isn't a fight you won, it's a choice you made when "
+                "nobody was going to know either way. Grimsby wants to hear the real story before he'll call "
+                "you one."
+            ),
+            "min_level": 92,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "There's no bounty board posting for this one, no Guild ledger entry waiting either way. "
+                    "Whatever you actually do here is between you and whoever's still standing after."
+                ),
+                "choices": {
+                    "the_quiet_mercy": {
+                        "label": "choose the quiet mercy nobody will ever hear about",
+                        "reward_xp": 350,
+                        "reward_gold": 100,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": 15,
+                        "outcome": "Nobody writes this one down. You did it anyway, and Grimsby, somehow, already knows.",
+                    },
+                    "the_practical_choice": {
+                        "label": "take the practical, profitable choice instead",
+                        "reward_xp": 350,
+                        "reward_gold": 350,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": -10,
+                        "outcome": "You come out ahead, the way a real professional actually does. Grimsby doesn't judge you for it — he just remembers.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
     ],
     "arcane_circle": [
         {

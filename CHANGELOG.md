@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.721] — Adventurers' Guild curriculum, levels 1-92 (Batch 1 of the remaining-5-guilds plan)
+
+First batch of extending the other 5 guilds to real full curricula,
+per Coffee's follow-up after the Forge/Enchanters' project: "plan the
+other guilds so they get full lv1-99 upgrades as well... be creative
+and make them unique." Adventurers' Guild extends from 4 to 17 steps,
+Journeyman → Veteran → Elite → Legendary Adventurer, themed on general
+reputation/bounty work (this guild has no single class mechanic of its
+own, unlike Forge/Enchanters'). Real trigger vocabulary only — The
+Colosseum Itself, Grimsby's Ledger, The Champion's Floor (Colosseum
+Champion), What the Roots Remember and The Deepest Record (two real,
+confirmed-repeatable Remnant-bound bosses, never a one-time story
+climax), and a capstone moral choice about what a "legend" actually
+costs.
+
+3 new tests; 7 adjacent guild-curriculum tests re-run with no
+regressions. Two real live Adventurers' Guild members exist
+(Ravenloft, already "complete" at the old 4 steps; Bram Ashfield,
+mid-curriculum) — purely additive for both, unlocks new content for
+Ravenloft rather than breaking anything.
+
 ## [1.27.720] — Enchanters' Guild curriculum complete, 1-95 — guild-curriculum plan closed out
 
 Fifth and final batch of the Forge Guild + Enchanters' Guild
