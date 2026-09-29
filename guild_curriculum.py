@@ -1289,6 +1289,232 @@ GUILD_CURRICULUM = {
             "reward_xp": 0,
             "reward_gold": 0,
         },
+        # Acolyte -> Healer -> Shepherd -> Living Saint tiers (2026-09-29,
+        # remaining-5-guilds 1-99 curriculum plan, Batch 5, final). Leans on
+        # Wren Hollowbrook (the Circle's own real NPC), real healing-adjacent
+        # locations, and Withering Bramble / the Sunken Cellar Husk --
+        # confirmed is_boss=None and NOT Remnant-bound, ordinary always-
+        # repeatable field monsters, same safety class used for every prior
+        # batch. Real trigger vocabulary only; every name confirmed real.
+        {
+            "id": "faith_5_wrens_old_grove",
+            "title": "Wren's Old Grove",
+            "flavor": (
+                "Wren tends a second, quieter garden most of the Circle's own members never actually find on "
+                "their own. Find Wren's Old Grove yourself."
+            ),
+            "min_level": 12,
+            "trigger": {"type": "reach_location", "location": "sunken_root_caverns_wrens_old_grove"},
+            "reward_xp": 90,
+            "reward_gold": 25,
+        },
+        {
+            "id": "faith_6_wrens_real_measure",
+            "title": "Wren's Real Measure",
+            "flavor": (
+                "Wren's answered what mercy means before. A Healer-tier acolyte needs to understand what "
+                "real healing work actually costs her, over years of doing it alone."
+            ),
+            "min_level": 16,
+            "trigger": {"type": "npc_dialogue", "npc": "wren_hollowbrook", "keywords": ["cost", "healer"]},
+            "reward_xp": 100,
+            "reward_gold": 20,
+        },
+        {
+            "id": "faith_7_herbs_in_quantity",
+            "title": "Herbs in Quantity",
+            "flavor": (
+                "A Healer who runs out of silverleaf mid-crisis is a Healer who can't finish the work. "
+                "Gather real quantity, the way the Circle's own veterans actually carry it."
+            ),
+            "min_level": 20,
+            "trigger": {"type": "gather_material", "material": "silverleaf_herb", "count": 8},
+            "reward_xp": 110,
+            "reward_gold": 25,
+        },
+        {
+            "id": "faith_8_the_withering_bramble",
+            "title": "The Withering Bramble",
+            "flavor": (
+                "Something in the deep growth is dying wrong, spreading the wrongness to whatever it "
+                "touches. A real Healer puts it down before it spreads any further."
+            ),
+            "min_level": 30,
+            "trigger": {"type": "defeat_monster", "monster": "withering_bramble", "count": 1},
+            "reward_xp": 160,
+            "reward_gold": 50,
+        },
+        {
+            "id": "faith_9_a_healers_composure",
+            "title": "A Healer's Composure",
+            "flavor": (
+                "Knowing the right prayer never tells you whether you're actually ready to hold someone's "
+                "life in your hands. Say \"try my luck\" and prove you are anyway."
+            ),
+            "min_level": 36,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 140,
+            "reward_gold": 40,
+        },
+        {
+            "id": "faith_10_what_wren_wont_say",
+            "title": "What Wren Won't Say",
+            "flavor": (
+                "Wren doesn't talk about the ones she couldn't save. A Shepherd-tier healer needs to "
+                "understand real loss before they can ever actually shepherd someone else through it."
+            ),
+            "min_level": 44,
+            "trigger": {"type": "npc_dialogue", "npc": "wren_hollowbrook", "keywords": ["loss", "couldnt"]},
+            "reward_xp": 170,
+            "reward_gold": 45,
+        },
+        {
+            "id": "faith_11_the_silent_shrine",
+            "title": "The Silent Shrine",
+            "flavor": (
+                "Stonearch Bridge hides a real shrine most travelers walk straight past without ever "
+                "noticing it. A Shepherd-tier healer finds it anyway."
+            ),
+            "min_level": 52,
+            "trigger": {"type": "reach_location", "location": "stonearch_bridge_the_silent_shrine"},
+            "reward_xp": 220,
+            "reward_gold": 70,
+        },
+        {
+            "id": "faith_12_the_dying_soldier",
+            "title": "The Dying Soldier",
+            "flavor": (
+                "A soldier from the wrong side of a real, ugly fight is bleeding out in front of you, and "
+                "there's genuinely no one else around to see what you actually choose to do about it."
+            ),
+            "min_level": 60,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "They fought for the side that burned Wren's own grove last season. Healing them costs "
+                    "you real supplies and real time — and nobody would ever know if you simply didn't."
+                ),
+                "choices": {
+                    "heal_them_anyway": {
+                        "label": "heal them anyway, exactly as the Circle actually teaches",
+                        "reward_xp": 200,
+                        "reward_gold": 40,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": 20,
+                        "outcome": "They live. It costs you supplies you'll genuinely miss later, and you never once regret it.",
+                    },
+                    "walk_past_them": {
+                        "label": "walk past them and save the supplies for your own side",
+                        "reward_xp": 200,
+                        "reward_gold": 60,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": -15,
+                        "outcome": "You keep every supply you'd have spent. You also know, permanently, exactly what that choice actually cost you instead.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
+        {
+            "id": "faith_13_the_sunken_cellar_husk",
+            "title": "The Sunken Cellar Husk",
+            "flavor": (
+                "Whatever the Sunken Cellar Husk used to be, it isn't anymore — just a real, suffering "
+                "remainder of it. A Living-Saint-tier Shepherd ends that suffering properly."
+            ),
+            "min_level": 64,
+            "trigger": {"type": "defeat_monster", "monster": "sunken_cellar_husk", "count": 1},
+            "reward_xp": 280,
+            "reward_gold": 90,
+        },
+        {
+            "id": "faith_14_a_shepherds_real_supply",
+            "title": "A Shepherd's Real Supply",
+            "flavor": (
+                "Living-Saint-tier work burns through silverleaf faster than any Acolyte ever imagined it "
+                "could. Stockpile it accordingly."
+            ),
+            "min_level": 70,
+            "trigger": {"type": "gather_material", "material": "silverleaf_herb", "count": 12},
+            "reward_xp": 260,
+            "reward_gold": 100,
+        },
+        {
+            "id": "faith_15_the_circles_oldest_riddle",
+            "title": "The Circle's Oldest Riddle",
+            "flavor": (
+                "The Circle's real Living Saints answer one last question before the rank is ever given, in "
+                "the Circle's own topic: \"The more you feed me, the more I die. What am I?\""
+            ),
+            "min_level": 78,
+            "trigger": {
+                "type": "solve_puzzle",
+                "accepted_answers": ["fire", "a fire", "flame", "a flame"],
+            },
+            "reward_xp": 300,
+            "reward_gold": 110,
+        },
+        {
+            "id": "faith_16_a_saints_nerve",
+            "title": "A Saint's Nerve",
+            "flavor": (
+                "Real Living-Saint work punishes hesitation the same way every rank before it always has. "
+                "Say \"try my luck\" and prove yours never actually changed."
+            ),
+            "min_level": 84,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 290,
+            "reward_gold": 115,
+        },
+        {
+            "id": "faith_17_what_wren_actually_believes",
+            "title": "What Wren Actually Believes",
+            "flavor": (
+                "Wren has one real question left for every healer who makes it this far. Ask her what "
+                "becoming a Living Saint actually means to her."
+            ),
+            "min_level": 90,
+            "trigger": {"type": "npc_dialogue", "npc": "wren_hollowbrook", "keywords": ["believe", "saint"]},
+            "reward_xp": 330,
+            "reward_gold": 110,
+        },
+        {
+            "id": "faith_18_the_last_real_mercy",
+            "title": "The Last Real Mercy",
+            "flavor": (
+                "Someone dying in front of you is begging you to stop, not to keep trying. The Circle's real "
+                "Living Saints decide these on their own, not by any book."
+            ),
+            "min_level": 95,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "You could keep fighting for their life the way every prayer you know actually says to. "
+                    "Or you could finally listen to them, and let them go the way they're genuinely asking."
+                ),
+                "choices": {
+                    "keep_fighting_for_them": {
+                        "label": "keep fighting for their life, exactly as every prayer you know says to",
+                        "reward_xp": 400,
+                        "reward_gold": 80,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "You win. They live, whether they actually wanted that or not, and you'll carry that question longer than the victory.",
+                    },
+                    "let_them_go": {
+                        "label": "listen to them, and let them go the way they're genuinely asking",
+                        "reward_xp": 400,
+                        "reward_gold": 60,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": 20,
+                        "outcome": "You stop. It's the hardest real mercy the Circle ever actually teaches, and you're the one who has to live with having chosen it.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
     ],
     "forge_guild": [
         {

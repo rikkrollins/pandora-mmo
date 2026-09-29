@@ -2,6 +2,31 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.725] — Faith Circle curriculum, levels 1-95 (Batch 5, final, of the remaining-5-guilds plan)
+
+Fifth and final batch — Faith Circle extends from 4 to 18 steps,
+Acolyte → Healer → Shepherd → Living Saint, leaning on Wren Hollowbrook
+(the Circle's own real NPC) and Withering Bramble / the Sunken Cellar
+Husk (both confirmed `is_boss=False` and not Remnant-bound, ordinary
+always-repeatable field monsters). Real trigger vocabulary only —
+Wren's Old Grove and the Silent Shrine (real locations), silverleaf
+gathering scaled up for the higher tiers, a classic riddle for the
+Living Saint tier's own puzzle step, and two capstone-shaped mercy
+choices (heal-an-enemy-soldier vs. walk-past at the mid tier,
+keep-fighting-for-a-life vs. let-them-go at the real level-95
+capstone). No live Faith Circle members existed at ship time, so this
+is purely additive with zero blast radius.
+
+**This closes the remaining-5-guilds 1-99 curriculum plan.** All 7
+guilds in the game (Forge Guild, Enchanters' Guild, Adventurers'
+Guild, Arcane Circle, Silver Wardens, Thieves' Guild, Faith Circle) now
+have real, hand-authored, distinctly-themed training curricula
+spanning level 1 through the real level-99 cap. Per Coffee's original
+ask ("plan the other guilds so they get full lv1-99 upgrades as well
+... make sure u plan accordingly to fill all gaps") — every gap is
+filled. Don't resume a "Batch 6" or similar without a genuinely new
+ask.
+
 ## [1.27.724] — Thieves' Guild curriculum, levels 1-95 (Batch 4 of the remaining-5-guilds plan)
 
 Fourth batch — Thieves' Guild extends from 4 to 18 steps, Cutpurse →

@@ -42544,6 +42544,153 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(char["guild_curriculum_step"], 18)
         self.assertTrue(gc.is_curriculum_complete("thieves_guild", char["guild_curriculum_step"]))
 
+    def test_faith_circle_full_tier_ladder_is_real_and_ordered(self):
+        """Remaining-5-guilds plan, Batch 5/final (2026-09-29): Faith Circle extends 4->18 steps, Acolyte/Healer/Shepherd/Living Saint tiers, capped under real MAX_LEVEL. Every name confirmed real."""
+        import guild_curriculum as gc
+        import rules.leveling as leveling
+        import remnants
+        curriculum = gc.get_curriculum("faith_circle")
+        self.assertEqual(len(curriculum), 18)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(ids[:4], ["faith_1_the_herbs", "faith_2_the_shrine", "faith_3_wrens_tending", "faith_4_the_wounded_stranger"])
+        self.assertEqual(
+            ids[4:],
+            [
+                "faith_5_wrens_old_grove", "faith_6_wrens_real_measure", "faith_7_herbs_in_quantity",
+                "faith_8_the_withering_bramble", "faith_9_a_healers_composure", "faith_10_what_wren_wont_say",
+                "faith_11_the_silent_shrine", "faith_12_the_dying_soldier", "faith_13_the_sunken_cellar_husk",
+                "faith_14_a_shepherds_real_supply", "faith_15_the_circles_oldest_riddle", "faith_16_a_saints_nerve",
+                "faith_17_what_wren_actually_believes", "faith_18_the_last_real_mercy",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+        self.assertLessEqual(curriculum[-1]["min_level"], leveling.MAX_LEVEL)
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("sunken_root_caverns_wrens_old_grove", campaign["locations"]["underground"])
+        self.assertIn("stonearch_bridge_the_silent_shrine", campaign["locations"]["underground"])
+        for monster in ("withering_bramble", "sunken_cellar_husk"):
+            self.assertIn(monster, campaign["monsters"])
+            self.assertNotIn(monster, remnants.REMNANTS)
+            self.assertFalse(campaign["monsters"][monster].get("is_boss"))
+
+    async def test_faith_circle_full_tier_ladder_credits_via_real_checkpoints(self):
+        """End-to-end: walks faith_5 through faith_16 (indices 4-15) via the same real checkpoints used everywhere else."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951060
+        make_basic_character(user_id, "FaithLadderTester", char_class="Cleric", current_location="market_row")
+        db.update_character(user_id, -999, guild="faith_circle", level=92, guild_curriculum_step=4)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="sunken_root_caverns_wrens_old_grove",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 5, sink)
+
+            npc_id = bot._find_npc_id_by_name("Wren Hollowbrook")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Wren about the cost of being a healer", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Wren about the cost of being a healer",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 6, sink)
+
+            db.add_item(user_id, -999, "silverleaf_herb", 8)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="silverleaf_herb",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 7, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"withering_bramble"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 8, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["faith_circle"]),
+                    DummyContext(), "faith_circle",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 9, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Wren about her loss", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Wren about her loss",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 10, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="stonearch_bridge_the_silent_shrine",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 11, sink)
+
+            # faith_12 is the mid-ladder alignment_choice, resolved separately below.
+            db.update_character(user_id, -999, guild_curriculum_step=12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"sunken_cellar_husk"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 13, sink)
+
+            db.add_item(user_id, -999, "silverleaf_herb", 12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="silverleaf_herb",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 14, sink)
+
+            sink = []
+            update = FakeUpdate(user_id, "I think it's fire", sink, thread_id=config.GUILD_TOPIC_IDS["faith_circle"])
+            await bot.guild_topic_handler(update, DummyContext(), "faith_circle")
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 15, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["faith_circle"]),
+                    DummyContext(), "faith_circle",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 16, sink)
+
+    async def test_faith_circle_mid_and_final_alignment_choices_credit_correctly(self):
+        """faith_12 (The Dying Soldier) and faith_18 (the real capstone) both resolve correctly for either branch."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951061
+        make_basic_character(user_id, "FaithChoiceTester", char_class="Cleric")
+        db.update_character(user_id, -999, guild="faith_circle", level=92, guild_curriculum_step=11)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|faith_circle|11|heal_them_anyway", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 12)
+
+            db.update_character(user_id, -999, guild_curriculum_step=17)
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|faith_circle|17|let_them_go", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 18)
+        self.assertTrue(gc.is_curriculum_complete("faith_circle", char["guild_curriculum_step"]))
+
     def test_adventurers_guild_full_tier_ladder_is_real_and_ordered(self):
         """
         Remaining-5-guilds 1-99 curriculum plan (2026-09-29, per Coffee:
