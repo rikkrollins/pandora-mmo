@@ -42103,6 +42103,123 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_forge_guild_master_smith_tier_steps_are_real_and_ordered(self):
+        """
+        Forge Guild 1-100 curriculum plan, Batch 2 (2026-09-30): the
+        Master Smith tier (forge_5 through forge_11) extends the
+        existing 4-step curriculum without touching it -- same real
+        trigger vocabulary, ascending min_level, every location/NPC/
+        monster name confirmed real against campaigns/default/
+        campaign.json before being used (never invented).
+        """
+        import guild_curriculum as gc
+        curriculum = gc.get_curriculum("forge_guild")
+        self.assertEqual(len(curriculum), 11)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(ids[:4], ["forge_1_first_ore", "forge_2_borins_word", "forge_3_proving_the_steel", "forge_4_temper_the_steel"])
+        self.assertEqual(
+            ids[4:],
+            [
+                "forge_5_the_deep_forge", "forge_6_borins_real_measure", "forge_7_the_ember_halls_stockpile",
+                "forge_8_the_champions_test", "forge_9_nerve_under_heat", "forge_10_the_wrathflame_trial",
+                "forge_11_a_smiths_real_cost",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("borin_ironjaw", campaign["npcs"])
+        self.assertIn("wrathflame_vault_deep_forge", campaign["locations"]["underground"])
+        self.assertIn("colosseum_champion", campaign["monsters"])
+        self.assertIn("the_wrathflame_unbound", campaign["monsters"])
+
+    async def test_forge_guild_master_smith_tier_credits_via_real_checkpoints(self):
+        """
+        End-to-end: walks forge_5 through forge_10 (indices 4-9) via the
+        exact same real checkpoints a player's own reach/talk/gather/
+        combat-victory actions already run through, matching this
+        file's own established multi-step curriculum walkthrough pattern
+        (see the Arcane Circle chain test above).
+        """
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951020
+        make_basic_character(user_id, "MasterSmithTester", char_class="Fighter", current_location="market_row")
+        db.update_character(user_id, -999, guild="forge_guild", level=40, guild_curriculum_step=4)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="wrathflame_vault_deep_forge",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 5, sink)
+
+            npc_id = bot._find_npc_id_by_name("Borin Ironjaw")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Borin about mastery", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Borin about mastery",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 6, sink)
+
+            db.add_item(user_id, -999, "iron_ore", 10)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="iron_ore",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 7, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"colosseum_champion"},
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 8, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["forge_guild"]),
+                    DummyContext(), "forge_guild",
+                )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 9, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"the_wrathflame_unbound"},
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 10, sink)
+
+    async def test_forge_guild_smiths_real_cost_alignment_choice_credits_both_branches(self):
+        """The Master Smith tier's own alignment_choice capstone (forge_11) resolves correctly for both branches, same real pattern as every other guild's alignment_choice step."""
+        user_id = 951021
+        make_basic_character(user_id, "SmithsCostTester", char_class="Fighter")
+        db.update_character(user_id, -999, guild="forge_guild", level=40, guild_curriculum_step=10)
+        char = db.get_character(user_id, -999)
+        law_chaos_before = char["alignment_law_chaos"]
+        good_evil_before = char["alignment_good_evil"]
+
+        sink = []
+        await bot.guild_curriculum_callback(
+            FakeCallbackUpdate(user_id, "gcurr|forge_guild|10|refuse_it", sink), DummyContext(),
+        )
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 11)
+        self.assertEqual(char["alignment_good_evil"], good_evil_before + 15)
+        self.assertEqual(char["alignment_law_chaos"], law_chaos_before)
+        import guild_curriculum as gc
+        self.assertTrue(gc.is_curriculum_complete("forge_guild", char["guild_curriculum_step"]))
+
     async def test_forge_guild_final_curriculum_step_grants_the_forge_tome(self):
         """
         Real gap fix (2026-09-11, per Coffee: "Are there quests in the

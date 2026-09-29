@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.717] — Forge Guild 1-100 curriculum, Batch 2: Master Smith tier (levels 10-38)
+
+Second batch of the planned Forge Guild + Enchanters' Guild 1-100
+curriculum expansion. Extends Forge Guild's curriculum from its
+original 4 steps to 11, adding a real Master Smith tier (levels
+10-38) themed on the guild-curriculum research's own naming, entirely
+via the existing curriculum trigger vocabulary (`reach_location`,
+`npc_dialogue`, `gather_material`, `defeat_monster`, `dice_challenge`,
+`alignment_choice`) — no new mechanics in this batch. Every location/
+NPC/monster referenced (The Deep Forge and Ember Hall inside the real
+Wrathflame Vault, Borin Ironjaw, the Colosseum Champion, the Wrathflame
+Unbound) is a real, already-live part of the game, confirmed against
+campaign data before use.
+
+New steps: The Deep Forge (reach it), Borin's Real Measure (ask about
+mastery), The Ember Hall's Stockpile (gather 10 iron ore), The
+Champion's Test (defeat the Colosseum Champion), Nerve Under Heat
+(dice trial), The Wrathflame Trial (defeat the Wrathflame Unbound),
+and A Smith's Real Cost (a real moral choice about a dishonest
+commission). The existing 4-step Apprentice tier is completely
+untouched.
+
+3 new tests (curriculum structure/ordering, a full real-checkpoint
+walkthrough of all 6 non-branching steps, and the alignment_choice
+capstone's both branches); 5 adjacent guild-curriculum tests re-run
+with no regressions.
+
 ## [1.27.716] — Forge/Enchanters' Guild 1-100 curriculum, Batch 1: new crafting mechanics
 
 First batch of the planned Forge Guild + Enchanters' Guild level 1-100

@@ -456,6 +456,136 @@ GUILD_CURRICULUM = {
             # doesn't waste the reward.
             "reward_item": "grandmasters_forge_tome",
         },
+        # Master Smith tier (2026-09-30, Forge Guild 1-100 curriculum
+        # plan, per Coffee: build what the guild-curriculum research
+        # matches real scope for). Same real trigger vocabulary as
+        # every step above; nothing here invents a new mechanic --
+        # forge_10's flavor references the real quality_tier_bump/
+        # exotic-metal recipes shipped in v1.27.716 (rules/crafting.py),
+        # but the step itself is still a plain, already-proven
+        # defeat_monster checkpoint. The Wrathflame Vault dungeon (a
+        # real, existing location cluster) gives this tier a genuine
+        # thematic home -- The Deep Forge and Ember Hall are real rooms
+        # inside it, and its own boss (the_wrathflame_unbound) is a
+        # real, already-live fight.
+        {
+            "id": "forge_5_the_deep_forge",
+            "title": "The Deep Forge",
+            "flavor": (
+                "Everything the Guild taught you so far was practice. The Deep Forge, sealed inside the "
+                "Wrathflame Vault, is where real Master Smiths still work. See it with your own eyes."
+            ),
+            "min_level": 10,
+            "trigger": {"type": "reach_location", "location": "wrathflame_vault_deep_forge"},
+            "reward_xp": 90,
+            "reward_gold": 30,
+        },
+        {
+            "id": "forge_6_borins_real_measure",
+            "title": "Borin's Real Measure",
+            "flavor": (
+                "Borin Ironjaw has watched a hundred apprentices think they were done learning. Ask him, "
+                "plainly, what mastery actually looks like."
+            ),
+            "min_level": 12,
+            "trigger": {"type": "npc_dialogue", "npc": "borin_ironjaw", "keywords": ["mastery", "master"]},
+            "reward_xp": 70,
+            "reward_gold": 20,
+        },
+        {
+            "id": "forge_7_the_ember_halls_stockpile",
+            "title": "The Ember Hall's Stockpile",
+            "flavor": (
+                "A Master Smith never runs dry mid-work. Stockpile iron the way the Ember Hall's own smiths "
+                "do — in real quantity, not just enough for one job."
+            ),
+            "min_level": 16,
+            "trigger": {"type": "gather_material", "material": "iron_ore", "count": 10},
+            "reward_xp": 85,
+            "reward_gold": 25,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 3.0,
+        },
+        {
+            "id": "forge_8_the_champions_test",
+            "title": "The Champion's Test",
+            "flavor": (
+                "The Colosseum's own champion has broken finer gear than anything you've forged so far. Put "
+                "your real work up against it and see what actually holds."
+            ),
+            "min_level": 20,
+            "trigger": {"type": "defeat_monster", "monster": "colosseum_champion", "count": 1},
+            "reward_xp": 130,
+            "reward_gold": 50,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 4.0,
+        },
+        {
+            "id": "forge_9_nerve_under_heat",
+            "title": "Nerve Under Heat",
+            "flavor": (
+                "Real exotic metal punishes hesitation worse than plain iron ever did. Say \"try my luck\" "
+                "here — a Master Smith's hands don't shake at the forge."
+            ),
+            "min_level": 26,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 100,
+            "reward_gold": 40,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 3.0,
+        },
+        {
+            "id": "forge_10_the_wrathflame_trial",
+            "title": "The Wrathflame Trial",
+            "flavor": (
+                "The Wrathflame Unbound is the real reason the Deep Forge was ever sealed away. The Guild "
+                "doesn't ask you to tame it — only to survive putting your work in front of it."
+            ),
+            "min_level": 32,
+            "trigger": {"type": "defeat_monster", "monster": "the_wrathflame_unbound", "count": 1},
+            "reward_xp": 180,
+            "reward_gold": 80,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 5.0,
+        },
+        {
+            "id": "forge_11_a_smiths_real_cost",
+            "title": "A Smith's Real Cost",
+            "flavor": (
+                "A merchant offers real coin for a weapon you both know is built to fail quietly, at exactly "
+                "the wrong moment for whoever ends up holding it."
+            ),
+            "min_level": 38,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "The commission pays well precisely because most smiths turn it down once they understand "
+                    "what it's actually for. Nobody's forcing your hand here."
+                ),
+                "choices": {
+                    "take_the_commission": {
+                        "label": "take the commission and forge it exactly as asked",
+                        "reward_xp": 120,
+                        "reward_gold": 150,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": -15,
+                        "outcome": "You deliver clean, honest work built around a dishonest purpose, and take the coin without asking what happens next.",
+                    },
+                    "refuse_it": {
+                        "label": "refuse the commission outright",
+                        "reward_xp": 120,
+                        "reward_gold": 20,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": 15,
+                        "outcome": "You turn the coin down. The merchant finds someone else eventually — but not you, and not today.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+            "reward_mastery_profession": "blacksmithing",
+            "reward_mastery_pct": 5.0,
+        },
     ],
     "enchanters_guild": [
         {
