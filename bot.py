@@ -62,7 +62,7 @@ import world_clock
 import moltbook
 import topics
 from ai.autonomous_player import choose_next_action
-from ai.moltbook_agent import decide_social_action
+from ai.moltbook_agent import decide_social_action, solve_verification_challenge
 from ai.dev_agent import answer_dev_question
 from ai import narration_cache
 from ai.dm_agent import (
@@ -2307,6 +2307,39 @@ async def _maybe_check_moltbook_activity(bot) -> None:
         logger.error(f"[moltbook_heartbeat] failed to notify Development topic: {e!r}")
 
 
+async def _maybe_verify_moltbook_post(create_post_result: dict) -> None:
+    """
+    Real gap closed 2026-09-29 (audit): a fresh Moltbook post's own
+    response carries a `verification` block (post -> verification ->
+    verification_code + a garbled math challenge_text + a ~5-minute
+    expires_at) that this codebase never once acted on across 172 real
+    logged posts/comments/upvotes since launch -- confirmed via
+    bot_live_tmp.log. Best-effort only: this never blocks or reverts
+    the post itself (it's already live either way), just closes the
+    gap between "posted" and "actually verified" when it can. Any
+    failure (unparseable challenge, wrong live field name for the
+    /verify payload since Moltbook's real contract for it isn't
+    published anywhere fetchable, expired code) is logged and dropped
+    -- never raised, never retried.
+    """
+    verification = (create_post_result or {}).get("post", {}).get("verification")
+    if not verification:
+        return
+    code = verification.get("verification_code")
+    challenge_text = verification.get("challenge_text")
+    if not code or not challenge_text:
+        return
+    answer = await asyncio.to_thread(solve_verification_challenge, challenge_text)
+    if answer is None:
+        logger.warning(f"[moltbook_social] couldn't solve verification challenge: {challenge_text!r}")
+        return
+    try:
+        result = await asyncio.to_thread(moltbook.verify_post, code, answer)
+        logger.info(f"[moltbook_social] verified post (answer {answer}): {result!r}")
+    except Exception as e:
+        logger.error(f"[moltbook_social] post verification failed (answer {answer}): {e!r}")
+
+
 MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS = getattr(config, "MOLTBOOK_SOCIAL_TICK_INTERVAL_SECONDS", 1800)
 _LAST_MOLTBOOK_SOCIAL_TICK_AT: datetime | None = None
 
@@ -2386,6 +2419,7 @@ async def _maybe_run_moltbook_social_tick(bot) -> None:
                 moltbook.create_post, "general", decision["title"], decision["content"]
             )
             logger.info(f"[moltbook_social] created post {decision['title']!r}: {result!r}")
+            await _maybe_verify_moltbook_post(result)
     except Exception as e:
         logger.error(f"[moltbook_social] action {action!r} failed: {e!r}")
 

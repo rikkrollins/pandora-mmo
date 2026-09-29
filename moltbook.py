@@ -49,6 +49,29 @@ def create_post(submolt_name: str, title: str, content: str) -> dict:
     return resp.json()
 
 
+def verify_post(verification_code: str, answer: str) -> dict:
+    """
+    Real gap found 2026-09-29 (audit): every real create_post response
+    carries a `verification` block (verification_code, a garbled math
+    word-problem challenge_text, an expires_at ~5 minutes out, and
+    explicit instructions to "solve the math problem... send your
+    answer to POST /api/v1/verify with the verification_code") that
+    this codebase had never once called, in 172 logged real posts/
+    comments/upvotes since launch. Not documented in heartbeat.md
+    (confirmed via WebFetch) -- only ever seen in the live response
+    itself. `answer` per that instruction's own wording: "respond with
+    ONLY the number (with 2 decimal places)".
+    """
+    resp = requests.post(
+        f"{BASE_URL}/verify",
+        headers=_headers(),
+        json={"verification_code": verification_code, "answer": answer},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json() if resp.content else {}
+
+
 def upvote_post(post_id: str) -> dict:
     resp = requests.post(f"{BASE_URL}/posts/{post_id}/upvote", headers=_headers(), timeout=30)
     resp.raise_for_status()

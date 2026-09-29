@@ -37675,6 +37675,100 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             decision = moltbook_agent_module.decide_social_action([], ["A real quest was completed."])
         self.assertEqual(decision["action"], "skip")
 
+    def test_moltbook_solve_verification_challenge_parses_a_clean_numeric_answer(self):
+        """
+        Real gap found 2026-09-29 (audit): every real Moltbook create_post
+        response carries a verification challenge (garbled math word
+        problem + a code + a ~5-minute expiry) that this codebase never
+        once solved/submitted across 172 real logged posts/comments/
+        upvotes since launch. solve_verification_challenge delegates the
+        parsing to the model and only trusts a response that's cleanly
+        just a number, formatted to 2 decimal places.
+        """
+        from unittest.mock import patch
+        import ai.moltbook_agent as moltbook_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "57.00"}
+
+        challenge = "A] LoO bS tEr^ ClA w] FoR cE- Is^ TwE nTy/ FoU r] NeW tO ns~ AnD- A] SeC oNd^ Lo O bS tEr\\ ClA w- Of^ ThIr Ty] ThReE~ NeW tOnS, WhAt] Is^ ToTaL- FoR cE?"
+        with patch("ai.moltbook_agent.requests.post", return_value=FakeResponse()):
+            answer = moltbook_agent_module.solve_verification_challenge(challenge)
+        self.assertEqual(answer, "57.00")
+
+    def test_moltbook_solve_verification_challenge_returns_none_for_a_non_numeric_response(self):
+        """Never guesses -- a response that isn't cleanly just a number must fall through to None, not a mangled answer."""
+        from unittest.mock import patch
+        import ai.moltbook_agent as moltbook_agent_module
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "The answer is fifty-seven."}
+
+        with patch("ai.moltbook_agent.requests.post", return_value=FakeResponse()):
+            answer = moltbook_agent_module.solve_verification_challenge("some challenge text")
+        self.assertIsNone(answer)
+
+    def test_moltbook_verify_post_sends_the_real_documented_payload_shape(self):
+        """moltbook.verify_post must POST to /api/v1/verify with the verification_code and answer, matching the live response's own instructions."""
+        from unittest.mock import patch, MagicMock
+        import moltbook as moltbook_module
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.content = b'{"success": true}'
+        mock_resp.json.return_value = {"success": True}
+
+        with patch("moltbook.requests.post", return_value=mock_resp) as mock_post:
+            result = moltbook_module.verify_post("moltbook_verify_abc123", "57.00")
+        self.assertEqual(result, {"success": True})
+        call_kwargs = mock_post.call_args.kwargs
+        self.assertEqual(call_kwargs["json"], {"verification_code": "moltbook_verify_abc123", "answer": "57.00"})
+        self.assertIn("/verify", mock_post.call_args.args[0])
+
+    async def test_maybe_verify_moltbook_post_solves_and_submits_a_real_verification_block(self):
+        """
+        End-to-end: a real create_post response carrying a verification
+        block gets solved and submitted; a response with no verification
+        block (or one missing its code/challenge) is a clean no-op.
+        """
+        from unittest.mock import patch
+        create_post_result = {
+            "post": {
+                "id": "abc",
+                "verification": {
+                    "verification_code": "moltbook_verify_xyz",
+                    "challenge_text": "twenty four newtons and thirty three newtons, what is total force?",
+                    "expires_at": "2099-01-01T00:00:00Z",
+                },
+            },
+        }
+        with patch("bot.solve_verification_challenge", return_value="57.00") as mock_solve, \
+             patch("bot.moltbook.verify_post", return_value={"success": True}) as mock_verify:
+            await bot._maybe_verify_moltbook_post(create_post_result)
+        mock_solve.assert_called_once_with(create_post_result["post"]["verification"]["challenge_text"])
+        mock_verify.assert_called_once_with("moltbook_verify_xyz", "57.00")
+
+        # No verification block at all -- clean no-op, no calls.
+        with patch("bot.solve_verification_challenge") as mock_solve, \
+             patch("bot.moltbook.verify_post") as mock_verify:
+            await bot._maybe_verify_moltbook_post({"post": {"id": "abc"}})
+        mock_solve.assert_not_called()
+        mock_verify.assert_not_called()
+
+        # Unsolvable challenge -- never submits a guessed answer.
+        with patch("bot.solve_verification_challenge", return_value=None), \
+             patch("bot.moltbook.verify_post") as mock_verify:
+            await bot._maybe_verify_moltbook_post(create_post_result)
+        mock_verify.assert_not_called()
+
     def test_moltbook_feed_content_is_isolated_from_the_prompts_own_instructions(self):
         """
         Real hardening (2026-09-14, proactive audit finding): other

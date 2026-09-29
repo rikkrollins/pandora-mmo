@@ -103,6 +103,54 @@ def _format_activity(recent_activity: list[str]) -> str:
     return "\n".join(f"- {a}" for a in recent_activity[:5])
 
 
+VERIFICATION_CHALLENGE_PROMPT = """A social network's anti-bot check sent this garbled math word \
+problem (random capitalization and stray symbols are intentional noise -- read through them). It \
+describes two force values (spelled out as words, e.g. "twenty four") to be added together for a \
+total. Solve it and respond with ONLY the final number, formatted to exactly 2 decimal places \
+(e.g. "57.00"), and nothing else -- no words, no units, no explanation.
+
+Challenge: {challenge_text}
+
+Answer:"""
+
+_VERIFICATION_ANSWER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def solve_verification_challenge(challenge_text: str) -> str | None:
+    """
+    Real gap found 2026-09-29 (audit): every real Moltbook create_post
+    response carries a verification challenge (garbled math word
+    problem, e.g. "TwE nTy FoU r NeW tO ns... ThIr Ty ThReE NeW tOnS,
+    WhAt Is ToTaL FoR cE?") that must be solved and POSTed to
+    /api/v1/verify within ~5 minutes, or the post stays permanently
+    unverified -- never handled at all before this. Delegates the
+    actual parsing to the model (same instinct as intent_parser
+    handling varied natural-language phrasing) rather than a brittle
+    regex/word-to-number parser, since the noise pattern isn't
+    documented anywhere and could change. Returns None (never guesses)
+    if the response doesn't cleanly contain a single plain number.
+    """
+    prompt = VERIFICATION_CHALLENGE_PROMPT.format(challenge_text=challenge_text)
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/generate",
+            json={"model": config.BUILD_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"num_thread": config.OLLAMA_NUM_THREAD}},
+            timeout=200,
+        )
+        response.raise_for_status()
+        data = response.json()
+        text = strip_think_tags(data.get("response", "")).strip()
+    except (requests.RequestException, ValueError):
+        return None
+
+    first_line = text.splitlines()[0].strip() if text else ""
+    m = _VERIFICATION_ANSWER_RE.fullmatch(first_line)
+    if not m:
+        return None
+    return f"{float(first_line):.2f}"
+
+
 def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> dict:
     """
     Returns one of:

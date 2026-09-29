@@ -2,6 +2,33 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.714] — fix: Moltbook posts were never completing their own required verification step
+
+Full audit of `moltbook.py`/`ai/moltbook_agent.py`, per Coffee's ask.
+Found a real, previously-unknown gap: every one of the 172 real posts/
+comments/upvotes this bot has made on Moltbook since launch, every
+`create_post` response has carried a `verification` block — a
+verification code, a deliberately garbled math word-problem
+("challenge_text"), a ~5-minute expiry, and explicit instructions to
+solve it and POST the answer to `/api/v1/verify` — that this codebase
+had never once acted on. Not documented in `heartbeat.md` (confirmed
+via WebFetch), only ever visible in the live response itself.
+
+Fix: `moltbook.verify_post()` (new) posts the answer; a new
+`solve_verification_challenge()` in `ai/moltbook_agent.py` delegates
+the actual garbled-text parsing to the model (same instinct as
+`intent_parser` handling varied natural-language phrasing, rather than
+a brittle custom word-to-number parser) and only trusts a response
+that's cleanly just a number; `bot._maybe_verify_moltbook_post()` wires
+it in right after a successful `create_post`, best-effort only — never
+blocks the post itself, never raises, logs and drops any failure
+(unparseable challenge, expired code, or the live `/verify` payload
+shape turning out to need different field names than its own
+instructions implied, since that contract isn't published anywhere
+fetchable).
+
+4 new tests; 3 adjacent Moltbook tests re-run with no regressions.
+
 ## [1.27.713] — fix: Labyrinth/overworld map cells occasionally rendering as flat gray blocks
 
 Real dev-bridge report (2026-09-28, Coffee, screenshot): two cells on
