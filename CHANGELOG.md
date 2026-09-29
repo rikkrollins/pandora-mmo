@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.724] — Thieves' Guild curriculum, levels 1-95 (Batch 4 of the remaining-5-guilds plan)
+
+Fourth batch — Thieves' Guild extends from 4 to 18 steps, Cutpurse →
+Shadow → Infiltrator → Shadowmaster, leaning on Kess (the guild's own
+real NPC) and The Smuggler's Warden (confirmed `is_boss=False` and not
+Remnant-bound, an ordinary always-repeatable field monster). Real
+trigger vocabulary only — the First City's Silent Market and Sunken
+Root Caverns' Smugglers' Cut (real locations), sulfur dust gathering
+scaled up for the higher tiers, a real classic riddle for the
+Shadowmaster tier's own puzzle step, and two capstone-shaped alignment
+choices (take-only-what's-owed vs. take-everything at the mid tier,
+walk-away-rich vs. go-back-for-it at the real level-95 capstone). No
+live Thieves' Guild members existed at ship time, so this is purely
+additive with zero blast radius.
+
 ## [1.27.723] — Silver Wardens curriculum, levels 1-95 (Batch 3 of the remaining-5-guilds plan)
 
 Third batch — Silver Wardens extends from 4 to 18 steps, Hunter →

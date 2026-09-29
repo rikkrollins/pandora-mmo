@@ -42397,6 +42397,153 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(char["guild_curriculum_step"], 18)
         self.assertTrue(gc.is_curriculum_complete("silver_wardens", char["guild_curriculum_step"]))
 
+    def test_thieves_guild_full_tier_ladder_is_real_and_ordered(self):
+        """Remaining-5-guilds plan, Batch 4 (2026-09-29): Thieves' Guild extends 4->18 steps, Cutpurse/Shadow/Infiltrator/Shadowmaster tiers, capped under real MAX_LEVEL. Every name confirmed real."""
+        import guild_curriculum as gc
+        import rules.leveling as leveling
+        import remnants
+        curriculum = gc.get_curriculum("thieves_guild")
+        self.assertEqual(len(curriculum), 18)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(ids[:4], ["thf_1_the_ledgers_game", "thf_2_casing_the_bridge", "thf_3_kess_terms", "thf_4_the_locksmiths_puzzle"])
+        self.assertEqual(
+            ids[4:],
+            [
+                "thf_5_the_silent_market", "thf_6_kess_real_shadow_work", "thf_7_smoke_in_quantity",
+                "thf_8_the_shadow_wisp", "thf_9_a_cutpurses_nerve", "thf_10_what_kess_really_steals",
+                "thf_11_the_smugglers_cut", "thf_12_the_marks_choice", "thf_13_the_smugglers_warden",
+                "thf_14_a_shadowmasters_real_supply", "thf_15_the_locks_perfected", "thf_16_a_shadowmasters_nerve",
+                "thf_17_what_kess_actually_trusts", "thf_18_the_last_real_take",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+        self.assertLessEqual(curriculum[-1]["min_level"], leveling.MAX_LEVEL)
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("the_first_city_silent_market", campaign["locations"]["underground"])
+        self.assertIn("sunken_root_caverns_the_smugglers_cut", campaign["locations"]["underground"])
+        for monster in ("shadow_wisp", "the_smugglers_warden"):
+            self.assertIn(monster, campaign["monsters"])
+            self.assertNotIn(monster, remnants.REMNANTS)
+            self.assertFalse(campaign["monsters"][monster].get("is_boss"))
+
+    async def test_thieves_guild_full_tier_ladder_credits_via_real_checkpoints(self):
+        """End-to-end: walks thf_5 through thf_16 (indices 4-15) via the same real checkpoints used everywhere else."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951050
+        make_basic_character(user_id, "ThiefLadderTester", char_class="Rogue", current_location="market_row")
+        db.update_character(user_id, -999, guild="thieves_guild", level=92, guild_curriculum_step=4)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="the_first_city_silent_market",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 5, sink)
+
+            npc_id = bot._find_npc_id_by_name("Kess")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Kess about the work", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Kess about the work",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 6, sink)
+
+            db.add_item(user_id, -999, "sulfur_dust", 8)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="sulfur_dust",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 7, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"shadow_wisp"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 8, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["thieves_guild"]),
+                    DummyContext(), "thieves_guild",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 9, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Kess about the worst regret", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Kess about the worst regret",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 10, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="sunken_root_caverns_the_smugglers_cut",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 11, sink)
+
+            # thf_12 is the mid-ladder alignment_choice, resolved separately below.
+            db.update_character(user_id, -999, guild_curriculum_step=12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"the_smugglers_warden"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 13, sink)
+
+            db.add_item(user_id, -999, "sulfur_dust", 12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="sulfur_dust",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 14, sink)
+
+            sink = []
+            update = FakeUpdate(user_id, "I think it's a keyboard", sink, thread_id=config.GUILD_TOPIC_IDS["thieves_guild"])
+            await bot.guild_topic_handler(update, DummyContext(), "thieves_guild")
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 15, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["thieves_guild"]),
+                    DummyContext(), "thieves_guild",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 16, sink)
+
+    async def test_thieves_guild_mid_and_final_alignment_choices_credit_correctly(self):
+        """thf_12 (The Mark's Choice) and thf_18 (the real capstone) both resolve correctly for either branch."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951051
+        make_basic_character(user_id, "ThiefChoiceTester", char_class="Rogue")
+        db.update_character(user_id, -999, guild="thieves_guild", level=92, guild_curriculum_step=11)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|thieves_guild|11|take_only_the_job", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 12)
+
+            db.update_character(user_id, -999, guild_curriculum_step=17)
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|thieves_guild|17|go_back_for_it", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 18)
+        self.assertTrue(gc.is_curriculum_complete("thieves_guild", char["guild_curriculum_step"]))
+
     def test_adventurers_guild_full_tier_ladder_is_real_and_ordered(self):
         """
         Remaining-5-guilds 1-99 curriculum plan (2026-09-29, per Coffee:

@@ -994,6 +994,233 @@ GUILD_CURRICULUM = {
             "reward_xp": 55,
             "reward_gold": 25,
         },
+        # Cutpurse -> Shadow -> Infiltrator -> Shadowmaster tiers (2026-09-29,
+        # remaining-5-guilds 1-99 curriculum plan, Batch 4). Leans on Kess
+        # (the Guild's own real NPC), the real Silent Market/Smugglers' Cut
+        # locations, and The Smuggler's Warden -- confirmed is_boss=False and
+        # NOT Remnant-bound, an ordinary always-repeatable field monster, same
+        # safety class used for Silver Wardens' own higher tiers. Real trigger
+        # vocabulary only; every name confirmed real.
+        {
+            "id": "thf_5_the_silent_market",
+            "title": "The Silent Market",
+            "flavor": (
+                "The First City keeps a market that never announces itself and never needs to. Find it "
+                "yourself, the way every real Shadow eventually does."
+            ),
+            "min_level": 12,
+            "trigger": {"type": "reach_location", "location": "the_first_city_silent_market"},
+            "reward_xp": 95,
+            "reward_gold": 40,
+        },
+        {
+            "id": "thf_6_kess_real_shadow_work",
+            "title": "Kess's Real Shadow Work",
+            "flavor": (
+                "Kess trusted you enough to let you in. A Shadow-tier thief needs to know what she actually "
+                "does with that trust once a job goes wrong. Ask her about the work."
+            ),
+            "min_level": 16,
+            "trigger": {"type": "npc_dialogue", "npc": "kess_the_bandit", "keywords": ["work", "job"]},
+            "reward_xp": 105,
+            "reward_gold": 30,
+        },
+        {
+            "id": "thf_7_smoke_in_quantity",
+            "title": "Smoke in Quantity",
+            "flavor": (
+                "Every real infiltrator's oldest trick still runs on sulfur dust, not luck. Stockpile it "
+                "properly before you ever need it in a hurry."
+            ),
+            "min_level": 20,
+            "trigger": {"type": "gather_material", "material": "sulfur_dust", "count": 8},
+            "reward_xp": 115,
+            "reward_gold": 35,
+        },
+        {
+            "id": "thf_8_the_shadow_wisp",
+            "title": "The Shadow Wisp",
+            "flavor": (
+                "A Shadow Wisp moves the way the Guild wants every Shadow-tier thief to move — seen only "
+                "once anyone actually notices it's already gone."
+            ),
+            "min_level": 30,
+            "trigger": {"type": "defeat_monster", "monster": "shadow_wisp", "count": 1},
+            "reward_xp": 165,
+            "reward_gold": 60,
+        },
+        {
+            "id": "thf_9_a_cutpurses_nerve",
+            "title": "A Cutpurse's Nerve",
+            "flavor": (
+                "Infiltrator-tier work punishes a shaking hand the same way it always has. Say \"try my "
+                "luck\" and prove yours hasn't started."
+            ),
+            "min_level": 36,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 145,
+            "reward_gold": 45,
+        },
+        {
+            "id": "thf_10_what_kess_really_steals",
+            "title": "What Kess Really Steals",
+            "flavor": (
+                "Kess has never once said what she actually takes when a job goes bad and there's a real "
+                "choice on the table. An Infiltrator asks anyway."
+            ),
+            "min_level": 44,
+            "trigger": {"type": "npc_dialogue", "npc": "kess_the_bandit", "keywords": ["regret", "worst"]},
+            "reward_xp": 175,
+            "reward_gold": 55,
+        },
+        {
+            "id": "thf_11_the_smugglers_cut",
+            "title": "The Smugglers' Cut",
+            "flavor": (
+                "Sunken Root Caverns hides a real smuggling route the Guild has quietly used for years. See "
+                "the Smugglers' Cut with your own eyes."
+            ),
+            "min_level": 52,
+            "trigger": {"type": "reach_location", "location": "sunken_root_caverns_the_smugglers_cut"},
+            "reward_xp": 225,
+            "reward_gold": 85,
+        },
+        {
+            "id": "thf_12_the_marks_choice",
+            "title": "The Mark's Choice",
+            "flavor": (
+                "You've got the mark cold — everything they own is one word away from being yours. An "
+                "Infiltrator decides here whether that's actually the job, or just the easy version of it."
+            ),
+            "min_level": 60,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "The mark's already ruined, and taking the rest wouldn't even be hard. The Guild's own "
+                    "terms say take what you're owed and nothing past it — but nobody's actually watching."
+                ),
+                "choices": {
+                    "take_only_the_job": {
+                        "label": "take exactly what the job called for, nothing past it",
+                        "reward_xp": 200,
+                        "reward_gold": 60,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "You leave the rest behind. It costs you real coin nobody would ever know you skipped, and you keep the one thing the Guild's terms are actually built on.",
+                    },
+                    "take_everything": {
+                        "label": "take everything, terms or not",
+                        "reward_xp": 200,
+                        "reward_gold": 140,
+                        "alignment_law_chaos_delta": -10,
+                        "alignment_good_evil_delta": -10,
+                        "outcome": "Nobody was watching, and nobody ever will be. You're richer for it, and you already know exactly what that decision actually says about you.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
+        {
+            "id": "thf_13_the_smugglers_warden",
+            "title": "The Smugglers' Warden",
+            "flavor": (
+                "Whoever keeps the real Smugglers' Cut safe from the Guild's own rivals is exactly what "
+                "Shadowmaster-tier work is actually for. Put it down."
+            ),
+            "min_level": 64,
+            "trigger": {"type": "defeat_monster", "monster": "the_smugglers_warden", "count": 1},
+            "reward_xp": 280,
+            "reward_gold": 110,
+        },
+        {
+            "id": "thf_14_a_shadowmasters_real_supply",
+            "title": "A Shadowmaster's Real Supply",
+            "flavor": (
+                "Shadowmaster-tier work burns through sulfur dust faster than any Cutpurse ever imagined it "
+                "could. Stockpile it accordingly."
+            ),
+            "min_level": 70,
+            "trigger": {"type": "gather_material", "material": "sulfur_dust", "count": 12},
+            "reward_xp": 260,
+            "reward_gold": 100,
+        },
+        {
+            "id": "thf_15_the_locks_perfected",
+            "title": "The Locks, Perfected",
+            "flavor": (
+                "The Guild's real Shadowmasters answer the Locksmith's oldest question a second time, in "
+                "the Guild's own topic, and this time it's never quite so simple: \"I have keys but open no "
+                "locks. I have space but no room. You can enter, but not go outside. What am I?\""
+            ),
+            "min_level": 78,
+            "trigger": {
+                "type": "solve_puzzle",
+                "accepted_answers": ["keyboard", "a keyboard"],
+            },
+            "reward_xp": 300,
+            "reward_gold": 120,
+        },
+        {
+            "id": "thf_16_a_shadowmasters_nerve",
+            "title": "A Shadowmaster's Nerve",
+            "flavor": (
+                "Real Shadowmaster work punishes hesitation the same way it always has, at every rank before "
+                "this one. Say \"try my luck\" and prove yours never actually changed."
+            ),
+            "min_level": 84,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 290,
+            "reward_gold": 115,
+        },
+        {
+            "id": "thf_17_what_kess_actually_trusts",
+            "title": "What Kess Actually Trusts",
+            "flavor": (
+                "Kess has one real question left for every thief who makes it this far. Ask her what being "
+                "trusted at this rank actually means to her."
+            ),
+            "min_level": 90,
+            "trigger": {"type": "npc_dialogue", "npc": "kess_the_bandit", "keywords": ["trusted", "actually"]},
+            "reward_xp": 330,
+            "reward_gold": 120,
+        },
+        {
+            "id": "thf_18_the_last_real_take",
+            "title": "The Last Real Take",
+            "flavor": (
+                "One final mark, one final real choice — walk away clean with a real fortune already in "
+                "hand, or go back in for the one thing that was never actually yours to leave behind."
+            ),
+            "min_level": 95,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "You could walk away right now, rich and clean, and no one would ever fault you for it. "
+                    "Or you could go back in for the one thing you actually came for in the first place."
+                ),
+                "choices": {
+                    "walk_away_rich": {
+                        "label": "walk away now, rich and clean",
+                        "reward_xp": 400,
+                        "reward_gold": 200,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": 0,
+                        "outcome": "You walk away with real, permanent wealth and never look back. Nobody could call that the wrong call.",
+                    },
+                    "go_back_for_it": {
+                        "label": "go back in for the one real thing you actually came for",
+                        "reward_xp": 400,
+                        "reward_gold": 100,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": 15,
+                        "outcome": "You get what you actually came for, and it's worth less in coin and more in every other way that matters to a real Shadowmaster.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
     ],
     "faith_circle": [
         {
