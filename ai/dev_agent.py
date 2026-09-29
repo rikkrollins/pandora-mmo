@@ -12,10 +12,14 @@ discussion about sandboxing and permissions before ever being wired in.
 Uses config.BUILD_MODEL, since this is a technical/code-adjacent task,
 closer to what that model is already used for elsewhere in the project.
 """
+import logging
+
 import requests
 
 import config
 from ai.text_cleanup import strip_think_tags, is_placeholder_text
+
+logger = logging.getLogger("pandora_mmo")
 
 DEV_SYSTEM_PROMPT = """You are a helpful development assistant for Pandora MMO, \
 a Python-based 5th-edition-style tabletop RPG Telegram bot. You help the developer \
@@ -66,7 +70,7 @@ def answer_dev_question(question: str, recent_context: list[str] | None = None) 
         if text and not is_placeholder_text(text):
             return text
     except (requests.RequestException, ValueError) as e:
-        print(f"[dev_agent] model call failed: {e}")
+        logger.error(f"[dev_agent] model call failed: {e}")
 
     return (
         "I couldn't reach the local model just now, so I can't answer that "

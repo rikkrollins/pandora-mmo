@@ -37769,6 +37769,64 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._maybe_verify_moltbook_post(create_post_result)
         mock_verify.assert_not_called()
 
+    def test_ai_module_failure_paths_log_through_the_real_pandora_mmo_logger(self):
+        """
+        Real audit finding (2026-09-29, AI-party agent audit): every one
+        of these 24 real Ollama-call failure sites (dev_agent, npc_agent,
+        autonomous_player, 20 in dm_agent, intent_parser) used a bare
+        `print(...)` instead of `logger.error(...)` -- unlike every OTHER
+        error site in this codebase. Confirmed live in bot_live_tmp.log:
+        145 real `[autonomous_player] action generation failed...` lines
+        with NO timestamp at all, unlike every properly logged line,
+        making it impossible to correlate a real narration/decision
+        failure against congestion incidents or anything else by time.
+        Fixed by adding the same `logging.getLogger("pandora_mmo")` this
+        codebase already uses everywhere else (see ai/support_agent.py)
+        to all 5 files and swapping every bare print for logger.error.
+        One representative call per module -- the pattern (added logger,
+        identical replaced line shape) is mechanical and was swept with
+        the same sed pattern across dm_agent's 20 sites.
+        """
+        from unittest.mock import patch
+        import requests as requests_module
+        import ai.autonomous_player as autonomous_player_module
+        import ai.dev_agent as dev_agent_module
+        import ai.npc_agent as npc_agent_module
+        import ai.dm_agent as dm_agent_module
+        import ai.intent_parser as intent_parser_module
+
+        character = {"name": "Tester", "race": "Human", "char_class": "Fighter",
+                     "level": 1, "hp_current": 10, "hp_max": 10}
+
+        with patch("ai.autonomous_player.requests.post", side_effect=requests_module.exceptions.Timeout("cold")), \
+             self.assertLogs("pandora_mmo", level="ERROR") as log_ctx:
+            autonomous_player_module.choose_next_action(character, "brave", "Real facts.")
+        self.assertTrue(any("[autonomous_player]" in m for m in log_ctx.output), log_ctx.output)
+
+        with patch("ai.dev_agent.requests.post", side_effect=requests_module.exceptions.Timeout("cold")), \
+             self.assertLogs("pandora_mmo", level="ERROR") as log_ctx:
+            dev_agent_module.answer_dev_question("Is the bot working?")
+        self.assertTrue(any("[dev_agent]" in m for m in log_ctx.output), log_ctx.output)
+
+        npc_agent_module.register_npc("logging_test_npc", "Logtest", "a quiet type")
+        with patch("ai.npc_agent.requests.post", side_effect=requests_module.exceptions.Timeout("cold")), \
+             self.assertLogs("pandora_mmo", level="ERROR") as log_ctx:
+            npc_agent_module.generate_ambient_line("logging_test_npc", -999, 0, "Tester", "is going about their day")
+        self.assertTrue(any("[npc_agent]" in m for m in log_ctx.output), log_ctx.output)
+
+        with patch("ai.dm_agent.requests.post", side_effect=requests_module.exceptions.Timeout("cold")), \
+             self.assertLogs("pandora_mmo", level="ERROR") as log_ctx:
+            dm_agent_module.narrate_action(character, "attacks something", {"hit": True, "damage_dealt": 5})
+        self.assertTrue(any("[dm_agent]" in m for m in log_ctx.output), log_ctx.output)
+
+        with patch("ai.intent_parser.requests.post", side_effect=requests_module.exceptions.Timeout("cold")), \
+             self.assertLogs("pandora_mmo", level="ERROR") as log_ctx:
+            # A confident keyword fallback (e.g. "I attack X") skips the
+            # model call entirely (real perf fix, see parse_intent's own
+            # docstring) -- only a genuinely ambiguous message reaches it.
+            intent_parser_module.parse_intent("hey what's going on around here", [])
+        self.assertTrue(any("[intent_parser]" in m for m in log_ctx.output), log_ctx.output)
+
     def test_moltbook_feed_content_is_isolated_from_the_prompts_own_instructions(self):
         """
         Real hardening (2026-09-14, proactive audit finding): other

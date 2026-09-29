@@ -4,11 +4,15 @@ NPCs as separate agent contexts, each with their own persona and short
 conversation memory. Uses config.DM_NARRATION_MODEL (same narrative
 model as dm_agent.py), since dialogue also doesn't need tool calling.
 """
+import logging
+
 import requests
 
 import config
 from ai.ollama_health import record_timeout
 from ai.text_cleanup import strip_think_tags, is_placeholder_text
+
+logger = logging.getLogger("pandora_mmo")
 
 # In-memory NPC registry: npc_id -> {"persona": str, "memory": {(chat_id, telegram_user_id): [(role, text), ...]}}
 _NPCS: dict[str, dict] = {}
@@ -207,7 +211,7 @@ def talk_to_npc(npc_id: str, chat_id: int, telegram_user_id: int, player_message
             reply = _TALK_FALLBACK_REPLY
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[npc_agent] NPC call failed, falling back: {e}")
+        logger.error(f"[npc_agent] NPC call failed, falling back: {e}")
         reply = _TALK_FALLBACK_REPLY
 
     buffer = _conversation_buffer(npc_id, chat_id, telegram_user_id)
@@ -265,7 +269,7 @@ def generate_ambient_line(npc_id: str, chat_id: int, telegram_user_id: int, char
             line = ""
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[npc_agent] ambient line failed, skipping: {e}")
+        logger.error(f"[npc_agent] ambient line failed, skipping: {e}")
         return ""
 
     if line:

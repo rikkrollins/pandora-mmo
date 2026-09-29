@@ -12,6 +12,7 @@ because a natural-language interpretation didn't come back cleanly.
 """
 import difflib
 import json
+import logging
 import re
 
 import requests
@@ -23,6 +24,8 @@ import rules.leveling as leveling
 import spells as spells_module
 from ai.text_cleanup import strip_think_tags
 from guilds import GUILDS
+
+logger = logging.getLogger("pandora_mmo")
 from remnants import REMNANTS
 
 # Confirmed live, twice, on unrelated inputs ("my characters", "I'm
@@ -3249,7 +3252,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                         return {**fallback, "action": "examine", "target": target}
             return parsed
     except (requests.RequestException, ValueError) as e:
-        print(f"[intent_parser] model call failed, using keyword fallback: {e}")
+        logger.error(f"[intent_parser] model call failed, using keyword fallback: {e}")
 
     return fallback
 

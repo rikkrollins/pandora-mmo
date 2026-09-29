@@ -14,11 +14,15 @@ CPU-bound intent model. The whole point of this loop is to actually
 exercise the real pipeline a human would hit, not dodge it with wording
 picked to avoid it.
 """
+import logging
+
 import requests
 
 import config
 from ai.ollama_health import record_timeout
 from ai.text_cleanup import strip_think_tags
+
+logger = logging.getLogger("pandora_mmo")
 
 ACTION_STYLE_PREAMBLE = """You are role-playing an autonomous character in a \
 5th-edition-style tabletop RPG, deciding your own next action for yourself. You \
@@ -243,5 +247,5 @@ def choose_next_action(character: dict, personality: str, situation_facts: str, 
             return text.splitlines()[0].strip().strip('"').strip()
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[autonomous_player] action generation failed, defaulting to a safe fallback: {e}")
+        logger.error(f"[autonomous_player] action generation failed, defaulting to a safe fallback: {e}")
     return "I look around"

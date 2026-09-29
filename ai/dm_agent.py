@@ -8,12 +8,16 @@ not tool-calling.
 IMPORTANT: this module never decides outcomes. It only narrates facts
 that were already computed by rules/combat.py or rules/dice.py.
 """
+import logging
+
 import requests
 
 import config
 from ai.ollama_health import record_timeout
 from ai.story_mode import scaled_sentences, style_directive
 from ai.text_cleanup import strip_think_tags, strip_internal_jargon, is_placeholder_text
+
+logger = logging.getLogger("pandora_mmo")
 
 # Real perf fix (2026-07-17, per Coffee): no call anywhere in this
 # module capped how many tokens the model could generate -- confirmed
@@ -331,7 +335,7 @@ def narrate_skill_check(character: dict, action_text: str, ability: str, mechani
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] skill check narration call failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] skill check narration call failed, falling back to template: {e}")
     finally:
         _narration_call_active = False
 
@@ -555,7 +559,7 @@ def narrate_action(character: dict, action_text: str, mechanical_result: dict,
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] narration call failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] narration call failed, falling back to template: {e}")
     finally:
         _narration_call_active = False
 
@@ -654,7 +658,7 @@ def narrate_boss_decision(boss: dict, target: dict, spell_name: str | None = Non
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] boss decision narration call failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] boss decision narration call failed, falling back to template: {e}")
 
     return f"{boss.get('name')} sets its sights on {target.get('name')}."
 
@@ -728,7 +732,7 @@ def narrate_welcome(character: dict, location: dict, party_summary: str) -> str:
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] welcome narration call failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] welcome narration call failed, falling back to template: {e}")
 
     return _fallback_welcome(character, location, party_summary)
 
@@ -803,7 +807,7 @@ def narrate_hourly_update(location_name: str, recent_events: list[str], activity
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] hourly update narration call failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] hourly update narration call failed, falling back to template: {e}")
     return _fallback_hourly_update(location_name, recent_events, activity_lines)
 
 
@@ -945,7 +949,7 @@ def narrate_next_step_hint(next_step: dict) -> str:
             return _ensure_next_step_facts_present(text, next_step)
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] next-step-hint narration call failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] next-step-hint narration call failed, falling back to template: {e}")
     # Real live report (2026-09-02, Coffee): this fallback used to
     # include next_step["clue"] verbatim even for a puzzle -- for a
     # normal quest that's the intended, deterministic hint text, but
@@ -1019,7 +1023,7 @@ def narrate_story_so_far(
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] story-so-far narration call failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] story-so-far narration call failed, falling back to template: {e}")
     return _fallback_story_so_far(character_name, completed_arcs, current_arc, completed_quests)
 
 
@@ -1088,7 +1092,7 @@ def narrate_examine(character: dict, location_name: str, object_name: str, objec
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] examine narration call failed, falling back to plain description: {e}")
+        logger.error(f"[dm_agent] examine narration call failed, falling back to plain description: {e}")
     return object_description
 
 
@@ -1148,7 +1152,7 @@ def narrate_branching_quest_setup(location_name: str, npc_name: str | None,
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] branching quest setup narration failed, falling back to plain text: {e}")
+        logger.error(f"[dm_agent] branching quest setup narration failed, falling back to plain text: {e}")
     return f"Something about this task at {location_name} doesn't sit quite right."
 
 
@@ -1183,7 +1187,7 @@ def narrate_branching_choice_outcome(location_name: str, choice_label: str, outc
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] branching quest outcome narration failed, falling back to plain text: {e}")
+        logger.error(f"[dm_agent] branching quest outcome narration failed, falling back to plain text: {e}")
     return outcome_facts
 
 
@@ -1235,7 +1239,7 @@ def narrate_chapter_climax(quest_title: str, quest_description: str, reward_text
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] chapter climax narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] chapter climax narration failed, falling back to template: {e}")
     return f"This was a turning point. {quest_description}"
 
 
@@ -1309,7 +1313,7 @@ def narrate_reach_location_quest_completion(
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] reach-location quest narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] reach-location quest narration failed, falling back to template: {e}")
     return quest_description
 
 
@@ -1374,7 +1378,7 @@ def narrate_boss_intro(
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] boss intro narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] boss intro narration failed, falling back to template: {e}")
     return f"**{monster_name}** makes its presence known. This is going to be a real fight."
 
 
@@ -1427,7 +1431,7 @@ def narrate_boss_defeat(monster_name: str, location_name: str, ability_facts: st
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] boss defeat narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] boss defeat narration failed, falling back to template: {e}")
     return f"**{monster_name}** falls. A real, hard-won victory."
 
 
@@ -1481,7 +1485,7 @@ def narrate_boss_summon(boss_name: str, minion_names: str) -> str:
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] boss summon narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] boss summon narration failed, falling back to template: {e}")
     return f"**{boss_name}**, badly wounded, calls for reinforcements!"
 
 
@@ -1537,7 +1541,7 @@ def narrate_remnant_summon(remnant_name: str, remnant_lore: str, target_name: st
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] remnant summon narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] remnant summon narration failed, falling back to template: {e}")
     return f"**{remnant_name}** turns its full attention on **{target_name}**."
 
 
@@ -1584,7 +1588,7 @@ def narrate_labyrinth_segment_flavor(theme_name: str, theme_intro: str, antagoni
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] labyrinth segment flavor narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] labyrinth segment flavor narration failed, falling back to template: {e}")
     return theme_intro
 
 
@@ -1647,7 +1651,7 @@ def narrate_arc_opening(arc_title: str, arc_description: str, quest_title: str, 
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] arc opening narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] arc opening narration failed, falling back to template: {e}")
     return f"A new chapter begins. {arc_description}"
 
 
@@ -1707,7 +1711,7 @@ def narrate_arc_opening_generic(arc_title: str, arc_description: str, quest_titl
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] generic arc opening narration failed: {e}")
+        logger.error(f"[dm_agent] generic arc opening narration failed: {e}")
     return f"A new chapter begins. {arc_description}"
 
 
@@ -1787,7 +1791,7 @@ def narrate_boss_confrontation(
             return text
     except (requests.RequestException, ValueError) as e:
         record_timeout()
-        print(f"[dm_agent] boss confrontation narration failed, falling back to template: {e}")
+        logger.error(f"[dm_agent] boss confrontation narration failed, falling back to template: {e}")
     return f"**{boss_name}** turns to face the party, {boss_goals.split('--')[0].strip().rstrip('.')}."
 
 

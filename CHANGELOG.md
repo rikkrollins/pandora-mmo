@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.715] — fix: AI-agent call failures logged with print() instead of the real logger
+
+Full audit of the AI-party agent (`ai/autonomous_player.py`) and its
+siblings, per Coffee's ask. Reviewed `_ai_party_act_one_turn`,
+`_build_ai_player_situation_facts`, party cohesion, and the whole
+`choose_next_action` prompt/example pipeline against the real
+`bot_live_tmp.log` history — every previously-fixed bug in this area
+(bracket leak, hedge leak, cohesion snap-back) confirmed still fixed,
+no regressions found in the core decision logic.
+
+Real finding: every one of 24 Ollama-call failure sites across
+`ai/dev_agent.py`, `ai/npc_agent.py` (2), `ai/autonomous_player.py`,
+`ai/dm_agent.py` (20), and `ai/intent_parser.py` used a bare
+`print(...)` instead of `logger.error(...)` — the one class of error
+site in this entire codebase that didn't. Confirmed live: 145 real
+`[autonomous_player] action generation failed...` lines in
+`bot_live_tmp.log` with no timestamp at all, unlike every properly
+logged line, making it impossible to correlate a real narration/
+decision failure against a congestion incident or anything else by
+time after the fact. Fixed by adding the same `logging.getLogger
+("pandora_mmo")` already used everywhere else (`ai/support_agent.py`,
+`bot.py`) to all 5 files and swapping every bare print for
+`logger.error`.
+
+1 new test (one representative failure path per module, all 5,
+verifying each now logs through the real `pandora_mmo` logger); 12
+adjacent tests across intent_parser/moltbook/AI-party/narration/world-
+tick re-run with no regressions.
+
 ## [1.27.714] — fix: Moltbook posts were never completing their own required verification step
 
 Full audit of `moltbook.py`/`ai/moltbook_agent.py`, per Coffee's ask.
