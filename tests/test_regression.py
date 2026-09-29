@@ -42103,6 +42103,106 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_enchanters_guild_arcane_master_grand_tiers_are_real_and_ordered(self):
+        """
+        Enchanters' Guild curriculum plan, Batch 5 (2026-09-30, FINAL
+        batch of the whole guild-curriculum plan): the Arcane Enchanter/
+        Master Enchanter/Grand Enchanter tiers (ench_11-ench_16) extend
+        the curriculum to 16 real steps, capped at min_level 95 (the
+        real MAX_LEVEL is 99). ench_14's riddle answer is a SECOND real
+        pull from ELEMENTAL_FUSION_NAMES, distinct from ench_8's.
+        """
+        import guild_curriculum as gc
+        import rules.leveling as leveling
+        import rules.crafting as crafting
+        curriculum = gc.get_curriculum("enchanters_guild")
+        self.assertEqual(len(curriculum), 16)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(
+            ids[10:],
+            [
+                "ench_11_what_fire_and_lightning_taught", "ench_12_the_dim_hollow", "ench_13_a_masters_real_stockpile",
+                "ench_14_the_second_fusion_riddle", "ench_15_the_grand_enchanters_nerve", "ench_16_the_spell_that_shouldnt_exist",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+        self.assertLessEqual(curriculum[-1]["min_level"], leveling.MAX_LEVEL)
+
+        second_riddle = gc.get_step("enchanters_guild", 13)
+        real_answer = crafting.elemental_fusion_name("cold", "lightning")
+        self.assertEqual(real_answer, "Stormfrost")
+        self.assertIn(real_answer.lower(), second_riddle["trigger"]["accepted_answers"])
+        self.assertNotEqual(second_riddle["trigger"]["accepted_answers"], gc.get_step("enchanters_guild", 7)["trigger"]["accepted_answers"])
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("glimmerdeep_grotto_dim_hollow", campaign["locations"]["underground"])
+
+    async def test_enchanters_guild_arcane_master_tier_credits_via_real_checkpoints(self):
+        """End-to-end: walks ench_11 through ench_15 (indices 10-14) via the same real checkpoints used everywhere else."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951026
+        make_basic_character(user_id, "ArcaneMasterTester", char_class="Wizard", current_location="market_row")
+        db.update_character(user_id, -999, guild="enchanters_guild", level=95, guild_curriculum_step=10)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            npc_id = bot._find_npc_id_by_name("Vesh Nightglass")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Vesh about elements", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Vesh about elements",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 11, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="glimmerdeep_grotto_dim_hollow",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 12, sink)
+
+            db.add_item(user_id, -999, "moonpetal", 6)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="moonpetal",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 13, sink)
+
+            sink = []
+            update = FakeUpdate(user_id, "I think it's a stormfrost", sink, thread_id=config.GUILD_TOPIC_IDS["enchanters_guild"])
+            await bot.guild_topic_handler(update, DummyContext(), "enchanters_guild")
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 14, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["enchanters_guild"]),
+                    DummyContext(), "enchanters_guild",
+                )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 15, sink)
+
+    async def test_enchanters_guild_final_capstone_completes_the_whole_curriculum(self):
+        """The Level 95 capstone (ench_16) resolves correctly and, once credited, the whole 16-step Enchanters' Guild curriculum reads as genuinely complete."""
+        import guild_curriculum as gc
+        user_id = 951027
+        make_basic_character(user_id, "SpellShouldntExistTester", char_class="Wizard")
+        db.update_character(user_id, -999, guild="enchanters_guild", level=95, guild_curriculum_step=15)
+
+        sink = []
+        await bot.guild_curriculum_callback(
+            FakeCallbackUpdate(user_id, "gcurr|enchanters_guild|15|share_the_discovery", sink), DummyContext(),
+        )
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 16)
+        self.assertTrue(gc.is_curriculum_complete("enchanters_guild", char["guild_curriculum_step"]))
+
     def test_enchanters_guild_rune_adept_tier_is_real_and_wired_to_the_fusion_table(self):
         """
         Enchanters' Guild 1-95 curriculum plan, Batch 4 (2026-09-30):
@@ -42115,10 +42215,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         import guild_curriculum as gc
         import rules.crafting as crafting
         curriculum = gc.get_curriculum("enchanters_guild")
-        self.assertEqual(len(curriculum), 10)
+        self.assertGreaterEqual(len(curriculum), 10)  # Batch 5+ extends this further; never shrinks
         ids = [s["id"] for s in curriculum]
         self.assertEqual(
-            ids[4:],
+            ids[4:10],
             [
                 "ench_5_the_buried_glow", "ench_6_veshs_second_lesson", "ench_7_components_in_quantity",
                 "ench_8_the_fusion_riddle", "ench_9_steady_hands_for_runework", "ench_10_a_rune_worth_hiding",

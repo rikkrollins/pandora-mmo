@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.720] — Enchanters' Guild curriculum complete, 1-95 — guild-curriculum plan closed out
+
+Fifth and final batch of the Forge Guild + Enchanters' Guild
+curriculum plan. Enchanters' Guild now runs the full real distance,
+16 steps from level 5 to 95, adding the Arcane Enchanter, Master
+Enchanter, and Grand Enchanter tiers: What Fire and Lightning Taught,
+The Dim Hollow, A Master's Real Stockpile, The Second Fusion Riddle (a
+second real pull from `ELEMENTAL_FUSION_NAMES`, distinct from Batch
+4's), The Grand Enchanter's Nerve, and The Spell That Shouldn't Exist
+— a real capstone choice about whether to share or hoard a discovery.
+
+Both guilds' curricula are now complete end to end (Forge Guild
+finished in Batch 3, v1.27.718). 3 new tests, plus fixing one sibling
+test's stale total-length assertion (same expected class of update as
+every prior batch that extended a shared list — not a regression). A
+full 18-test sweep across every guild-curriculum test in the suite
+(both guilds, all 5 batches) confirms the whole feature is clean.
+
+This closes the guild-curriculum plan
+(`~/.claude/plans/twinkly-stargazing-grove.md`) that began with
+Coffee's guild-research review this session.
+
 ## [1.27.719] — Enchanters' Guild curriculum, Batch 4: Rune Adept tier (levels 9-36)
 
 Fourth batch of the guild-curriculum plan, first for the Enchanters'

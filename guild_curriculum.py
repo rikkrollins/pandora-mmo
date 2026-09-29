@@ -901,6 +901,116 @@ GUILD_CURRICULUM = {
             "reward_mastery_profession": "alchemy",
             "reward_mastery_pct": 4.0,
         },
+        # Arcane Enchanter / Master Enchanter / Grand Enchanter tiers
+        # (2026-09-30, Enchanters' Guild curriculum plan, Batch 5 --
+        # FINAL batch of the whole plan). Same discipline as every tier
+        # before this: real trigger vocabulary only, capped at 95 (the
+        # real MAX_LEVEL is 99, per rules/leveling.py), no defeat_monster
+        # on a one-time story boss. ench_14's riddle answer is a SECOND
+        # real pull from ELEMENTAL_FUSION_NAMES (cold+lightning), never
+        # reusing ench_8's own answer.
+        {
+            "id": "ench_11_what_fire_and_lightning_taught",
+            "title": "What Fire and Lightning Taught",
+            "flavor": (
+                "You solved the fusion riddle once. Vesh Nightglass wants to know if you actually understood "
+                "it, or just got lucky. Ask her about elements."
+            ),
+            "min_level": 41,
+            "trigger": {"type": "npc_dialogue", "npc": "vesh_nightglass", "keywords": ["elements", "element"]},
+            "reward_xp": 220,
+            "reward_gold": 80,
+        },
+        {
+            "id": "ench_12_the_dim_hollow",
+            "title": "The Dim Hollow",
+            "flavor": (
+                "Arcane Enchanters work where the light gives out entirely, not where it's merely dim. See "
+                "the Dim Hollow for yourself."
+            ),
+            "min_level": 50,
+            "trigger": {"type": "reach_location", "location": "glimmerdeep_grotto_dim_hollow"},
+            "reward_xp": 240,
+            "reward_gold": 90,
+        },
+        {
+            "id": "ench_13_a_masters_real_stockpile",
+            "title": "A Master's Real Stockpile",
+            "flavor": (
+                "A Master Enchanter never works from a single petal. Gather moonpetal in real quantity, the "
+                "way the Guild's own senior members actually do."
+            ),
+            "min_level": 60,
+            "trigger": {"type": "gather_material", "material": "moonpetal", "count": 6},
+            "reward_xp": 260,
+            "reward_gold": 100,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 5.0,
+        },
+        {
+            "id": "ench_14_the_second_fusion_riddle",
+            "title": "The Second Fusion Riddle",
+            "flavor": (
+                "A Master Enchanter's real test, in the Guild's own topic: \"Cold wants everything still. "
+                "Lightning wants everything moving. Bind them, and what walks out of the working?\""
+            ),
+            "min_level": 72,
+            "trigger": {"type": "solve_puzzle", "accepted_answers": ["stormfrost", "a stormfrost"]},
+            "reward_xp": 280,
+            "reward_gold": 0,
+        },
+        {
+            "id": "ench_15_the_grand_enchanters_nerve",
+            "title": "The Grand Enchanter's Nerve",
+            "flavor": (
+                "Grand Enchanters work on effects that don't forgive a shaking hand at all. Say \"try my "
+                "luck\" here and prove yours has finally stopped."
+            ),
+            "min_level": 84,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 300,
+            "reward_gold": 110,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 5.0,
+        },
+        {
+            "id": "ench_16_the_spell_that_shouldnt_exist",
+            "title": "The Spell That Shouldn't Exist",
+            "flavor": (
+                "The Guild has taught you everything it actually knows. What you make now, it genuinely "
+                "cannot advise you on — including whether you should."
+            ),
+            "min_level": 95,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "There's no recipe left to reach for. Whatever you enchant here is entirely your own "
+                    "invention, for better or worse — the Guild has already said it won't stop you either way."
+                ),
+                "choices": {
+                    "share_the_discovery": {
+                        "label": "record it openly for the Guild to study and teach",
+                        "reward_xp": 420,
+                        "reward_gold": 120,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "Whatever you actually made, other Enchanters will be able to learn from it honestly, not stumble onto it blind the way you just did.",
+                    },
+                    "keep_it_to_yourself": {
+                        "label": "keep the discovery entirely to yourself",
+                        "reward_xp": 420,
+                        "reward_gold": 300,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": -5,
+                        "outcome": "You walk away with real, singular power nobody else can replicate — and the Guild's own real curiosity about it, permanently unanswered.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 5.0,
+        },
     ],
 }
 
