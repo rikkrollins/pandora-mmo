@@ -42103,6 +42103,151 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_arcane_circle_full_tier_ladder_is_real_and_ordered(self):
+        """Remaining-5-guilds plan, Batch 2 (2026-09-29): Arcane Circle extends 4->18 steps, Spellbinder/Battlemage/Archmage/Sage of the Circle tiers, capped under real MAX_LEVEL. Every name confirmed real."""
+        import guild_curriculum as gc
+        import rules.leveling as leveling
+        import remnants
+        curriculum = gc.get_curriculum("arcane_circle")
+        self.assertEqual(len(curriculum), 18)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(ids[:4], ["arc_1_the_nook", "arc_2_the_first_riddle", "arc_3_reagents", "arc_4_a_wanderers_warning"])
+        self.assertEqual(
+            ids[4:],
+            [
+                "arc_5_the_sunken_archive", "arc_6_veshs_real_craft", "arc_7_reagents_in_quantity",
+                "arc_8_steady_casting", "arc_9_the_battlemages_question", "arc_10_the_champions_ward",
+                "arc_11_the_counterspell_riddle", "arc_12_the_disarmed_opponent", "arc_13_the_original_spire",
+                "arc_14_an_archmages_real_reserves", "arc_15_the_archives_keeper", "arc_16_an_archmages_nerve",
+                "arc_17_a_sages_real_question", "arc_18_what_the_circle_actually_keeps",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+        self.assertLessEqual(curriculum[-1]["min_level"], leveling.MAX_LEVEL)
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("the_first_city_sunken_archive", campaign["locations"]["underground"])
+        self.assertIn("the_first_city_the_original_spire", campaign["locations"]["underground"])
+        self.assertIn("the_archives_keeper", campaign["monsters"])
+        self.assertIn("the_archives_keeper", remnants.REMNANTS)
+
+    async def test_arcane_circle_full_tier_ladder_credits_via_real_checkpoints(self):
+        """End-to-end: walks arc_5 through arc_16 (indices 4-15) via the same real checkpoints used everywhere else."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951030
+        make_basic_character(user_id, "ArcaneLadderTester", char_class="Wizard", current_location="market_row")
+        db.update_character(user_id, -999, guild="arcane_circle", level=92, guild_curriculum_step=4)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="the_first_city_sunken_archive",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 5, sink)
+
+            npc_id = bot._find_npc_id_by_name("Vesh Nightglass")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Vesh about spellcraft", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Vesh about spellcraft",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 6, sink)
+
+            db.add_item(user_id, -999, "moonpetal", 8)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="moonpetal",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 7, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+                    DummyContext(), "arcane_circle",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 8, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Vesh about battle", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Vesh about battle",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 9, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"colosseum_champion"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 10, sink)
+
+            sink = []
+            update = FakeUpdate(user_id, "I think it's a counterspell", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"])
+            await bot.guild_topic_handler(update, DummyContext(), "arcane_circle")
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 11, sink)
+
+            # arc_12 is the mid-ladder alignment_choice, resolved separately below.
+            db.update_character(user_id, -999, guild_curriculum_step=12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="the_first_city_the_original_spire",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 13, sink)
+
+            db.add_item(user_id, -999, "glimmerdeep_moss", 6)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="glimmerdeep_moss",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 14, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"the_archives_keeper"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 15, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["arcane_circle"]),
+                    DummyContext(), "arcane_circle",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 16, sink)
+
+    async def test_arcane_circle_mid_and_final_alignment_choices_credit_correctly(self):
+        """arc_12 (The Disarmed Opponent) and arc_18 (the real capstone) both resolve correctly for either branch."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951031
+        make_basic_character(user_id, "ArcaneChoiceTester", char_class="Wizard")
+        db.update_character(user_id, -999, guild="arcane_circle", level=92, guild_curriculum_step=11)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|arcane_circle|11|let_them_walk", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 12)
+
+            db.update_character(user_id, -999, guild_curriculum_step=17)
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|arcane_circle|17|give_it_to_the_circle", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 18)
+        self.assertTrue(gc.is_curriculum_complete("arcane_circle", char["guild_curriculum_step"]))
+
     def test_adventurers_guild_full_tier_ladder_is_real_and_ordered(self):
         """
         Remaining-5-guilds 1-99 curriculum plan (2026-09-29, per Coffee:

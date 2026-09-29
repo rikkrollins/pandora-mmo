@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.722] — Arcane Circle curriculum, levels 1-92 (Batch 2 of the remaining-5-guilds plan)
+
+Second batch — Arcane Circle extends from 4 to 18 steps, Spellbinder →
+Battlemage → Archmage → Sage of the Circle, leaning on this guild's
+own real mechanics (Arcane Recovery, Counterspell, cantrip/spell-slot
+mastery) for flavor rather than reskinning Forge/Enchanters' own tier
+shape. Real trigger vocabulary only — The Sunken Archive and The
+Original Spire (real First City locations), a Counterspell-themed
+riddle, The Archive's Keeper (a real, confirmed Remnant-bound boss,
+never a one-time story climax), and a capstone choice about sharing
+vs. hoarding a real arcane discovery.
+
+3 new tests; 7 adjacent guild-curriculum tests re-run with no
+regressions. Two real live Arcane Circle members exist (Pan, already
+"complete" at the old 4 steps; Charvenna, mid-curriculum) — purely
+additive for both.
+
 ## [1.27.721] — Adventurers' Guild curriculum, levels 1-92 (Batch 1 of the remaining-5-guilds plan)
 
 First batch of extending the other 5 guilds to real full curricula,

@@ -423,6 +423,233 @@ GUILD_CURRICULUM = {
             "reward_mastery_profession": "alchemy",
             "reward_mastery_pct": 2.0,
         },
+        # Spellbinder -> Battlemage -> Archmage -> Sage of the Circle
+        # tiers (2026-09-29, remaining-5-guilds 1-99 curriculum plan,
+        # Batch 2, per Coffee: "be creative and make them unique"). This
+        # guild's own real mechanics -- Arcane Recovery, Counterspell,
+        # the cantrip/spell-slot system -- shape the flavor here, same
+        # discipline as Forge/Enchanters' own real-mechanic theming.
+        # Real trigger vocabulary only; every name confirmed real.
+        {
+            "id": "arc_5_the_sunken_archive",
+            "title": "The Sunken Archive",
+            "flavor": (
+                "The Arcane Nook is where you started. Real Spellbinders go further, into the First City's "
+                "own Sunken Archive, where the actual old workings are kept."
+            ),
+            "min_level": 10,
+            "trigger": {"type": "reach_location", "location": "the_first_city_sunken_archive"},
+            "reward_xp": 90,
+            "reward_gold": 25,
+        },
+        {
+            "id": "arc_6_veshs_real_craft",
+            "title": "Vesh's Real Craft",
+            "flavor": (
+                "You've heard Vesh Nightglass talk about power in the abstract. Ask her, directly, about "
+                "spellcraft itself."
+            ),
+            "min_level": 15,
+            "trigger": {"type": "npc_dialogue", "npc": "vesh_nightglass", "keywords": ["spellcraft", "craft"]},
+            "reward_xp": 100,
+            "reward_gold": 20,
+        },
+        {
+            "id": "arc_7_reagents_in_quantity",
+            "title": "Reagents in Quantity",
+            "flavor": (
+                "A Spellbinder who runs dry mid-casting is a Spellbinder who loses the fight. Gather real "
+                "quantity, not just enough for one working."
+            ),
+            "min_level": 20,
+            "trigger": {"type": "gather_material", "material": "moonpetal", "count": 8},
+            "reward_xp": 110,
+            "reward_gold": 30,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 3.0,
+        },
+        {
+            "id": "arc_8_steady_casting",
+            "title": "Steady Casting",
+            "flavor": (
+                "Arcane Recovery only ever helps a caster who's already steady under real pressure. Say "
+                "\"try my luck\" and prove yours is."
+            ),
+            "min_level": 26,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 120,
+            "reward_gold": 35,
+        },
+        {
+            "id": "arc_9_the_battlemages_question",
+            "title": "The Battlemage's Question",
+            "flavor": (
+                "Vesh Nightglass wants to know if you've actually thought about what happens when your own "
+                "spell meets someone else's counterspell. Ask her about battle."
+            ),
+            "min_level": 32,
+            "trigger": {"type": "npc_dialogue", "npc": "vesh_nightglass", "keywords": ["battle", "combat"]},
+            "reward_xp": 140,
+            "reward_gold": 40,
+        },
+        {
+            "id": "arc_10_the_champions_ward",
+            "title": "The Champion's Ward",
+            "flavor": (
+                "The Colosseum Champion doesn't cast a single spell — and a real Battlemage needs to know "
+                "exactly how to win a fight where magic alone won't decide it."
+            ),
+            "min_level": 40,
+            "trigger": {"type": "defeat_monster", "monster": "colosseum_champion", "count": 1},
+            "reward_xp": 180,
+            "reward_gold": 60,
+        },
+        {
+            "id": "arc_11_the_counterspell_riddle",
+            "title": "The Counterspell Riddle",
+            "flavor": (
+                "Every real Battlemage hears this one, in the Circle's own topic: \"I can undo what's never "
+                "been cast at all, but only in the instant it's actually happening. What am I?\""
+            ),
+            "min_level": 48,
+            "trigger": {"type": "solve_puzzle", "accepted_answers": ["a counterspell", "counterspell"]},
+            "reward_xp": 200,
+            "reward_gold": 0,
+        },
+        {
+            "id": "arc_12_the_disarmed_opponent",
+            "title": "The Disarmed Opponent",
+            "flavor": (
+                "You've got a real spell ready and an opponent who's genuinely out of options already. "
+                "Nobody's making you finish this the hard way."
+            ),
+            "min_level": 55,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "They're beaten and they know it. A real Battlemage could end this cleanly right now, or "
+                    "just as easily let them walk, with nothing forcing either choice."
+                ),
+                "choices": {
+                    "end_it_cleanly": {
+                        "label": "end the fight decisively, on your own terms",
+                        "reward_xp": 210,
+                        "reward_gold": 60,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": -10,
+                        "outcome": "It's over fast and it's over clean. Nobody argues with the result, even if some of them quietly wonder about it after.",
+                    },
+                    "let_them_walk": {
+                        "label": "let a beaten opponent walk away",
+                        "reward_xp": 210,
+                        "reward_gold": 20,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "They walk. Whether that was mercy or a mistake isn't something you get to know yet.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
+        {
+            "id": "arc_13_the_original_spire",
+            "title": "The Original Spire",
+            "flavor": (
+                "Every real Archmage eventually makes the climb to the First City's own Original Spire, "
+                "where the Circle's oldest real workings actually began."
+            ),
+            "min_level": 60,
+            "trigger": {"type": "reach_location", "location": "the_first_city_the_original_spire"},
+            "reward_xp": 240,
+            "reward_gold": 90,
+        },
+        {
+            "id": "arc_14_an_archmages_real_reserves",
+            "title": "An Archmage's Real Reserves",
+            "flavor": (
+                "Genuine arcane residue doesn't gather itself twice as fast just because you're an Archmage "
+                "now. Gather glimmerdeep moss the same patient way you always have."
+            ),
+            "min_level": 68,
+            "trigger": {"type": "gather_material", "material": "glimmerdeep_moss", "count": 6},
+            "reward_xp": 260,
+            "reward_gold": 100,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 4.0,
+        },
+        {
+            "id": "arc_15_the_archives_keeper",
+            "title": "The Archive's Keeper",
+            "flavor": (
+                "The Archives Keeper is real, bindable Remnant work — genuinely optional, and exactly the "
+                "kind of fight an Archmage is actually expected to seek out, not stumble into."
+            ),
+            "min_level": 76,
+            "trigger": {"type": "defeat_monster", "monster": "the_archives_keeper", "count": 1},
+            "reward_xp": 300,
+            "reward_gold": 130,
+        },
+        {
+            "id": "arc_16_an_archmages_nerve",
+            "title": "An Archmage's Nerve",
+            "flavor": (
+                "Real Archmage-tier workings don't forgive a shaking hand any more than a first-year "
+                "Spellbinder's did. Say \"try my luck\" and prove yours never actually stopped mattering."
+            ),
+            "min_level": 82,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 280,
+            "reward_gold": 110,
+        },
+        {
+            "id": "arc_17_a_sages_real_question",
+            "title": "A Sage's Real Question",
+            "flavor": (
+                "Vesh Nightglass has one real question left for you, the same one the Circle asks every "
+                "member who makes it this far. Ask her about legacy."
+            ),
+            "min_level": 88,
+            "trigger": {"type": "npc_dialogue", "npc": "vesh_nightglass", "keywords": ["legacy"]},
+            "reward_xp": 320,
+            "reward_gold": 120,
+        },
+        {
+            "id": "arc_18_what_the_circle_actually_keeps",
+            "title": "What the Circle Actually Keeps",
+            "flavor": (
+                "You've found something the Circle itself never fully understood. Whether it stays yours "
+                "alone or becomes the Circle's own real, shared knowledge is entirely your call now."
+            ),
+            "min_level": 92,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "Nobody else in the Circle knows this working exists yet. Handing it over means it "
+                    "becomes real, shared knowledge; keeping it means it stays yours, and yours only."
+                ),
+                "choices": {
+                    "give_it_to_the_circle": {
+                        "label": "hand the working over to the Circle, freely",
+                        "reward_xp": 380,
+                        "reward_gold": 100,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "It becomes part of the Circle's own real, shared teaching — bigger than you now, the way real knowledge is actually supposed to get.",
+                    },
+                    "keep_the_working": {
+                        "label": "keep the working entirely to yourself",
+                        "reward_xp": 380,
+                        "reward_gold": 280,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": -5,
+                        "outcome": "It stays yours, singular and real. The Circle never quite stops wondering what you're not telling them.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
     ],
     "silver_wardens": [
         {
