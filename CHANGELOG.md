@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.719] — Enchanters' Guild curriculum, Batch 4: Rune Adept tier (levels 9-36)
+
+Fourth batch of the guild-curriculum plan, first for the Enchanters'
+Guild — extends its curriculum from 4 to 10 steps, adding a real Rune
+Adept tier: The Buried Glow, Vesh's Second Lesson, Components in
+Quantity, The Fusion Riddle, Steady Hands for Runework, and A Rune
+Worth Hiding (a real forbidden-magic moral choice). Same real trigger
+vocabulary as every other curriculum in this game; no dedicated
+Enchanters' Guild NPC exists in the campaign data, so Vesh Nightglass
+(already the real NPC tied to Glimmerdeep Grotto's arcane lore) is
+reused rather than inventing a new one.
+
+The Fusion Riddle is the first real content anywhere to reference
+Batch 1's `ELEMENTAL_FUSION_NAMES` table — its accepted answer
+("wildfire") is pulled directly from `elemental_fusion_name("fire",
+"lightning")`, not a separately hand-typed answer that could drift out
+of sync with the actual data.
+
+3 new tests; 5 adjacent guild-curriculum tests re-run with no
+regressions. No live Enchanters' Guild member exists yet, so this
+ships with zero live-character risk.
+
 ## [1.27.718] — Forge Guild curriculum, Batch 3: Artificer + Legendary Forgemaster (levels 45-95), Forge Guild now complete 1-95
 
 Third and final Forge Guild batch — the curriculum now runs the real

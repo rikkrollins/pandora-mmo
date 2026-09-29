@@ -786,6 +786,121 @@ GUILD_CURRICULUM = {
             # branch, never reward_item.
             "reward_item": "enchanters_grimoire",
         },
+        # Rune Adept tier (2026-09-30, Enchanters' Guild 1-95 curriculum
+        # plan, Batch 4). Same real trigger vocabulary as every other
+        # curriculum in this file. No dedicated Enchanters' Guild NPC
+        # exists in campaign.json (confirmed by search before writing
+        # this) -- Vesh Nightglass, already the real NPC tied to
+        # Glimmerdeep Grotto's own arcane lore (see arcane_circle's
+        # curriculum above), is reused here rather than inventing a new
+        # NPC. ench_8's riddle answer is pulled directly from the real
+        # ELEMENTAL_FUSION_NAMES table (rules/crafting.py, shipped in
+        # Batch 1) -- the first real content in either guild's
+        # curriculum to actually reference that data.
+        {
+            "id": "ench_5_the_buried_glow",
+            "title": "The Buried Glow",
+            "flavor": (
+                "Every apprentice sees Glimmerdeep Grotto's entrance. Real Rune Adepts go further, to where "
+                "the glow is old enough to have buried itself."
+            ),
+            "min_level": 9,
+            "trigger": {"type": "reach_location", "location": "glimmerdeep_grotto_buried_glow"},
+            "reward_xp": 90,
+            "reward_gold": 30,
+        },
+        {
+            "id": "ench_6_veshs_second_lesson",
+            "title": "Vesh's Second Lesson",
+            "flavor": (
+                "Vesh Nightglass never fully found her way back from whatever she chased into this grotto. "
+                "Ask her, plainly, about resonance."
+            ),
+            "min_level": 13,
+            "trigger": {"type": "npc_dialogue", "npc": "vesh_nightglass", "keywords": ["resonance"]},
+            "reward_xp": 100,
+            "reward_gold": 25,
+        },
+        {
+            "id": "ench_7_components_in_quantity",
+            "title": "Components in Quantity",
+            "flavor": (
+                "A Rune Adept who runs out of catalyst mid-working ruins the rune, not just the attempt. "
+                "Gather sulfur dust the way a real workshop actually stocks it."
+            ),
+            "min_level": 17,
+            "trigger": {"type": "gather_material", "material": "sulfur_dust", "count": 8},
+            "reward_xp": 110,
+            "reward_gold": 35,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 3.0,
+        },
+        {
+            "id": "ench_8_the_fusion_riddle",
+            "title": "The Fusion Riddle",
+            "flavor": (
+                "Every Rune Adept learns this one the same way, in the Guild's own topic: \"Fire wants to "
+                "climb. Lightning wants to strike. Bind them into one working, and what do smiths call what "
+                "walks out of the forge?\""
+            ),
+            "min_level": 22,
+            "trigger": {"type": "solve_puzzle", "accepted_answers": ["wildfire", "a wildfire"]},
+            "reward_xp": 130,
+            "reward_gold": 0,
+        },
+        {
+            "id": "ench_9_steady_hands_for_runework",
+            "title": "Steady Hands for Runework",
+            "flavor": (
+                "A rune carved with a shaking hand fails the instant it's needed most. Say \"try my luck\" "
+                "here — real runework punishes hesitation the same way real forging does."
+            ),
+            "min_level": 28,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 140,
+            "reward_gold": 45,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 3.0,
+        },
+        {
+            "id": "ench_10_a_rune_worth_hiding",
+            "title": "A Rune Worth Hiding",
+            "flavor": (
+                "You've stumbled onto a genuinely forbidden rune — the kind the Guild teaches its members "
+                "exists, then quietly hopes nobody ever actually finds one."
+            ),
+            "min_level": 36,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "Nobody else knows this rune is here. Reporting it to the Guild is the expected thing to "
+                    "do — using it first, just once, before anyone else even knows to stop you, is entirely "
+                    "possible too."
+                ),
+                "choices": {
+                    "report_it": {
+                        "label": "report the rune to the Guild untouched",
+                        "reward_xp": 150,
+                        "reward_gold": 40,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": 10,
+                        "outcome": "The Guild logs it, studies it properly, and eventually decides it's safer sealed than taught. You never find out what it would have done.",
+                    },
+                    "use_it_first": {
+                        "label": "use it yourself before reporting anything",
+                        "reward_xp": 150,
+                        "reward_gold": 40,
+                        "alignment_law_chaos_delta": -10,
+                        "alignment_good_evil_delta": -5,
+                        "outcome": "It works exactly as forbidden things usually do — real power, and a real cost you don't fully understand yet.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+            "reward_mastery_profession": "alchemy",
+            "reward_mastery_pct": 4.0,
+        },
     ],
 }
 

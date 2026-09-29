@@ -42103,6 +42103,114 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_enchanters_guild_rune_adept_tier_is_real_and_wired_to_the_fusion_table(self):
+        """
+        Enchanters' Guild 1-95 curriculum plan, Batch 4 (2026-09-30):
+        the Rune Adept tier (ench_5-ench_10) extends the existing
+        4-step curriculum, real names confirmed against campaign data,
+        and ench_8's riddle answer is pulled directly from the real
+        ELEMENTAL_FUSION_NAMES table shipped in Batch 1 -- not a
+        separately-invented answer.
+        """
+        import guild_curriculum as gc
+        import rules.crafting as crafting
+        curriculum = gc.get_curriculum("enchanters_guild")
+        self.assertEqual(len(curriculum), 10)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(
+            ids[4:],
+            [
+                "ench_5_the_buried_glow", "ench_6_veshs_second_lesson", "ench_7_components_in_quantity",
+                "ench_8_the_fusion_riddle", "ench_9_steady_hands_for_runework", "ench_10_a_rune_worth_hiding",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+
+        riddle_step = gc.get_step("enchanters_guild", 7)
+        real_fusion_answer = crafting.elemental_fusion_name("fire", "lightning")
+        self.assertEqual(real_fusion_answer, "Wildfire")
+        self.assertIn(real_fusion_answer.lower(), riddle_step["trigger"]["accepted_answers"])
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("glimmerdeep_grotto_buried_glow", campaign["locations"]["underground"])
+        self.assertIn("vesh_nightglass", campaign["npcs"])
+
+    async def test_enchanters_guild_rune_adept_tier_credits_via_real_checkpoints(self):
+        """End-to-end: walks ench_5 through ench_9 (indices 4-8) via the same real checkpoints used everywhere else in this curriculum, including a real riddle-answer submission through guild_topic_handler."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951024
+        make_basic_character(user_id, "RuneAdeptTester", char_class="Wizard", current_location="market_row")
+        db.update_character(user_id, -999, guild="enchanters_guild", level=36, guild_curriculum_step=4)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="glimmerdeep_grotto_buried_glow",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 5, sink)
+
+            npc_id = bot._find_npc_id_by_name("Vesh Nightglass")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Vesh about resonance", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Vesh about resonance",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 6, sink)
+
+            db.add_item(user_id, -999, "sulfur_dust", 8)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="sulfur_dust",
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 7, sink)
+
+            sink = []
+            update = FakeUpdate(user_id, "I think it's a wildfire", sink, thread_id=config.GUILD_TOPIC_IDS["enchanters_guild"])
+            await bot.guild_topic_handler(update, DummyContext(), "enchanters_guild")
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 8, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["enchanters_guild"]),
+                    DummyContext(), "enchanters_guild",
+                )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 9, sink)
+
+    async def test_enchanters_guild_forbidden_rune_alignment_choice_credits_both_branches(self):
+        """The Rune Adept tier's own capstone (ench_10) resolves correctly for both branches."""
+        user_id = 951025
+        make_basic_character(user_id, "ForbiddenRuneTester", char_class="Wizard")
+        db.update_character(user_id, -999, guild="enchanters_guild", level=36, guild_curriculum_step=9)
+        char = db.get_character(user_id, -999)
+        law_chaos_before = char["alignment_law_chaos"]
+        good_evil_before = char["alignment_good_evil"]
+
+        sink = []
+        await bot.guild_curriculum_callback(
+            FakeCallbackUpdate(user_id, "gcurr|enchanters_guild|9|report_it", sink), DummyContext(),
+        )
+        char = db.get_character(user_id, -999)
+        self.assertEqual(char["guild_curriculum_step"], 10)
+        self.assertEqual(char["alignment_law_chaos"], law_chaos_before + 5)
+        self.assertEqual(char["alignment_good_evil"], good_evil_before + 10)
+        # Deliberately no is_curriculum_complete assertion here -- ench_10
+        # is the Rune Adept tier's own capstone, not necessarily the
+        # whole curriculum's; whether it's "complete" depends on Batch 5
+        # (Arcane/Master/Grand Enchanter tiers), which doesn't exist yet
+        # as of this batch. Asserting either True or False here would go
+        # stale the moment Batch 5 ships -- see the identical lesson
+        # already learned once for Forge Guild's forge_11 test above.
+
     def test_forge_guild_artificer_and_forgemaster_tiers_are_real_and_ordered(self):
         """
         Forge Guild 1-100 curriculum plan, Batch 3 (2026-09-30): the
