@@ -42248,6 +42248,155 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(char["guild_curriculum_step"], 18)
         self.assertTrue(gc.is_curriculum_complete("arcane_circle", char["guild_curriculum_step"]))
 
+    def test_silver_wardens_full_tier_ladder_is_real_and_ordered(self):
+        """Remaining-5-guilds plan, Batch 3 (2026-09-29): Silver Wardens extends 4->18 steps, Hunter/Exorcist/Wraithbane/the Wardens' Chosen tiers, capped under real MAX_LEVEL. Every name confirmed real."""
+        import guild_curriculum as gc
+        import rules.leveling as leveling
+        import remnants
+        curriculum = gc.get_curriculum("silver_wardens")
+        self.assertEqual(len(curriculum), 18)
+        ids = [s["id"] for s in curriculum]
+        self.assertEqual(ids[:4], ["wrd_1_first_undead", "wrd_2_the_downs", "wrd_3_grasks_measure", "wrd_4_after_the_kill"])
+        self.assertEqual(
+            ids[4:],
+            [
+                "wrd_5_the_sunken_barrow", "wrd_6_grasks_real_wardens_measure", "wrd_7_silver_in_quantity",
+                "wrd_8_the_ash_wraith", "wrd_9_a_hunters_composure", "wrd_10_what_grask_still_fears",
+                "wrd_11_the_mirror_wisp", "wrd_12_the_restless_watch", "wrd_13_the_wardens_hollow",
+                "wrd_14_a_wraithbanes_real_supply", "wrd_15_the_drift_bound_wisp", "wrd_16_a_wraithbanes_nerve",
+                "wrd_17_what_the_wardens_actually_choose", "wrd_18_the_last_real_mercy",
+            ],
+        )
+        levels = [s["min_level"] for s in curriculum]
+        self.assertEqual(levels, sorted(levels), "min_level must strictly climb, never regress")
+        self.assertLessEqual(curriculum[-1]["min_level"], leveling.MAX_LEVEL)
+
+        campaign = bot.CAMPAIGN
+        self.assertIn("greymoor_downs_sunken_barrow", campaign["locations"]["underground"])
+        self.assertIn("greymoor_downs_the_wardens_hollow", campaign["locations"]["underground"])
+        for monster in ("ash_wraith", "unmoored_mirror_wisp", "the_drift_bound_wisp"):
+            self.assertIn(monster, campaign["monsters"])
+            self.assertNotIn(monster, remnants.REMNANTS)
+            self.assertFalse(campaign["monsters"][monster].get("is_boss"))
+
+    async def test_silver_wardens_full_tier_ladder_credits_via_real_checkpoints(self):
+        """End-to-end: walks wrd_5 through wrd_16 (indices 4-15) via the same real checkpoints used everywhere else."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951040
+        make_basic_character(user_id, "WardenLadderTester", char_class="Paladin", current_location="market_row")
+        db.update_character(user_id, -999, guild="silver_wardens", level=92, guild_curriculum_step=4)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="greymoor_downs_sunken_barrow",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 5, sink)
+
+            npc_id = bot._find_npc_id_by_name("Grask Emberscale")
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Grask about the wardens cost", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Grask about the wardens cost",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 6, sink)
+
+            db.add_item(user_id, -999, "silverleaf_herb", 8)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="silverleaf_herb",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 7, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"ash_wraith"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 8, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["silver_wardens"]),
+                    DummyContext(), "silver_wardens",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 9, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "Ask Grask about fear", sink), user_id, -999,
+                "npc_dialogue", npc_id=npc_id, text="Ask Grask about fear",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 10, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"unmoored_mirror_wisp"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 11, sink)
+
+            # wrd_12 is the mid-ladder alignment_choice, resolved separately below.
+            db.update_character(user_id, -999, guild_curriculum_step=12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "reach_location", location_id="greymoor_downs_the_wardens_hollow",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 13, sink)
+
+            db.add_item(user_id, -999, "silverleaf_herb", 12)
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "gather_material", material_id="silverleaf_herb",
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 14, sink)
+
+            sink = []
+            await bot._check_guild_curriculum_progress(
+                FakeUpdate(user_id, "", sink), user_id, -999,
+                "defeat_monster", monster_keys={"the_drift_bound_wisp"},
+            )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 15, sink)
+
+            sink = []
+            with patch("bot.roll", return_value=[6, 6]):
+                await bot.guild_topic_handler(
+                    FakeUpdate(user_id, "try my luck", sink, thread_id=config.GUILD_TOPIC_IDS["silver_wardens"]),
+                    DummyContext(), "silver_wardens",
+                )
+            self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 16, sink)
+
+    async def test_silver_wardens_mid_and_final_alignment_choices_credit_correctly(self):
+        """wrd_12 (The Restless Watch) and wrd_18 (the real capstone) both resolve correctly for either branch."""
+        from unittest.mock import patch
+        import guild_curriculum as gc
+        user_id = 951041
+        make_basic_character(user_id, "WardenChoiceTester", char_class="Paladin")
+        db.update_character(user_id, -999, guild="silver_wardens", level=92, guild_curriculum_step=11)
+
+        with patch.object(gc, "GUILD_CURRICULUM_STEP_COOLDOWN_HOURS", 0):
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|silver_wardens|11|release_it_gently", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 12)
+
+            db.update_character(user_id, -999, guild_curriculum_step=17)
+            sink = []
+            await bot.guild_curriculum_callback(
+                FakeCallbackUpdate(user_id, "gcurr|silver_wardens|17|grant_it_peace", sink), DummyContext(),
+            )
+            char = db.get_character(user_id, -999)
+            self.assertEqual(char["guild_curriculum_step"], 18)
+        self.assertTrue(gc.is_curriculum_complete("silver_wardens", char["guild_curriculum_step"]))
+
     def test_adventurers_guild_full_tier_ladder_is_real_and_ordered(self):
         """
         Remaining-5-guilds 1-99 curriculum plan (2026-09-29, per Coffee:

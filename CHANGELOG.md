@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.723] — Silver Wardens curriculum, levels 1-95 (Batch 3 of the remaining-5-guilds plan)
+
+Third batch — Silver Wardens extends from 4 to 18 steps, Hunter →
+Exorcist → Wraithbane → the Wardens' Chosen, leaning on Divine Sense
+and a real, HP-scaled spread of undead/spirit field monsters
+(Ash Wraith, Unmoored Mirror Wisp, The Drift-Bound Wisp — confirmed
+none are flagged `is_boss` and none are Remnant-bound, so every one is
+an ordinary, always-repeatable encounter, not a one-time story fight).
+Real trigger vocabulary only — the Sunken Barrow and the Warden's
+Hollow (real Greymoor Downs locations), Grask Emberscale reused across
+3 new dialogue checkpoints, silverleaf-herb gathering scaled up for
+the higher tiers, and two capstone-shaped alignment choices (releasing
+vs. banishing a restless spirit at the mid tier, mercy vs. the manual
+at the real level-95 capstone). No live Silver Wardens guild members
+existed at ship time, so this is purely additive with zero blast
+radius.
+
 ## [1.27.722] — Arcane Circle curriculum, levels 1-92 (Batch 2 of the remaining-5-guilds plan)
 
 Second batch — Arcane Circle extends from 4 to 18 steps, Spellbinder →

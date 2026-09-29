@@ -718,6 +718,232 @@ GUILD_CURRICULUM = {
             "reward_xp": 0,
             "reward_gold": 0,
         },
+        # Hunter -> Exorcist -> Wraithbane -> the Wardens' Chosen tiers
+        # (2026-09-29, remaining-5-guilds 1-99 curriculum plan, Batch
+        # 3). Leans on Divine Sense and a real, HP-scaled spread of
+        # undead/spirit field monsters -- confirmed NONE of them are
+        # flagged is_boss and NONE are Remnant-bound (checked against
+        # remnants.REMNANTS before writing this), meaning they're all
+        # ordinary, always-repeatable encounters, not one-time story
+        # fights -- even safer than the Remnant-boss pattern used for
+        # Adventurers'/Arcane's own higher tiers. Real trigger
+        # vocabulary only; every name confirmed real.
+        {
+            "id": "wrd_5_the_sunken_barrow",
+            "title": "The Sunken Barrow",
+            "flavor": (
+                "Greymoor Downs has a real barrow beneath it that the Wardens keep closer watch on than "
+                "anywhere else. See the Sunken Barrow with your own eyes."
+            ),
+            "min_level": 12,
+            "trigger": {"type": "reach_location", "location": "greymoor_downs_sunken_barrow"},
+            "reward_xp": 90,
+            "reward_gold": 30,
+        },
+        {
+            "id": "wrd_6_grasks_real_wardens_measure",
+            "title": "Grask's Real Wardens' Measure",
+            "flavor": (
+                "Grask Emberscale's answered what strength means before. Ask him now what the Wardens' own "
+                "work actually costs a person, over years of it."
+            ),
+            "min_level": 16,
+            "trigger": {"type": "npc_dialogue", "npc": "grask_emberscale", "keywords": ["wardens", "cost"]},
+            "reward_xp": 100,
+            "reward_gold": 25,
+        },
+        {
+            "id": "wrd_7_silver_in_quantity",
+            "title": "Silver in Quantity",
+            "flavor": (
+                "A Hunter who runs out of silverleaf mid-hunt is a Hunter who doesn't finish it. Gather real "
+                "quantity, the way the Wardens' own veterans actually carry it."
+            ),
+            "min_level": 20,
+            "trigger": {"type": "gather_material", "material": "silverleaf_herb", "count": 8},
+            "reward_xp": 110,
+            "reward_gold": 30,
+        },
+        {
+            "id": "wrd_8_the_ash_wraith",
+            "title": "The Ash Wraith",
+            "flavor": (
+                "An Ash Wraith is a real, harder step up from your first wraith kill — the Wardens want proof "
+                "the training scales with the real threat, not just the easy version of it."
+            ),
+            "min_level": 30,
+            "trigger": {"type": "defeat_monster", "monster": "ash_wraith", "count": 1},
+            "reward_xp": 160,
+            "reward_gold": 55,
+        },
+        {
+            "id": "wrd_9_a_hunters_composure",
+            "title": "A Hunter's Composure",
+            "flavor": (
+                "Divine Sense tells you something's there. It never tells you whether you're actually ready "
+                "for it. Say \"try my luck\" and prove you are anyway."
+            ),
+            "min_level": 36,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 140,
+            "reward_gold": 45,
+        },
+        {
+            "id": "wrd_10_what_grask_still_fears",
+            "title": "What Grask Still Fears",
+            "flavor": (
+                "Grask doesn't talk about the goblins' cages easily, but an Exorcist-tier Warden needs to "
+                "understand real fear before they can ever exorcise it from someone else. Ask him about fear."
+            ),
+            "min_level": 44,
+            "trigger": {"type": "npc_dialogue", "npc": "grask_emberscale", "keywords": ["fear", "afraid"]},
+            "reward_xp": 170,
+            "reward_gold": 50,
+        },
+        {
+            "id": "wrd_11_the_mirror_wisp",
+            "title": "The Mirror Wisp",
+            "flavor": (
+                "The Unmoored Isle's own Mirror Wisp shows a Hunter exactly what they're afraid to become. An "
+                "Exorcist puts it down anyway."
+            ),
+            "min_level": 52,
+            "trigger": {"type": "defeat_monster", "monster": "unmoored_mirror_wisp", "count": 1},
+            "reward_xp": 220,
+            "reward_gold": 80,
+        },
+        {
+            "id": "wrd_12_the_restless_watch",
+            "title": "The Restless Watch",
+            "flavor": (
+                "Something's been keeping a genuine vigil here for longer than it's had any real reason to. "
+                "Releasing it means it finally rests. Banishing it outright means it's simply gone."
+            ),
+            "min_level": 60,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "It isn't hostile, hasn't been for a long time — it's just still watching for something "
+                    "that stopped coming decades ago. An Exorcist could release it gently, or simply banish it."
+                ),
+                "choices": {
+                    "release_it_gently": {
+                        "label": "help it finally let go and rest",
+                        "reward_xp": 200,
+                        "reward_gold": 50,
+                        "alignment_law_chaos_delta": 0,
+                        "alignment_good_evil_delta": 15,
+                        "outcome": "It fades slowly, on its own real terms, finally done waiting for something that was never coming back.",
+                    },
+                    "banish_it_outright": {
+                        "label": "banish it outright, quickly and cleanly",
+                        "reward_xp": 200,
+                        "reward_gold": 70,
+                        "alignment_law_chaos_delta": 5,
+                        "alignment_good_evil_delta": -5,
+                        "outcome": "It's simply gone. Faster, cleaner, and you'll never actually know if it minded.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
+        {
+            "id": "wrd_13_the_wardens_hollow",
+            "title": "The Warden's Hollow",
+            "flavor": (
+                "Real Wraithbane-tier training happens where the Wardens themselves actually train for it. "
+                "Find the Warden's Hollow."
+            ),
+            "min_level": 64,
+            "trigger": {"type": "reach_location", "location": "greymoor_downs_the_wardens_hollow"},
+            "reward_xp": 240,
+            "reward_gold": 90,
+        },
+        {
+            "id": "wrd_14_a_wraithbanes_real_supply",
+            "title": "A Wraithbane's Real Supply",
+            "flavor": (
+                "Wraithbane-tier work burns through silverleaf faster than any Hunter ever imagined it could. "
+                "Stockpile it accordingly."
+            ),
+            "min_level": 70,
+            "trigger": {"type": "gather_material", "material": "silverleaf_herb", "count": 12},
+            "reward_xp": 260,
+            "reward_gold": 100,
+        },
+        {
+            "id": "wrd_15_the_drift_bound_wisp",
+            "title": "The Drift-Bound Wisp",
+            "flavor": (
+                "The Drift-Bound Wisp is the genuine reason this tier is called Wraithbane and not just "
+                "'more wraiths.' It's real, it's dangerous, and it's exactly what the rank is for."
+            ),
+            "min_level": 78,
+            "trigger": {"type": "defeat_monster", "monster": "the_drift_bound_wisp", "count": 1},
+            "reward_xp": 320,
+            "reward_gold": 140,
+        },
+        {
+            "id": "wrd_16_a_wraithbanes_nerve",
+            "title": "A Wraithbane's Nerve",
+            "flavor": (
+                "Real Wraithbane work punishes hesitation the same way it always has, at every rank before "
+                "this one. Say \"try my luck\" and prove yours never actually changed."
+            ),
+            "min_level": 84,
+            "trigger": {"type": "dice_challenge", "threshold": DICE_CHALLENGE_DEFAULT_THRESHOLD},
+            "reward_xp": 290,
+            "reward_gold": 115,
+        },
+        {
+            "id": "wrd_17_what_the_wardens_actually_choose",
+            "title": "What the Wardens Actually Choose",
+            "flavor": (
+                "Grask has one real question left for every Warden who makes it this far. Ask him what being "
+                "chosen for this rank actually means."
+            ),
+            "min_level": 90,
+            "trigger": {"type": "npc_dialogue", "npc": "grask_emberscale", "keywords": ["chosen"]},
+            "reward_xp": 330,
+            "reward_gold": 120,
+        },
+        {
+            "id": "wrd_18_the_last_real_mercy",
+            "title": "The Last Real Mercy",
+            "flavor": (
+                "You've cornered something that was never truly evil, only unmade by whatever happened to it. "
+                "The Wardens' Chosen decide these on their own, not by the book."
+            ),
+            "min_level": 95,
+            "trigger": {
+                "type": "alignment_choice",
+                "setup": (
+                    "It could be put down here, permanently, the way the Wardens' own manual actually "
+                    "recommends. Or it could be given one last, genuine chance at something like peace instead."
+                ),
+                "choices": {
+                    "grant_it_peace": {
+                        "label": "grant it a real, deliberate mercy instead of the manual's answer",
+                        "reward_xp": 400,
+                        "reward_gold": 100,
+                        "alignment_law_chaos_delta": -5,
+                        "alignment_good_evil_delta": 15,
+                        "outcome": "It's not the answer the manual gives. It's the one you actually chose, and you're the one who has to live with having made it.",
+                    },
+                    "follow_the_manual": {
+                        "label": "follow the Wardens' manual exactly as written",
+                        "reward_xp": 400,
+                        "reward_gold": 150,
+                        "alignment_law_chaos_delta": 10,
+                        "alignment_good_evil_delta": -5,
+                        "outcome": "By the book, every time, the way the Wardens actually trained you. Nobody can argue with the procedure.",
+                    },
+                },
+            },
+            "reward_xp": 0,
+            "reward_gold": 0,
+        },
     ],
     "thieves_guild": [
         {
