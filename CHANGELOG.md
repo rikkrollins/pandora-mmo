@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.731] — Story So Far now shows real party members' own progress
+
+Real dev-bridge report (Coffee, re: Laurienna and Elduinn: "we are
+also in the same party?! ... I don't want this to be confusing and I
+want you to find a way so that it is concise between both party
+players"). Confirmed the real root cause directly against live
+character data before building anything: `party_id` alone doesn't
+keep party members physically or narratively together in this game —
+each character's own location, quests, and level march forward
+completely independently even while genuinely partied (one had
+wandered solo into the Labyrinth while the other continued the
+overworld story elsewhere, 11 quests and 3 levels apart), so their own
+"Story So Far" screens read as unrelated even though the party link is
+real. Scoped narrowly per Coffee's own confirmed choice — no change to
+how parties/movement/questing work anywhere else — the Story So Far
+screen now shows a real "🤝 Party" section listing every OTHER real
+party member's own current chapter and level alongside the viewer's
+own, so a divergence like this is immediately visible and explained
+instead of silently confusing. 2 new tests (shows another real
+member's progress; shows nothing extra for a solo character); 7
+adjacent story-so-far/check-story tests re-run clean.
+
 ## [1.27.730] — Artifact evolution: a real tier above mythic (Batch 5 of the Forge/Enchanters endgame systems plan)
 
 Per the original research doc's "a weapon that gains new abilities as

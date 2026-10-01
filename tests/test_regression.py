@@ -42253,6 +42253,50 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Whispers", combined)
         self.assertTrue(any(rumor in combined for rumor in bot._GENERIC_TAVERN_RUMORS), combined)
 
+    async def test_story_so_far_shows_other_real_party_members_own_progress(self):
+        """
+        Real dev-bridge report (2026-10-01, Coffee, re: Laurienna and
+        Elduinn: "we are also in the same party?! ... I don't want
+        this to be confusing and I want you to find a way so that it
+        is concise between both party players"). Root cause confirmed
+        against real character data before building: party_id alone
+        doesn't keep members physically/narratively together -- each
+        character's own quests/level march forward independently. This
+        screen now shows every OTHER real party member's own current
+        chapter and level alongside the viewer's own, scoped narrowly
+        per Coffee's own confirmed choice (just this screen, no change
+        to how parties/movement/questing work anywhere else).
+        """
+        from unittest.mock import patch
+        viewer_id, other_id = 996105, 996106
+        make_basic_character(viewer_id, "PartyViewerTester", current_location="crossroads_tavern")
+        make_basic_character(other_id, "PartyOtherTester", current_location="crossroads_tavern")
+        arc = bot.CAMPAIGN["story_arcs"]["arc_1_discovery"]
+        db.update_character(other_id, -999, completed_quests=list(arc["quests"]), level=12)
+        db.update_character(viewer_id, -999, party_id=777)
+        db.update_character(other_id, -999, party_id=777)
+        sink = []
+        with patch("bot.narrate_story_so_far", return_value="Their tale so far."), \
+             patch("bot.narrate_next_step_hint", return_value="Onward."), \
+             patch("bot._send_generated_image", return_value=None):
+            await bot._do_show_story_so_far(FakeUpdate(viewer_id, "story so far", sink))
+        combined = "\n".join(sink)
+        self.assertIn("🤝 Party", combined)
+        self.assertIn("PartyOtherTester", combined)
+        self.assertIn("lvl 12", combined)
+
+    async def test_story_so_far_shows_no_party_block_when_solo(self):
+        """A character with no real party_id (or alone in one) gets no Party block at all -- never an empty/placeholder section."""
+        from unittest.mock import patch
+        make_basic_character(996107, "SoloStoryTester", current_location="crossroads_tavern")
+        sink = []
+        with patch("bot.narrate_story_so_far", return_value="Their tale so far."), \
+             patch("bot.narrate_next_step_hint", return_value="Onward."), \
+             patch("bot._send_generated_image", return_value=None):
+            await bot._do_show_story_so_far(FakeUpdate(996107, "story so far", sink))
+        combined = "\n".join(sink)
+        self.assertNotIn("🤝 Party", combined)
+
     def test_generic_tavern_rumor_pick_is_stable_for_the_same_character(self):
         character_a = {"telegram_user_id": 12345, "name": "Alduin"}
         character_b = dict(character_a)

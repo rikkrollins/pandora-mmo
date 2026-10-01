@@ -36748,8 +36748,38 @@ async def _do_show_story_so_far(update: Update) -> None:
     if image_task is not None:
         await image_task
 
+    # Party status (2026-10-01, per Coffee, dev-bridge, re: Laurienna
+    # and Elduinn: "we are also in the same party?! ... I don't want
+    # this to be confusing and I want you to find a way so that it is
+    # concise between both party players"). Real root cause confirmed
+    # directly against live data before building this: party_id alone
+    # doesn't keep members together -- each character's own location/
+    # quests/level march forward independently even while partied (one
+    # had wandered solo into the Labyrinth while the other continued
+    # the overworld story elsewhere), so their own "Story So Far"
+    # screens read as unrelated even though they're genuinely in the
+    # same party. Scoped narrowly, per Coffee's own confirmed choice:
+    # this screen specifically now shows every OTHER real party
+    # member's own current chapter and level alongside the viewer's
+    # own, so the divergence is visible and explained rather than
+    # silently confusing -- no change to how movement/questing/parties
+    # actually work anywhere else in the game.
+    party_block = ""
+    if character.get("party_id"):
+        other_members = [
+            m for m in db.get_party_members_by_id(character["party_id"])
+            if m["telegram_user_id"] != character["telegram_user_id"]
+        ]
+        if other_members:
+            party_lines = ["🤝 **Party**"]
+            for member in other_members:
+                member_arc = _current_story_arc(member)
+                arc_label = member_arc[1]["title"] if member_arc else "the very beginning"
+                party_lines.append(f"— **{member['name']}** (lvl {member['level']}): {arc_label}")
+            party_block = "\n\n━━━━━━━━━━━━━━\n" + "\n".join(party_lines)
+
     await _safe_send(
-        update, f"📖 **Story So Far**\n\n{recap}{next_step_block}{whispers_block}\n\n" + "\n".join(chapter_lines),
+        update, f"📖 **Story So Far**\n\n{recap}{next_step_block}{whispers_block}{party_block}\n\n" + "\n".join(chapter_lines),
         reply_markup=_with_menu_button(_story_chapter_keyboard(character)),
     )
 
