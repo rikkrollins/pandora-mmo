@@ -238,6 +238,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         for text in ("Open my professions", "View my profession", "look at my profession", "check my professions"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "check_professions", text)
 
+    def test_unlock_the_door_now_classifies_as_a_real_dexterity_skill_check(self):
+        """
+        Real live gap found via topic-activity monitoring (2026-10-01):
+        "Unlock the heavily-barred main door" and "unlock the door" fell
+        all the way through to the silent "chat" default -- only "pick
+        the lock" was ever a real trigger phrase for the lockpicking
+        dexterity check, same "a reasonable phrase with nothing to
+        route to" gap class already fixed for Arcana/Nature/Religion/
+        Animal Handling/Insight/Medicine/Performance on 2026-07-14.
+        "unlock my <achievements>" stays correctly routed to its own
+        earlier, more specific check_achievements phrase.
+        """
+        for text in ("Unlock the heavily-barred main door", "unlock the door", "unlock this gate"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "skill_check", text)
+            self.assertEqual(_keyword_fallback(text, [])["ability"], "dexterity", text)
+        self.assertEqual(_keyword_fallback("check my unlocked achievements", [])["action"], "check_achievements")
+
     def test_approach_classified_as_examine(self):
         """
         Real live gap found via the AI-driven Labyrinth playtest tool

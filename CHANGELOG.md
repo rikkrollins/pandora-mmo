@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.732] — "Unlock the door" now classifies as a real skill check
+
+Real gap found via topic-activity monitoring: "Unlock the heavily-
+barred main door" and "unlock the door" fell all the way through to
+the silent "chat" default — only "pick the lock" was ever a real
+trigger phrase for the lockpicking dexterity check. Same "a reasonable
+phrase with nothing to route to" gap class already fixed for Arcana/
+Nature/Religion/Animal Handling/Insight/Medicine/Performance on
+2026-07-14; "unlock my achievements" stays correctly routed to its own
+earlier, more specific phrase. 1 new test; 77 adjacent keyword-
+fallback/classification tests re-run clean (1 unrelated pre-existing
+failure, `test_view_classified_as_examine`, confirmed via a clean-
+baseline stash check to already exist before this change).
+
 ## [1.27.731] — Story So Far now shows real party members' own progress
 
 Real dev-bridge report (Coffee, re: Laurienna and Elduinn: "we are

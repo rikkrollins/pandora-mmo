@@ -2873,7 +2873,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # gap (a phrase with nothing to route to) without inventing new
     # per-skill tracking that doesn't exist anywhere else in this game.
     skill_check_verb_abilities = [
-        (["sneak", "hide", "climb", "balance", "pick the lock", "disarm the trap", "tiptoe",
+        (["sneak", "hide", "climb", "balance", "pick the lock", "unlock the", "unlock this", "disarm the trap", "tiptoe",
           "palm the", "pickpocket", "lift the coin purse", "plant this on", "swap the", "conceal the"], "dexterity"),
         (["lift", "push", "break down", "break open", "force open", "shove the", "smash"], "strength"),
         (["recall", "remember lore", "investigate", "decipher", "figure out the puzzle",
