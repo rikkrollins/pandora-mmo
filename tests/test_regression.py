@@ -18029,6 +18029,74 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(rejection)
         self.assertIn("Forge Guild", rejection)
 
+    async def test_first_discovery_announces_once_on_main_topic_then_stays_silent(self):
+        """
+        Forge/Enchanters endgame systems plan, Batch 1 (2026-10-01): the
+        first player to ever craft a real exotic-metal edge recipe gets
+        a one-line Main-topic "World Discovery" ping via _notify_main_
+        topic; a second crafter of the SAME recipe (or the same player
+        recasting it) gets no second announcement, since db.get_setting
+        already has the key recorded.
+        """
+        from unittest.mock import patch
+        from rules.item_generator import generate_weapon
+        import guild_curriculum  # noqa: F401 -- not used, just confirms no import cycle issue
+        make_basic_character(950945, "FirstSmith", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(950945, -999, guild="forge_guild", level=25)
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950945, -999, item_id, 1)
+        db.add_item(950945, -999, "embersteel", 1)
+        db.add_item(950945, -999, "iron_ore", 2)
+
+        main_topic_calls = []
+        async def fake_notify(update, text):
+            main_topic_calls.append(text)
+
+        sink = []
+        update = FakeUpdate(950945, f"enchant my {base_weapon['name']} with embersteel edge", sink)
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="The blade drinks the ember-metal in."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}), \
+             patch("bot._notify_main_topic", side_effect=fake_notify):
+            await bot._do_enchant_item(update, f"enchant my {base_weapon['name']} with embersteel edge")
+
+        self.assertEqual(len(main_topic_calls), 1, main_topic_calls)
+        self.assertIn("World Discovery", main_topic_calls[0])
+        self.assertIn("FirstSmith", main_topic_calls[0])
+        self.assertIsNotNone(db.get_setting("first_discovery:enchant_embersteel_edge"))
+
+        # A second character crafting the SAME recipe gets no second announcement.
+        make_basic_character(950946, "SecondSmith", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(950946, -999, guild="forge_guild", level=25)
+        base_weapon_2 = generate_weapon(tier="common")
+        item_id_2 = db.create_item_instance(
+            item_type=base_weapon_2["type"], name=base_weapon_2["name"], rarity=base_weapon_2["rarity"],
+            price=base_weapon_2["price"], base_stats={k: v for k, v in base_weapon_2.items() if k != "affixes"},
+            affixes=[],
+        )
+        db.add_item(950946, -999, item_id_2, 1)
+        db.add_item(950946, -999, "embersteel", 1)
+        db.add_item(950946, -999, "iron_ore", 2)
+
+        main_topic_calls_2 = []
+        async def fake_notify_2(update, text):
+            main_topic_calls_2.append(text)
+
+        sink2 = []
+        update2 = FakeUpdate(950946, f"enchant my {base_weapon_2['name']} with embersteel edge", sink2)
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="The blade drinks the ember-metal in."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}), \
+             patch("bot._notify_main_topic", side_effect=fake_notify_2):
+            await bot._do_enchant_item(update2, f"enchant my {base_weapon_2['name']} with embersteel edge")
+
+        self.assertEqual(main_topic_calls_2, [])
+
     def test_elemental_fusion_name_returns_real_pairs_and_none_for_unlisted(self):
         """Enchanters' Guild 1-100 curriculum plan: a pure reference lookup, order-independent, never invents a combination the research didn't actually name."""
         from rules.crafting import elemental_fusion_name

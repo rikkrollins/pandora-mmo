@@ -26183,6 +26183,41 @@ def _find_enchant_recipe_in_text(text: str) -> str | None:
     return None
 
 
+# First Discovery (2026-10-01, Forge/Enchanters endgame systems plan,
+# Batch 1): per the original guild research doc's "if a player is the
+# first to ever combine a specific combo, it becomes a named,
+# permanently-recorded discovery... a server-wide announcement moment"
+# -- scoped here to the 5 real Forge Guild exotic-metal edge recipes
+# specifically (the "specific combo" the research doc actually means),
+# not every enchant in the game. Reuses two already-real, already-live
+# mechanisms rather than building anything new: db.get_setting/
+# set_setting (a real key/value table, already used for other
+# game-wide toggles) to track "has this recipe ever been crafted by
+# anyone," and _notify_main_topic (already posts level-up/death/
+# rebirth pings) for the actual broadcast.
+_FIRST_DISCOVERY_RECIPE_IDS = frozenset({
+    "enchant_embersteel_edge",
+    "enchant_frostsilver_edge",
+    "enchant_umbral_iron_edge",
+    "enchant_storm_bronze_edge",
+    "enchant_sunsteel_edge",
+})
+
+
+async def _maybe_announce_first_discovery(update: Update, character: dict, recipe_id: str) -> None:
+    if recipe_id not in _FIRST_DISCOVERY_RECIPE_IDS:
+        return
+    setting_key = f"first_discovery:{recipe_id}"
+    if db.get_setting(setting_key) is not None:
+        return
+    db.set_setting(setting_key, character["name"])
+    metal_label = recipe_id.replace("enchant_", "").replace("_edge", "").replace("_", " ").title()
+    await _notify_main_topic(
+        update,
+        f"🌟 **World Discovery!** {character['name']} is the first to forge a real {metal_label} edge!",
+    )
+
+
 async def _do_enchant_item(update: Update, text: str) -> None:
     """
     Enchanting/imbuing (Phase 7): "enchant"/"imbue" both classify to this
@@ -26394,6 +26429,7 @@ async def _do_enchant_item(update: Update, text: str) -> None:
         recast_label = recipe_id.replace("enchant_", "").replace("_", " ").title()
         recast_button = [[InlineKeyboardButton(f"🔄 Recast {recast_label}", callback_data=f"enchant|preview|{recipe_id}|{item_id}")]]
         await _maybe_send_item_image(update, item_id, enchanted_item, extra_buttons=recast_button)
+        await _maybe_announce_first_discovery(update, character, recipe_id)
 
 
 async def _do_enchant_item_elemental_roll(update: Update, character: dict, item_id: str, item: dict, text: str) -> None:

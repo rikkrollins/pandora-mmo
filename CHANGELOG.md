@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.726] — First Discovery world-broadcast (Batch 1 of the Forge/Enchanters endgame systems plan)
+
+Per Coffee's original guild research doc ("if a player is the first
+to ever combine a specific combo, it becomes a... server-wide
+announcement moment"): the first player anywhere to craft each of the
+5 real Forge Guild exotic-metal edge recipes (Embersteel, Frostsilver,
+Umbral Iron, Storm Bronze, Sunsteel) now gets a one-line "🌟 World
+Discovery!" ping to the Main topic. Built entirely from two
+already-real, already-live mechanisms — `db.get_setting`/`set_setting`
+(a real key/value table) to track which recipes have ever been
+crafted, and `_notify_main_topic` (already used for level-up/death/
+rebirth pings) for the broadcast itself — zero new systems, zero new
+schema. Confirmed via live DB query that none of the 5 recipes have
+been crafted by any live character yet, so every one of them is still
+a genuine "first" waiting to happen. First batch of a larger plan
+scoping out the rest of the original research doc's "skipped" systems
+(durability, Arcane Capacity budgets, artifact evolution, discipline
+branches) — those ship as their own later batches.
+
 ## [1.27.725] — Faith Circle curriculum, levels 1-95 (Batch 5, final, of the remaining-5-guilds plan)
 
 Fifth and final batch — Faith Circle extends from 4 to 18 steps,
