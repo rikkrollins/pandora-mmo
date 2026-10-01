@@ -2,6 +2,30 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.729] — Real item durability + Blacksmith repair (Batch 4 of the Forge/Enchanters endgame systems plan)
+
+Per the original research doc's tempering/durability ask (previously
+scoped out for having no durability stat at all) — generated weapons
+and armor now have one. Per Coffee's confirmed design: a weapon wears
+1% per landed hit, armor wears 1% per hit taken, through the single
+real choke point every weapon attack in the game already funnels
+through (`_resolve_attack_with_reaction_check`). A worn-down weapon
+deals reduced damage, floored at 50% so it's never fully useless — a
+pure read in `rules/combat.py`'s own damage calculation, no new db
+write inside the rules layer. A new Blacksmith "🔧 Repair" menu lists
+owned damaged gear with its real cost (gold scaled to the item's own
+price, proportional to how much durability is actually missing —
+confirmed with Coffee), and repairs in one tap, no roll needed. New
+`item_instances.durability_pct` column, defaulted to 100 via the
+project's existing safe `ALTER TABLE ... ADD COLUMN` pattern —
+confirmed via a real migration dry-run against a copy of the live
+database that every one of 439 existing item rows gets the pristine
+default, zero live-player impact until a real hit actually decays
+something post-deploy. 5 new tests (decay on a landed hit, the damage
+floor, a successful repair, an unaffordable repair, plus the pure
+rules-layer multiplier check); resolve_attack/reaction-check/
+concentration/do_attack/bsmenu/blacksmith test areas re-run clean.
+
 ## [1.27.728] — Arcane Capacity budget + 2 real enchant bugs fixed (Batch 3 of the Forge/Enchanters endgame systems plan)
 
 Per the original research doc's "items must be built within a real

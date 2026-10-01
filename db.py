@@ -1001,6 +1001,15 @@ def init_db() -> None:
         item_instance_columns = _existing_columns(conn, "item_instances")
         if "source" not in item_instance_columns:
             conn.execute("ALTER TABLE item_instances ADD COLUMN source TEXT NOT NULL DEFAULT 'loot'")
+        # Durability (2026-10-01, Forge/Enchanters endgame systems plan,
+        # Batch 4, per Coffee's confirmed design: weapons wear from
+        # landed hits, armor wears from hits taken). Default 100 means
+        # every existing live item starts completely unaffected --
+        # there is zero live-player impact until a real combat hit
+        # actually decays it post-deploy, same purely-additive
+        # discipline every prior ALTER TABLE in this file follows.
+        if "durability_pct" not in item_instance_columns:
+            conn.execute("ALTER TABLE item_instances ADD COLUMN durability_pct INTEGER NOT NULL DEFAULT 100")
 
         # Guild curriculum (2026-08-12, per Coffee: "go ahead and start on
         # it" -- a real, hand-authored, gated training-quest chain per
@@ -1799,6 +1808,7 @@ def materialize_item_instance(item_id: str) -> dict | None:
         "name": row["name"], "type": row["item_type"], "rarity": row["rarity"],
         "price": row["price"], "generated": True, "instance_id": instance_id,
         "set_id": row["set_id"], "source": row["source"],
+        "durability_pct": row["durability_pct"],
     })
     stored_affixes = json.loads(row["affixes"])
     for affix in stored_affixes:
@@ -1831,6 +1841,82 @@ def materialize_item_instance(item_id: str) -> dict | None:
 # generate_weapon/generate_armor/generate_shield exactly (damage_bonus
 # for a weapon, ac_base for armor, ac_bonus for a shield).
 FORGE_STAT_BONUS_FIELD = {"weapon": "damage_bonus", "armor": "ac_base", "shield": "ac_bonus"}
+
+# Durability (2026-10-01, Forge/Enchanters endgame systems plan,
+# Batch 4). A fixed, small per-hit decay -- confirmed with Coffee that
+# weapons wear from landing a hit, armor wears from taking one. 1%
+# per hit means roughly 100 real combat hits before an item needs a
+# repair, a pace meant to matter over extended play without nagging
+# every single fight.
+DURABILITY_DECAY_PCT_PER_HIT = 1
+# Repair cost (confirmed with Coffee): gold scaled to the item's own
+# price, proportional to how much durability is actually missing --
+# fully repairing a fully-worn item costs REPAIR_COST_FRACTION of its
+# own price; a lightly-worn item costs proportionally less.
+REPAIR_COST_FRACTION = 0.5
+
+
+def decay_item_durability(item_id: str, amount: int = DURABILITY_DECAY_PCT_PER_HIT) -> int | None:
+    """Reduces a generated item's durability_pct by `amount`, floored at 0. Returns the new value, or None if this isn't a real generated item (nothing to decay)."""
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return None
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return None
+    with get_connection() as conn:
+        row = conn.execute("SELECT durability_pct FROM item_instances WHERE instance_id = ?", (instance_id,)).fetchone()
+        if row is None:
+            return None
+        new_value = max(0, row["durability_pct"] - amount)
+        conn.execute("UPDATE item_instances SET durability_pct = ? WHERE instance_id = ?", (new_value, instance_id))
+    return new_value
+
+
+def repair_item_instance(item_id: str) -> tuple[bool, int, dict | None]:
+    """
+    Restores a generated item to full (100%) durability. Returns
+    (whether anything actually needed repairing, the real gold cost
+    charged, the repaired item dict) -- the caller (bot.py) is
+    responsible for actually deducting that gold BEFORE calling this,
+    same convention every other real crafting/forging action in this
+    file already follows (bot.py confirms materials/gold, this
+    function only ever performs the mutation).
+    """
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return False, 0, None
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return False, 0, None
+    with get_connection() as conn:
+        row = conn.execute("SELECT durability_pct, price FROM item_instances WHERE instance_id = ?", (instance_id,)).fetchone()
+        if row is None:
+            return False, 0, None
+        missing_pct = 100 - row["durability_pct"]
+        if missing_pct <= 0:
+            return False, 0, materialize_item_instance(item_id)
+        cost = round(row["price"] * REPAIR_COST_FRACTION * (missing_pct / 100))
+        conn.execute("UPDATE item_instances SET durability_pct = 100 WHERE instance_id = ?", (instance_id,))
+    return True, cost, materialize_item_instance(item_id)
+
+
+def repair_cost_for_item(item_id: str) -> int | None:
+    """The real gold cost to fully repair this item right now, or None if it isn't a real generated item / isn't actually damaged."""
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return None
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return None
+    with get_connection() as conn:
+        row = conn.execute("SELECT durability_pct, price FROM item_instances WHERE instance_id = ?", (instance_id,)).fetchone()
+    if row is None:
+        return None
+    missing_pct = 100 - row["durability_pct"]
+    if missing_pct <= 0:
+        return None
+    return round(row["price"] * REPAIR_COST_FRACTION * (missing_pct / 100))
 
 
 def forge_item_instance(item_id: str) -> tuple[bool, str, dict | None]:

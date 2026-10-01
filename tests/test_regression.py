@@ -36321,6 +36321,93 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(caster_p["concentrating_on"])
         sessions.end_session(-999, session)
 
+    async def test_landed_hit_decays_attackers_weapon_and_defenders_armor(self):
+        """
+        Forge/Enchanters endgame systems plan, Batch 4 (2026-10-01):
+        a real landed hit, through the same real choke point every
+        weapon attack in this game funnels through
+        (_resolve_attack_with_reaction_check), decays the attacker's
+        equipped weapon AND the defender's equipped armor by 1% each --
+        confirmed with Coffee: weapons wear from landing a hit, armor
+        wears from taking one.
+        """
+        from unittest.mock import patch
+        weapon_id = db.create_item_instance(
+            item_type="weapon", name="Decay Test Sword", rarity="common", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d1", "damage_bonus": 0, "ability": "strength"},
+            affixes=[],
+        )
+        armor_id = db.create_item_instance(
+            item_type="armor", name="Decay Test Armor", rarity="common", price=0,
+            base_stats={"type": "armor", "ac_base": 10}, affixes=[],
+        )
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0, "equipped_weapon": weapon_id}
+        defender = {
+            "telegram_user_id": -700960, "name": "Defender", "dexterity": 10, "armor_class": 10,
+            "hp_current": 50, "hp_max": 50, "equipped_armor": armor_id,
+        }
+        weapon = items_module.get_item(weapon_id)
+        with patch("bot.roll_d20", return_value=20):
+            result = await bot._resolve_attack_with_reaction_check(
+                FakeUpdate(1, "look", []), attacker, defender, weapon, round_number=1, forced_roll=20,
+            )
+        self.assertTrue(result["hit"])
+        self.assertEqual(items_module.get_item(weapon_id)["durability_pct"], 99)
+        self.assertEqual(items_module.get_item(armor_id)["durability_pct"], 99)
+
+    def test_a_worn_weapon_deals_reduced_damage_floored_at_half(self):
+        """Pure rules-layer check: a weapon's own durability_pct, once read off the materialized dict, scales damage down, floored at 50% so a worn weapon is never fully useless."""
+        from rules.combat import resolve_attack
+        attacker = {"name": "Attacker", "strength": 20, "proficiency_bonus": 4}
+        defender = {"name": "Dummy", "dexterity": 10, "armor_class": 1, "hp_current": 1000, "hp_max": 1000}
+        pristine_weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0, "durability_pct": 100}
+        worn_weapon = {"ability": "strength", "damage_dice": "1d1", "damage_bonus": 0, "durability_pct": 10}
+        pristine = resolve_attack(attacker, defender, pristine_weapon, forced_roll=20, forced_damage_roll=1)
+        worn = resolve_attack(attacker, defender, worn_weapon, forced_roll=20, forced_damage_roll=1)
+        self.assertTrue(pristine["hit"] and worn["hit"])
+        self.assertLess(worn["damage_dealt"], pristine["damage_dealt"])
+        self.assertGreaterEqual(worn["damage_dealt"], pristine["damage_dealt"] * 0.5 - 1)
+
+    async def test_repair_item_restores_full_durability_and_charges_real_gold(self):
+        """End-to-end via the real _do_repair_item handler: cost scales with how much durability is actually missing, gold is actually deducted, durability actually restored."""
+        user_id = 951090
+        make_basic_character(user_id, "RepairTester", char_class="Fighter", current_location="crossroads_tavern")
+        item_id = db.create_item_instance(
+            item_type="weapon", name="Worn Repair Sword", rarity="common", price=100,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[],
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.decay_item_durability(item_id, amount=50)  # 50% missing
+        db.update_character(user_id, -999, gold=1000)
+        expected_cost = round(100 * 0.5 * 0.5)  # REPAIR_COST_FRACTION * missing_fraction * price
+        sink = []
+        await bot._do_repair_item(FakeUpdate(user_id, "", sink), item_id)
+        full_text = "\n".join(sink)
+        self.assertIn("restored to full repair", full_text)
+        self.assertIn(str(expected_cost), full_text)
+        self.assertEqual(items_module.get_item(item_id)["durability_pct"], 100)
+        self.assertEqual(db.get_character(user_id, -999)["gold"], 1000 - expected_cost)
+
+    async def test_repair_item_rejects_when_player_cant_afford_it(self):
+        """A player without enough gold gets a clear rejection, and nothing is charged or repaired."""
+        user_id = 951091
+        make_basic_character(user_id, "PoorRepairTester", char_class="Fighter", current_location="crossroads_tavern")
+        item_id = db.create_item_instance(
+            item_type="weapon", name="Expensive Worn Sword", rarity="legendary", price=10000,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[],
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.decay_item_durability(item_id, amount=50)
+        db.update_character(user_id, -999, gold=1)
+        sink = []
+        await bot._do_repair_item(FakeUpdate(user_id, "", sink), item_id)
+        full_text = "\n".join(sink)
+        self.assertIn("only have 1", full_text)
+        self.assertEqual(db.get_character(user_id, -999)["gold"], 1)
+        self.assertEqual(items_module.get_item(item_id)["durability_pct"], 50)
+
     def test_level_gap_advantage_fires_only_when_both_levels_are_real_and_the_gap_is_big_enough(self):
         """
         Real live report (2026-08-16, Coffee: "the enemy shud have an

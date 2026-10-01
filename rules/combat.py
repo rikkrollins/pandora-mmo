@@ -752,6 +752,21 @@ def resolve_attack(attacker: dict, defender: dict, weapon: dict,
         # separate "no weapon equipped" combat path just for this.
         if "disarmed" in attacker.get("conditions", []):
             damage_dealt = damage_dealt // 4
+        # Durability (2026-10-01, Forge/Enchanters endgame systems
+        # plan, Batch 4, per Coffee's confirmed design): a worn-down
+        # weapon hits softer. Pure read of a field already on the
+        # weapon dict (items.get_item's materialized durability_pct) --
+        # no db write happens here, this function stays a pure rules
+        # calculation same as everywhere else; the actual decay over
+        # time is applied by bot.py's own _resolve_attack_with_
+        # reaction_check wrapper, the single real choke point every
+        # weapon-attack call site already funnels through. A static
+        # catalog item (no durability_pct field at all) is treated as
+        # permanently pristine -- only a real generated instance can
+        # ever actually wear down.
+        durability_pct = weapon.get("durability_pct", 100)
+        if durability_pct < 100:
+            damage_dealt = int(damage_dealt * max(0.5, durability_pct / 100))
         if sneak_attack_die:
             # Real 5E scales Sneak Attack's die count with Rogue level
             # (1d6 at 1-2, up to 10d6 at 19-20) -- found frozen at a flat

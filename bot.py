@@ -13360,6 +13360,23 @@ async def _resolve_attack_with_reaction_check(
     # and monster-vs-player.
     if session is not None and result["hit"]:
         _check_concentration(defender, result["damage_dealt"], session)
+    # Durability (2026-10-01, Forge/Enchanters endgame systems plan,
+    # Batch 4, per Coffee's confirmed design): a weapon wears from
+    # LANDING a hit, armor wears from TAKING one -- this wrapper is
+    # the single real choke point every weapon-attack call site in
+    # this file already funnels through (see its own docstring), so
+    # it's the one real place to apply this for every attack in the
+    # game, player-vs-monster and monster-vs-player alike. Only ever
+    # touches a real generated ("gi...") instance -- db.decay_item_
+    # durability is a safe no-op for a plain catalog item/monster
+    # weapon dict with no instance_id.
+    if result["hit"]:
+        attacker_weapon_id = attacker.get("equipped_weapon")
+        if attacker_weapon_id:
+            db.decay_item_durability(attacker_weapon_id)
+        defender_armor_id = defender.get("equipped_armor")
+        if defender_armor_id:
+            db.decay_item_durability(defender_armor_id)
     return result
 
 
@@ -24191,6 +24208,7 @@ async def _do_show_blacksmith_menu(update: Update) -> None:
         [InlineKeyboardButton("🔨 Craft", callback_data="bsmenu|craft")],
         [InlineKeyboardButton("⚒️ Advanced Ladder", callback_data="bsmenu|advanced")],
         [InlineKeyboardButton("✨ Forge Magic Item", callback_data="bsmenu|forge")],
+        [InlineKeyboardButton("🔧 Repair", callback_data="bsmenu|repair")],
     ])
     await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
 
@@ -24288,6 +24306,29 @@ async def _do_show_blacksmith_category(update: Update, category: str) -> None:
                 button_rows.append([InlineKeyboardButton(_item_menu_label(item) if _item_bonus_tag(item) else f"✨ {item['name']}", callback_data=f"forge|preview|{item_id}")])
             if not button_rows:
                 locked_lines.append("You don't own a plain weapon, armor, shield, ring, amulet, or wondrous item to forge yet.")
+    elif category == "repair":
+        title = "🔧 **The Forge — Repair**"
+        intro = (
+            "Real combat wear (2026-10-01): a weapon that's landed enough hits, or armor that's taken enough, "
+            "needs real work to bring back to full. Cost scales with how much is actually missing."
+        )
+        for item_id in inventory:
+            if not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+                continue
+            cost = db.repair_cost_for_item(item_id)
+            if cost is None:
+                continue
+            item = items_module.get_item(item_id)
+            if item is None:
+                continue
+            button_rows.append([
+                InlineKeyboardButton(
+                    f"🔧 {item['name']} ({item['durability_pct']}% — {cost}g to fully repair)",
+                    callback_data=f"bsmenu|repairdo|{item_id}",
+                )
+            ])
+        if not button_rows:
+            locked_lines.append("Everything you own is already in real full repair.")
     else:
         return
 
@@ -24398,15 +24439,47 @@ async def _do_show_forge_preview(update: Update, item_id: str) -> None:
 
 
 async def bsmenu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on the Blacksmith landing screen and its 3 category screens."""
+    """Handles taps on the Blacksmith landing screen and its 4 category screens."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
     if action == "root":
         await _do_show_blacksmith_menu(update)
-    elif action in ("craft", "advanced", "forge"):
+    elif action in ("craft", "advanced", "forge", "repair"):
         await _do_show_blacksmith_category(update, action)
+    elif action == "repairdo" and len(parts) >= 3:
+        await _do_repair_item(update, parts[2])
+
+
+async def _do_repair_item(update: Update, item_id: str) -> None:
+    """
+    Durability repair (2026-10-01, Forge/Enchanters endgame systems
+    plan, Batch 4, per Coffee's confirmed design): a guaranteed-
+    success gold transaction at the Blacksmith -- no ability roll,
+    same as buying from a shop, since there's no real "failed repair"
+    concept in this game's crafting model. The cost shown on the
+    Repair menu's own button is recomputed and re-confirmed here
+    (not trusted blindly from the tap) in case the item took more
+    damage between opening the menu and tapping the button.
+    """
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        return
+    item = items_module.get_item(item_id)
+    if item is None or character["inventory"].get(item_id, 0) <= 0:
+        await _safe_send(update, "You don't own that item anymore.")
+        return
+    cost = db.repair_cost_for_item(item_id)
+    if cost is None:
+        await _safe_send(update, f"The {item['name']} is already in full repair.")
+        return
+    if character["gold"] < cost:
+        await _safe_send(update, f"Repairing the {item['name']} costs {cost} gold — you only have {character['gold']}.")
+        return
+    db.update_character(update.effective_user.id, update.effective_chat.id, gold=character["gold"] - cost)
+    _repaired, actual_cost, repaired_item = db.repair_item_instance(item_id)
+    await _safe_send(update, f"🔧 The {repaired_item['name']} is restored to full repair, for {actual_cost} gold.")
 
 
 # Alchemy & Enchanting menu (2026-09-11, same real ask as the Blacksmith
@@ -30055,6 +30128,13 @@ def _format_item_stats_line(item: dict) -> str | None:
     # otherwise invisible until you try to sell it).
     if item_type in ("weapon", "armor", "shield", "ring", "amulet", "wondrous") and item.get("price"):
         parts.append(f"worth {item['price']}g")
+    # Durability (2026-10-01, Batch 4): only shown when actually
+    # below 100 -- a pristine item (every static catalog item, and
+    # every generated item fresh off the forge) stays silent on this,
+    # same "don't show a line with nothing interesting to say" rule
+    # every other optional stat here already follows.
+    if item.get("durability_pct") is not None and item["durability_pct"] < 100:
+        parts.append(f"{item['durability_pct']}% durability")
     if not parts:
         return None
     return "; ".join(parts)
