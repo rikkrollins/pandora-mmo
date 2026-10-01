@@ -26233,6 +26233,70 @@ async def _maybe_announce_first_discovery(update: Update, character: dict, recip
     )
 
 
+# Arcane Capacity budget (2026-10-01, Forge/Enchanters endgame systems
+# plan, Batch 3, exact numbers confirmed with Coffee: rare=3, very_
+# rare/legendary=4, mythic=5 total enchantment slots). Per the
+# original research doc: "items must be built within a real budget,
+# can't just stack unlimited enchantments" -- this governs the TOTAL
+# number of DISTINCT real enchantments an item carries at once, not
+# any single kind's own magnitude. A "slot" is one real enchant-
+# recipe application; RECASTING something the item already has (a
+# different frost ward strength, a re-rolled elemental retype, a
+# fresh forge_magic_upgrade roll) replaces that SAME slot rather than
+# consuming a new one, matching every existing replace_kinds/
+# replace_match rule in this file 1:1 (confirmed by mirroring that
+# exact grouping here) -- so recasts are genuinely free, per Coffee's
+# own confirmed answer. Counted off the RAW stored affixes list (via
+# db.get_enchanted_affix_slot_keys), filtered to entries carrying a
+# real recipe_id -- the item's own base-tier stat_bonus affix (set at
+# generation/forging time, never a player enchant choice) never gets
+# a recipe_id, so it correctly never consumes a slot. common/uncommon
+# are 2, not 1 -- confirmed via a real pre-existing, intentionally
+# tested combo (test_enchant_ward_different_elements_on_same_item_
+# coexist: a frost ward + a flame ward coexisting on a single COMMON-
+# tier item is explicitly real, intended cross-element defense, not
+# something this new system should ever retroactively block).
+_ARCANE_CAPACITY_BY_RARITY = {
+    "common": 2, "uncommon": 2, "rare": 3, "very_rare": 4, "legendary": 4, "mythic": 5,
+}
+
+
+def _capacity_slot_key(kind: str, damage_type: str | None = None) -> tuple:
+    """
+    The real Arcane Capacity "slot" a given affix kind occupies --
+    mirrors db.enchant_item_instance's own replace_kinds/replace_match
+    grouping exactly, so a recast of anything that already self-
+    replaces there is guaranteed to map to the SAME slot key here too.
+    elemental_damage (the RNG retype family) and elemental_damage_bonus
+    (sharpen/exotic-metal edges) share one combined slot because a
+    fresh elemental roll already replaces BOTH together in one call.
+    elemental_resistance keys off damage_type since different-element
+    wards deliberately coexist (enchant_frost_ward + enchant_flame_ward
+    on the same shield is a real, intended cross-element build).
+    """
+    if kind in ("elemental_damage", "elemental_damage_bonus"):
+        return ("elemental_offense",)
+    if kind == "elemental_resistance":
+        return ("elemental_resistance", damage_type)
+    return (kind,)
+
+
+def _arcane_capacity_rejection(item_id: str, item: dict, new_slot_key: tuple) -> str | None:
+    """None if there's real room (or this is a free recast of a slot the item already has); a player-facing rejection message otherwise."""
+    existing_slots = db.get_enchanted_affix_slot_keys(item_id)
+    if new_slot_key in existing_slots:
+        return None  # a real recast, always free
+    cap = _ARCANE_CAPACITY_BY_RARITY.get(item.get("rarity"), 1)
+    used = len(existing_slots)
+    if used < cap:
+        return None
+    rarity_label = (item.get("rarity") or "").replace("_", " ")
+    return (
+        f"The {item['name']} has no real Arcane Capacity left for another enchantment "
+        f"({used}/{cap} slots used for a {rarity_label} item) — it would need to be a higher rarity to hold more."
+    )
+
+
 async def _do_enchant_item(update: Update, text: str) -> None:
     """
     Enchanting/imbuing (Phase 7): "enchant"/"imbue" both classify to this
@@ -26282,6 +26346,27 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     if recipe["affix"].get("kind") == "elemental_damage":
         await _do_enchant_item_elemental_roll(update, character, item_id, item, text)
         return
+    # Real exploit/bug found 2026-10-01 (Forge/Enchanters endgame
+    # systems plan, Batch 3): _find_enchant_recipe_in_text scans ALL
+    # of ENCHANT_RECIPES by label, including forge_magic_upgrade
+    # ("forge magic upgrade") -- so "enchant my ring with forge magic
+    # upgrade" reached down into THIS function's generic path, which
+    # (a) never resolved the recipe's literal "ability": "random"
+    # into a real rolled stat the way _do_forge_magic_item's own
+    # _roll_forge_magic_upgrade_ability does (silently storing a
+    # nonsensical "random" ability bonus that could never apply to
+    # anything), and (b) had no replace_kinds for ability_bonus,
+    # reopening the exact unbounded-stacking exploit the 2026-09-13
+    # fix closed for the OTHER entry point. forge_magic_upgrade is
+    # explicitly documented as "a SEPARATE handler from _do_enchant_
+    # item" (see _do_forge_magic_item's own docstring) precisely
+    # because promoting a plain item into its first magic state needs
+    # a genuinely different eligibility gate -- delegating here keeps
+    # that one real code path as the single source of truth instead
+    # of a second, broken reimplementation.
+    if recipe_id == "forge_magic_upgrade":
+        await _do_forge_magic_item(update, text)
+        return
     if item["type"] not in recipe["applies_to"]:
         await _safe_send(update, f"That enchantment can't be applied to a {item['type']}.")
         return
@@ -26291,6 +26376,11 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     gate_rejection = recipe_requirement_gate(character, recipe)
     if gate_rejection:
         await _safe_send(update, gate_rejection)
+        return
+    new_slot_key = _capacity_slot_key(recipe["affix"]["kind"], recipe["affix"].get("damage_type"))
+    capacity_rejection = _arcane_capacity_rejection(item_id, item, new_slot_key)
+    if capacity_rejection:
+        await _safe_send(update, capacity_rejection)
         return
     # Spell-gated elemental enchanting (2026-08-11, per Coffee:
     # "enchanters shud be able to use thier own spells or abilities to
@@ -26425,14 +26515,26 @@ async def _do_enchant_item(update: Update, text: str) -> None:
     # "resistance" kind and enchant_godsforged_ward's "ignore_
     # resistance" flag were both already naturally self-capping (a
     # Python set/bool can't stack), so neither needed this. forge_
-    # magic_upgrade's ability_bonus stays untouched -- a separate
-    # mechanic, per Coffee's own prior "separate from forging" scoping.
+    # magic_upgrade's ability_bonus was previously left untouched here
+    # on the theory that it's "a separate mechanic" reached only via
+    # _do_forge_magic_item's own dedicated handler (which has carried
+    # its OWN replace_kinds=["ability_bonus"] fix since 2026-09-13's
+    # exploit audit). Real gap found 2026-10-01 (Forge/Enchanters
+    # endgame systems plan, Batch 3): _find_enchant_recipe_in_text
+    # scans ALL of ENCHANT_RECIPES by label, including forge_magic_
+    # upgrade ("forge magic upgrade") -- so typing "enchant my ring
+    # with forge magic upgrade" on an already-magic item reaches THIS
+    # function's own generic path instead, which had no replace_kinds
+    # for this kind at all, reopening the identical unbounded-stacking
+    # exploit the 2026-09-13 fix closed for the OTHER entry point.
+    # Confirmed no live item currently has more than one ability_bonus
+    # entry, so this closes a real but not-yet-exploited gap.
     replace_kinds = None
     replace_match = None
     if affix["kind"] == "elemental_resistance":
         replace_kinds = ["elemental_resistance"]
         replace_match = {"damage_type": affix["damage_type"]}
-    elif affix["kind"] in ("profession_bonus", "elemental_damage_bonus"):
+    elif affix["kind"] in ("profession_bonus", "elemental_damage_bonus", "ability_bonus"):
         replace_kinds = [affix["kind"]]
 
     _ok, enchant_msg, enchanted_item = db.enchant_item_instance(
@@ -26498,6 +26600,16 @@ async def _do_enchant_item_elemental_roll(update: Update, character: dict, item_
         )
         return
     recipe_id, recipe = random.choice(eligible)
+    # Arcane Capacity (2026-10-01, Batch 3): the elemental-offense slot
+    # (elemental_damage + elemental_damage_bonus combined, see
+    # _capacity_slot_key) always self-replaces once the item already
+    # has one, so a reroll is free -- this only ever actually blocks
+    # the FIRST elemental retype on an item that's already full up on
+    # other, unrelated enchantments.
+    capacity_rejection = _arcane_capacity_rejection(item_id, item, _capacity_slot_key("elemental_damage"))
+    if capacity_rejection:
+        await _safe_send(update, capacity_rejection)
+        return
     if not has_materials(character["inventory"], recipe):
         need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
         await _safe_send(
@@ -26646,6 +26758,18 @@ async def _do_forge_magic_item(update: Update, text: str) -> None:
     if gate_rejection:
         await _safe_send(update, gate_rejection)
         return
+    # Arcane Capacity (2026-10-01, Batch 3): a plain (not-yet-magic)
+    # item being promoted has zero existing enchant slots, so this
+    # only ever actually blocks re-forging an ALREADY-magic item
+    # that's already full on other, unrelated enchantments -- the
+    # ability_bonus slot itself always self-replaces (confirmed real
+    # fix, 2026-09-13), so a plain reroll of an item that already has
+    # one stays free.
+    if item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+        capacity_rejection = _arcane_capacity_rejection(item_id, item, _capacity_slot_key("ability_bonus"))
+        if capacity_rejection:
+            await _safe_send(update, capacity_rejection)
+            return
     if not has_materials(character["inventory"], recipe):
         need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in recipe["materials"].items())
         await _safe_send(update, f"You don't have the materials to forge a magic item. You need: {need}.")

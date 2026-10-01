@@ -21673,6 +21673,105 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         expected = {k: v for k, v in expected.items() if v > 0}
         self.assertEqual(dismantle_materials_for_item(item_id, materialized), expected)
 
+    async def test_arcane_capacity_blocks_a_new_enchant_kind_once_a_rare_items_3_slots_are_full(self):
+        """
+        Forge/Enchanters endgame systems plan, Batch 3 (2026-10-01):
+        a rare item caps at 3 real distinct enchant slots (confirmed
+        with Coffee). An item already carrying 3 different real
+        enchant-recipe affixes (ward, sharpen, profession_bonus) can't
+        take a 4th, NEW kind (forge_magic_upgrade's ability_bonus) --
+        real rejection via the actual _do_enchant_item/_do_forge_magic_
+        item handlers, materials never spent.
+        """
+        from unittest.mock import patch
+        user_id = 951080
+        make_basic_character(user_id, "CapacityFullTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=25)
+        item_id = db.create_item_instance(
+            item_type="ring", name="Full Capacity Ring", rarity="rare", price=0,
+            base_stats={"type": "ring"},
+            affixes=[
+                {"kind": "elemental_resistance", "damage_type": "cold", "value": 50, "recipe_id": "enchant_frost_ward"},
+                {"kind": "elemental_damage_bonus", "value": 15, "recipe_id": "enchant_sharpen"},
+                {"kind": "profession_bonus", "profession": "alchemy", "value": 3, "recipe_id": "enchant_masters_focus"},
+            ],
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        before = items_module.get_item(item_id)
+        before_iron = db.get_character(user_id, -999)["inventory"].get("iron_ore")
+
+        sink = []
+        await bot._do_forge_magic_item(
+            FakeUpdate(user_id, "forge my Full Capacity Ring into a magic item", sink),
+            "forge my Full Capacity Ring into a magic item",
+        )
+        full_text = "\n".join(sink)
+        self.assertIn("no real Arcane Capacity left", full_text)
+        after_iron = db.get_character(user_id, -999)["inventory"].get("iron_ore")
+        self.assertEqual(before_iron, after_iron, "materials must never be spent on a capacity-rejected attempt")
+        self.assertIsNone(items_module.get_item(item_id).get("ability_bonuses"))
+
+    async def test_arcane_capacity_recast_of_an_existing_slot_is_always_free(self):
+        """A recast of a ward the item ALREADY has never consumes a new slot, even when the item's other 3 real slots are already full."""
+        from unittest.mock import patch
+        user_id = 951081
+        make_basic_character(user_id, "RecastFreeTester", char_class="Wizard", current_location="crossroads_tavern", known_spells=["ray_of_frost"])
+        item_id = db.create_item_instance(
+            item_type="armor", name="Recast Test Armor", rarity="rare", price=0,
+            base_stats={"type": "armor"},
+            affixes=[
+                {"kind": "elemental_resistance", "damage_type": "cold", "value": 50, "recipe_id": "enchant_frost_ward"},
+                {"kind": "elemental_damage_bonus", "value": 15, "recipe_id": "enchant_sharpen"},
+                {"kind": "profession_bonus", "profession": "alchemy", "value": 3, "recipe_id": "enchant_masters_focus"},
+            ],
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.add_item(user_id, -999, "moonpetal", 2)
+        db.add_item(user_id, -999, "silverleaf_herb", 2)
+        sink = []
+        with patch("bot.roll_percentage_check", return_value=False), \
+             patch("bot.narrate_skill_check", return_value="The cold deepens."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_enchant_item(FakeUpdate(user_id, "enchant my Recast Test Armor with frost ward", sink), "enchant my Recast Test Armor with frost ward")
+        full_text = "\n".join(sink)
+        self.assertNotIn("no real Arcane Capacity left", full_text)
+        updated = items_module.get_item(item_id)
+        self.assertEqual(updated["elemental_resistances"], [{"damage_type": "cold", "value": 50}])
+
+    async def test_forge_magic_upgrade_via_enchant_phrasing_no_longer_stacks_ability_bonus(self):
+        """
+        Real exploit found this batch: _find_enchant_recipe_in_text
+        scans ALL of ENCHANT_RECIPES by label (including "forge magic
+        upgrade"), so "enchant my X with forge magic upgrade" reached
+        _do_enchant_item's generic path, which (unlike the dedicated
+        _do_forge_magic_item handler, fixed 2026-09-13) had no
+        replace_kinds for ability_bonus -- confirmed this would have
+        stacked an unlimited number of +1-random-ability entries on
+        ONE already-magic item. Now self-replaces, same as the
+        dedicated handler already does.
+        """
+        from unittest.mock import patch
+        user_id = 951082
+        make_basic_character(user_id, "DoubleUpgradeTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", level=25)
+        item_id = db.create_item_instance(
+            item_type="ring", name="Upgrade Stack Ring", rarity="rare", price=0,
+            base_stats={"type": "ring"},
+            affixes=[{"kind": "ability_bonus", "ability": "charisma", "value": 1, "recipe_id": "forge_magic_upgrade"}],
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.add_item(user_id, -999, "iron_ore", 10)
+        db.add_item(user_id, -999, "moonpetal", 5)
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="The ring hums anew."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}), \
+             patch("bot._roll_forge_magic_upgrade_ability", return_value="wisdom"):
+            await bot._do_enchant_item(FakeUpdate(user_id, "enchant my Upgrade Stack Ring with forge magic upgrade", sink), "enchant my Upgrade Stack Ring with forge magic upgrade")
+        updated = items_module.get_item(item_id)
+        self.assertEqual(updated.get("ability_bonuses"), [{"ability": "wisdom", "value": 1}])
+
     async def test_forge_magic_upgrade_promoting_a_plain_catalog_item_no_longer_loses_its_own_base_recipe(self):
         """
         The deeper half of the same gap: promoting a PLAIN catalog item

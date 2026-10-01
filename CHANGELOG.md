@@ -2,6 +2,37 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.728] — Arcane Capacity budget + 2 real enchant bugs fixed (Batch 3 of the Forge/Enchanters endgame systems plan)
+
+Per the original research doc's "items must be built within a real
+budget, can't just stack unlimited enchantments": a magic item now
+has a real Arcane Capacity — common/uncommon hold 2 distinct
+enchantments, rare 3, very rare/legendary 4, mythic 5 (exact numbers
+confirmed with Coffee). A "slot" is one real enchant-recipe
+application; recasting something an item already has (a fresh ward
+roll, a re-rolled elemental retype, a fresh magic-upgrade roll)
+always replaces that same slot and is genuinely free, never consuming
+a new one — confirmed against every existing same-item replace rule
+in the codebase, and confirmed to preserve the pre-existing, real,
+intentional "2 different-element wards on one item" cross-element
+defense combo.
+
+Building this surfaced two real, previously-unknown bugs along the
+way: `_find_enchant_recipe_in_text` matches ANY `ENCHANT_RECIPES`
+label in free text, including `forge_magic_upgrade`'s own
+("forge magic upgrade") — so phrasing an upgrade as "enchant my X with
+forge magic upgrade" instead of "forge my X into a magic item" reached
+a generic code path that (1) had no self-replace guard for this
+recipe's `ability_bonus` affix, reopening the exact unbounded-stacking
+exploit a 2026-09-13 fix had already closed for the intended entry
+point, and (2) never actually rolled a real ability at all — it
+silently stored the recipe's own literal `"ability": "random"` string
+as a permanently broken, unresolved affix. Fixed by having that path
+delegate straight to the real, already-correct `_do_forge_magic_item`
+handler instead of a second, divergent reimplementation. Confirmed via
+live DB query that no live item was ever actually hit by either bug.
+4 new tests; 44 enchant + 42 forge + 23 trade tests re-run clean.
+
 ## [1.27.727] — Magic item stats now visible in trades + 3 missing affix kinds fixed everywhere (Batch 2 of the Forge/Enchanters endgame systems plan)
 
 Confirmed the two hard pieces of an "enchantment trading economy"

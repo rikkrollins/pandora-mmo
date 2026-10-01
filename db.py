@@ -1733,6 +1733,47 @@ def _apply_affix(item: dict, affix: dict) -> None:
         item.setdefault("ability_bonuses", []).append({"ability": affix["ability"], "value": affix["value"]})
 
 
+# Arcane Capacity budget (2026-10-01, Forge/Enchanters endgame
+# systems plan, Batch 3) -- these kind groupings mirror enchant_item_
+# instance's own replace_kinds/replace_match rules exactly, see
+# bot._capacity_slot_key's own docstring for the full reasoning.
+_CAPACITY_ELEMENTAL_OFFENSE_KINDS = ("elemental_damage", "elemental_damage_bonus")
+
+
+def get_enchanted_affix_slot_keys(item_id: str) -> set:
+    """
+    Real Arcane Capacity slots an item currently has used, computed
+    from the RAW stored affixes (never the materialized/flattened
+    dict, which can silently merge or lose per-entry identity) --
+    filtered to affixes carrying a real `recipe_id` (every genuine
+    player enchant tags this; the item's own base-tier `stat_bonus`
+    affix, set at generation/forging time, never does, so it correctly
+    never consumes a slot here).
+    """
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return set()
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return set()
+    with get_connection() as conn:
+        row = conn.execute("SELECT affixes FROM item_instances WHERE instance_id = ?", (instance_id,)).fetchone()
+    if row is None:
+        return set()
+    slots = set()
+    for affix in json.loads(row["affixes"]):
+        if not affix.get("recipe_id"):
+            continue
+        kind = affix.get("kind")
+        if kind in _CAPACITY_ELEMENTAL_OFFENSE_KINDS:
+            slots.add(("elemental_offense",))
+        elif kind == "elemental_resistance":
+            slots.add(("elemental_resistance", affix.get("damage_type")))
+        else:
+            slots.add((kind,))
+    return slots
+
+
 def materialize_item_instance(item_id: str) -> dict | None:
     """
     Resolves a synthetic "gi<n>" item_id into a full item dict, in the
