@@ -2,6 +2,39 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.730] — Artifact evolution: a real tier above mythic (Batch 5 of the Forge/Enchanters endgame systems plan)
+
+Per the original research doc's "a weapon that gains new abilities as
+it's used rather than being replaced": a new top rarity tier,
+"artifact," one real step above mythic. Reachable two ways, both
+confirmed with Coffee — fragments earned from real boss fights
+(🌌 Fragment of an Unmade World, a new material, independent small
+drop chance alongside the existing godshard roll) feed a new, heavily
+gated Forge Guild recipe (forge_guild + rebirth 5+) that promotes an
+EXISTING mythic weapon/armor/shield into a real artifact, via a new
+"🌌 Artifact Reforging" Blacksmith menu. An artifact gains real,
+toughness-scaled XP from every real killing blow landed while
+equipped (reusing the monster's own `xp_reward` — the same toughness
+proxy already used elsewhere in this game — rather than a new
+formula), and every 50 XP unlocks one more Arcane Capacity slot beyond
+the base cap, directly extending Batch 3's existing system. Careful
+scoping up front: `roll_tier()`'s hand-tuned percentile ladder is
+completely untouched (confirmed via a 2000-sample test that it can
+never produce "artifact" on its own), and the player-facing reforge
+button stays deliberately excluded from reaching this tier (only the
+new dedicated recipe can) — the exact safety gap the research flagged
+stays closed on purpose. New `item_instances.artifact_xp` column,
+confirmed safe via the same migration-dry-run-against-a-live-copy
+discipline as every prior batch (zero existing items are artifact
+rarity, so zero live impact). 7 new tests; forge (44) + enchant (44) +
+capacity (3) + masterwork/tier-bump (5) areas re-run clean, including
+2 expected stale-sibling-assertion fixes (next_tier_up and
+forge_item_instance's own "top tier" tests, which correctly change
+behavior now that mythic is no longer the actual top tier — same
+"routine test maintenance when a later batch extends a shared list"
+pattern as every prior guild-curriculum/tier batch this project has
+shipped).
+
 ## [1.27.729] — Real item durability + Blacksmith repair (Batch 4 of the Forge/Enchanters endgame systems plan)
 
 Per the original research doc's tempering/durability ask (previously

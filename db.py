@@ -1010,6 +1010,14 @@ def init_db() -> None:
         # discipline every prior ALTER TABLE in this file follows.
         if "durability_pct" not in item_instance_columns:
             conn.execute("ALTER TABLE item_instances ADD COLUMN durability_pct INTEGER NOT NULL DEFAULT 100")
+        # Artifact XP (2026-10-01, Forge/Enchanters endgame systems
+        # plan, Batch 5): grows from real kills while an artifact-rarity
+        # item is equipped, scaled off the defender's own xp_reward
+        # (see bot._resolve_attack_with_reaction_check). Default 0
+        # means zero live-item impact -- no live item is artifact
+        # rarity yet, since that tier doesn't exist until this ships.
+        if "artifact_xp" not in item_instance_columns:
+            conn.execute("ALTER TABLE item_instances ADD COLUMN artifact_xp INTEGER NOT NULL DEFAULT 0")
 
         # Guild curriculum (2026-08-12, per Coffee: "go ahead and start on
         # it" -- a real, hand-authored, gated training-quest chain per
@@ -1808,7 +1816,7 @@ def materialize_item_instance(item_id: str) -> dict | None:
         "name": row["name"], "type": row["item_type"], "rarity": row["rarity"],
         "price": row["price"], "generated": True, "instance_id": instance_id,
         "set_id": row["set_id"], "source": row["source"],
-        "durability_pct": row["durability_pct"],
+        "durability_pct": row["durability_pct"], "artifact_xp": row["artifact_xp"],
     })
     stored_affixes = json.loads(row["affixes"])
     for affix in stored_affixes:
@@ -1854,6 +1862,32 @@ DURABILITY_DECAY_PCT_PER_HIT = 1
 # fully repairing a fully-worn item costs REPAIR_COST_FRACTION of its
 # own price; a lightly-worn item costs proportionally less.
 REPAIR_COST_FRACTION = 0.5
+
+
+def grant_artifact_xp(item_id: str, amount: int) -> int | None:
+    """
+    Adds real artifact XP to a generated item instance -- a no-op
+    returning None for anything that isn't a real generated instance
+    (a static catalog item, a monster's own weapon dict). Does NOT
+    check the item's rarity is actually "artifact" -- the caller
+    (bot.py's kill-XP hook) already only calls this for confirmed
+    artifact-rarity equipped gear, same "rules decide, this just
+    mutates" division every other real crafting helper in this file
+    follows.
+    """
+    if not item_id.startswith(GENERATED_ITEM_ID_PREFIX):
+        return None
+    try:
+        instance_id = int(item_id[len(GENERATED_ITEM_ID_PREFIX):])
+    except ValueError:
+        return None
+    with get_connection() as conn:
+        row = conn.execute("SELECT artifact_xp FROM item_instances WHERE instance_id = ?", (instance_id,)).fetchone()
+        if row is None:
+            return None
+        new_value = row["artifact_xp"] + amount
+        conn.execute("UPDATE item_instances SET artifact_xp = ? WHERE instance_id = ?", (new_value, instance_id))
+    return new_value
 
 
 def decay_item_durability(item_id: str, amount: int = DURABILITY_DECAY_PCT_PER_HIT) -> int | None:
@@ -2303,7 +2337,10 @@ def _meets_proficiency_requirement(character: dict, item: dict) -> bool:
 # mythic:60 -- rare is common enough (~15% of rolls, see rules.item_
 # generator.roll_tier) to want a low bar; mythic is a true 1%-roll
 # flex, so it stays a real milestone well short of MAX_LEVEL (99).
-RARITY_LEVEL_REQUIREMENT = {"rare": 5, "very_rare": 15, "legendary": 35, "mythic": 60}
+# artifact (2026-10-01, Batch 5): a real milestone well past mythic's
+# own, matching how far above mythic the new ADVANCED_RECIPES/boss-
+# drop paths already gate it.
+RARITY_LEVEL_REQUIREMENT = {"rare": 5, "very_rare": 15, "legendary": 35, "mythic": 60, "artifact": 80}
 
 
 def _item_level_requirement(item: dict) -> int:

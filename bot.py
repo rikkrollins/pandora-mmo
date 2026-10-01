@@ -1675,6 +1675,12 @@ LABYRINTH_MINIBOSS_SPELL_TONIC_DROP_CHANCE = 0.12
 # who already climbed the whole ladder.
 GODSHARD_DROP_CHANCE = 0.08
 
+# Artifact evolution (2026-10-01, Forge/Enchanters endgame systems
+# plan, Batch 5): deliberately rarer than godshard above -- this feeds
+# a tier even further past mythic, gated behind forge_guild AND
+# rebirth >= 5 (one step past godsforged_blade's own rebirth >= 3).
+ARTIFACT_FRAGMENT_DROP_CHANCE = 0.03
+
 # ---------------------------------------------------------------------
 # Moltbook heartbeat — PandoraMMO_Bot's agent profile on Moltbook (the
 # social network for AI agents) is meant to help other AI agents
@@ -7343,6 +7349,23 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
         finder_name = db.get_character(finder_id, update.effective_chat.id)["name"]
         godshard_note = f"\n💠 **{finder_name}** finds a {godshard_item['name']} among the boss's remains!"
 
+    # Artifact material drop (2026-10-01, Forge/Enchanters endgame
+    # systems plan, Batch 5): independent roll from both drops above,
+    # same real "is_boss fights only" gate -- the real boss-drop half
+    # of artifact evolution's two origin paths (the other is the new,
+    # heavily-gated Forge Guild artifact recipe, bot._do_forge_
+    # artifact_item, which consumes several of these). Deliberately a
+    # material, not a finished artifact item, so this stays a single
+    # coherent system (earn fragments from real boss fights, bring
+    # enough back to the Guild) rather than two unrelated mechanics.
+    world_fragment_note = ""
+    if defeated_a_boss and random.random() < ARTIFACT_FRAGMENT_DROP_CHANCE:
+        fragment_item = items_module.get_item("world_fragment")
+        finder_id = random.choice(real_party_ids)
+        db.add_item(finder_id, update.effective_chat.id, "world_fragment", 1)
+        finder_name = db.get_character(finder_id, update.effective_chat.id)["name"]
+        world_fragment_note = f"\n🌌 **{finder_name}** finds a {fragment_item['name']} among the boss's remains!"
+
     summary = f"\n✨ Party gains {xp_each} XP each ({enemy_xp_total} total)."
     if absent_bonus_recipients:
         bonus_xp = max(int(xp_each * INACTIVE_PARTY_XP_SHARE), 1)
@@ -7354,6 +7377,7 @@ async def _award_victory_xp(update: Update, session: sessions.Session) -> tuple[
     summary += map_note
     summary += tonic_note
     summary += godshard_note
+    summary += world_fragment_note
     summary += "".join(board_notes)
     if newly_proven_names:
         summary += (
@@ -13377,6 +13401,28 @@ async def _resolve_attack_with_reaction_check(
         defender_armor_id = defender.get("equipped_armor")
         if defender_armor_id:
             db.decay_item_durability(defender_armor_id)
+    # Artifact XP (2026-10-01, Forge/Enchanters endgame systems plan,
+    # Batch 5, per Coffee's confirmed design: XP scales with monster
+    # toughness). Killer identification reuses the exact same "hp_
+    # after == 0" signal resolve_attack already computes internally
+    # for Dark One's Blessing/hybrid-kill checks, just read here
+    # instead of inventing new plumbing -- a landed hit that leaves
+    # the defender at <= 0 HP is, by this game's own turn structure,
+    # the real killing blow. Scales off the defender's own xp_reward,
+    # the same toughness proxy every other real scaling mechanic in
+    # this codebase (encounter/labyrinth-depth scaling) already uses,
+    # rather than a new HP/level-derived formula. Only the ATTACKER's
+    # own equipped weapon/armor/shield gain XP -- never the defender's
+    # (a monster's own gear, or an ally who merely witnessed the kill).
+    if result["hit"] and result.get("defender_hp_remaining", 1) <= 0:
+        xp_gain = max(1, round(defender.get("xp_reward", 0) / 50))
+        for slot in ("equipped_weapon", "equipped_armor", "equipped_shield"):
+            gear_id = attacker.get(slot)
+            if not gear_id:
+                continue
+            gear_item = items_module.get_item(gear_id)
+            if gear_item and gear_item.get("rarity") == "artifact":
+                db.grant_artifact_xp(gear_id, xp_gain)
     return result
 
 
@@ -24209,6 +24255,7 @@ async def _do_show_blacksmith_menu(update: Update) -> None:
         [InlineKeyboardButton("⚒️ Advanced Ladder", callback_data="bsmenu|advanced")],
         [InlineKeyboardButton("✨ Forge Magic Item", callback_data="bsmenu|forge")],
         [InlineKeyboardButton("🔧 Repair", callback_data="bsmenu|repair")],
+        [InlineKeyboardButton("🌌 Artifact Reforging", callback_data="bsmenu|artifact")],
     ])
     await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
 
@@ -24329,6 +24376,27 @@ async def _do_show_blacksmith_category(update: Update, category: str) -> None:
             ])
         if not button_rows:
             locked_lines.append("Everything you own is already in real full repair.")
+    elif category == "artifact":
+        title = "🌌 **The Forge — Artifact Reforging**"
+        intro = (
+            "Real artifact evolution (2026-10-01): forge an existing mythic weapon, armor, or shield into a true "
+            f"artifact. Costs {ARTIFACT_FORGE_GOLD_COST} gold, {ARTIFACT_FORGE_MATERIALS['world_fragment']}x Fragment "
+            f"of an Unmade World, and {ARTIFACT_FORGE_MATERIALS['godshard']}x Godshard — both earned from real boss "
+            "fights, never bought or crafted."
+        )
+        gate = recipe_requirement_gate(character, {"requires_guild": "forge_guild", "min_rebirth": ARTIFACT_FORGE_MIN_REBIRTH})
+        if gate:
+            locked_lines.append(f"🔒 Artifact Reforging — {gate}")
+        else:
+            for item_id in inventory:
+                if not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+                    continue
+                item = items_module.get_item(item_id)
+                if item is None or item.get("rarity") != "mythic" or item["type"] not in ("weapon", "armor", "shield"):
+                    continue
+                button_rows.append([InlineKeyboardButton(f"🌌 Forge {item['name']} into an Artifact", callback_data=f"bsmenu|artifactdo|{item_id}")])
+            if not button_rows:
+                locked_lines.append("You don't own a real mythic weapon, armor, or shield to forge into an artifact yet.")
     else:
         return
 
@@ -24439,17 +24507,23 @@ async def _do_show_forge_preview(update: Update, item_id: str) -> None:
 
 
 async def bsmenu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles taps on the Blacksmith landing screen and its 4 category screens."""
+    """Handles taps on the Blacksmith landing screen and its 5 category screens."""
     query = update.callback_query
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else ""
     await _safe_answer(query)
     if action == "root":
         await _do_show_blacksmith_menu(update)
-    elif action in ("craft", "advanced", "forge", "repair"):
+    elif action in ("craft", "advanced", "forge", "repair", "artifact"):
         await _do_show_blacksmith_category(update, action)
     elif action == "repairdo" and len(parts) >= 3:
         await _do_repair_item(update, parts[2])
+    elif action == "artifactdo" and len(parts) >= 3:
+        item = items_module.get_item(parts[2])
+        if item is None:
+            return
+        await _safe_send(update, "⏳ Forging...", speak=False)
+        await _do_forge_artifact_item(update, f"forge my {item['name']} into an artifact")
 
 
 async def _do_repair_item(update: Update, item_id: str) -> None:
@@ -26330,8 +26404,13 @@ async def _maybe_announce_first_discovery(update: Update, character: dict, recip
 # tier item is explicitly real, intended cross-element defense, not
 # something this new system should ever retroactively block).
 _ARCANE_CAPACITY_BY_RARITY = {
-    "common": 2, "uncommon": 2, "rare": 3, "very_rare": 4, "legendary": 4, "mythic": 5,
+    "common": 2, "uncommon": 2, "rare": 3, "very_rare": 4, "legendary": 4, "mythic": 5, "artifact": 5,
 }
+# Artifact capacity growth (2026-10-01, Batch 5, per Coffee's confirmed
+# design): every 50 real artifact_xp unlocks one extra slot beyond the
+# base cap above -- the ONLY change this batch makes to Batch 3's
+# capacity system, no redesign.
+ARTIFACT_XP_PER_CAPACITY_SLOT = 50
 
 
 def _capacity_slot_key(kind: str, damage_type: str | None = None) -> tuple:
@@ -26360,6 +26439,8 @@ def _arcane_capacity_rejection(item_id: str, item: dict, new_slot_key: tuple) ->
     if new_slot_key in existing_slots:
         return None  # a real recast, always free
     cap = _ARCANE_CAPACITY_BY_RARITY.get(item.get("rarity"), 1)
+    if item.get("rarity") == "artifact":
+        cap += item.get("artifact_xp", 0) // ARTIFACT_XP_PER_CAPACITY_SLOT
     used = len(existing_slots)
     if used < cap:
         return None
@@ -26767,6 +26848,85 @@ def _roll_forge_magic_upgrade_ability(character: dict, profession: str) -> str:
         primary = CLASS_PRIMARY_ABILITY.get(character["char_class"].lower(), "strength")
         pool = list(_FORGE_MAGIC_UPGRADE_ALL_ABILITIES) + [primary]
     return random.choice(pool)
+
+
+# Artifact evolution (2026-10-01, Forge/Enchanters endgame systems
+# plan, Batch 5). Deliberately NOT an ENCHANT_RECIPES/ADVANCED_
+# RECIPES entry -- both of those model "craft something NEW from raw
+# materials," while this specifically promotes an EXISTING mythic
+# item the player already owns, reusing db.forge_item_instance's
+# already-tested generic tier-bump mutation (same real mechanism the
+# legendary->mythic reforge button uses) rather than generating a
+# fresh item. Deliberately reuses rules.crafting.recipe_requirement_
+# gate for the guild/rebirth check by building a plain dict in its
+# expected shape, instead of writing a second, divergent gate-check
+# implementation.
+ARTIFACT_FORGE_MATERIALS = {"world_fragment": 3, "godshard": 1}
+ARTIFACT_FORGE_GOLD_COST = 5000
+ARTIFACT_FORGE_DC = 32
+ARTIFACT_FORGE_MIN_REBIRTH = 5
+
+
+async def _do_forge_artifact_item(update: Update, text: str) -> None:
+    character = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if character is None:
+        await update.effective_chat.send_message(
+            "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
+        )
+        return
+    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    item = items_module.get_item(item_id) if item_id else None
+    if (
+        item_id is None or item is None or not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX)
+        or item.get("rarity") != "mythic" or item["type"] not in ("weapon", "armor", "shield")
+    ):
+        await _safe_send(update, "Only a real mythic weapon, armor, or shield you already own can be forged into an artifact.")
+        return
+    gate_rejection = recipe_requirement_gate(
+        character, {"requires_guild": "forge_guild", "min_rebirth": ARTIFACT_FORGE_MIN_REBIRTH},
+    )
+    if gate_rejection:
+        await _safe_send(update, gate_rejection)
+        return
+    if not has_materials(character["inventory"], {"materials": ARTIFACT_FORGE_MATERIALS}):
+        need = ", ".join(f"{qty}x {items_module.get_item(mid)['name']}" for mid, qty in ARTIFACT_FORGE_MATERIALS.items())
+        await _safe_send(update, f"You don't have the materials to forge an artifact. You need: {need}.")
+        return
+    if character["gold"] < ARTIFACT_FORGE_GOLD_COST:
+        await _safe_send(update, f"Forging an artifact costs {ARTIFACT_FORGE_GOLD_COST} gold — you only have {character['gold']}.")
+        return
+
+    profession = "blacksmithing"
+    bonus = _practiced_bonus_for(update.effective_user.id, update.effective_chat.id, profession)
+    bonus += class_profession_affinity_bonus(character["char_class"], profession)
+    bonus += _equipped_profession_bonus(character, profession)
+    bonus += _skill_points(character, f"prof_{profession}")
+    bonus += _effective_ability_check_bonus(character, "strength")
+    check = roll_ability_check(character, "strength", proficient=False)
+    check["total"] += bonus
+    check["practiced_bonus"] = bonus
+    success = check["total"] >= ARTIFACT_FORGE_DC
+    flavor = await asyncio.to_thread(
+        narrate_skill_check, character, text, "strength",
+        {**check, "ability": "strength", "dc": ARTIFACT_FORGE_DC, "success": success},
+    )
+    message = _format_skill_check_result(flavor, check, "strength", ARTIFACT_FORGE_DC, success)
+    if not success:
+        message += f"\n🌌 The working collapses — the {item['name']} is unharmed, and your materials aren't wasted."
+        await _safe_send(update, message)
+        return
+
+    for mid, qty in ARTIFACT_FORGE_MATERIALS.items():
+        db.remove_item(update.effective_user.id, update.effective_chat.id, mid, qty)
+    db.update_character(update.effective_user.id, update.effective_chat.id, gold=character["gold"] - ARTIFACT_FORGE_GOLD_COST)
+    db.record_skill_use(update.effective_user.id, update.effective_chat.id, profession)
+    _grind_profession_mastery(update.effective_user.id, update.effective_chat.id, character, profession)
+
+    _ok, forge_msg, forged_item = db.forge_item_instance(item_id)
+    message += f"\n🌌 {forge_msg}"
+    await _safe_send(update, message)
+    if forged_item:
+        await _maybe_send_item_image(update, item_id, forged_item)
 
 
 async def _do_forge_magic_item(update: Update, text: str) -> None:
@@ -30135,6 +30295,13 @@ def _format_item_stats_line(item: dict) -> str | None:
     # every other optional stat here already follows.
     if item.get("durability_pct") is not None and item["durability_pct"] < 100:
         parts.append(f"{item['durability_pct']}% durability")
+    # Artifact XP (2026-10-01, Batch 5): only shown for a real
+    # artifact-rarity item that's actually earned some -- a freshly
+    # forged one (0 XP) stays silent, same convention as every other
+    # optional stat here.
+    if item.get("rarity") == "artifact" and item.get("artifact_xp"):
+        extra_slots = item["artifact_xp"] // ARTIFACT_XP_PER_CAPACITY_SLOT
+        parts.append(f"{item['artifact_xp']} artifact XP (+{extra_slots} capacity)" if extra_slots else f"{item['artifact_xp']} artifact XP")
     if not parts:
         return None
     return "; ".join(parts)

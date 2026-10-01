@@ -1226,6 +1226,13 @@ ITEMS = {
     # godsforged_blade (rules/crafting.py), the true end of both guild
     # ladders.
     "godshard": {"name": "Godshard", "type": "material", "rarity": "mythic", "price": 0, "weight": 0.1, "description": "A splinter of something that was never meant to be small enough to hold. It doesn't feel like it belongs to this world's weight."},
+    # Artifact material (2026-10-01, Forge/Enchanters endgame systems
+    # plan, Batch 5): the real material the new artifact forging
+    # recipe consumes -- boss-drop only (bot.py's _award_victory_xp,
+    # same real "defeated_a_boss" gate godshard itself already uses),
+    # deliberately never craftable/buyable, same rarity shape as
+    # godshard's own capstone-material role.
+    "world_fragment": {"name": "Fragment of an Unmade World", "type": "material", "rarity": "mythic", "price": 0, "weight": 0.1, "description": "It doesn't feel like it was ever part of this world at all -- more like a piece of one that was never finished being made."},
 
     # Exotic metals (2026-09-30, Forge Guild 1-100 curriculum plan, per
     # Coffee: build what the guild-curriculum research matches real

@@ -17200,9 +17200,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             item_type=mythic_weapon["type"], name=mythic_weapon["name"], rarity=mythic_weapon["rarity"],
             price=mythic_weapon["price"], base_stats=mythic_weapon, affixes=mythic_affixes,
         )
+        # Batch 5 (2026-10-01) added "artifact" one step above mythic --
+        # mythic is no longer the top tier, so the raw db.forge_item_
+        # instance primitive (which has no gate beyond "is this the
+        # last tier") now correctly bumps it to "artifact," same as it
+        # always bumped every other non-top tier. The real player-
+        # facing safety (mythic deliberately excluded from bot.py's
+        # FORGE_ADVANCE_DC reforge-button dict) is a SEPARATE, still-
+        # intact gate at the bot.py layer, not this db-level primitive
+        # -- see test_forge_artifact_item_rejects_a_non_mythic_item and
+        # the dedicated Batch 5 artifact-forging tests for that gate.
         ok3, _msg3, forged3 = db.forge_item_instance(mythic_item_id)
-        self.assertFalse(ok3)
-        self.assertIsNone(forged3)
+        self.assertTrue(ok3)
+        self.assertEqual(forged3["rarity"], "artifact")
 
         ok4, _msg4, forged4 = db.forge_item_instance("longsword")
         self.assertFalse(ok4)
@@ -18001,7 +18011,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["masterwork"])
         self.assertEqual(result["generated_item"]["rarity"], next_tier_up("rare"))
         self.assertEqual(next_tier_up("rare"), "very_rare")
-        self.assertEqual(next_tier_up("mythic"), "mythic")  # never overflows past the top tier
+        # Batch 5 (2026-10-01) added "artifact" one step above mythic --
+        # mythic itself is no longer the top tier, but the "never
+        # overflows past the top" guarantee still holds at whatever the
+        # real top tier currently is.
+        self.assertEqual(next_tier_up("mythic"), "artifact")
+        self.assertEqual(next_tier_up("artifact"), "artifact")  # never overflows past the real top tier
 
     def test_quality_tier_bump_stacks_additively_on_top_of_masterwork(self):
         """
@@ -36407,6 +36422,146 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("only have 1", full_text)
         self.assertEqual(db.get_character(user_id, -999)["gold"], 1)
         self.assertEqual(items_module.get_item(item_id)["durability_pct"], 50)
+
+    def test_artifact_tier_generates_without_crashing_and_has_real_entries(self):
+        """
+        Forge/Enchanters endgame systems plan, Batch 5 (2026-10-01):
+        every fixed per-tier dict in rules/item_generator.py that
+        indexes directly with no .get() fallback (TIER_BONUS, PREFIXES)
+        has a real "artifact" entry -- confirmed by actually generating
+        and naming an artifact-tier item, not just checking the dict
+        keys exist.
+        """
+        from rules.item_generator import generate_weapon, generate_armor, TIERS, TIER_BONUS, TIER_PRICE_MULT
+        self.assertEqual(TIERS[-1], "artifact")
+        self.assertEqual(TIER_BONUS["artifact"], 6)
+        self.assertGreater(TIER_PRICE_MULT["artifact"], TIER_PRICE_MULT["mythic"])
+        weapon = generate_weapon(tier="artifact")
+        self.assertEqual(weapon["rarity"], "artifact")
+        self.assertIn(weapon["affixes"][0]["value"], (6,))
+        armor = generate_armor(tier="artifact")
+        self.assertEqual(armor["rarity"], "artifact")
+
+    def test_artifact_tier_cannot_be_rolled_by_ordinary_loot_generation(self):
+        """roll_tier() is a hand-written percentile ladder -- confirmed it never actually returns 'artifact' across a real, large sample, even though the tier now exists in TIERS."""
+        from rules.item_generator import roll_tier
+        results = {roll_tier() for _ in range(2000)}
+        self.assertNotIn("artifact", results)
+
+    async def test_landed_killing_blow_grants_real_artifact_xp_scaled_by_toughness(self):
+        """A lethal hit while wielding a real artifact weapon grants artifact_xp scaled off the defender's own xp_reward -- the exact toughness proxy already used elsewhere in this game."""
+        from unittest.mock import patch
+        weapon_id = db.create_item_instance(
+            item_type="weapon", name="Test Artifact Blade", rarity="artifact", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d20", "damage_bonus": 0, "ability": "strength"},
+            affixes=[],
+        )
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0, "equipped_weapon": weapon_id}
+        defender = {
+            "telegram_user_id": -700961, "name": "Tough Monster", "dexterity": 10, "armor_class": 1,
+            "hp_current": 1, "hp_max": 1, "xp_reward": 500, "monster_key": "test_tough_monster",
+        }
+        with patch("bot.roll_d20", return_value=20):
+            result = await bot._resolve_attack_with_reaction_check(
+                FakeUpdate(1, "look", []), attacker, defender, items_module.get_item(weapon_id), round_number=1, forced_roll=20, forced_damage_roll=5,
+            )
+        self.assertTrue(result["hit"])
+        self.assertLessEqual(result["defender_hp_remaining"], 0)
+        self.assertEqual(items_module.get_item(weapon_id)["artifact_xp"], 10)  # round(500/50)
+
+    async def test_non_lethal_hit_grants_no_artifact_xp(self):
+        """A landed hit that does NOT kill the defender grants zero artifact XP -- confirms this is keyed on the real killing blow, not every hit."""
+        from unittest.mock import patch
+        weapon_id = db.create_item_instance(
+            item_type="weapon", name="Test Artifact Dagger", rarity="artifact", price=0,
+            base_stats={"type": "weapon", "damage_dice": "1d1", "damage_bonus": 0, "ability": "strength"},
+            affixes=[],
+        )
+        attacker = {"name": "Attacker", "strength": 10, "proficiency_bonus": 0, "equipped_weapon": weapon_id}
+        defender = {
+            "telegram_user_id": -700962, "name": "Tough Monster", "dexterity": 10, "armor_class": 1,
+            "hp_current": 1000, "hp_max": 1000, "xp_reward": 500,
+        }
+        with patch("bot.roll_d20", return_value=20):
+            await bot._resolve_attack_with_reaction_check(
+                FakeUpdate(1, "look", []), attacker, defender, items_module.get_item(weapon_id), round_number=1, forced_roll=20, forced_damage_roll=5,
+            )
+        self.assertEqual(items_module.get_item(weapon_id)["artifact_xp"], 0)
+
+    def test_artifact_capacity_grows_with_real_xp_thresholds(self):
+        """An artifact item's real Arcane Capacity cap grows by 1 every 50 real XP, on top of its base-5 cap."""
+        item_id = db.create_item_instance(
+            item_type="ring", name="Growing Artifact Ring", rarity="artifact", price=0,
+            base_stats={"type": "ring"}, affixes=[],
+        )
+        item = items_module.get_item(item_id)
+        self.assertIsNone(bot._arcane_capacity_rejection(item_id, item, ("ignore_resistance",)))
+        db.grant_artifact_xp(item_id, 50)
+        item = items_module.get_item(item_id)
+        self.assertEqual(item["artifact_xp"], 50)
+        # Fill the base 5 + 1 bonus = 6 real slots; the 7th must be rejected.
+        fill_affixes = [
+            ("ignore_resistance", {"kind": "ignore_resistance"}),
+            ("free_extra_attack", {"kind": "free_extra_attack"}),
+            ("resistance", {"kind": "resistance", "damage_type": "fire"}),
+            ("profession_bonus", {"kind": "profession_bonus", "profession": "alchemy", "value": 1}),
+            ("elemental_offense", {"kind": "elemental_damage_bonus", "value": 10}),
+            ("ability_bonus", {"kind": "ability_bonus", "ability": "wisdom", "value": 1}),
+        ]
+        for i, (slot_name, affix) in enumerate(fill_affixes):
+            rejection = bot._arcane_capacity_rejection(item_id, item, (slot_name,))
+            self.assertIsNone(rejection, f"slot {i} ({slot_name}) should fit within base 5 + 1 bonus")
+            affix["recipe_id"] = f"test_{slot_name}"
+            db.enchant_item_instance(item_id, affix)
+            item = items_module.get_item(item_id)
+        seventh_rejection = bot._arcane_capacity_rejection(item_id, item, ("proficiency_bonus",))
+        self.assertIsNotNone(seventh_rejection)
+        self.assertIn("6/6", seventh_rejection)
+
+    async def test_forge_artifact_item_promotes_a_mythic_item_and_consumes_real_materials(self):
+        """End-to-end via the real _do_forge_artifact_item handler: a mythic item becomes a real artifact, materials/gold are actually spent, gated on forge_guild + rebirth."""
+        from unittest.mock import patch
+        user_id = 951095
+        make_basic_character(user_id, "ArtifactForger", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", rebirth_count=5, gold=10000)
+        item_id = db.create_item_instance(
+            item_type="weapon", name="Mythic Test Blade", rarity="mythic", price=1000,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[{"kind": "stat_bonus", "field": "damage_bonus", "value": 5}],
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.add_item(user_id, -999, "world_fragment", 3)
+        db.add_item(user_id, -999, "godshard", 1)
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="Reality strains and gives."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_forge_artifact_item(FakeUpdate(user_id, "forge my Mythic Test Blade into an artifact", sink), "forge my Mythic Test Blade into an artifact")
+        updated = items_module.get_item(item_id)
+        self.assertEqual(updated["rarity"], "artifact")
+        self.assertEqual(updated["damage_bonus"], 6)
+        character = db.get_character(user_id, -999)
+        self.assertEqual(character["gold"], 10000 - bot.ARTIFACT_FORGE_GOLD_COST)
+        self.assertEqual(character["inventory"].get("world_fragment", 0), 0)
+        self.assertEqual(character["inventory"].get("godshard", 0), 0)
+
+    async def test_forge_artifact_item_rejects_a_non_mythic_item(self):
+        """A rare item can't be forged into an artifact -- only a real mythic one qualifies."""
+        user_id = 951096
+        make_basic_character(user_id, "ArtifactForgerRejected", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", rebirth_count=5, gold=10000)
+        item_id = db.create_item_instance(
+            item_type="weapon", name="Rare Test Blade", rarity="rare", price=100,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 2, "ability": "strength"},
+            affixes=[],
+        )
+        db.add_item(user_id, -999, item_id, 1)
+        db.add_item(user_id, -999, "world_fragment", 3)
+        db.add_item(user_id, -999, "godshard", 1)
+        sink = []
+        await bot._do_forge_artifact_item(FakeUpdate(user_id, "forge my Rare Test Blade into an artifact", sink), "forge my Rare Test Blade into an artifact")
+        full_text = "\n".join(sink)
+        self.assertIn("Only a real mythic", full_text)
+        self.assertEqual(items_module.get_item(item_id)["rarity"], "rare")
 
     def test_level_gap_advantage_fires_only_when_both_levels_are_real_and_the_gap_is_big_enough(self):
         """

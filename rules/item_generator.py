@@ -64,7 +64,7 @@ SHIELD_BASES = {
     "wooden_shield": {"ac_bonus": 2, "base_price": 10, "armor_category": "shield"},
 }
 
-TIERS = ["common", "uncommon", "rare", "very_rare", "legendary", "mythic"]
+TIERS = ["common", "uncommon", "rare", "very_rare", "legendary", "mythic", "artifact"]
 # mythic (2026-08-02, magic item system Phase 6): ONE step above
 # legendary, deliberately a MODEST numeric bump (+5, not +10 or +20) --
 # per Coffee's own framing, the point of mythic is real new mechanical
@@ -73,8 +73,16 @@ TIERS = ["common", "uncommon", "rare", "very_rare", "legendary", "mythic"]
 # whole 2% slice in half with legendary (roll_tier below), so getting a
 # legendary drop is now slightly MORE common than before, and mythic is
 # the new rarest tier.
-TIER_BONUS = {"common": 0, "uncommon": 1, "rare": 2, "very_rare": 3, "legendary": 4, "mythic": 5}
-TIER_PRICE_MULT = {"common": 1, "uncommon": 4, "rare": 12, "very_rare": 30, "legendary": 80, "mythic": 250}
+# artifact (2026-10-01, Forge/Enchanters endgame systems plan, Batch
+# 5): ONE step above mythic -- real, not a bigger flat number either,
+# same philosophy as mythic's own addition. roll_tier() below is a
+# hand-written percentile ladder, NOT an index/weight pick over TIERS,
+# so appending "artifact" here cannot leak into ordinary loot
+# generation by itself -- it's reachable only via the new gated
+# Advanced Ladder recipe (rules/crafting.py) or the isolated boss-drop
+# chance (bot.py), both deliberately separate from this table.
+TIER_BONUS = {"common": 0, "uncommon": 1, "rare": 2, "very_rare": 3, "legendary": 4, "mythic": 5, "artifact": 6}
+TIER_PRICE_MULT = {"common": 1, "uncommon": 4, "rare": 12, "very_rare": 30, "legendary": 80, "mythic": 250, "artifact": 600}
 
 # Phase 2 of the magic item system (2026-08-02): real elemental damage
 # types already in live use across this game (rules/combat.py's
@@ -98,12 +106,14 @@ PREFIXES = {
     "very_rare": ["Emberbound", "Frostwoven", "Starforged", "Hollowlight"],
     "legendary": ["World-Ending", "Godsbane", "Undying", "Last-Dawn"],
     "mythic": ["Realitybreaking", "World-Splitting", "Godsforged", "Truthless"],
+    "artifact": ["Firstborn", "Unmade", "Name-Bearing", "Ever-Waking"],
 }
 SUFFIXES = {
     "rare": ["of the Wolf", "of Embers", "of the Deep", "of Quiet Ruin"],
     "very_rare": ["of the Undying", "of the Tempest", "of the First Flame", "of the Hollow Choir"],
     "legendary": ["of the World's End", "of the Last Dawn", "of Forgotten Kings", "of the Unmoored Isle"],
     "mythic": ["of the Unwritten Law", "of the Broken Pantheon", "that Should Not Be", "of the Last Rebirth"],
+    "artifact": ["that Remembers", "of the First Story", "that Was Never Made", "of Its Own Name"],
 }
 
 
