@@ -2,6 +2,54 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.734] — Full post-ship audit: fixed a real guild-curriculum stranding risk + an artifact-forge name-collision bug
+
+Ran a full audit across the whole story, all 7 guild curricula, and
+everything shipped this session, to catch anything missed before
+calling the work done. Two real, concrete issues found and fixed:
+
+**Guild curriculum stranding risk (4 steps, 3 guilds)** —
+`forge_3_proving_the_steel`/`forge_8_the_champions_test` (Forge
+Guild), `adv_8_the_champions_floor` (Adventurers' Guild), and
+`arc_10_the_champions_ward` (Arcane Circle) targeted `goblin_boss`/
+`colosseum_champion` — both confirmed, via `bot.py`'s own "chapter-
+critical, unfleeable" handling and permanent one-time
+`defeated_monsters` flags, to be real story-climax fights that can
+never be refought. This directly violated this exact project's own
+stranding-safety rule (never gate a repeatable curriculum step behind
+a one-time boss) — a rule correctly followed by every guild shipped
+AFTER these two early batches, but missed in the batches themselves.
+Confirmed via live DB query: 4 real characters (Laurienna, Ravenloft,
+Charvenna, Pan) already have the relevant boss marked defeated and are
+progressing toward these exact steps — a guaranteed future dead-end
+if left unfixed. Swapped all 4 to confirmed ordinary, always-
+repeatable field monsters at matching levels (`cinder_hound`,
+`hollow_root_sentinel`, `the_folded_warden`, `warren_deep_lurker`) —
+purely forward-looking (no character's already-recorded progress
+changes), so nobody is worse off and the dead-end simply never
+happens now.
+
+**Artifact-forge button name-collision bug** — the new "🌌 Forge X
+into an Artifact" Blacksmith button (shipped this session, Batch 5)
+re-encoded its already-resolved, disambiguated `item_id` back into
+free text before calling the handler, which then re-resolved the
+target by NAME — the exact same bug class as the 2026-09-22 "+STR to
+Laurienna" incident. A player owning two mythic items sharing a
+display name could tap one specific instance and silently forge the
+OTHER one instead. Fixed by threading the real `item_id` straight
+through, same fix shape as every other button in this file. Also
+added the same per-user-ordering double-tap protection
+`craft_menu_callback`/`forge_menu_callback` already have to the whole
+Blacksmith menu callback, since "Repair"/"Artifact Reforging" both
+spend real gold/materials and had no protection against a fast
+double-tap. Confirmed via live DB query that zero artifact-rarity
+items exist yet, so this was caught before anyone could hit it.
+
+4 new/updated tests for the monster swaps (plus 3 existing structural/
+walkthrough tests updated to match), 2 new tests for the name-
+collision fix; adjacent bsmenu/repair/forge/other-guild tests re-run
+clean.
+
 ## [1.27.733] — Discipline branches: real recipes for herbalism, mining, fishing, lumberjacking (Batch 6, final, of the Forge/Enchanters endgame systems plan)
 
 Per the original research doc's "5 real disciplines" idea, rescoped to

@@ -24507,6 +24507,33 @@ async def _do_show_forge_preview(update: Update, item_id: str) -> None:
 
 
 async def bsmenu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Thin per-user-ordering wrapper around _bsmenu_callback_inner (2026-
+    10-01, real gap found via post-ship audit): "repairdo"/"artifactdo"
+    both spend real gold/materials, same exploit shape as the 2026-09-16
+    "ending up with more" duplicate-forge report craft_menu_callback/
+    forge_menu_callback were already protected against -- a fast
+    double-tap could independently execute each action before the
+    first one's result (button disappearing, item state changing) was
+    visible. Pure navigation actions (root/craft/advanced/forge/repair/
+    artifact) are harmless to re-run, but there's no cheap way to only
+    gate the two spending actions at this layer, so the whole callback
+    gets the same real protection every other spending-capable menu
+    callback in this file already has.
+    """
+    user_id = update.effective_user.id
+    if user_id in _USER_BUSY:
+        await _safe_answer(
+            update.callback_query, "⏳ Still working on your last action — I'll get to this one right after.", show_alert=False,
+        )
+    enqueued = await _run_in_user_order(
+        user_id, lambda: _bsmenu_callback_inner(update, context), signature=update.callback_query.data,
+    )
+    if not enqueued:
+        await _safe_answer(update.callback_query, "⏳ Already working on that one — no need to tap it again.", show_alert=False)
+
+
+async def _bsmenu_callback_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles taps on the Blacksmith landing screen and its 5 category screens."""
     query = update.callback_query
     parts = (query.data or "").split("|")
@@ -24523,7 +24550,7 @@ async def bsmenu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if item is None:
             return
         await _safe_send(update, "⏳ Forging...", speak=False)
-        await _do_forge_artifact_item(update, f"forge my {item['name']} into an artifact")
+        await _do_forge_artifact_item(update, "", item_id=parts[2])
 
 
 async def _do_repair_item(update: Update, item_id: str) -> None:
@@ -26867,14 +26894,31 @@ ARTIFACT_FORGE_DC = 32
 ARTIFACT_FORGE_MIN_REBIRTH = 5
 
 
-async def _do_forge_artifact_item(update: Update, text: str) -> None:
+async def _do_forge_artifact_item(update: Update, text: str, item_id: str | None = None) -> None:
+    """
+    `item_id` (2026-10-01, real bug found via post-ship audit): the
+    Blacksmith menu's "Forge X into an Artifact" button already
+    resolves ONE SPECIFIC real item_id per button, but used to re-
+    encode that choice back into free text (f"forge my {item['name']}
+    into an artifact") before calling this function -- the exact same
+    "name round-trip" bug class already fixed for give/trade/forge-
+    magic-item (v1.27.658/671/672, and the 2026-09-22 "+STR to
+    Laurienna" incident): a player owning two mythic items that share a
+    display name would always re-resolve to the SAME one via free-text
+    matching below, silently forging the wrong instance and consuming
+    the TAPPED instance's intended materials/gold against a different
+    item. Passing the real id straight through from the button skips
+    that re-resolution entirely, same fix shape as every other button
+    path in this file.
+    """
     character = db.get_character(update.effective_user.id, update.effective_chat.id)
     if character is None:
         await update.effective_chat.send_message(
             "You don't have a character yet!", message_thread_id=topics.thread_id_for(update.effective_chat.id, "adventure")
         )
         return
-    item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
+    if item_id is None:
+        item_id = items_module.find_item_mentioned_in_text(text, candidate_ids=list(character["inventory"].keys()))
     item = items_module.get_item(item_id) if item_id else None
     if (
         item_id is None or item is None or not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX)

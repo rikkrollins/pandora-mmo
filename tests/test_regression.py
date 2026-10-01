@@ -36639,6 +36639,65 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Only a real mythic", full_text)
         self.assertEqual(items_module.get_item(item_id)["rarity"], "rare")
 
+    async def test_forge_artifact_item_with_explicit_id_forges_the_exact_tapped_instance(self):
+        """
+        Real bug found via post-ship audit (2026-10-01), same class as
+        the 2026-09-22 "+STR to Laurienna" incident: a player owning
+        TWO mythic items sharing a display name must have the exact
+        one they tapped forged, not whichever one free-text resolution
+        happens to pick. Confirms the new `item_id` param bypasses
+        name-based re-resolution entirely.
+        """
+        user_id = 951097
+        make_basic_character(user_id, "TwoMythicBladesForger", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", rebirth_count=5, gold=10000)
+        item_id_a = db.create_item_instance(
+            item_type="weapon", name="Mythic Test Blade", rarity="mythic", price=1000,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[{"kind": "stat_bonus", "field": "damage_bonus", "value": 5}],
+        )
+        item_id_b = db.create_item_instance(
+            item_type="weapon", name="Mythic Test Blade", rarity="mythic", price=1000,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[{"kind": "stat_bonus", "field": "damage_bonus", "value": 5}],
+        )
+        db.add_item(user_id, -999, item_id_a, 1)
+        db.add_item(user_id, -999, item_id_b, 1)
+        db.add_item(user_id, -999, "world_fragment", 3)
+        db.add_item(user_id, -999, "godshard", 1)
+        from unittest.mock import patch
+        with patch("bot.narrate_skill_check", return_value="Reality strains and gives."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_forge_artifact_item(FakeUpdate(user_id, "", []), "", item_id=item_id_b)
+        self.assertEqual(items_module.get_item(item_id_b)["rarity"], "artifact")
+        self.assertEqual(items_module.get_item(item_id_a)["rarity"], "mythic", "the OTHER instance must stay untouched")
+
+    async def test_bsmenu_artifactdo_button_passes_the_real_item_id_through(self):
+        """End-to-end via the real bsmenu_callback button dispatch: tapping "Forge X into an Artifact" for one specific instance_id forges THAT instance, not a name-matched one."""
+        user_id = 951098
+        make_basic_character(user_id, "ButtonArtifactForger", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, guild="forge_guild", rebirth_count=5, gold=10000)
+        item_id_a = db.create_item_instance(
+            item_type="weapon", name="Mythic Button Blade", rarity="mythic", price=1000,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[{"kind": "stat_bonus", "field": "damage_bonus", "value": 5}],
+        )
+        item_id_b = db.create_item_instance(
+            item_type="weapon", name="Mythic Button Blade", rarity="mythic", price=1000,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[{"kind": "stat_bonus", "field": "damage_bonus", "value": 5}],
+        )
+        db.add_item(user_id, -999, item_id_a, 1)
+        db.add_item(user_id, -999, item_id_b, 1)
+        db.add_item(user_id, -999, "world_fragment", 3)
+        db.add_item(user_id, -999, "godshard", 1)
+        from unittest.mock import patch
+        with patch("bot.narrate_skill_check", return_value="Reality strains and gives."), \
+             patch("bot.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot.bsmenu_callback(FakeCallbackUpdate(user_id, f"bsmenu|artifactdo|{item_id_b}", []), DummyContext())
+        self.assertEqual(items_module.get_item(item_id_b)["rarity"], "artifact")
+        self.assertEqual(items_module.get_item(item_id_a)["rarity"], "mythic", "the OTHER instance must stay untouched")
+
     def test_level_gap_advantage_fires_only_when_both_levels_are_real_and_the_gap_is_big_enough(self):
         """
         Real live report (2026-08-16, Coffee: "the enemy shud have an
@@ -42720,6 +42779,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("the_first_city_the_original_spire", campaign["locations"]["underground"])
         self.assertIn("the_archives_keeper", campaign["monsters"])
         self.assertIn("the_archives_keeper", remnants.REMNANTS)
+        # Real fix (2026-10-01, post-ship audit): arc_10 used to target
+        # colosseum_champion -- confirmed a permanent, one-time story-
+        # climax fight, NOT repeatable, a direct stranding risk for any
+        # character who'd already cleared it. Swapped to warren_deep_
+        # lurker, a confirmed ordinary, always-repeatable field monster.
+        self.assertIn("warren_deep_lurker", campaign["monsters"])
+        self.assertNotIn("warren_deep_lurker", remnants.REMNANTS)
+        self.assertFalse(campaign["monsters"]["warren_deep_lurker"].get("is_boss"))
+        self.assertEqual(curriculum[9]["trigger"]["monster"], "warren_deep_lurker")
 
     async def test_arcane_circle_full_tier_ladder_credits_via_real_checkpoints(self):
         """End-to-end: walks arc_5 through arc_16 (indices 4-15) via the same real checkpoints used everywhere else."""
@@ -42770,8 +42838,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
             sink = []
             await bot._check_guild_curriculum_progress(
+                # Real fix (2026-10-01, post-ship audit): arc_10's own
+                # target was swapped from colosseum_champion (a
+                # permanent one-time story-climax fight, confirmed NOT
+                # repeatable) to warren_deep_lurker (a confirmed
+                # ordinary, always-repeatable field monster).
                 FakeUpdate(user_id, "", sink), user_id, -999,
-                "defeat_monster", monster_keys={"colosseum_champion"},
+                "defeat_monster", monster_keys={"warren_deep_lurker"},
             )
             self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 10, sink)
 
@@ -43321,6 +43394,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         import remnants
         self.assertIn("the_root_that_remembers", remnants.REMNANTS)
         self.assertIn("the_deepest_record", remnants.REMNANTS)
+        # Real fix (2026-10-01, post-ship audit): adv_8 used to target
+        # colosseum_champion -- confirmed a permanent, one-time story-
+        # climax fight, NOT repeatable, a direct stranding risk for any
+        # character who'd already cleared it. Swapped to the_folded_
+        # warden, a confirmed ordinary, always-repeatable field monster.
+        self.assertIn("the_folded_warden", campaign["monsters"])
+        self.assertNotIn("the_folded_warden", remnants.REMNANTS)
+        self.assertFalse(campaign["monsters"]["the_folded_warden"].get("is_boss"))
+        self.assertEqual(gc.get_curriculum("adventurers_guild")[7]["trigger"]["monster"], "the_folded_warden")
 
     async def test_adventurers_guild_full_tier_ladder_credits_via_real_checkpoints(self):
         """End-to-end: walks adv_5 through adv_16 (indices 4-15) via the same real checkpoints used everywhere else in this curriculum."""
@@ -43356,8 +43438,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
             sink = []
             await bot._check_guild_curriculum_progress(
+                # Real fix (2026-10-01, post-ship audit): adv_8's own
+                # target was swapped from colosseum_champion (a
+                # permanent one-time story-climax fight, confirmed NOT
+                # repeatable) to the_folded_warden (a confirmed
+                # ordinary, always-repeatable field monster).
                 FakeUpdate(user_id, "", sink), user_id, -999,
-                "defeat_monster", monster_keys={"colosseum_champion"},
+                "defeat_monster", monster_keys={"the_folded_warden"},
             )
             self.assertEqual(db.get_character(user_id, -999)["guild_curriculum_step"], 8, sink)
 
@@ -43780,7 +43867,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         campaign = bot.CAMPAIGN
         self.assertIn("borin_ironjaw", campaign["npcs"])
         self.assertIn("wrathflame_vault_deep_forge", campaign["locations"]["underground"])
-        self.assertIn("colosseum_champion", campaign["monsters"])
+        # Real fix (2026-10-01, post-ship audit): forge_3/forge_8 used to
+        # target goblin_boss/colosseum_champion -- both confirmed
+        # permanent, one-time story-climax fights, NOT repeatable, a
+        # direct stranding risk for any character who'd already cleared
+        # them. Swapped to confirmed ordinary, always-repeatable field
+        # monsters.
+        import remnants
+        for monster in ("cinder_hound", "hollow_root_sentinel"):
+            self.assertIn(monster, campaign["monsters"])
+            self.assertNotIn(monster, remnants.REMNANTS)
+            self.assertFalse(campaign["monsters"][monster].get("is_boss"))
+        self.assertEqual(gc.get_curriculum("forge_guild")[2]["trigger"]["monster"], "cinder_hound")
+        self.assertEqual(gc.get_curriculum("forge_guild")[7]["trigger"]["monster"], "hollow_root_sentinel")
         self.assertIn("the_wrathflame_unbound", campaign["monsters"])
 
     async def test_forge_guild_master_smith_tier_credits_via_real_checkpoints(self):
@@ -43826,8 +43925,13 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
 
             sink = []
             await bot._check_guild_curriculum_progress(
+                # Real fix (2026-10-01, post-ship audit): forge_8's own
+                # target was swapped from colosseum_champion (a
+                # permanent one-time story-climax fight, confirmed NOT
+                # repeatable) to hollow_root_sentinel (a confirmed
+                # ordinary, always-repeatable field monster).
                 FakeUpdate(user_id, "", sink), user_id, -999,
-                "defeat_monster", monster_keys={"colosseum_champion"},
+                "defeat_monster", monster_keys={"hollow_root_sentinel"},
             )
             char = db.get_character(user_id, -999)
             self.assertEqual(char["guild_curriculum_step"], 8, sink)

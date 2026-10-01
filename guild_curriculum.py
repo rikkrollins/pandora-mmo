@@ -197,11 +197,17 @@ GUILD_CURRICULUM = {
             "id": "adv_8_the_champions_floor",
             "title": "The Champion's Floor",
             "flavor": (
-                "The Colosseum Champion doesn't care what Guild sent you. Put your real Journeyman training "
+                "The Folded Warden doesn't care what Guild sent you. Put your real Journeyman training "
                 "up against it and see what actually holds."
             ),
             "min_level": 26,
-            "trigger": {"type": "defeat_monster", "monster": "colosseum_champion", "count": 1},
+            # Real fix (2026-10-01, post-ship audit): colosseum_champion is
+            # a permanent one-time flag-gated fight (unlocks the Labyrinth),
+            # confirmed NOT Remnant-bound and explicitly unfleeable/chapter-
+            # critical per bot.py -- directly violating this exact plan's
+            # own stranding-safety rule. the_folded_warden (level 27) is a
+            # confirmed ordinary, always-repeatable field monster.
+            "trigger": {"type": "defeat_monster", "monster": "the_folded_warden", "count": 1},
             "reward_xp": 140,
             "reward_gold": 50,
         },
@@ -496,11 +502,17 @@ GUILD_CURRICULUM = {
             "id": "arc_10_the_champions_ward",
             "title": "The Champion's Ward",
             "flavor": (
-                "The Colosseum Champion doesn't cast a single spell — and a real Battlemage needs to know "
+                "A Warren Deep Lurker doesn't cast a single spell — and a real Battlemage needs to know "
                 "exactly how to win a fight where magic alone won't decide it."
             ),
             "min_level": 40,
-            "trigger": {"type": "defeat_monster", "monster": "colosseum_champion", "count": 1},
+            # Real fix (2026-10-01, post-ship audit): colosseum_champion is
+            # a permanent one-time flag-gated fight (unlocks the Labyrinth),
+            # confirmed NOT Remnant-bound and explicitly unfleeable/chapter-
+            # critical per bot.py -- directly violating this exact plan's
+            # own stranding-safety rule. warren_deep_lurker (level 40) is a
+            # confirmed ordinary, always-repeatable field monster.
+            "trigger": {"type": "defeat_monster", "monster": "warren_deep_lurker", "count": 1},
             "reward_xp": 180,
             "reward_gold": 60,
         },
@@ -1545,10 +1557,19 @@ GUILD_CURRICULUM = {
             "title": "Proving the Steel",
             "flavor": (
                 "A smith's work means nothing untested. Take whatever you've forged into a real fight and "
-                "prove it against the Goblin Warrens' own boss."
+                "prove it against a real Cinder Hound."
             ),
             "min_level": 7,
-            "trigger": {"type": "defeat_monster", "monster": "goblin_boss", "count": 1},
+            # Real fix (2026-10-01, post-ship audit): goblin_boss is Chapter
+            # 1's real, permanent, one-time story climax (confirmed via
+            # bot.py's own "chapter-critical, unfleeable" handling and its
+            # permanent defeated_monsters flag) -- NOT a repeatable fight, a
+            # direct violation of this exact plan's own stated rule. A
+            # character who already cleared Chapter 1 before reaching this
+            # step (the realistic common case) could never credit it.
+            # cinder_hound (level 8) is a confirmed ordinary, always-
+            # repeatable field monster (is_boss unset, not Remnant-bound).
+            "trigger": {"type": "defeat_monster", "monster": "cinder_hound", "count": 1},
             "reward_xp": 80,
             "reward_gold": 35,
             "reward_mastery_profession": "blacksmithing",
@@ -1632,11 +1653,18 @@ GUILD_CURRICULUM = {
             "id": "forge_8_the_champions_test",
             "title": "The Champion's Test",
             "flavor": (
-                "The Colosseum's own champion has broken finer gear than anything you've forged so far. Put "
+                "A real Hollow Root Sentinel has broken finer gear than anything you've forged so far. Put "
                 "your real work up against it and see what actually holds."
             ),
             "min_level": 20,
-            "trigger": {"type": "defeat_monster", "monster": "colosseum_champion", "count": 1},
+            # Real fix (2026-10-01, post-ship audit): colosseum_champion is
+            # a permanent one-time flag-gated fight (unlocks the Labyrinth),
+            # confirmed NOT Remnant-bound and explicitly listed in bot.py
+            # among the handful of real unfleeable chapter-critical fights --
+            # directly violating this exact plan's own stranding-safety
+            # rule. hollow_root_sentinel (level 20) is a confirmed ordinary,
+            # always-repeatable field monster.
+            "trigger": {"type": "defeat_monster", "monster": "hollow_root_sentinel", "count": 1},
             "reward_xp": 130,
             "reward_gold": 50,
             "reward_mastery_profession": "blacksmithing",
