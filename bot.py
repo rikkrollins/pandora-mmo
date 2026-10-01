@@ -6295,12 +6295,27 @@ def _trade_gold_keyboard(trade_id: str, mode: str, available_gold: int) -> Inlin
 
 
 def _trade_side_lines(side: dict) -> str:
+    """
+    Real display gap found continuing the Batch 2 scoping of the
+    Forge/Enchanters endgame systems plan (2026-10-01): a trade offer
+    showed only "qty x name" for every item, with zero indication of
+    what a magic/generated item's own real affixes actually are --
+    exactly the kind of information gap that risks a repeat of the
+    2026-09-22 "+STR to Laurienna" incident (that one was about WHICH
+    instance; this is about not knowing WHAT a given instance even
+    does before trading it away). Reuses _format_item_stats_line, the
+    same function market listings/character sheet/item view already
+    use, so this never drifts out of sync with those.
+    """
     lines = [f"**{side['name']}'s offer:**"]
     if side["items"]:
         for item_id, qty in side["items"].items():
             item = items_module.get_item(item_id)
             name = item["name"] if item else item_id
             lines.append(f"  • {qty}x {name}")
+            stats_line = _format_item_stats_line(item) if item else None
+            if stats_line:
+                lines.append(f"     _{stats_line}_")
     if side["gold"]:
         lines.append(f"  • 💰 {side['gold']} gold")
     if not side["items"] and not side["gold"]:
@@ -29817,6 +29832,27 @@ def _format_item_stats_line(item: dict) -> str | None:
         parts.append(f"+{item['ac_bonus']} AC")
     if item.get("damage_type") and item["damage_type"] != "physical" and not item.get("damage_dice"):
         parts.append(f"deals {item['damage_type']} damage")
+    # Real display gap (2026-10-01, Forge/Enchanters endgame systems
+    # plan, Batch 2): elemental_damage_bonus_pct (enchant_sharpen and
+    # the 5 exotic-metal edge recipes) is a real, stacking % damage
+    # bonus already correctly applied in live combat (see
+    # _weapon_for_attacker), but was never shown here at all -- a
+    # player listing/trading an exotic-metal weapon had no way to see
+    # that bonus existed. elemental_resistances (the real ward list
+    # from enchant_warding) and proficiency_bonuses (the real guild-
+    # granted proficiency affix) had the exact same gap -- both are
+    # already correctly summed into live mechanics elsewhere
+    # (items.equipped_elemental_profile, _proficiency_bonus_total) but
+    # were never rendered here either. All three are read by this one
+    # shared function, so fixing it here fixes every caller at once
+    # (market listings, trade offers, item view, character sheet).
+    if item.get("elemental_damage_bonus_pct"):
+        parts.append(f"+{item['elemental_damage_bonus_pct']}% elemental damage")
+    for ward in item.get("elemental_resistances") or []:
+        parts.append(f"{ward['value']}% ward vs {ward['damage_type']}")
+    for pb in item.get("proficiency_bonuses") or []:
+        category_label = f" {pb['category']}" if pb.get("category") else ""
+        parts.append(f"+{pb['value']}{category_label} {pb['stat']} proficiency")
     if item.get("resistances"):
         parts.append(f"resistance to {', '.join(item['resistances'])}")
     if item.get("vulnerabilities"):

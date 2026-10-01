@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.727] — Magic item stats now visible in trades + 3 missing affix kinds fixed everywhere (Batch 2 of the Forge/Enchanters endgame systems plan)
+
+Confirmed the two hard pieces of an "enchantment trading economy"
+(market listings, per-instance item affixes) were already fully live
+— no new economy needed, just two real display gaps found and fixed.
+`_format_item_stats_line` (the one shared function behind market
+listings, trade offers, item view, and the character sheet) never
+read `elemental_damage_bonus_pct` (the real stacking % bonus from
+`enchant_sharpen` and the 5 exotic-metal edge recipes),
+`elemental_resistances` (the real ward list from `enchant_warding`),
+or `proficiency_bonuses` — all three were already correctly applied
+in live combat/proficiency math, just invisible everywhere a player
+could look at the item. Fixing this one function fixes all 4 display
+surfaces at once. Separately, a direct player-to-player trade offer
+previously showed only "qty x name" for every item with zero stat
+info at all — now shows the same real stats line market listings do,
+closing the exact kind of "I didn't know what I was trading away" gap
+behind the 2026-09-22 "+STR to Laurienna" incident. 2 new tests
+(market listing shows an exotic-metal weapon's bonus; a trade offer
+shows a warded item's ward); 23 adjacent trade tests + 5 adjacent
+stats-line tests re-run clean.
+
 ## [1.27.726] — First Discovery world-broadcast (Batch 1 of the Forge/Enchanters endgame systems plan)
 
 Per Coffee's original guild research doc ("if a player is the first

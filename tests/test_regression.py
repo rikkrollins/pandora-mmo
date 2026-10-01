@@ -3151,6 +3151,42 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         record = bot._find_trade_for_user(-999, a_id)
         self.assertEqual(record["party_a"]["items"].get("healing_potion"), 1)
 
+    async def test_trade_offer_shows_a_magic_items_real_stats(self):
+        """
+        Forge/Enchanters endgame systems plan, Batch 2 (2026-10-01): a
+        trade offer previously showed only "qty x name" for every
+        item, with zero indication of what a generated/magic item's
+        real affixes are -- the same information gap that risks a
+        repeat of the 2026-09-22 "+STR to Laurienna" incident. A real
+        warded item added to a trade now surfaces its stats line
+        (reusing _format_item_stats_line) in the shared trade-message
+        text both sides see.
+        """
+        import sessions
+        sessions.end_session(-999)
+        from rules.item_generator import generate_armor
+        a_id, b_id = 951070, 951071
+        make_basic_character(a_id, "TraderWithWard", current_location="crossroads_tavern")
+        make_basic_character(b_id, "TraderPartner", current_location="crossroads_tavern")
+        base_armor = generate_armor(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_armor["type"], name=base_armor["name"], rarity=base_armor["rarity"],
+            price=base_armor["price"], base_stats={k: v for k, v in base_armor.items() if k != "affixes"},
+            affixes=[{"kind": "elemental_resistance", "damage_type": "cold", "value": 50}],
+        )
+        db.add_item(a_id, -999, item_id, 1)
+
+        sink = []
+        await bot._do_trade_request(FakeUpdate(a_id, "trade with TraderPartner", sink), "trade with TraderPartner")
+        sink.clear()
+        await bot._do_trade_add(
+            FakeUpdate(a_id, f"add 1 {base_armor['name']} to the trade", sink),
+            f"add 1 {base_armor['name']} to the trade",
+        )
+        record = bot._find_trade_for_user(-999, a_id)
+        message_text = bot._trade_message_text(record)
+        self.assertIn("ward vs cold", message_text)
+
     async def test_trade_add_rejects_a_currently_equipped_item(self):
         """
         Real gap found continuing the equipped-item audit (2026-09-18,
@@ -22275,6 +22311,30 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("still working on" in s for s in sink), sink)
         self.assertEqual(db.get_character(giver_id, -999)["inventory"].get("shard_of_dim_light"), 1)  # never left the giver
         self.assertEqual(db.get_character(recipient_id, -999)["inventory"].get("shard_of_dim_light", 0), 0)
+
+    async def test_market_listing_shows_an_exotic_metal_weapons_damage_bonus(self):
+        """
+        Forge/Enchanters endgame systems plan, Batch 2 (2026-10-01):
+        _format_item_stats_line never read elemental_damage_bonus_pct
+        at all (the real stacking % bonus from enchant_sharpen and the
+        5 exotic-metal edge recipes), so a market listing for one of
+        these weapons showed nothing about its real bonus. Fixed at
+        the shared function, confirmed here via the real
+        _do_sell_market handler/listing message.
+        """
+        from rules.item_generator import generate_weapon
+        make_basic_character(951072, "ExoticSeller", current_location="crossroads_tavern")
+        base_weapon = generate_weapon(tier="common")
+        item_id = db.create_item_instance(
+            item_type=base_weapon["type"], name=base_weapon["name"], rarity=base_weapon["rarity"],
+            price=base_weapon["price"], base_stats={k: v for k, v in base_weapon.items() if k != "affixes"},
+            affixes=[{"kind": "elemental_damage_bonus", "value": 25}],
+        )
+        db.add_item(951072, -999, item_id, 1)
+        sink = []
+        await bot._do_sell_market(FakeUpdate(951072, "", sink), ["1", "100", base_weapon["name"]])
+        full_text = "\n".join(sink)
+        self.assertIn("25% elemental damage", full_text)
 
     async def test_do_sell_market_rejects_a_quest_item(self):
         """Same real gap, the player-to-player market listing path."""
