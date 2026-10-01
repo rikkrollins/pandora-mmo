@@ -164,6 +164,31 @@ ITEMS = {
         "price": 15, "weight": 0.1, "effect": "cure_poison",
         "description": "Cures poison. A thin, bitter tonic. Smells like it's already working before you drink it.",
     },
+    # Discipline branches (2026-10-01, Forge/Enchanters endgame systems
+    # plan, Batch 6): real crafted goods for the 4 professions that
+    # were previously pure XP sinks with no recipe content at all
+    # (herbalism/mining/fishing/lumberjacking) -- each gated on a real
+    # 50% mastery threshold (rules/crafting.py's new min_mastery_pct
+    # gate), so these are a genuine "the more you practice, the more
+    # you can make" unlock, not available from day one.
+    "herbalist_poultice": {
+        "name": "Herbalist's Poultice", "type": "consumable", "rarity": "uncommon",
+        "price": 60, "weight": 0.3, "effect": "heal", "heal_dice": "1d1+249",
+        "description": "Heals 1d1+249 HP (250 flat). Bound herbs and moonpetal pressed tight against a wound, the way a real herbalist does it -- no vial, no tonic, just know-how.",
+    },
+    "refined_iron": {
+        "name": "Refined Iron", "type": "material", "rarity": "uncommon", "price": 60, "weight": 2,
+        "description": "Ordinary ore, but worked clean of slag and impurity by someone who's spent real time at it. A smith pays more for this than raw ore, and for good reason.",
+    },
+    "fisherman_stew": {
+        "name": "Fisherman's Stew", "type": "consumable", "rarity": "uncommon",
+        "price": 60, "weight": 0.5, "effect": "heal", "heal_dice": "1d1+249",
+        "description": "Heals 1d1+249 HP (250 flat). A real catch, cleaned and cooked the way someone who's hauled nets for years actually does it.",
+    },
+    "reinforced_haft": {
+        "name": "Reinforced Haft", "type": "material", "rarity": "uncommon", "price": 60, "weight": 2,
+        "description": "Properly seasoned and grain-aligned timber, the kind only real lumberjacking experience knows how to pick out. Worth real coin to a smith who knows the difference.",
+    },
     # Real live gap (2026-08-26, per Coffee: "what cures silence?" ->
     # "create an item and a spell to cure silence -- check other status
     # effects and make sure there is items and spells to cure them

@@ -2,6 +2,35 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.733] — Discipline branches: real recipes for herbalism, mining, fishing, lumberjacking (Batch 6, final, of the Forge/Enchanters endgame systems plan)
+
+Per the original research doc's "5 real disciplines" idea, rescoped to
+what's actually real in this codebase: `profession_mastery_pct` (0-100
+per profession, already grown via XP, already tied to each guild) had
+only 3 of 7 real professions with any recipe content at all —
+herbalism, mining, fishing, and lumberjacking were pure XP sinks with
+nothing to actually craft. Each now has one real recipe, using that
+profession's own real gathered material (confirmed against
+campaign.json's resource nodes): Herbalist's Poultice (silverleaf +
+moonpetal), Refined Iron (iron ore), Fisherman's Stew (raw fish), and
+Reinforced Haft (wood). All four are gated on a new, real
+`min_mastery_pct` check in `recipe_requirement_gate` — the first real
+use of profession mastery as an actual crafting GATE rather than just
+a roll-bonus input — so these are genuine "the more you practice, the
+more you can make" unlocks, not available from day one. Confirmed via
+live DB query that no character is anywhere close to the 50%
+threshold on any of these 4 professions (highest is 12.7%), so this is
+purely additive with zero live impact. 3 new tests; 7 adjacent recipe-
+gate/craft tests re-run clean.
+
+**This closes the Forge/Enchanters endgame systems plan.** All 6
+batches shipped (v1.27.726 through v1.27.733): First Discovery,
+trading display, Arcane Capacity, durability+repair, artifact
+evolution, and discipline branches. Every system explicitly scoped out
+of the original guild-curriculum pass (except sentient enchantments,
+which conflicts with this game's hard AI-narrates-never-decides
+boundary and was explicitly dropped) is now real, tested, and live.
+
 ## [1.27.732] — "Unlock the door" now classifies as a real skill check
 
 Real gap found via topic-activity monitoring: "Unlock the heavily-

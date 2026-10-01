@@ -29,6 +29,35 @@ RECIPES = {
         "result_item": "antitoxin", "result_qty": 1,
         "ability": "intelligence", "dc": 13, "profession": "alchemy",
     },
+    # Discipline branches (2026-10-01, Forge/Enchanters endgame systems
+    # plan, Batch 6): the first real recipes for herbalism/mining/
+    # fishing/lumberjacking -- previously pure XP sinks with nothing to
+    # actually craft. Each gated on a real 50% mastery threshold
+    # (recipe_requirement_gate's new min_mastery_pct check), using that
+    # profession's own real gathered material (confirmed against
+    # campaign.json's resource_nodes before writing these: herbalism ->
+    # silverleaf_herb/moonpetal, mining -> iron_ore, fishing ->
+    # raw_fish, lumberjacking -> wood).
+    "herbalist_poultice": {
+        "materials": {"silverleaf_herb": 4, "moonpetal": 2},
+        "result_item": "herbalist_poultice", "result_qty": 1,
+        "ability": "wisdom", "dc": 16, "profession": "herbalism", "min_mastery_pct": 50,
+    },
+    "refined_iron": {
+        "materials": {"iron_ore": 5},
+        "result_item": "refined_iron", "result_qty": 1,
+        "ability": "strength", "dc": 16, "profession": "mining", "min_mastery_pct": 50,
+    },
+    "fisherman_stew": {
+        "materials": {"raw_fish": 3},
+        "result_item": "fisherman_stew", "result_qty": 1,
+        "ability": "wisdom", "dc": 16, "profession": "fishing", "min_mastery_pct": 50,
+    },
+    "reinforced_haft": {
+        "materials": {"wood": 5},
+        "result_item": "reinforced_haft", "result_qty": 1,
+        "ability": "strength", "dc": 16, "profession": "lumberjacking", "min_mastery_pct": 50,
+    },
     "scroll_magic_missile": {
         "materials": {"moonpetal": 2, "iron_ore": 1},
         "result_item": "scroll_magic_missile", "result_qty": 1,
@@ -446,6 +475,24 @@ def recipe_requirement_gate(character: dict, recipe: dict) -> str | None:
     min_level = recipe.get("min_level")
     if min_level and character.get("level", 1) < min_level:
         return f"That recipe demands character level {min_level} or higher — you're not there yet."
+    # Discipline branches (2026-10-01, Forge/Enchanters endgame systems
+    # plan, Batch 6, per Coffee's own confirmed design in the "build it
+    # all" scoping pass): a new, real gate on a recipe's own profession
+    # mastery -- the first real recipe-level use of profession_mastery_
+    # pct as a GATE rather than just a roll-bonus/masterwork-chance
+    # input. Lets herbalism/mining/fishing/lumberjacking (previously
+    # pure XP sinks with no recipe content at all) have real "the more
+    # you practice, the more you can make" unlocks, same spirit as the
+    # guild curriculum ladders' own level-gated tiers.
+    min_mastery_pct = recipe.get("min_mastery_pct")
+    if min_mastery_pct:
+        profession = recipe.get("profession", "")
+        mastery = character.get("profession_mastery_pct", {}).get(profession, 0)
+        if mastery < min_mastery_pct:
+            return (
+                f"That recipe needs {min_mastery_pct}% {profession} mastery — you're at "
+                f"{round(mastery)}% so far. Keep practicing."
+            )
     return None
 
 

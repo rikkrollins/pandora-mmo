@@ -17404,6 +17404,65 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         updated = db.get_character(950946, -999)
         self.assertGreater(updated["inventory"].get("greater_scroll_fire", 0), 0)
 
+    def test_discipline_branch_recipes_are_real_and_mastery_gated(self):
+        """
+        Forge/Enchanters endgame systems plan, Batch 6 (2026-10-01):
+        the first real recipes for herbalism/mining/fishing/
+        lumberjacking -- previously pure XP sinks with nothing to
+        actually craft. Each gated on a real 50% mastery threshold via
+        recipe_requirement_gate's new min_mastery_pct check; below 50%
+        rejects with the real current mastery shown, at/above 50% is
+        unlocked.
+        """
+        from rules.crafting import recipe_requirement_gate, RECIPES
+        character = make_basic_character(950950, "DisciplineTester", char_class="Fighter", current_location="crossroads_tavern")
+        character = db.get_character(950950, -999)
+        recipe_by_profession = {
+            "herbalism": "herbalist_poultice", "mining": "refined_iron",
+            "fishing": "fisherman_stew", "lumberjacking": "reinforced_haft",
+        }
+        for profession, recipe_id in recipe_by_profession.items():
+            recipe = RECIPES[recipe_id]
+            self.assertEqual(recipe["profession"], profession)
+            self.assertEqual(recipe["min_mastery_pct"], 50)
+            db.update_character(950950, -999, profession_mastery_pct={profession: 10})
+            character = db.get_character(950950, -999)
+            rejection = recipe_requirement_gate(character, recipe)
+            self.assertIsNotNone(rejection, recipe_id)
+            self.assertIn("50%", rejection)
+            self.assertIn("10%", rejection)
+            db.update_character(950950, -999, profession_mastery_pct={profession: 60})
+            character = db.get_character(950950, -999)
+            self.assertIsNone(recipe_requirement_gate(character, recipe), recipe_id)
+
+    async def test_herbalist_poultice_is_actually_craftable_by_a_qualified_character(self):
+        """End-to-end: bot._do_craft actually produces a real Herbalist's Poultice once mastery is 50%+ and materials are on hand."""
+        from unittest.mock import patch
+        make_basic_character(950951, "QualifiedHerbalist", char_class="Cleric", current_location="crossroads_tavern")
+        db.update_character(950951, -999, profession_mastery_pct={"herbalism": 60})
+        db.add_item(950951, -999, "silverleaf_herb", 4)
+        db.add_item(950951, -999, "moonpetal", 2)
+        craft_text = "craft a Herbalist's Poultice"
+        update = FakeUpdate(950951, craft_text, [])
+        with patch("bot.narrate_skill_check", return_value="You bind the herbs carefully."), \
+             patch("rules.crafting.roll_ability_check", return_value={"total": 99, "raw_roll": 15}):
+            await bot._do_craft(update, craft_text)
+        updated = db.get_character(950951, -999)
+        self.assertGreater(updated["inventory"].get("herbalist_poultice", 0), 0)
+
+    async def test_refined_iron_rejects_an_unqualified_miner(self):
+        """End-to-end rejection: a character below 50% mining mastery can't craft Refined Iron even with materials in hand."""
+        make_basic_character(950952, "UnqualifiedMiner", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(950952, -999, profession_mastery_pct={"mining": 20})
+        db.add_item(950952, -999, "iron_ore", 5)
+        craft_text = "craft Refined Iron"
+        sink = []
+        update = FakeUpdate(950952, craft_text, sink)
+        await bot._do_craft(update, craft_text)
+        full_text = "\n".join(sink)
+        self.assertIn("50% mining mastery", full_text)
+        self.assertEqual(db.get_character(950952, -999)["inventory"].get("refined_iron", 0), 0)
+
     def test_alchemy_ascension_ladder_requires_arcane_circle_and_successive_rebirths(self):
         """
         Real feature (2026-09-10): Alchemy's own rebirth-gated capstone
