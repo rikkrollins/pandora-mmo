@@ -47889,6 +47889,65 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         await bot._do_labyrinth_move(FakeUpdate(user_id, "", sink3, chat_id=chat_id), "go to unvisited room")
         self.assertEqual(db.get_labyrinth_run(chat_id, party_key)["current_room_id"], "f1_r1")
 
+    async def test_labyrinth_progress_resolves_the_real_humans_run_not_an_ai_companions(self):
+        """
+        Real live bug (2026-10-01, dev-bridge: "I have already beaten
+        the enemy, and it won't let me progress"). A human in Labyrinth
+        Solo Mode (run keyed "soloplay:<id>") fighting alongside a real
+        AI party companion (keyed "party:<party_id>", labyrinth_solo_
+        mode=0) used to have _check_labyrinth_progress pick whichever
+        party-side combatant happened to be FIRST in turn_order -- if
+        that was the AI companion, it resolved and cleared the AI's own
+        unrelated "party:" run instead of the human's real "soloplay:"
+        run, leaving the actual current room's monster permanently
+        un-clearable. Confirmed directly against the real live reported
+        state (Elduinn's run) before fixing. The AI companion is placed
+        FIRST in turn_order here specifically to reproduce the bug.
+        """
+        import sessions
+        user_id, chat_id = 962051, -962051
+        make_basic_character(
+            user_id, "SoloHumanTester", chat_id=chat_id, current_location=bot.LABYRINTH_LOCATION_SENTINEL,
+        )
+        db.update_character(user_id, chat_id, labyrinth_solo_mode=1, party_id=77)
+        ai_character = db.create_character(
+            telegram_user_id=-77001, chat_id=chat_id, name="AICompanionTester", race="Human", char_class="Fighter",
+            ability_scores={"strength": 10, "dexterity": 10, "constitution": 10, "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=20, armor_class=12, gold=0, inventory={},
+        )
+        db.update_character_by_id(ai_character["character_id"], is_ai=1, party_id=77, labyrinth_solo_mode=0)
+
+        human_key = f"soloplay:{user_id}"
+        ai_key = "party:77"
+        human_rooms = {
+            "f1_hub": {"id": "f1_hub", "floor": 1, "name": "Human's Room", "description": "A test room.", "connections": ["f1_r1"], "monsters": ["goblin"], "is_gated_encounter": True, "visited": True},
+            "f1_r1": {"id": "f1_r1", "floor": 1, "name": "Unvisited Room", "description": "A test room.", "connections": ["f1_hub"], "monsters": []},
+        }
+        db.create_labyrinth_run(chat_id, human_key, floor=1, seed=1, current_room_id="f1_hub", rooms=human_rooms)
+        ai_rooms = {
+            "f5_hub": {"id": "f5_hub", "floor": 5, "name": "AI's Old Room", "description": "A stale, unrelated run.", "connections": [], "monsters": ["unrelated_stale_monster"]},
+        }
+        db.create_labyrinth_run(chat_id, ai_key, floor=5, seed=2, current_room_id="f5_hub", rooms=ai_rooms)
+
+        session = sessions.Session(
+            chat_id=chat_id,
+            participants=[
+                {"telegram_user_id": -77001, "name": "AICompanionTester", "is_ai": True, "is_labyrinth_run": True, "hp_current": 20},
+                {"telegram_user_id": user_id, "name": "SoloHumanTester", "is_labyrinth_run": True, "hp_current": 20},
+                {"telegram_user_id": -99999, "name": "Goblin", "monster_key": "goblin", "hp_current": 0},
+            ],
+            turn_order=[-77001, user_id, -99999],  # AI companion deliberately FIRST
+            sides={-77001: "party", user_id: "party", -99999: "enemy"},
+            session_id=99,
+        )
+        await bot._check_labyrinth_progress(FakeUpdate(user_id, "", [], chat_id=chat_id), session)
+
+        self.assertEqual(db.get_labyrinth_run(chat_id, human_key)["rooms"]["f1_hub"]["monsters"], [], "the HUMAN's real current room must be cleared")
+        self.assertEqual(
+            db.get_labyrinth_run(chat_id, ai_key)["rooms"]["f5_hub"]["monsters"], ["unrelated_stale_monster"],
+            "the AI's own unrelated run must stay completely untouched",
+        )
+
     def test_labyrinth_exits_hides_blocked_directions_while_monsters_are_present(self):
         rooms = {
             "f1_hub": {"id": "f1_hub", "floor": 1, "name": "The Hub", "description": "A test room.", "connections": ["f1_r0", "f1_r1"], "monsters": ["goblin"], "is_gated_encounter": True, "visited": True},

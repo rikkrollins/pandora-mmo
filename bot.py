@@ -12104,7 +12104,34 @@ async def _check_labyrinth_progress(update: Update, session: sessions.Session) -
     party_side_ids = [pid for pid in session.turn_order if session.sides.get(pid) == "party"]
     if not party_side_ids:
         return
-    character = db.get_character(party_side_ids[0], update.effective_chat.id)
+    # Real live bug (2026-10-01, dev-bridge: "I have already beaten the
+    # enemy, and it won't let me progress"). This used to always take
+    # party_side_ids[0] -- whichever party-side combatant happened to
+    # be FIRST in turn order, human or AI. A human in Labyrinth Solo
+    # Mode fighting alongside a real AI companion (Solo Mode only
+    # isolates the run's OWN key namespace/best-floor stat, not who
+    # fights alongside you -- see _do_enter_labyrinth's own comment)
+    # has a run keyed off the HUMAN's own labyrinth_solo_mode flag
+    # ("soloplay:<id>"), while the AI companion's own character has
+    # labyrinth_solo_mode=0 and would resolve to a completely
+    # different, likely stale "party:<id>" run instead. If that AI
+    # companion happened to go first in turn order, this function
+    # picked their character, resolved the WRONG run key, and cleared
+    # that OTHER run's room (invisibly, since it's usually already
+    # empty) while leaving the real current room's monsters untouched
+    # forever -- a permanent, confirmed-live soft-lock. Preferring a
+    # real human party-side participant (falling back to whichever one
+    # comes first only if the whole party side is AI, same idiom
+    # already used for a real counterspeller/human-leader lookup
+    # elsewhere in this file) means the run key always reflects the
+    # actual human entrant whose Solo Mode flag the whole run is keyed
+    # on, never an AI companion's own unrelated state.
+    human_party_side_ids = [
+        pid for pid in party_side_ids
+        if not (db.get_character(pid, update.effective_chat.id) or {}).get("is_ai")
+    ]
+    resolver_id = human_party_side_ids[0] if human_party_side_ids else party_side_ids[0]
+    character = db.get_character(resolver_id, update.effective_chat.id)
     if character is None:
         return
     party_key = _labyrinth_party_key(character)

@@ -2,6 +2,36 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.735] — Fixed a real Labyrinth soft-lock: progress checkpoint could clear the wrong run
+
+Reported live via dev-bridge (Coffee, relaying a player): "I have
+already beaten the enemy, and it won't let me progress," with a
+screenshot showing the exact "An enemy still bars the way down" gate
+message while the room's fight was already won.
+
+Root cause: `_check_labyrinth_progress` (the checkpoint that clears a
+room's defeated monsters after a real Labyrinth combat victory) picked
+whichever party-side combatant happened to be first in turn order to
+resolve which stored run to update — human or AI companion, whichever
+rolled first. A human in Labyrinth Solo Mode fighting alongside a real
+AI party companion has their own run keyed `soloplay:<id>` (Solo Mode
+only changes the run's own key namespace and best-floor stat, not who
+fights alongside you), while the AI companion's own character has
+`labyrinth_solo_mode=0` and resolves to a completely different, likely
+stale `party:<id>` run. If the AI happened to go first, the checkpoint
+cleared the wrong (AI's) run, leaving the human's real current room's
+monsters stuck forever — a permanent soft-lock, confirmed directly
+against Elduinn's actual live run before fixing.
+
+Fixed by preferring a real human party-side participant when resolving
+whose run to update (falling back to whichever party-side combatant
+comes first only if the whole party side is AI) — the same "prefer a
+human over an AI companion" idiom already used elsewhere in this file
+for counterspell/leadership lookups. New regression test reproduces
+the exact bug (AI companion deliberately placed first in turn order)
+and confirms it fails without the fix, passes with it; full
+`LabyrinthTests` sweep (196 tests) stayed clean.
+
 ## [1.27.734] — Full post-ship audit: fixed a real guild-curriculum stranding risk + an artifact-forge name-collision bug
 
 Ran a full audit across the whole story, all 7 guild curricula, and
