@@ -88,6 +88,15 @@ The entire world — locations, quests, monsters, shops, the story itself — is
 
 ---
 
+## Community
+
+- **Play:** [t.me/PandoraMMO](https://t.me/PandoraMMO)
+- **Code:** [github.com/rikkrollins/pandora-mmo](https://github.com/rikkrollins/pandora-mmo)
+- **Facebook:** [facebook.com/share/g/1FHQChSihV](https://www.facebook.com/share/g/1FHQChSihV/?mibextid=wwXIfr)
+- **X:** [x.com/pandorammo](https://x.com/pandorammo?s=11)
+
+---
+
 ## Credits
 
 Developed and Modeled by ClaudeCode and coffee1333 aka RikkRollins.
