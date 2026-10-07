@@ -159,6 +159,34 @@ the bill.
   call — the docs pasted don't give a clear per-call price table for
   consuming official models).
 
+## Live-verified correction (2026-10-07, same day)
+
+Coffee said he doesn't want to pay for anything. Before assuming the
+legacy free endpoints (`text.pollinations.ai`, and its `?model=
+openai-audio` TTS variant) were still usable, they were tested directly
+with real `curl` calls rather than trusted from secondhand articles:
+
+- `image.pollinations.ai` — **confirmed still free/keyless and working**
+  (HTTP 200, real image bytes returned). This is the one genuinely free
+  capability, and it's exactly what this game already uses.
+- `text.pollinations.ai/{prompt}` — **returns `402 Payment Required`**
+  on every model tried (`openai`, `mistral`, no model specified).
+  Despite the endpoint's own deprecation notice claiming "Anonymous
+  requests to text.pollinations.ai are NOT affected," that is not what
+  actually happens today.
+- `text.pollinations.ai/{prompt}?model=openai-audio` (free TTS) —
+  **returns `404 Model not found`**; that model no longer exists on the
+  legacy route at all.
+
+So in practice, as of today, **nothing beyond plain image generation is
+free**. Shipped the one real, zero-cost improvement available: pinned
+the free image endpoint to an explicit `model=flux` (`images.py`,
+v1.27.742) instead of whatever Pollinations' own default model happened
+to be — same free endpoint, no new dependency, consistently better
+output. Everything else in this document (video, embeddings, hosted
+text, audio, 3D, realtime voice, agents) remains genuinely paid-only;
+there is no free path to any of it right now.
+
 ## Bottom line
 
 Nothing here is urgent or broken — this game's existing free image
