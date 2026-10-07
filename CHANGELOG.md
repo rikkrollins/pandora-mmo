@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.737] — Character sheet, round 2: dropped the redundant carried-gear section, type-matched emojis
+
+Second real dev-bridge round on the same sheet, with a screenshot
+circling the exact sections (Coffee relaying Elduinn):
+
+- **"Carried but not equipped" removed entirely** — "items, armour and
+  equitable [sic] show up in the item menu and the equipment menu so
+  we don't need to have redundancies like this." That section (just
+  grouped-by-type one version earlier) duplicated data already shown
+  in `check_inventory`/the equip menu — gone, along with its now-dead
+  helper function.
+- **Equipped items now get a type-matched emoji** instead of one
+  generic 📊 for everything — ⚔️ weapons, 🛡️ armor, 🔰 shields, 💍
+  rings, 📿 amulets, 🌟 wondrous items.
+
+3 tests updated/added; 13-test sheet-adjacent sweep stayed clean.
+
 ## [1.27.736] — Character sheet legibility: grouped carried gear, fixed underscored skill names
 
 Requested live via dev-bridge (Coffee relaying Elduinn: "Can you make

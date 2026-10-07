@@ -6109,7 +6109,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         equipper_after = db.get_character(equipper_id, -999)
         self.assertIsNone(equipper_after["equipped_weapon"])  # the HELPER didn't equip anything
 
-    def test_sheet_shows_equipped_and_carried_not_equipped_gear(self):
+    def test_sheet_shows_equipped_gear_with_stats(self):
         use_test_db("tests/tmp/sheet_gear_test.db")
         user_id = 900307
         make_basic_character(user_id, "SheetTest", current_location="crossroads_tavern")
@@ -6119,28 +6119,48 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         sheet = bot._format_character_sheet(character)
         self.assertIn("Equipped: Longsword", sheet)
-        self.assertIn("Carried but not equipped:", sheet)
-        self.assertIn("Weapons: Shortsword", sheet)
 
-    def test_sheet_groups_carried_gear_by_type_not_one_flat_line(self):
+    def test_sheet_no_longer_shows_a_redundant_carried_but_not_equipped_section(self):
         """
-        Real live request (2026-10-07, Coffee dev-bridge relaying
-        Elduinn: "Can you make this look better?!" with a pasted sheet
-        showing ~20 carried items as one unbroken comma line). Carried
-        gear across multiple types must now render as separate bulleted
-        sub-lines, one per type, matching the rest of the sheet's
-        sectioned style -- not a single flat "Carried but not equipped:
-        A, B, C, ..." line.
+        Real live request (2026-10-07, Coffee dev-bridge, 2nd sheet-
+        legibility round, screenshot circling the section): "we don't
+        need to have this purple section, because items, armour and
+        equitable [sic] show up in the item menu and the equipment menu
+        so we don't need to have redundancies like this." The whole
+        "Carried but not equipped" block (grouped-by-type one version
+        earlier) is now gone from the sheet entirely -- that data still
+        lives in check_inventory/the equip menu, just not duplicated
+        here.
         """
-        use_test_db("tests/tmp/sheet_gear_grouped_test.db")
+        use_test_db("tests/tmp/sheet_no_carried_section_test.db")
         user_id = 900308
-        make_basic_character(user_id, "SheetGroupTest", current_location="crossroads_tavern")
+        make_basic_character(user_id, "SheetNoCarriedTest", current_location="crossroads_tavern")
         db.add_item(user_id, -999, "shortsword", 1)
         db.add_item(user_id, -999, "chain_shirt", 1)
         character = db.get_character(user_id, -999)
         sheet = bot._format_character_sheet(character)
-        self.assertIn("  • Weapons: Shortsword", sheet)
-        self.assertIn("  • Armor: Chain Shirt", sheet)
+        self.assertNotIn("Carried but not equipped", sheet)
+
+    def test_sheet_equipped_items_show_type_matched_emoji_not_one_generic_icon(self):
+        """
+        Real live request (2026-10-07, Coffee dev-bridge, same message:
+        "can you please add some better emojis ... to match the items
+        the character's wearing"). Every equipped item's stats sub-line
+        used to show one generic 📊 bar-chart icon regardless of
+        whether it was a weapon, armor, or a ring -- now matches the
+        item's own real type.
+        """
+        use_test_db("tests/tmp/sheet_type_emoji_test.db")
+        user_id = 900310
+        make_basic_character(user_id, "SheetEmojiTest", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "longsword", 1)
+        db.add_item(user_id, -999, "chain_shirt", 1)
+        db.equip_item(user_id, -999, "longsword")
+        db.equip_item(user_id, -999, "chain_shirt")
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("⚔️ Longsword:", sheet)
+        self.assertIn("🛡️ Chain Shirt:", sheet)
 
     def test_sheet_skill_line_humanizes_underscored_skill_names(self):
         """

@@ -23382,10 +23382,23 @@ def _format_equipped_line(character: dict) -> str:
     resistance/element tethered to it, even though the exact same
     stats were already computable via _format_item_stats_line (used
     elsewhere for market/examine/loot). Every real equipped item now
-    gets its own indented stats sub-line underneath, same "📊" convention
-    the market listing already uses -- nothing new invented, just the
-    existing formatter finally reused here too.
+    gets its own indented stats sub-line underneath.
+
+    Real live request (2026-10-07, Coffee dev-bridge, 2nd sheet-
+    legibility round: "can you please add some better emojis ... to
+    match the items the character's wearing"). Each equipped item's
+    stats sub-line now gets an emoji matching its own real item type
+    (weapon/armor/shield/ring/amulet/wondrous) instead of one generic
+    bar-chart icon for everything.
+
+    Same message also asked to drop the "Carried but not equipped"
+    section entirely -- "items, armour and equippable[s] show up in
+    the item menu and the equipment menu so we don't need to have
+    redundancies like this" -- removed (was _format_carried_gear_line,
+    shipped one version earlier, now deleted outright rather than left
+    as dead code since nothing else called it).
     """
+    _TYPE_EMOJI = {"weapon": "⚔️", "armor": "🛡️", "shield": "🔰", "ring": "💍", "amulet": "📿", "wondrous": "🌟"}
     weapon_item = items_module.get_item(character.get("equipped_weapon") or "")
     armor_item = items_module.get_item(character.get("equipped_armor") or "")
     shield_item = items_module.get_item(character.get("equipped_shield") or "")
@@ -23406,47 +23419,8 @@ def _format_equipped_line(character: dict) -> str:
             continue
         stats_line = _format_item_stats_line(equipped_item)
         if stats_line:
-            lines.append(f"     📊 {equipped_item['name']}: {stats_line}")
-    return "\n".join(lines) + "\n"
-
-
-def _format_carried_gear_line(character: dict) -> str:
-    """
-    Real weapons/armor/shields sitting in the backpack, NOT currently
-    equipped (2026-07-15, per Coffee) -- a player asking "what could I
-    equip" shouldn't have to cross-reference their own inventory list
-    against items.py's type field by hand. Empty string (no line at
-    all) if nothing equippable is being carried unequipped.
-
-    Real live request (2026-10-07, Coffee dev-bridge relaying Elduinn:
-    "Can you make this look better?!"): a heavily-geared character's
-    carried-but-unequipped gear used to render as one unbroken,
-    alphabetized comma line -- by far the densest, least readable part
-    of an otherwise sectioned/bulleted sheet (equipped gear already
-    gets its own line per item; this didn't). Grouped by the same
-    weapon/armor/shield/ring/amulet/wondrous categories the equip menu
-    already sorts by, one bulleted sub-list per category -- no new
-    data, just legible structure matching the rest of this sheet.
-    """
-    equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
-                    character.get("equipped_shield"), *(character.get("equipped_accessories") or [])}
-    by_type: dict[str, list[str]] = {}
-    for item_id, qty in (character.get("inventory") or {}).items():
-        if qty <= 0 or item_id in equipped_ids:
-            continue
-        item = items_module.get_item(item_id)
-        if item and item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
-            by_type.setdefault(item["type"], []).append(item["name"])
-    if not by_type:
-        return ""
-    type_labels = {"weapon": "Weapons", "armor": "Armor", "shield": "Shields",
-                   "ring": "Rings", "amulet": "Amulets", "wondrous": "Wondrous items"}
-    lines = ["Carried but not equipped:"]
-    for item_type in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
-        names = by_type.get(item_type)
-        if not names:
-            continue
-        lines.append(f"  • {type_labels[item_type]}: {', '.join(sorted(names))}")
+            emoji = _TYPE_EMOJI.get(equipped_item.get("type"), "📊")
+            lines.append(f"     {emoji} {equipped_item['name']}: {stats_line}")
     return "\n".join(lines) + "\n"
 
 
@@ -23619,7 +23593,6 @@ def _format_character_sheet(character: dict) -> str:
     title_suffix = f" \"{character['active_title']}\"" if character.get("active_title") else ""
     name_line = f"**{character['name']}**{title_suffix}" + (" *(AI companion)*" if character.get("is_ai") else "")
     equipped_line = _format_equipped_line(character)
-    carried_gear_line = _format_carried_gear_line(character)
     pronouns_line = f"Pronouns: {character['pronouns']}\n" if character.get("pronouns") else ""
     description_line = f"\"{character['description']}\"\n" if character.get("description") else ""
     # Presence (task #144): only real players have a meaningful status;
@@ -23744,7 +23717,6 @@ def _format_character_sheet(character: dict) -> str:
         f"🎒 **Gear & Gold**\n"
         f"Gold: {character['gold']} | Guild: {character.get('guild') or 'None'}\n"
         f"{equipped_line}"
-        f"{carried_gear_line}"
     ).rstrip("\n")
     magic_section = (
         f"✨ **Magic**\n"
@@ -36876,10 +36848,11 @@ async def _do_show_story_so_far(update: Update) -> None:
 def _equip_keyboard(character: dict) -> InlineKeyboardMarkup | None:
     """
     Task #176 menu revision: real tap-to-equip buttons for gear this
-    character is actually carrying but hasn't equipped yet -- same real
-    inventory/equipped-slot data _format_carried_gear_line already reads
-    (never a generic list). None (not even a Menu-only keyboard) when
-    there's nothing to equip, so _do_show_equip_menu can say so plainly.
+    character is actually carrying but hasn't equipped yet -- reads the
+    same real inventory/equipped-slot data the sheet's own equipped
+    line does (never a generic list). None (not even a Menu-only
+    keyboard) when there's nothing to equip, so _do_show_equip_menu can
+    say so plainly.
     """
     equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
                     character.get("equipped_shield"), *(character.get("equipped_accessories") or [])}
