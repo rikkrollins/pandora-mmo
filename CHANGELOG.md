@@ -2,6 +2,27 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.736] — Character sheet legibility: grouped carried gear, fixed underscored skill names
+
+Requested live via dev-bridge (Coffee relaying Elduinn: "Can you make
+this look better?!", with his full sheet pasted). Two real, concrete
+issues found in that pasted sheet:
+
+- **Carried-but-unequipped gear was one unbroken, alphabetized comma
+  line** — by far the densest, least readable part of an otherwise
+  sectioned/bulleted sheet (equipped gear already gets its own line
+  per item). Now grouped into the same weapon/armor/shield/ring/
+  amulet/wondrous categories the equip menu already uses, one bulleted
+  sub-line per category.
+- **Skill names with an underscore rendered literally** — e.g.
+  "Bait_gathering" instead of "Bait gathering" (also affects
+  "dice_game"/"fortunes_wheel"). Every other proficiency section on
+  this sheet already replaces underscores with spaces before display;
+  the plain Skills line never did.
+
+3 new tests confirm both fixes; full character-sheet-adjacent test
+sweep (28 tests) stayed clean.
+
 ## [1.27.735] — Fixed a real Labyrinth soft-lock: progress checkpoint could clear the wrong run
 
 Reported live via dev-bridge (Coffee, relaying a player): "I have

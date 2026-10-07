@@ -23417,19 +23417,37 @@ def _format_carried_gear_line(character: dict) -> str:
     equip" shouldn't have to cross-reference their own inventory list
     against items.py's type field by hand. Empty string (no line at
     all) if nothing equippable is being carried unequipped.
+
+    Real live request (2026-10-07, Coffee dev-bridge relaying Elduinn:
+    "Can you make this look better?!"): a heavily-geared character's
+    carried-but-unequipped gear used to render as one unbroken,
+    alphabetized comma line -- by far the densest, least readable part
+    of an otherwise sectioned/bulleted sheet (equipped gear already
+    gets its own line per item; this didn't). Grouped by the same
+    weapon/armor/shield/ring/amulet/wondrous categories the equip menu
+    already sorts by, one bulleted sub-list per category -- no new
+    data, just legible structure matching the rest of this sheet.
     """
     equipped_ids = {character.get("equipped_weapon"), character.get("equipped_armor"),
                     character.get("equipped_shield"), *(character.get("equipped_accessories") or [])}
-    carried_names = []
+    by_type: dict[str, list[str]] = {}
     for item_id, qty in (character.get("inventory") or {}).items():
         if qty <= 0 or item_id in equipped_ids:
             continue
         item = items_module.get_item(item_id)
         if item and item.get("type") in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
-            carried_names.append(item["name"])
-    if not carried_names:
+            by_type.setdefault(item["type"], []).append(item["name"])
+    if not by_type:
         return ""
-    return f"Carried but not equipped: {', '.join(sorted(carried_names))}\n"
+    type_labels = {"weapon": "Weapons", "armor": "Armor", "shield": "Shields",
+                   "ring": "Rings", "amulet": "Amulets", "wondrous": "Wondrous items"}
+    lines = ["Carried but not equipped:"]
+    for item_type in ("weapon", "armor", "shield", "ring", "amulet", "wondrous"):
+        names = by_type.get(item_type)
+        if not names:
+            continue
+        lines.append(f"  • {type_labels[item_type]}: {', '.join(sorted(names))}")
+    return "\n".join(lines) + "\n"
 
 
 def _format_proficiency_line(character: dict) -> str:
@@ -23555,7 +23573,7 @@ def _format_character_sheet(character: dict) -> str:
     # once, so a fresh character's sheet isn't cluttered with six zeros.
     skill_uses = character.get("skill_uses") or {}
     skill_lines = [
-        f"{ability.capitalize()} +{practiced_bonus(uses)} ({uses} use{'s' if uses != 1 else ''})"
+        f"{ability.replace('_', ' ').capitalize()} +{practiced_bonus(uses)} ({uses} use{'s' if uses != 1 else ''})"
         for ability, uses in sorted(skill_uses.items())
         if uses > 0
     ]

@@ -6119,7 +6119,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(user_id, -999)
         sheet = bot._format_character_sheet(character)
         self.assertIn("Equipped: Longsword", sheet)
-        self.assertIn("Carried but not equipped: Shortsword", sheet)
+        self.assertIn("Carried but not equipped:", sheet)
+        self.assertIn("Weapons: Shortsword", sheet)
+
+    def test_sheet_groups_carried_gear_by_type_not_one_flat_line(self):
+        """
+        Real live request (2026-10-07, Coffee dev-bridge relaying
+        Elduinn: "Can you make this look better?!" with a pasted sheet
+        showing ~20 carried items as one unbroken comma line). Carried
+        gear across multiple types must now render as separate bulleted
+        sub-lines, one per type, matching the rest of the sheet's
+        sectioned style -- not a single flat "Carried but not equipped:
+        A, B, C, ..." line.
+        """
+        use_test_db("tests/tmp/sheet_gear_grouped_test.db")
+        user_id = 900308
+        make_basic_character(user_id, "SheetGroupTest", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "shortsword", 1)
+        db.add_item(user_id, -999, "chain_shirt", 1)
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("  • Weapons: Shortsword", sheet)
+        self.assertIn("  • Armor: Chain Shirt", sheet)
+
+    def test_sheet_skill_line_humanizes_underscored_skill_names(self):
+        """
+        Real live gap found via the same 2026-10-07 "make this look
+        better" request: skill_uses keys like "bait_gathering" (and
+        "dice_game"/"fortunes_wheel") only ever had their first letter
+        capitalized, rendering literally as "Bait_gathering" on the
+        sheet -- every other proficiency section already replaces
+        underscores with spaces before display, this one didn't.
+        """
+        use_test_db("tests/tmp/sheet_skill_underscore_test.db")
+        user_id = 900309
+        make_basic_character(user_id, "SkillNameTest", current_location="crossroads_tavern")
+        db.record_skill_use(user_id, -999, "bait_gathering")
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertIn("Bait gathering", sheet)
+        self.assertNotIn("Bait_gathering", sheet)
 
     def test_weapon_stats_line_shows_damage_dice_and_element(self):
         """
