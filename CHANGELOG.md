@@ -2,6 +2,28 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.741] — Consistent per-layer mood for every location image
+
+Prompted by a dev-bridge photo of a physical D&D "Dungeon Tiles
+Reincarnated" set, asking to "purpose them for game visuals" —
+declined using that specific copyrighted/trademarked product art, but
+the real underlying ask (a consistent, atmospheric look across every
+location's generated image, instead of each one looking visually
+unrelated) is legitimate and free to build on the existing,
+zero-cost Pollinations.ai pipeline already powering every "look
+around."
+
+Every location already carries a real `layer` field (surface/
+underground/sky — the game's own three-layer world structure), so
+each layer now gets its own mood clause appended to its image
+prompt — sunlit/weathered surface architecture, cold torchlit
+underground ruin, ethereal drifting sky realm — with zero new
+campaign.json authoring required. Applied identically in both real
+copies of this prompt builder (`bot.py` and `map_render.py`, which
+must stay in sync per their own docstrings). 1 new test covering all
+three layers plus the no-layer fallback; 13-test image/map-adjacent
+sweep stayed clean.
+
 ## [1.27.740] — Character sheet, round 3: dropped the redundant equipped-names summary line
 
 Third real dev-bridge round on the same sheet (Coffee relaying

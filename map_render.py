@@ -155,10 +155,19 @@ def _location_image_seed(location_id: str) -> int:
     return int(hashlib.sha256(f"location:{location_id}".encode()).hexdigest(), 16) % (2 ** 31)
 
 
+_LAYER_IMAGE_MOOD = {
+    "surface": "sunlit or overcast fantasy surface-world architecture, weathered stone and timber",
+    "underground": "deep underground ruin, cold damp stone, torchlit shadows, dungeon-tile aesthetic",
+    "sky": "ethereal floating sky realm, drifting clouds, soft otherworldly light",
+}
+
+
 def _location_image_prompt(location: dict) -> str:
-    """Identical formula to bot.py's own _location_image_prompt -- grounded only in the location's real description text."""
+    """Identical formula to bot.py's own _location_image_prompt -- grounded only in the location's real description text, with a per-layer mood clause (2026-10-07)."""
+    mood = _LAYER_IMAGE_MOOD.get(location.get("layer"), "")
+    mood_clause = f", {mood}" if mood else ""
     return (
-        f"{location['description']}, fantasy tabletop RPG environment concept art, "
+        f"{location['description']}{mood_clause}, fantasy tabletop RPG environment concept art, "
         "atmospheric lighting, detailed digital painting, no text or labels"
     )
 

@@ -39338,6 +39338,38 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         called_url = mock_get.call_args[0][0]
         self.assertIn("environment%20concept%20art", called_url)
 
+    def test_location_image_prompt_applies_a_consistent_per_layer_mood(self):
+        """
+        Real live request (2026-10-07, Coffee dev-bridge, photo of a
+        physical D&D dungeon tile set asking to "purpose them for game
+        visuals"): declined the actual copyrighted product art, but the
+        real underlying ask -- consistent atmospheric styling across
+        location images instead of each one looking visually unrelated
+        -- is legitimate. Every location already carries a real `layer`
+        field (surface/underground/sky) with zero new authoring needed;
+        each layer's own mood clause must now show up in the generated
+        prompt, and bot.py's and map_render.py's two independent copies
+        of this function must stay identical (same convention their own
+        docstrings already require).
+        """
+        import map_render
+        surface_loc = {"description": "A quiet tavern.", "layer": "surface"}
+        underground_loc = {"description": "A damp cavern.", "layer": "underground"}
+        sky_loc = {"description": "A floating isle.", "layer": "sky"}
+        no_layer_loc = {"description": "A placeless void."}
+
+        for loc, expected_fragment in (
+            (surface_loc, "weathered stone and timber"),
+            (underground_loc, "dungeon-tile aesthetic"),
+            (sky_loc, "otherworldly light"),
+        ):
+            self.assertIn(expected_fragment, bot._location_image_prompt(loc))
+            self.assertIn(expected_fragment, map_render._location_image_prompt(loc))
+
+        # No layer field at all must never crash -- just no mood clause.
+        self.assertIn("A placeless void.", bot._location_image_prompt(no_layer_loc))
+        self.assertIn("A placeless void.", map_render._location_image_prompt(no_layer_loc))
+
     async def test_fetch_location_background_bytes_never_raises_on_a_bad_response(self):
         """
         A malformed/unexpected response shape (missing .raise_for_status,

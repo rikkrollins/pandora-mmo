@@ -28974,6 +28974,13 @@ def _location_image_seed(location_id: str) -> int:
     return _deterministic_image_seed(f"location:{location_id}")
 
 
+_LAYER_IMAGE_MOOD = {
+    "surface": "sunlit or overcast fantasy surface-world architecture, weathered stone and timber",
+    "underground": "deep underground ruin, cold damp stone, torchlit shadows, dungeon-tile aesthetic",
+    "sky": "ethereal floating sky realm, drifting clouds, soft otherworldly light",
+}
+
+
 def _location_image_prompt(location: dict) -> str:
     """
     Extracted (2026-08-10, Task #14) from _maybe_send_location_image so
@@ -28984,9 +28991,26 @@ def _location_image_prompt(location: dict) -> str:
     an automatic "look around" on arrival) image instead of a new,
     separate one. Grounded only in the location's own real description
     text already in campaign.json, never invented detail.
+
+    Real live request (2026-10-07, Coffee dev-bridge, photo of a
+    physical D&D "Dungeon Tiles Reincarnated" set, asking to "purpose
+    them for game visuals"): using that specific copyrighted/
+    trademarked product art was declined (standing no-copyrighted-
+    material rule), but the underlying ask -- a consistent, atmospheric
+    dungeon-tile-style LOOK across every location image, not one
+    unrelated-looking picture per place -- is real and legitimate.
+    Every location already carries a real `layer` field
+    (surface/underground/sky, the game's own three-layer world
+    structure) with zero new authoring needed, so each layer gets its
+    own real mood descriptor (_LAYER_IMAGE_MOOD) appended on top of the
+    location's own description -- consistent per-layer atmosphere,
+    fully original (AI-generated, never reproducing anyone else's
+    published artwork), no new campaign.json fields required.
     """
+    mood = _LAYER_IMAGE_MOOD.get(location.get("layer"), "")
+    mood_clause = f", {mood}" if mood else ""
     return (
-        f"{location['description']}, fantasy tabletop RPG environment concept art, "
+        f"{location['description']}{mood_clause}, fantasy tabletop RPG environment concept art, "
         "atmospheric lighting, detailed digital painting, no text or labels"
     )
 
