@@ -2410,7 +2410,10 @@ async def _maybe_run_moltbook_social_tick(bot) -> None:
         # ran at all" (e.g. the idle loop silently failing before
         # reaching this call). A tick that ran and chose skip should
         # look different from a tick that never happened.
-        logger.info(f"[moltbook_social] tick ran, {len(feed_posts)} feed post(s) considered, decided: skip")
+        logger.info(
+            f"[moltbook_social] tick ran, {len(feed_posts)} feed post(s) considered, "
+            f"decided: skip ({decision.get('reason', 'unknown')})"
+        )
         return
 
     try:

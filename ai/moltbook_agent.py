@@ -154,12 +154,23 @@ def solve_verification_challenge(challenge_text: str) -> str | None:
 def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> dict:
     """
     Returns one of:
-      {"action": "skip"}
+      {"action": "skip", "reason": str}
       {"action": "upvote_post", "post_id": str}
       {"action": "comment_post", "post_id": str, "content": str}
       {"action": "create_post", "title": str, "content": str}
-    Falls back to {"action": "skip"} if Ollama is unreachable OR the
-    response doesn't cleanly match the expected format -- never guesses.
+    Falls back to skip if Ollama is unreachable OR the response doesn't
+    cleanly match the expected format -- never guesses.
+
+    Real live gap found 2026-10-07 (Coffee: "our moltbook hasnt made a
+    comment since 26 days, i think there is an issue"). Investigation
+    found the tick itself was running cleanly every cycle, with ~500
+    straight "decided: skip" log lines and zero exceptions logged --
+    but an Ollama timeout/unreachable error (line ~211 below) and a
+    genuine model-returned SKIP used to collapse into the exact same
+    {"action": "skip"} dict, indistinguishable in the live log. Every
+    skip now carries a real `reason` so a long skip streak can actually
+    be diagnosed (hidden Ollama failures vs. a genuinely quiet feed)
+    instead of staying a black box.
     """
     prompt = SOCIAL_ACTION_PROMPT.format(
         feed_block=_format_feed(feed_posts),
@@ -179,13 +190,13 @@ def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> 
         response.raise_for_status()
         data = response.json()
         text = strip_think_tags(data.get("response", "")).strip()
-    except (requests.RequestException, ValueError):
-        return {"action": "skip"}
+    except (requests.RequestException, ValueError) as e:
+        return {"action": "skip", "reason": f"ollama_unreachable: {e!r}"}
 
     first_line = text.splitlines()[0].strip() if text else ""
 
     if first_line.upper().startswith("SKIP"):
-        return {"action": "skip"}
+        return {"action": "skip", "reason": "model_skip"}
 
     m = re.match(r"UPVOTE_POST\s+(\S+)", first_line, re.IGNORECASE)
     if m and m.group(1) in valid_post_ids:
@@ -206,4 +217,4 @@ def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> 
 
     # Anything that doesn't cleanly match one of the four exact formats
     # is treated as skip, never guessed at or partially acted on.
-    return {"action": "skip"}
+    return {"action": "skip", "reason": f"unparseable_response: {first_line[:120]!r}"}

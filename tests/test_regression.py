@@ -38449,6 +38449,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             answer = moltbook_agent_module.solve_verification_challenge("some challenge text")
         self.assertIsNone(answer)
 
+    def test_moltbook_skip_reasons_distinguish_ollama_failure_from_a_genuine_model_skip(self):
+        """
+        Real live gap found 2026-10-07 (Coffee: "our moltbook hasnt made
+        a comment since 26 days, i think there is an issue"). An Ollama
+        timeout/unreachable error and a genuine model-returned SKIP used
+        to collapse into the identical {"action": "skip"} dict -- a long
+        skip streak in the live log was indistinguishable between "ran
+        fine, model chose not to engage" and "has been silently failing
+        the whole time." Every skip now carries a real `reason`.
+        """
+        import requests
+        from unittest.mock import patch
+        import ai.moltbook_agent as moltbook_agent_module
+
+        class SkipResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "SKIP"}
+
+        class GarbageResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "this is not one of the four real formats"}
+
+        with patch("ai.moltbook_agent.requests.post", return_value=SkipResponse()):
+            decision = moltbook_agent_module.decide_social_action([], [])
+        self.assertEqual(decision["action"], "skip")
+        self.assertEqual(decision["reason"], "model_skip")
+
+        with patch("ai.moltbook_agent.requests.post", return_value=GarbageResponse()):
+            decision = moltbook_agent_module.decide_social_action([], [])
+        self.assertEqual(decision["action"], "skip")
+        self.assertIn("unparseable_response", decision["reason"])
+
+        with patch("ai.moltbook_agent.requests.post", side_effect=requests.ConnectionError("refused")):
+            decision = moltbook_agent_module.decide_social_action([], [])
+        self.assertEqual(decision["action"], "skip")
+        self.assertIn("ollama_unreachable", decision["reason"])
+
     def test_moltbook_verify_post_sends_the_real_documented_payload_shape(self):
         """moltbook.verify_post must POST to /api/v1/verify with the verification_code and answer, matching the live response's own instructions."""
         from unittest.mock import patch, MagicMock

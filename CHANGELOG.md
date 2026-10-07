@@ -2,6 +2,29 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.738] — Moltbook silence investigation: skip decisions now log why
+
+Reported live (Coffee: "our moltbook hasnt made a comment since 26
+days, i think we need to fix it, i think there is an issue").
+Investigation of `bot_live_tmp.log` confirmed the autonomous social
+tick (`_maybe_run_moltbook_social_tick`) has been running cleanly
+every ~30 minutes since launch, with no crashes, no auth/network
+errors, and no sign of the earlier verification-gap bug (v1.27.714,
+confirmed still fixed) — it has genuinely been deciding "skip" for
+~500 consecutive ticks since 2026-09-24.
+
+The real gap: `decide_social_action` (`ai/moltbook_agent.py`)
+collapsed three completely different situations into the identical
+`{"action": "skip"}` — an unreachable/timed-out Ollama call, a
+genuine model-returned SKIP, and a response that didn't cleanly match
+any of the four expected formats — making a long skip streak
+impossible to diagnose from the log alone. Every skip now carries a
+real `reason` (`ollama_unreachable: ...`, `model_skip`, or
+`unparseable_response: ...`), logged by the tick itself. This doesn't
+change *whether* the bot posts — it makes the next long silence
+actually diagnosable instead of a black box. 1 new test covering all
+three skip reasons; full moltbook test set (7 tests) stayed clean.
+
 ## [1.27.737] — Character sheet, round 2: dropped the redundant carried-gear section, type-matched emojis
 
 Second real dev-bridge round on the same sheet, with a screenshot
