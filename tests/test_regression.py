@@ -6118,7 +6118,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.equip_item(user_id, -999, "longsword")
         character = db.get_character(user_id, -999)
         sheet = bot._format_character_sheet(character)
-        self.assertIn("Equipped: Longsword", sheet)
+        self.assertIn("⚔️ Longsword:", sheet)
+
+    def test_sheet_no_longer_shows_a_redundant_equipped_name_summary_line(self):
+        """
+        Real live follow-up (2026-10-07, Coffee dev-bridge, screenshot
+        circling the "Equipped: A, B, C" summary line): "You also don't
+        need to say what they have equipped twice. I prefer the list
+        that you have below." The bare comma-joined names-only summary
+        (duplicating the per-item bulleted stats list right under it)
+        is gone -- "Equipped:" is now just a header, with only the
+        bulleted per-item lines underneath carrying real names/stats.
+        """
+        use_test_db("tests/tmp/sheet_no_equip_summary_test.db")
+        user_id = 900311
+        make_basic_character(user_id, "SheetNoSummaryTest", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "longsword", 1)
+        db.add_item(user_id, -999, "chain_shirt", 1)
+        db.equip_item(user_id, -999, "longsword")
+        db.equip_item(user_id, -999, "chain_shirt")
+        character = db.get_character(user_id, -999)
+        sheet = bot._format_character_sheet(character)
+        self.assertNotIn("Equipped: Longsword", sheet)
+        self.assertNotIn("Equipped: Longsword, Chain Shirt", sheet)
+        self.assertIn("⚔️ Longsword:", sheet)
+        self.assertIn("🛡️ Chain Shirt:", sheet)
 
     def test_sheet_no_longer_shows_a_redundant_carried_but_not_equipped_section(self):
         """

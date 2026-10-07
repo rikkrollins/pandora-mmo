@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.740] — Character sheet, round 3: dropped the redundant equipped-names summary line
+
+Third real dev-bridge round on the same sheet (Coffee relaying
+Elduinn, screenshot circling the line): "You also don't need to say
+what they have equipped twice. I prefer the list that you have
+below." The "Equipped: Longsword, Chain Mail, ..." bare-names summary
+line duplicated the per-item bulleted stats list immediately under
+it — gone; "Equipped:" is now just a header, with the bulleted
+per-item lines (name + stats, or an honest "no weapon"/"no armor" for
+an empty slot) carrying everything. 1 new test; 14-test sheet-
+adjacent sweep stayed clean.
+
 ## [1.27.739] — Moltbook silence, real root cause: multi-line responses were silently discarded
 
 Caught live, watching the very first tick after v1.27.738's new skip-

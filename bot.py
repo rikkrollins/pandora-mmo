@@ -23400,30 +23400,39 @@ def _format_equipped_line(character: dict) -> str:
     redundancies like this" -- removed (was _format_carried_gear_line,
     shipped one version earlier, now deleted outright rather than left
     as dead code since nothing else called it).
+
+    Real live follow-up, same day (Coffee dev-bridge, screenshot
+    circling the "Equipped: A, B, C, ..." summary line): "You also
+    don't need to say what they have equipped twice. I prefer the list
+    that you have below." That summary line (every equipped item's
+    bare name, comma-joined) duplicated the per-item bulleted list
+    right underneath it -- removed. A weapon/armor with no real
+    stat-worthy fields (the one case _format_item_stats_line returns
+    None for) still gets its own bare line so an equipped item is never
+    silently absent from the sheet, and an empty weapon/armor slot
+    still honestly says so -- only the redundant summary line is gone.
     """
     _TYPE_EMOJI = {"weapon": "⚔️", "armor": "🛡️", "shield": "🔰", "ring": "💍", "amulet": "📿", "wondrous": "🌟"}
+
+    def _slot_line(item: dict | None, slot_emoji: str, empty_label: str) -> str:
+        if not item:
+            return f"{slot_emoji} {empty_label}"
+        emoji = _TYPE_EMOJI.get(item.get("type"), slot_emoji)
+        stats_line = _format_item_stats_line(item)
+        return f"{emoji} {item['name']}: {stats_line}" if stats_line else f"{emoji} {item['name']}"
+
     weapon_item = items_module.get_item(character.get("equipped_weapon") or "")
     armor_item = items_module.get_item(character.get("equipped_armor") or "")
     shield_item = items_module.get_item(character.get("equipped_shield") or "")
-    parts = [weapon_item["name"] if weapon_item else "no weapon",
-             armor_item["name"] if armor_item else "no armor"]
-    equipped_items = [weapon_item, armor_item]
+    lines = ["Equipped:",
+              "  " + _slot_line(weapon_item, "⚔️", "no weapon"),
+              "  " + _slot_line(armor_item, "🛡️", "no armor")]
     if shield_item:
-        parts.append(shield_item["name"])
-        equipped_items.append(shield_item)
+        lines.append("  " + _slot_line(shield_item, "🔰", ""))
     for acc_id in character.get("equipped_accessories") or []:
         acc_item = items_module.get_item(acc_id)
         if acc_item:
-            parts.append(acc_item["name"])
-            equipped_items.append(acc_item)
-    lines = [f"Equipped: {', '.join(parts)}"]
-    for equipped_item in equipped_items:
-        if not equipped_item:
-            continue
-        stats_line = _format_item_stats_line(equipped_item)
-        if stats_line:
-            emoji = _TYPE_EMOJI.get(equipped_item.get("type"), "📊")
-            lines.append(f"     {emoji} {equipped_item['name']}: {stats_line}")
+            lines.append("  " + _slot_line(acc_item, "🌟", ""))
     return "\n".join(lines) + "\n"
 
 
