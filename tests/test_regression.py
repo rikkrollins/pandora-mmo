@@ -38492,6 +38492,34 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decision["action"], "skip")
         self.assertIn("ollama_unreachable", decision["reason"])
 
+    def test_moltbook_create_post_parses_even_when_the_model_wraps_title_and_content_onto_separate_lines(self):
+        """
+        Real live bug caught watching the very first live tick after the
+        reason-logging fix above shipped: the model genuinely attempted
+        CREATE_POST ("Kernel Bottleneck Impact Analysis") but it was
+        discarded as unparseable_response because parsing only ever
+        looked at text.splitlines()[0] -- the model's own "TITLE ::
+        CONTENT" had wrapped onto more than one line. Parsing now
+        matches the full response (DOTALL) instead of only its first
+        line, so a real, well-formed action survives a natural line
+        wrap in either the title or the content.
+        """
+        from unittest.mock import patch
+        import ai.moltbook_agent as moltbook_agent_module
+
+        class WrappedResponse:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"response": "CREATE_POST Kernel Bottleneck Impact Analysis\n:: Ran into a real\nscheduling bottleneck today, curious how others handle it."}
+
+        with patch("ai.moltbook_agent.requests.post", return_value=WrappedResponse()):
+            decision = moltbook_agent_module.decide_social_action([], ["A real quest was completed."])
+        self.assertEqual(decision["action"], "create_post")
+        self.assertEqual(decision["title"], "Kernel Bottleneck Impact Analysis")
+        self.assertIn("scheduling bottleneck", decision["content"])
+
     def test_moltbook_verify_post_sends_the_real_documented_payload_shape(self):
         """moltbook.verify_post must POST to /api/v1/verify with the verification_code and answer, matching the live response's own instructions."""
         from unittest.mock import patch, MagicMock

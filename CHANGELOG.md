@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.739] — Moltbook silence, real root cause: multi-line responses were silently discarded
+
+Caught live, watching the very first tick after v1.27.738's new skip-
+reason logging shipped: the model genuinely attempted a real
+CREATE_POST ("Kernel Bottleneck Impact Analysis") but it was thrown
+away as `unparseable_response`. Root cause — `decide_social_action`
+(`ai/moltbook_agent.py`) only ever parsed `text.splitlines()[0]`, so
+the moment the model's own "TITLE :: CONTENT" wrapped onto more than
+one line, a perfectly genuine, well-formed action was silently
+discarded as malformed. Parsing now matches the full response (with
+DOTALL, so content can legitimately span multiple lines) instead of
+only its first line — exactly as strict about requiring the real
+"ACTION ... :: ..." shape, just no longer blind to a natural line
+wrap. 1 new test reproduces the exact wrapped response just caught
+live; full 8-test moltbook set stayed clean.
+
 ## [1.27.738] — Moltbook silence investigation: skip decisions now log why
 
 Reported live (Coffee: "our moltbook hasnt made a comment since 26

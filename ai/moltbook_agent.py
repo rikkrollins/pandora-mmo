@@ -171,6 +171,20 @@ def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> 
     skip now carries a real `reason` so a long skip streak can actually
     be diagnosed (hidden Ollama failures vs. a genuinely quiet feed)
     instead of staying a black box.
+
+    Real root cause found the same day, watching the very next live
+    tick after the `reason` logging above shipped: the model DID
+    attempt a real CREATE_POST ("Kernel Bottleneck Impact Analysis")
+    but it got logged as `unparseable_response` -- parsing only ever
+    looked at `text.splitlines()[0]`, so the moment the model's own
+    "TITLE :: CONTENT" wrapped onto more than one line (which it
+    apparently now does routinely, where it previously didn't), the
+    whole response was silently discarded as malformed, even though
+    it was a perfectly genuine, well-formed action. Parsing now matches
+    against the full stripped response (DOTALL, so "::" content can
+    legitimately span multiple lines) instead of only its first line --
+    still exactly as strict about requiring the real "ACTION ... ::
+    ..." shape, just no longer blind to a natural line wrap.
     """
     prompt = SOCIAL_ACTION_PROMPT.format(
         feed_block=_format_feed(feed_posts),
@@ -193,22 +207,20 @@ def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> 
     except (requests.RequestException, ValueError) as e:
         return {"action": "skip", "reason": f"ollama_unreachable: {e!r}"}
 
-    first_line = text.splitlines()[0].strip() if text else ""
-
-    if first_line.upper().startswith("SKIP"):
+    if text[:4].upper() == "SKIP":
         return {"action": "skip", "reason": "model_skip"}
 
-    m = re.match(r"UPVOTE_POST\s+(\S+)", first_line, re.IGNORECASE)
+    m = re.match(r"UPVOTE_POST\s+(\S+)", text, re.IGNORECASE)
     if m and m.group(1) in valid_post_ids:
         return {"action": "upvote_post", "post_id": m.group(1)}
 
-    m = re.match(r"COMMENT_POST\s+(\S+)\s*::\s*(.+)", first_line, re.IGNORECASE)
+    m = re.match(r"COMMENT_POST\s+(\S+)\s*::\s*(.+)", text, re.IGNORECASE | re.DOTALL)
     if m and m.group(1) in valid_post_ids and m.group(2).strip():
         content = strip_prompt_placeholder_tags(m.group(2).strip())
         if content:
             return {"action": "comment_post", "post_id": m.group(1), "content": content}
 
-    m = re.match(r"CREATE_POST\s+(.+?)\s*::\s*(.+)", first_line, re.IGNORECASE)
+    m = re.match(r"CREATE_POST\s+(.+?)\s*::\s*(.+)", text, re.IGNORECASE | re.DOTALL)
     if m and m.group(1).strip() and m.group(2).strip():
         title = strip_prompt_placeholder_tags(m.group(1).strip())
         content = strip_prompt_placeholder_tags(m.group(2).strip())
@@ -217,4 +229,4 @@ def decide_social_action(feed_posts: list[dict], recent_activity: list[str]) -> 
 
     # Anything that doesn't cleanly match one of the four exact formats
     # is treated as skip, never guessed at or partially acted on.
-    return {"action": "skip", "reason": f"unparseable_response: {first_line[:120]!r}"}
+    return {"action": "skip", "reason": f"unparseable_response: {text[:200]!r}"}
