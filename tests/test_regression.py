@@ -39370,6 +39370,22 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("A placeless void.", bot._location_image_prompt(no_layer_loc))
         self.assertIn("A placeless void.", map_render._location_image_prompt(no_layer_loc))
 
+    def test_generate_image_url_pins_the_free_flux_model(self):
+        """
+        Real live request (2026-10-07, Coffee, after confirming
+        gen.pollinations.ai's free text/audio endpoints now 402/404 and
+        only plain image generation is still genuinely free): pin the
+        free image endpoint to a real, named model (flux) instead of
+        whatever Pollinations' own default happens to be -- same free,
+        keyless endpoint, consistently better output. Confirmed live via
+        a direct curl before shipping this.
+        """
+        import images
+        url = images.generate_image_url("a torchlit dungeon corridor", width=768, height=512, seed=42)
+        self.assertIn("model=flux", url)
+        self.assertIn("image.pollinations.ai", url)
+        self.assertIn("seed=42", url)
+
     async def test_fetch_location_background_bytes_never_raises_on_a_bad_response(self):
         """
         A malformed/unexpected response shape (missing .raise_for_status,

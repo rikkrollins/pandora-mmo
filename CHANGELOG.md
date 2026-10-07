@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.742] — Pin free image generation to the flux model
+
+Follow-up after researching Pollinations.ai's full paid gateway
+(gen.pollinations.ai) per Coffee's request to see what it could do.
+Live-tested all three free legacy endpoints before building anything:
+the free TEXT endpoint now returns `402 Payment Required` on every
+model, and the free AUDIO/TTS endpoint 404s (model no longer exists)
+— both effectively dead despite docs claiming otherwise. Only plain
+image generation is still genuinely free/keyless, exactly what this
+game already uses for every generated image.
+
+The one real, zero-cost win available: the free image endpoint was
+never pinned to a specific model, so it got whatever Pollinations'
+own default happened to be. Now explicitly requests `model=flux` —
+same free endpoint, same no-key deal, consistently better output.
+1 new test; image-adjacent sweep stayed clean.
+
 ## [1.27.741] — Consistent per-layer mood for every location image
 
 Prompted by a dev-bridge photo of a physical D&D "Dungeon Tiles

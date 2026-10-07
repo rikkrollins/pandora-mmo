@@ -13,9 +13,21 @@ POLLINATIONS_BASE = "https://image.pollinations.ai/prompt/"
 
 
 def generate_image_url(prompt: str, width: int = 512, height: int = 512, seed: int | None = None) -> str:
-    """A real Pollinations.ai image URL for this prompt — the image itself is generated server-side on first fetch."""
+    """
+    A real Pollinations.ai image URL for this prompt — the image itself
+    is generated server-side on first fetch.
+
+    Real live request (2026-10-07, Coffee, after researching
+    gen.pollinations.ai's full paid gateway and confirming the free text/
+    audio endpoints have since gone 402/404): everything beyond plain
+    image generation now requires a paid key, so this one genuinely free
+    win was pinning the free image endpoint to a real, named model
+    (`model=flux`) instead of whatever Pollinations' own default happens
+    to be -- same free endpoint, same no-key/no-cost deal, consistently
+    better output. Confirmed live via a direct curl before shipping.
+    """
     encoded = urllib.parse.quote(prompt)
-    url = f"{POLLINATIONS_BASE}{encoded}?width={width}&height={height}&nologo=true"
+    url = f"{POLLINATIONS_BASE}{encoded}?width={width}&height={height}&nologo=true&model=flux"
     if seed is not None:
         url += f"&seed={seed}"
     return url
