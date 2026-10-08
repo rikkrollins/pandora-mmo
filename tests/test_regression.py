@@ -30761,6 +30761,75 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(enemy["damage_bonus"], template.get("damage_bonus", 0))
         sessions.end_session(-999)
 
+    async def test_first_fight_against_a_level_curve_boss_stays_untouched_even_if_overleveled(self):
+        """
+        Real player question (2026-10-08, Adventure topic, forwarded by
+        Coffee, who then asked for repeat-fight scaling to be built): a
+        party's FIRST-EVER fight against a level-curve boss (a real
+        hand-authored "level" field, e.g. the_wrathflame_unbound) must
+        stay exactly as hand-authored, even for a badly overleveled
+        party -- repeat_boss_level_scale_multiplier only ever engages
+        once the requester has already beaten this specific monster
+        before (db.mark_defeated_monster's own bestiary record).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900712
+        make_basic_character(user_id, "FirstTimer", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=60, hp_current=2000, hp_max=2000)
+        self.assertNotIn("the_wrathflame_unbound", db.get_character(user_id, -999)["defeated_monsters"])
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the wrathflame unbound", sink),
+                                        monster_key="the_wrathflame_unbound", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_wrathflame_unbound")
+        self.assertEqual(enemy["hp_max"], template["hp_max"])
+        self.assertEqual(enemy["damage_bonus"], template.get("damage_bonus", 0))
+        sessions.end_session(-999)
+
+    async def test_repeat_boss_quest_fight_scales_up_for_an_already_higher_level_party(self):
+        """
+        Companion case to the test above: once the requester has
+        ALREADY beaten this exact level-curve boss before (e.g. an
+        earlier playthrough, well before a later guild quest like the
+        Forge Guild's Wrathflame Trial sends them back), the same
+        fight now scales up with the party's real current level --
+        exact expected value computed from the real function this
+        test is exercising, not hand-picked.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900713
+        make_basic_character(user_id, "Returning", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=60, hp_current=2000, hp_max=2000)
+        db.mark_defeated_monster(user_id, -999, "the_wrathflame_unbound")
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the wrathflame unbound", sink),
+                                        monster_key="the_wrathflame_unbound", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        from rules.leveling import repeat_boss_level_scale_multiplier, UNDERTUNED_DAMAGE_SCALE_EXPONENT
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_wrathflame_unbound")
+        expected_mult = repeat_boss_level_scale_multiplier([60], template["level"])
+        self.assertGreater(expected_mult, 1.0)
+        self.assertEqual(enemy["hp_max"], round(template["hp_max"] * expected_mult))
+        self.assertEqual(enemy["hp_current"], enemy["hp_max"])
+        expected_damage = round(template.get("damage_bonus", 0) * (expected_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT))
+        self.assertEqual(enemy["damage_bonus"], expected_damage)
+        self.assertGreater(enemy["damage_bonus"], template.get("damage_bonus", 0))
+        sessions.end_session(-999)
+
     async def test_hostile_npc_ambush_also_grows_for_an_overleveled_party(self):
         """
         Real live report (2026-08-14, per Coffee, dev-bridge screenshot:

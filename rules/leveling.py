@@ -975,6 +975,58 @@ def undertuned_monster_stat_multiplier(
     return min(ceiling, reference_budget / monster_xp_reward)
 
 
+# Real player question (2026-10-08, Adventure topic, forwarded by
+# Coffee): a named boss with a real hand-authored "level" field (e.g.
+# the_wrathflame_unbound, level 20) is deliberately exempt from BOTH
+# multipliers above -- touching a reviewed Encounter Ledger number
+# would corrupt it (see the "level" field check at its own call site
+# in bot.py). That's correct for a party's FIRST fight against it, but
+# leaves a real gap for a guild quest that sends an already-higher-
+# level party back to refight a boss they outleveled long ago (the
+# Forge Guild's "Wrathflame Trial" step, min_level 32, against a
+# level-20 boss) -- same fixed, trivial fight every time, no matter
+# how high the party has climbed since their first real kill.
+#
+# Deliberately scoped to REPEAT encounters only (the caller checks
+# monster_key against the real requester's own db.mark_defeated_monster
+# history before ever calling this) -- a party's first-ever fight
+# against a level-curve boss always stays exactly as hand-authored;
+# this only ever engages once they've already proven they can beat it
+# and are coming back (e.g. for a later guild quest's own
+# defeat_monster trigger).
+REPEAT_BOSS_LEVEL_SCALE_PCT_PER_LEVEL = 0.08
+# Same "never let an extreme mismatch produce a degenerate result"
+# convention as UNDERTUNED_BOSS_STAT_CEILING, kept as its own separate
+# knob since this is a narrower, repeat-fight-only case, not the same
+# "badly outleveled trash/boss" scenario that constant covers.
+REPEAT_BOSS_STAT_CEILING = 10.0
+
+
+def repeat_boss_level_scale_multiplier(party_levels: list[int], monster_level: int | None) -> float:
+    """
+    Returns 1.0 (no change) unless the party's average level is
+    genuinely ABOVE the boss's own hand-authored "level" field --
+    never shrinks a level-curve boss back down for an underleveled
+    party (that's not what was asked for, and the ledger's floor is
+    already the intended minimum difficulty). Grows HP/xp_reward-style
+    stats by REPEAT_BOSS_LEVEL_SCALE_PCT_PER_LEVEL per level of real
+    gap, same shape as the undertuned-growth function above, capped at
+    REPEAT_BOSS_STAT_CEILING. Callers apply UNDERTUNED_DAMAGE_SCALE_
+    EXPONENT to this same multiplier for damage_bonus, same convention
+    as every other stat-growth path in this module -- HP is what makes
+    a refight actually take longer; raw per-hit damage scaling the
+    same ratio would overshoot much faster here since boss "level"
+    gaps can run wide (e.g. a level-60 party against a level-20 boss).
+    """
+    if not party_levels or monster_level is None:
+        return 1.0
+    avg_level = round(sum(party_levels) / len(party_levels))
+    if avg_level <= monster_level:
+        return 1.0
+    level_gap = avg_level - monster_level
+    return min(REPEAT_BOSS_STAT_CEILING, 1.0 + level_gap * REPEAT_BOSS_LEVEL_SCALE_PCT_PER_LEVEL)
+
+
 def labyrinth_floor_reference_xp_budget(floor: int) -> float:
     """
     The Labyrinth's own equivalent of MEDIUM_ENCOUNTER_XP_PER_CHARACTER's

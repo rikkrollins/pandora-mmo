@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.746] — Repeat boss quest fights now scale with your level
+
+Real player question (Adventure topic, forwarded by Coffee, who then
+asked for this to be built): a named boss with a real hand-authored
+"level" field (e.g. The Wrathflame Unbound, level 20) was a fixed,
+never-scaling fight — fine for a first kill, but a guild quest sending
+an already-much-higher-level party back to refight the same boss (the
+Forge Guild's Wrathflame Trial, min_level 32) was the exact same
+trivial fight every time, no matter how far past it the party had
+grown. New `repeat_boss_level_scale_multiplier` (rules/leveling.py)
+scales a level-curve boss's HP/xp_reward up (damage by a dampened
+square-root ratio, same convention as every other growth-direction
+scaling in this game) once the real requester has already beaten that
+exact boss before — a party's first-ever fight against it always
+stays exactly as hand-authored.
+
 ## [1.27.745] — Automated new-member welcome + GitHub link on the pin post
 
 Real dev-bridge request (2026-10-08, Coffee, screenshot): a brand-new

@@ -155,7 +155,7 @@ from rules.dice import roll, roll_damage, ability_modifier, roll_ability_check, 
 from rules.item_generator import generate_item, PREFIXES as GENERATED_ITEM_PREFIXES
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, overtuned_monster_stat_multiplier, undertuned_monster_stat_multiplier,
-    UNDERTUNED_DAMAGE_SCALE_EXPONENT, breath_weapon_dice_count,
+    UNDERTUNED_DAMAGE_SCALE_EXPONENT, breath_weapon_dice_count, repeat_boss_level_scale_multiplier,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill, is_proficient_in_save,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
@@ -9617,6 +9617,26 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 if grow_mult > 1.0:
                     stat_mult = grow_mult
                     damage_mult = grow_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT
+        elif template.get("is_boss", False) and monster_key in requester.get("defeated_monsters", []):
+            # Real player question (2026-10-08, Adventure topic, Coffee
+            # relayed it + asked for this to be built): a level-curve
+            # boss (one with a real hand-authored "level" field, see the
+            # branch above) is otherwise a fixed, never-scaling fight --
+            # fine for a first kill, but a guild quest sending an
+            # already-much-higher-level party back for a repeat fight
+            # (e.g. Forge Guild's Wrathflame Trial, min_level 32, vs a
+            # level-20 boss) deserves a real difficulty bump, not the
+            # exact same trivial fight again. Only engages once the
+            # REQUESTER has genuinely beaten this exact monster before
+            # (db.mark_defeated_monster, the same bestiary record
+            # _award_victory_xp already writes on every real win) --
+            # never touches a party's first-ever fight against it.
+            repeat_mult = repeat_boss_level_scale_multiplier(
+                [p.get("level", 1) for p in party], template.get("level")
+            )
+            if repeat_mult > 1.0:
+                stat_mult = repeat_mult
+                damage_mult = repeat_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT
 
         # "The World Evolves" (2026-08-14, per Coffee): unlike stat_mult
         # just above, this DOES apply to bosses too -- strengthening the
