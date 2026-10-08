@@ -6128,10 +6128,19 @@ async def loot_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     previous_vote = record["votes"].get(user_id)
     record["votes"][user_id] = (choice == "yes")
     changed = previous_vote is not None and previous_vote != record["votes"][user_id]
+    # Real dev-bridge report (2026-10-08, Coffee, screenshot: "instead
+    # of saying 'you' tag the player... if we have many players in the
+    # group players will be able to distinguish who is choosing what
+    # action") -- this reply posts as a real new message visible to the
+    # WHOLE group (not an ephemeral per-tapper toast), and the loot-vote
+    # buttons are shared by every real human on the record, so a bare
+    # "you" told every onlooker nothing about who actually just voted.
+    character = db.get_character(user_id, update.effective_chat.id)
+    voter_name = character["name"] if character else (update.effective_user.full_name or "Someone")
     await _safe_send(
         update,
         f"{'Vote changed' if changed else 'Vote recorded'}: "
-        f"{'you want it!' if choice == 'yes' else 'you pass.'}",
+        f"{voter_name} {'wants it!' if choice == 'yes' else 'passes.'}",
     )
     await _safe_edit_text(query, _loot_vote_message_text(record), reply_markup=_loot_vote_keyboard(vote_id))
 

@@ -21853,6 +21853,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # unresolved entry left behind here would corrupt them.
         del bot._PENDING_LOOT_VOTES[vote_id]
 
+    async def test_loot_vote_acknowledgement_names_the_real_voter(self):
+        """
+        Real dev-bridge report (2026-10-08, Coffee, screenshot): the
+        loot-vote acknowledgement said a bare "Vote recorded: you
+        pass." -- this posts as a real message visible to the WHOLE
+        group, and the vote buttons are shared by every real human on
+        the record, so onlookers had no way to tell who had just
+        voted. Must name the real voter (their character name)
+        instead of "you".
+        """
+        make_basic_character(996040, "Elduinn", current_location="crossroads_tavern")
+        loot_item = bot.generate_item(item_type="weapon")
+        item_id = bot._persist_generated_item(loot_item)
+        vote_id = "loottestnamedvoter"
+        bot._PENDING_LOOT_VOTES[vote_id] = {
+            "chat_id": -999, "item_id": item_id, "item_name": loot_item["name"],
+            "human_ids": [996040], "ai_wants": {}, "votes": {}, "started_at": time.time(),
+        }
+        sink = []
+        no_update = FakeCallbackUpdate(996040, f"lootvote|{vote_id}|no", sink)
+        await bot.loot_vote_callback(no_update, DummyContext())
+        self.assertTrue(any("Elduinn passes" in msg for msg in sink), sink)
+        self.assertFalse(any(" you " in msg.lower() or msg.lower().startswith("vote recorded: you") for msg in sink), sink)
+        del bot._PENDING_LOOT_VOTES[vote_id]
+
     async def test_loot_vote_message_shows_timeout_and_current_wanters(self):
         """
         Same live request -- "please say how long the time out is and

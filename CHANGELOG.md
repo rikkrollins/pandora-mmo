@@ -2,6 +2,15 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.750] — Loot-vote acknowledgement now names the real voter
+
+Real dev-bridge report (Coffee, screenshot): the loot-vote Pass/Want-it
+buttons are shared by every real human in the party, and the
+acknowledgement reply posts as a real message visible to the whole
+group — but it said a bare "Vote recorded: you pass.", giving
+onlookers no way to tell who had actually just voted. Now names the
+real voter's character ("Elduinn passes.") instead of "you".
+
 ## [1.27.749] — Main now handles real character/party/market maintenance
 
 Real live request (Coffee): "things that dont need to be cluttering
