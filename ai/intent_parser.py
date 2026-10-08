@@ -330,6 +330,20 @@ CREATE_CHARACTER_PHRASES = [
     "additional character",
 ]
 
+# Real dev-bridge report (2026-10-08, Coffee: "When I ask it this
+# question in the adventure topic can you please show me what my
+# current guild training is in the current guild that I am in?"): a
+# player asked "What is my guild training?" in Adventure and got
+# zero reply -- _do_check_guild_curriculum (bot.py) and this exact
+# keyword list already existed, but ONLY inside guild_topic_handler, a
+# guild's own dedicated topic, never dispatched as a real action from
+# Adventure at all, so it fell through to the generic "chat" fallback.
+# Module-level here (moved from a bot.py-local constant) so
+# guild_topic_handler's own keyword match and this module's
+# deterministic fallback share one real list, never two copies that
+# could drift.
+GUILD_CURRICULUM_STATUS_KEYWORDS = ["my curriculum", "guild training", "next lesson", "curriculum", "training"]
+
 
 def _split_target_clause(text: str) -> tuple[str, str | None]:
     """Splits off a trailing "at/on/against <target>" clause, if present."""
@@ -2831,6 +2845,9 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["guild quest", "today's guild quest", "todays guild quest"]):
         return {**base, "action": "check_guild_quest"}
 
+    if any(w in lowered for w in GUILD_CURRICULUM_STATUS_KEYWORDS):
+        return {**base, "action": "check_guild_curriculum"}
+
     if any(w in lowered for w in ["make a campfire", "build a campfire", "start a campfire",
                                     "light a campfire", "make camp", "set up camp"]):
         return {**base, "action": "make_campfire"}
@@ -3067,7 +3084,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "flurry_of_blows", "wild_shape", "toggle_manual_dice", "level_up", "auto_level_up_party",
                 "set_description", "set_pronouns",
                 "bestiary", "list_shop", "leaderboard", "check_achievements", "set_title", "check_weather",
-                "check_guild_quest", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
+                "check_guild_quest", "check_guild_curriculum", "dice_game", "fortunes_wheel", "set_alignment", "message_ai",
                 "skill_tree", "challenge_duel", "accept_duel", "check_market", "cancel_market",
                 "sell_market", "buy_market", "view_market_listing", "join_battle",
                 "replay_intro", "visual_map", "rebirth", "choose_hybrid", "give_offering",

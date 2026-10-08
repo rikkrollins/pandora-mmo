@@ -119,7 +119,7 @@ from ai.dm_agent import (
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
-from ai.intent_parser import parse_intents, CREATE_CHARACTER_PHRASES
+from ai.intent_parser import parse_intents, CREATE_CHARACTER_PHRASES, GUILD_CURRICULUM_STATUS_KEYWORDS
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.ollama_health import recently_congested as _ollama_recently_timed_out
 from ai.support_agent import answer_support_question, is_support_call_active
@@ -31957,7 +31957,6 @@ async def _do_check_guild_quest(update: Update, guild_id: str) -> None:
 
 
 GUILD_CURRICULUM_DICE_KEYWORDS = ["try my luck", "attempt the trial", "roll for it", "take the trial"]
-GUILD_CURRICULUM_STATUS_KEYWORDS = ["my curriculum", "guild training", "next lesson", "curriculum", "training"]
 
 
 def _guild_curriculum_step_index(character: dict, guild_id: str) -> int:
@@ -41004,6 +41003,21 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             await _safe_send(update, "You're not in a guild — join one first (\"join the Adventurers' Guild\", etc.).")
         else:
             await _do_check_guild_quest(update, character["guild"])
+    elif action == "check_guild_curriculum":
+        # Real dev-bridge report (2026-10-08, Coffee: "When I ask it
+        # this question in the adventure topic can you please show me
+        # what my current guild training is in the current guild that
+        # I am in?"): _do_check_guild_curriculum already existed, but
+        # was only ever dispatched from guild_topic_handler (a guild's
+        # own dedicated topic) -- asking the exact same question from
+        # Adventure fell through to the generic "chat" fallback with no
+        # reply at all. Same real function, same "not in a guild" guard
+        # shape as check_guild_quest just above.
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None or not character.get("guild"):
+            await _safe_send(update, "You're not in a guild — join one first (\"join the Adventurers' Guild\", etc.).")
+        else:
+            await _do_check_guild_curriculum(update, character["guild"])
     elif action == "list_shop":
         await _do_list_shop(update)
     elif action == "list_characters":

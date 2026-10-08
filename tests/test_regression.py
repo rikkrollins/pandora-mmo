@@ -43290,6 +43290,39 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Same key a real enchant's masterwork roll actually reads.
         self.assertEqual(bot._profession_mastery_pct(char_after, "alchemy"), after_pct["alchemy"])
 
+    def test_guild_training_phrase_classifies_as_check_guild_curriculum(self):
+        """
+        Real dev-bridge report (2026-10-08, Coffee): "What is my guild
+        training?" asked in the Adventure topic got zero reply --
+        GUILD_CURRICULUM_STATUS_KEYWORDS/_do_check_guild_curriculum
+        already existed, but were only ever wired into
+        guild_topic_handler (a guild's own dedicated topic), never
+        dispatched as a real action anywhere else, so this fell through
+        to "chat". Covers the exact reported phrase.
+        """
+        self.assertEqual(_keyword_fallback("What is my guild training?", [])["action"], "check_guild_curriculum")
+        self.assertEqual(_keyword_fallback("check my curriculum", [])["action"], "check_guild_curriculum")
+
+    async def test_guild_curriculum_question_now_gets_a_real_answer_from_adventure(self):
+        """
+        End-to-end companion to the classification test above: asking
+        the same real question through the actual Adventure handler
+        (not just the keyword matcher) now reaches
+        _do_check_guild_curriculum and gets a real, specific reply
+        instead of silence.
+        """
+        import guild_curriculum as gc
+        user_id = 700107
+        make_basic_character(
+            user_id, "CurriculumAdventureTester", char_class="Wizard", current_location="market_row",
+        )
+        db.update_character(user_id, -999, guild="arcane_circle", level=50)
+        step = gc.get_step("arcane_circle", db.get_character(user_id, -999)["guild_curriculum_step"])
+        self.assertIsNotNone(step)
+        sink = []
+        await bot.adventure_master_handler(FakeUpdate(user_id, "What is my guild training?", sink), DummyContext())
+        self.assertTrue(any(step["title"] in m for m in sink), sink)
+
     def test_arcane_circle_full_tier_ladder_is_real_and_ordered(self):
         """Remaining-5-guilds plan, Batch 2 (2026-09-29): Arcane Circle extends 4->18 steps, Spellbinder/Battlemage/Archmage/Sage of the Circle tiers, capped under real MAX_LEVEL. Every name confirmed real."""
         import guild_curriculum as gc

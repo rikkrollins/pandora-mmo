@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.748] — "What is my guild training?" now works from Adventure
+
+Real dev-bridge report (Coffee): a player asked "What is my guild
+training?" in the Adventure topic and got zero reply.
+`_do_check_guild_curriculum` and its keyword list already existed, but
+were only ever wired into a guild's own dedicated topic
+(`guild_topic_handler`) — asking the same real question from Adventure
+fell through to the generic "chat" fallback. New `check_guild_curriculum`
+action, dispatched from Adventure exactly like the existing
+`check_guild_quest`, reuses the same real function and keyword list
+(now shared between `ai/intent_parser.py` and `bot.py` instead of two
+copies that could drift).
+
 ## [1.27.747] — "Create a character" now actually works in Main
 
 Real live gap: a player asked to create a character directly in Main
