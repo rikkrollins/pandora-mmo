@@ -8530,6 +8530,31 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(lockable)
         self.assertEqual(lockable["kind"], "lever")
 
+    async def test_skill_check_refuses_honestly_when_no_real_lockable_is_present(self):
+        """
+        Real live gap (2026-10-08, confirmed from Coffee/Elduinn's own
+        dev-bridge report "the wrathflame for my quest is not showing
+        up" + bot_live_tmp.log history): "Pull the lever" typed while
+        standing somewhere with no real lever at all (Elduinn had typed
+        this exact phrase repeatedly over two weeks, always one room
+        early or late relative to the real lockable) silently fell
+        through to a generic, ungrounded ability check every time,
+        with no indication anything was actually wrong -- same
+        "hollow fake success" class the 2026-09-05 ambiguous-lockable
+        fix already covers for "too many," just never covered "none."
+        A genuinely unrelated ability-check phrase must still reach
+        the real roll, never swallowed by this.
+        """
+        user_id = 900951
+        make_basic_character(user_id, "NoLockableHereTester", current_location="crossroads_tavern")
+        sink = []
+        await bot._do_skill_check(FakeUpdate(user_id, "Pull the lever", sink), "dexterity", "Pull the lever")
+        self.assertEqual(sink, ["There's nothing like that to interact with here."])
+
+        sink2 = []
+        await bot._do_skill_check(FakeUpdate(user_id, "I search the room for clues", sink2), "wisdom", "I search the room for clues", forced_roll=15)
+        self.assertNotIn("There's nothing like that to interact with here.", sink2)
+
     async def test_picking_the_lock_phrasing_actually_pulls_the_lever_end_to_end(self):
         """Full _do_skill_check dispatch, not just _find_lockable in isolation -- confirms the real player-facing path never falls through to a generic no-op ability check."""
         user_id = 960240

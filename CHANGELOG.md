@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.764] — "Pull the lever" now says so when there's nothing to pull
+
+Real live follow-up (Coffee/Elduinn, still stuck after the monster-
+visibility and puzzle-state-persistence fixes). bot_live_tmp.log
+history showed Elduinn had typed "Pull the lever" at this exact
+location 7+ times over two weeks — every time either one room early
+or one room late relative to the real lever, so the game correctly
+found nothing to act on but silently ran a hollow, ungrounded ability
+check instead of saying so, giving zero indication anything was
+actually wrong. A phrase naming a real lockable-kind noun
+(lever/switch/chest/door/gate/lock) with nothing matching at the
+player's current location now gets an honest "there's nothing like
+that to interact with here" — same "never a hollow fake success"
+principle this project already applies to the ambiguous-lockable
+case. A genuinely unrelated skill check still reaches the real roll
+unaffected.
+
 ## [1.27.763] — "Keep it and accept the reward" now resolves correctly
 
 Found via the standing topic-activity monitoring cron: a player typed

@@ -15198,6 +15198,17 @@ _LOCKABLE_VERB_HINT = {
     "multi_switch_gate": "activating every one of the switches feeding into it",
 }
 
+# Real live gap (2026-10-08, Coffee/Elduinn's own repeated "pull the
+# lever" attempts over two weeks, bot_live_tmp.log -- always typed one
+# room early or late relative to the real lockable, so _find_lockable
+# correctly found nothing, and _do_skill_check silently ran a hollow,
+# ungrounded ability check every single time instead of saying so).
+# Every real lockable-kind noun that could appear in a player's own
+# phrasing -- used ONLY to decide whether a "nothing like that here"
+# refusal is warranted, never to match a SPECIFIC lockable (that's
+# still _find_lockable's own, more precise job).
+_LOCKABLE_KIND_NOUNS = ("lever", "switch", "chest", "door", "gate", "pressure plate", "lock")
+
 
 def _lockable_block_message(location: dict, destination_name: str, lockable_id: str, chat_id: int) -> str | None:
     """
@@ -16235,6 +16246,24 @@ async def _do_skill_check(update: Update, ability: str, action_text: str, forced
     if ambiguous_lockables:
         names = ", ".join(lk["name"] for lk in ambiguous_lockables)
         await _safe_send(update, f"There's more than one of those here — which one? {names}")
+        return
+
+    # Real live gap (2026-10-08, confirmed from Coffee/Elduinn's own
+    # dev-bridge report "the wrathflame for my quest is not showing
+    # up" + bot_live_tmp.log history): "Pull the lever" typed while
+    # standing somewhere with no real lever at all (Elduinn tried this
+    # exact phrase repeatedly over two weeks, always one room early or
+    # one room late relative to the real lockable) silently fell
+    # through to a generic, ungrounded ability check -- same "hollow
+    # fake success" failure class the 2026-09-05 ambiguous-lockable fix
+    # above already covers, just for the "nothing here at all" case
+    # instead of "too many here." Scoped to text that clearly names a
+    # real lockable-kind noun (never a bare skill-check phrase like
+    # "I search the room," which has every reason to fall through to a
+    # real ability roll) so this can never swallow a genuine, unrelated
+    # ability check.
+    if lockable is None and re.search(r"\b(?:" + "|".join(_LOCKABLE_KIND_NOUNS) + r")\b", action_text.lower()):
+        await _safe_send(update, "There's nothing like that to interact with here.")
         return
 
     has_advantage = (
