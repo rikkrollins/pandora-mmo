@@ -5491,6 +5491,35 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._maybe_post_hourly_status_update(fake_bot2, chat_id)
         self.assertEqual(fake_bot2.sent, [], "must not re-post within the same real hour after a restart")
 
+    def test_puzzle_state_survives_a_restart(self):
+        """
+        Real live report (2026-10-08, Coffee, on behalf of Elduinn:
+        "im still not seeing it" -- after the monster-visibility fix
+        confirmed working, Elduinn was still stuck behind a real lever
+        his own dungeon progress should have already opened). Root
+        cause: _UNLOCKED/_SWITCH_STATE (every picked lock/chest/
+        breakable wall, every flipped switch/pressure-plate/pillar, in
+        BOTH overworld dungeons and the Labyrinth) were in-memory only,
+        wiped on every restart -- this session alone restarted the bot
+        15+ times in one day shipping other fixes, each one silently
+        re-locking every lever/switch any player had already opened
+        that day. Now persisted the same way _LAST_HOURLY_UPDATE_
+        BUCKET's own identical restart-survival fix works.
+        """
+        chat_id = -998840
+        bot._chat_scoped_set(bot._UNLOCKED, chat_id).add("test_lever_id")
+        bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id)["test_switch_id"] = True
+        bot._save_puzzle_state()
+
+        # Simulate a real restart: wipe the in-memory dicts for this
+        # chat, then reload exactly as main() does at startup.
+        bot._UNLOCKED.pop(chat_id, None)
+        bot._SWITCH_STATE.pop(chat_id, None)
+        bot._load_puzzle_state()
+
+        self.assertIn("test_lever_id", bot._chat_scoped_set(bot._UNLOCKED, chat_id))
+        self.assertTrue(bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id).get("test_switch_id"))
+
     def test_support_retries_and_logs_when_a_real_response_has_no_text_after_stripping_think_tags(self):
         """
         Real live bug (2026-08-10, Coffee: "How do i enchant my weapon?"

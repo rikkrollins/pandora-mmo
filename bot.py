@@ -919,9 +919,21 @@ def _adjust_faction_standing(telegram_user_id: int, chat_id: int, faction_id: st
     return new_standing
 
 # Lockable chests/doors that have been picked, keyed by their lockable
-# "id" from campaign.json. In-memory, not persisted — same deliberate
-# simplification as combat conditions: shared world state that resets on
-# a bot restart rather than needing a new schema/table for it.
+# "id" from campaign.json. Originally in-memory only ("same deliberate
+# simplification as combat conditions: shared world state that resets
+# on a bot restart rather than needing a new schema/table for it") --
+# that tradeoff assumed restarts would be rare (a real code deploy),
+# not several in one day. Real live report (2026-10-08, Coffee, on
+# behalf of Elduinn: "im still not seeing it" -- after the monster-
+# visibility fix confirmed working, Elduinn was still stuck behind a
+# real lever, wrathflame_vault_hub_shortcut, that _UNLOCKED showed as
+# CLOSED despite his own real progress through this exact dungeon --
+# this session alone restarted the bot 15+ times today shipping other
+# fixes, each one silently re-locking every lever/switch/chest/
+# breakable wall every player had already opened that day). Now
+# persisted via db.get_setting/set_setting, same convention as
+# _LAST_HOURLY_UPDATE_BUCKET's own identical restart-survival fix
+# earlier today -- see _save_puzzle_state/_load_puzzle_state below.
 # 2026-08-01 Phase 2 (chat-scoping): each of these was a bare set/dict
 # shared across every Telegram chat the bot is ever added to -- fine
 # while there was exactly one real chat, wrong the moment a second
@@ -941,6 +953,40 @@ _UNLOCKED: dict[int, set[str]] = {}
 # already assume membership means "open forever." Chat-scoped the same
 # way, real boolean state that flips both ways.
 _SWITCH_STATE: dict[int, dict[str, bool]] = {}
+
+_PUZZLE_STATE_SETTING_KEY = "puzzle_unlocked_and_switch_state"
+
+
+def _save_puzzle_state() -> None:
+    """
+    Persists _UNLOCKED/_SWITCH_STATE so a real restart can no longer
+    silently re-lock a lever/switch/chest/breakable wall a player
+    already opened -- see _UNLOCKED's own docstring for the real
+    live incident this fixes. Called after every real mutation of
+    either dict. Cheap enough to call unconditionally (a handful of
+    short strings/bools per chat, not a hot path) -- no debouncing
+    needed, same convention _save_support_feedback_state already uses.
+    """
+    db.set_setting(_PUZZLE_STATE_SETTING_KEY, json.dumps({
+        "unlocked": {str(k): sorted(v) for k, v in _UNLOCKED.items()},
+        "switch_state": {str(k): v for k, v in _SWITCH_STATE.items()},
+    }))
+
+
+def _load_puzzle_state() -> None:
+    """Real process startup only (see main()) -- restores _UNLOCKED/_SWITCH_STATE across a restart."""
+    raw = db.get_setting(_PUZZLE_STATE_SETTING_KEY)
+    if not raw:
+        return
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    for chat_id_str, lockable_ids in data.get("unlocked", {}).items():
+        _UNLOCKED[int(chat_id_str)] = set(lockable_ids)
+    for chat_id_str, state in data.get("switch_state", {}).items():
+        _SWITCH_STATE[int(chat_id_str)] = dict(state)
+
 
 _LABYRINTH_LOCKABLE_ID_RE = re.compile(r"^f\d+_")
 
@@ -967,6 +1013,7 @@ def _reset_labyrinth_lockable_state(chat_id: int) -> None:
     switch_state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
     for lockable_id in [lid for lid in switch_state if _LABYRINTH_LOCKABLE_ID_RE.match(lid)]:
         switch_state.pop(lockable_id, None)
+    _save_puzzle_state()
 
 # Named hostile NPCs (campaign.json npc ids) already defeated in combat —
 # in-memory, same reasoning as _UNLOCKED. A defeated antagonist doesn't
@@ -15392,6 +15439,7 @@ async def _do_activate_switch(
     switch_state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
     now_active = not switch_state.get(lockable["id"], False)
     switch_state[lockable["id"]] = now_active
+    _save_puzzle_state()
     verb = "strikes" if method == "hit" else "channels magic into"
     if now_active:
         message = f"{element_emoji} **{character['name']}** {verb} {lockable['name'].lower()} — it flares to life; somewhere nearby, a way opens."
@@ -15433,6 +15481,7 @@ async def _do_break_obstacle(
         )
         return
     _chat_scoped_set(_UNLOCKED, chat_id).add(lockable["id"])
+    _save_puzzle_state()
     verb = "smashes through" if method == "hit" else "blasts open"
     noun = "wall" if lockable.get("kind") == "breakable_wall" else "floor"
     await update.effective_chat.send_message(
@@ -15460,6 +15509,7 @@ async def _do_activate_pressure_plate(
     switch_state = _chat_scoped_dict(_SWITCH_STATE, chat_id)
     now_active = not switch_state.get(lockable["id"], False)
     switch_state[lockable["id"]] = now_active
+    _save_puzzle_state()
     if now_active:
         message = f"⚖️ **{character['name']}** {verb} {lockable['name'].lower()} — it sinks into place with a heavy click; somewhere nearby, a way opens."
     else:
@@ -15560,6 +15610,7 @@ async def _do_strike_pillar(update: Update, character: dict, lockable: dict) -> 
         await _safe_send(update, f"{lockable['name'].capitalize()} has already been struck.")
         return
     state[lockable["id"]] = True
+    _save_puzzle_state()
     db.update_labyrinth_run(chat_id, party_key, carrying=None)
     await _safe_send(update, f"💥 **{character['name']}** slams the weight into {lockable['name'].lower()} — it shudders, something else on this floor answering back.")
 
@@ -15632,6 +15683,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
             )
             return
         _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        _save_puzzle_state()
         # Real live feature (2026-09-04, Phase B of the combat-gating
         # work, per Coffee: "keys can be dropped by enemies or found in
         # another room"). Opt-in, default False -- every EXISTING named
@@ -15675,6 +15727,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
             )
             return
         _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        _save_puzzle_state()
         db.remove_item(update.effective_user.id, update.effective_chat.id, rune_item, needed)
         await update.effective_chat.send_message(
             f"🔹 **{character['name']}** slots {needed} Labyrinth Runes into {lockable['name'].lower()} — it grinds open.",
@@ -15685,6 +15738,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
 
     if lockable.get("kind") == "lever":
         _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        _save_puzzle_state()
         # Discrete atmospheric confirmation (2026-09-01, per Coffee,
         # right after the "pull the lever" routing fix: "if it worked
         # tell the user. maybe be discrete 'You hear a tick sound in a
@@ -15720,6 +15774,7 @@ async def _do_lockpick(update: Update, character: dict, lockable: dict, action_t
     reward_line = ""
     if success:
         _chat_scoped_set(_UNLOCKED, update.effective_chat.id).add(lockable["id"])
+        _save_puzzle_state()
         if lockable["kind"] == "chest":
             for item_id, qty in lockable.get("loot", {}).items():
                 db.add_item(update.effective_user.id, update.effective_chat.id, item_id, qty)
@@ -45639,6 +45694,7 @@ def main() -> None:
     setup_default_npcs()
     _load_support_feedback_state()
     _load_hourly_update_buckets()
+    _load_puzzle_state()
     application = build_application()
     logger.info("BotApplication created successfully. Starting polling...")
     application.run_polling()

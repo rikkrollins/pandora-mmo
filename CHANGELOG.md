@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.762] — Levers/switches/chests no longer reset on a restart
+
+Real live follow-up (Coffee, on behalf of Elduinn: "im still not
+seeing it" — after v1.27.761's monster-visibility fix confirmed
+working, he was still stuck). Root cause: every picked lock/chest/
+breakable wall and flipped switch/pressure-plate/pillar, in both
+overworld dungeons and the Labyrinth, lived in two in-memory-only
+dicts that silently reset on every bot restart. This session alone
+restarted the bot 15+ times in one day shipping other fixes — each
+one re-locked every lever/switch any player had already opened that
+day, with zero indication why their progress reverted. Now persisted
+the same way the hourly-update bucket's own identical restart-
+survival fix works earlier today — a restart can no longer erase real
+puzzle progress.
+
 ## [1.27.761] — A live guild quest need now beats an old quest's "already done" hiding
 
 Real live report (Coffee, on behalf of Elduinn): "Elduinn isnt seeing
