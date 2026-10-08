@@ -17977,6 +17977,25 @@ def _monster_visible_to_character(monster_key: str, character: dict) -> bool:
     clear_the_warrens' and grasks_freedom's real target) -- visible if
     ANY linked quest is reachable, not just the first one checked.
     """
+    # Real live report (2026-10-08, Coffee, on behalf of Elduinn:
+    # "Elduinn isnt seeing the wrathflame to complete the guild
+    # quest"): the_wrathflame_unbound is ALSO the real target of a
+    # separate Remnant quest (remnant_the_wrathflame_unbound) Elduinn
+    # had already completed in an earlier chapter -- both the
+    # defeated_monsters short-circuit just below AND the quest-
+    # reachability loop treat that as "permanently done, hide it,"
+    # with zero awareness that the Forge Guild's own "Wrathflame
+    # Trial" curriculum step (guild_curriculum.py, not CAMPAIGN
+    # ["quests"] -- _QUEST_MONSTER_INDEX only ever scans the latter)
+    # independently needs this same monster alive and visible again
+    # later. A live guild-curriculum need always wins over any other
+    # quest's own completed/defeated history for this monster -- checked
+    # first, before either suppression gets a chance to hide it.
+    for guild_id in held_guild_ids(character):
+        step = guild_curriculum_module.get_step(guild_id, _guild_curriculum_step_index(character, guild_id))
+        if step and step["trigger"].get("type") == "defeat_monster" and step["trigger"].get("monster") == monster_key:
+            return True
+
     quest_ids = _QUEST_MONSTER_INDEX.get(monster_key)
     if not quest_ids:
         return True

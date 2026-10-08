@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.761] — A live guild quest need now beats an old quest's "already done" hiding
+
+Real live report (Coffee, on behalf of Elduinn): "Elduinn isnt seeing
+the wrathflame to complete the guild quest." Root cause: The
+Wrathflame Unbound is the shared target of a separate Remnant quest
+Elduinn had already completed in an earlier chapter — the per-
+character "already defeated this quest boss, hide it forever" rule
+had zero awareness that the Forge Guild's own "Wrathflame Trial"
+curriculum step independently needed this same monster alive again
+later (guild curriculum steps were never part of this visibility
+check at all, only CAMPAIGN quests). A live guild-curriculum need for
+a monster now always wins over any other quest's own completed/
+defeated history for it.
+
 ## [1.27.760] — "Go up"/"go down" typo-tolerance gap fixed
 
 Found via the standing topic-activity monitoring cron: "Go up"

@@ -28749,6 +28749,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         character = db.get_character(999944, -999)
         self.assertTrue(bot._monster_visible_to_character("cairn_watcher", character))
 
+    def test_monster_visible_to_character_when_a_live_guild_curriculum_step_needs_it_again(self):
+        """
+        Real live report (2026-10-08, Coffee, on behalf of Elduinn:
+        "Elduinn isnt seeing the wrathflame to complete the guild
+        quest"). the_wrathflame_unbound is ALSO the real target of a
+        separate, already-completed Remnant quest -- both the
+        defeated_monsters short-circuit AND the quest-completed check
+        used to hide it permanently, with zero awareness that the
+        Forge Guild's own "Wrathflame Trial" curriculum step
+        independently needs this same monster alive again later. A
+        live guild-curriculum need must always win over an unrelated
+        quest's own completed/defeated history for the same monster.
+        """
+        character = make_basic_character(999945, "WrathflameRefightWitness", char_class="Fighter")
+        db.update_character(
+            999945, -999, guild="forge_guild", level=35,
+            defeated_monsters=["the_wrathflame_unbound"],
+            completed_quests=["remnant_the_wrathflame_unbound"],
+        )
+        character = db.get_character(999945, -999)
+        import guild_curriculum as gc
+        forge_steps = gc.GUILD_CURRICULUM["forge_guild"]
+        wrathflame_step_index = next(
+            i for i, step in enumerate(forge_steps)
+            if step["trigger"].get("type") == "defeat_monster" and step["trigger"].get("monster") == "the_wrathflame_unbound"
+        )
+        db.update_character(999945, -999, guild_curriculum_step=wrathflame_step_index)
+        character = db.get_character(999945, -999)
+        self.assertTrue(bot._monster_visible_to_character("the_wrathflame_unbound", character))
+
     async def test_attack_text_cannot_resolve_a_not_yet_reachable_quest_boss(self):
         """
         Integration-level: _find_monster_mentioned_in_text (and so
