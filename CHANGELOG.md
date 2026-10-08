@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.757] — Market sorting + "usable by me" + "best for me" upgrades
+
+Real dev-bridge request (Coffee): "I want sorting options for the
+market. Also create a sorting option that will only show what the
+player can actually use. Also create a way showing optimal items for
+that player based off what is available in the market." Confirmed
+first that no item anywhere is race/guild restricted — only real class
+weapon/armor proficiency and the rarity-based level gate every piece
+of gear already enforces at equip time — so those are exactly what's
+built: **Price: Low/High** and **Level Req: Low** sort buttons;
+**✅ Usable by Me**, narrowing the board to gear your class/level can
+actually equip (plus every non-gear item, always usable); and
+**🎯 Best for Me**, which further narrows to real, computed stat
+upgrades over whatever you have equipped right now (average weapon
+damage or AC), sorted biggest-improvement-first, each showing a real
+"upgrade over X (2.5 → 4.5)" note — never a guess. All three also work
+via plain text ("cheapest", "what can I use", "best for me"), and work
+from both Adventure and Main.
+
 ## [1.27.756] — Pending market-sell prompt no longer swallows the next message
 
 Real dev-bridge report (Coffee): "The game doesn't seem to understand

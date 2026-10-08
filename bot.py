@@ -21368,6 +21368,30 @@ def _infer_market_filter_type(text: str) -> str | None:
     return None
 
 
+def _infer_market_sort(text: str) -> str | None:
+    """Free-text equivalent of the market's new sort buttons (2026-10-08, per Coffee: "create a couple of sorting options... make sure they work")."""
+    lowered = text.lower()
+    if "cheap" in lowered or ("price" in lowered and ("low" in lowered or "ascending" in lowered)):
+        return "price_asc"
+    if "expensive" in lowered or ("price" in lowered and ("high" in lowered or "descending" in lowered)):
+        return "price_desc"
+    if "level" in lowered and ("low" in lowered or "lowest" in lowered):
+        return "level_asc"
+    return None
+
+
+def _infer_market_usable_only(text: str) -> bool:
+    """Free-text equivalent of the market's "Usable by Me" button."""
+    lowered = text.lower()
+    return any(p in lowered for p in ("i can use", "i can actually use", "usable by me", "what can i use"))
+
+
+def _infer_market_optimal_only(text: str) -> bool:
+    """Free-text equivalent of the market's "Best for Me" button."""
+    lowered = text.lower()
+    return any(p in lowered for p in ("best for me", "optimal", "good upgrade", "upgrades for me"))
+
+
 def _infer_market_seller_filter(text: str, chat_id: int, viewer_id: int) -> int | None:
     """
     Free-text equivalent of the market's seller-filter buttons and "My
@@ -21392,6 +21416,7 @@ def _infer_market_seller_filter(text: str, chat_id: int, viewer_id: int) -> int 
 def _market_keyboard(
     listings: list[dict], viewer_id: int | None = None, all_listings: list[dict] | None = None,
     active_filter: str | None = None, active_seller_id: int | None = None,
+    usable_only: bool = False, optimal_only: bool = False, sort_by: str | None = None,
 ) -> InlineKeyboardMarkup | None:
     """
     Per Coffee (2026-07-22): "make buttons on market and tell players
@@ -21482,11 +21507,35 @@ def _market_keyboard(
     if viewer_id is not None and active_seller_id != viewer_id and any(l["seller_id"] == viewer_id for l in filter_source):
         buttons.append([InlineKeyboardButton("📋 My Listings", callback_data=f"market|sellerfilter|{viewer_id}")])
 
+    # Real dev-bridge request (2026-10-08, Coffee): sorting options +
+    # a real "only what I can use"/"best for me" view. Sort buttons
+    # cycle through the real options (never shown twice at once); the
+    # usable/optimal toggles are each a single real on/off button.
+    sort_row = []
+    for sort_key, label in _MARKET_SORT_LABELS.items():
+        if sort_key != sort_by:
+            sort_row.append(InlineKeyboardButton(label, callback_data=f"market|sort|{sort_key}"))
+    if sort_by is not None:
+        sort_row.append(InlineKeyboardButton("🔄 Clear Sort", callback_data="market|sort|none"))
+    for i in range(0, len(sort_row), 2):
+        buttons.append(sort_row[i:i + 2])
+
+    if viewer_id is not None:
+        if optimal_only:
+            buttons.append([InlineKeyboardButton("🔄 Show All (exit Best-for-Me)", callback_data="market|optimal|off")])
+        else:
+            usable_label = "☑️ Usable by Me (on)" if usable_only else "✅ Usable by Me"
+            buttons.append([InlineKeyboardButton(usable_label, callback_data=f"market|usable|{'off' if usable_only else 'on'}")])
+            buttons.append([InlineKeyboardButton("🎯 Best for Me (real upgrades)", callback_data="market|optimal|on")])
+
     buttons.append([InlineKeyboardButton("💰 Sell an Item", callback_data="market|sell")])
     return InlineKeyboardMarkup(buttons) if buttons else None
 
 
-async def _do_check_market(update: Update, filter_type: str | None = None, filter_seller_id: int | None = None) -> None:
+async def _do_check_market(
+    update: Update, filter_type: str | None = None, filter_seller_id: int | None = None,
+    usable_only: bool = False, optimal_only: bool = False, sort_by: str | None = None,
+) -> None:
     """
     2026-08-20 update, per Coffee's screenshot request for real buy/
     sell/unlist/search buttons: filter_type narrows the shown listings
@@ -21501,6 +21550,20 @@ async def _do_check_market(update: Update, filter_type: str | None = None, filte
     filters are mutually exclusive in this first version (whichever is
     passed wins) -- simplest UX for one filter axis at a time, same
     shape as the type filter already had.
+
+    usable_only/optimal_only/sort_by added 2026-10-08, per Coffee
+    (dev-bridge: "create a sorting option that will only show what the
+    player can actually use... create a way showing optimal items for
+    that player based off what is available in the market... create a
+    couple of sorting options"). usable_only narrows to real class/
+    level-eligible gear (_character_can_use_market_item) plus every
+    non-gear item (always usable); optimal_only implies usable_only AND
+    further narrows to a real, computed stat upgrade over whatever's
+    currently equipped in that slot (_market_optimal_upgrade), sorted
+    by the real improvement amount, biggest first -- never a guess,
+    both require a real character to evaluate against. sort_by reorders
+    whatever survives the filters above (_market_sort_listings) and is
+    independent of them -- any combination is valid.
     """
     all_listings = db.get_market_listings(update.effective_chat.id)
     if not all_listings:
@@ -21519,15 +21582,48 @@ async def _do_check_market(update: Update, filter_type: str | None = None, filte
         listings = [l for l in all_listings if (items_module.get_item(l["item_id"]) or {}).get("type") == filter_type]
     else:
         listings = all_listings
+
+    character = db.get_character(update.effective_user.id, update.effective_chat.id) if update.effective_user else None
+    upgrade_notes: dict[int, str] = {}
+    if usable_only or optimal_only:
+        if character is None:
+            await _safe_send(update, "You don't have a character yet — nothing to check usability against.")
+            return
+        listings = [
+            l for l in listings
+            if _character_can_use_market_item(character, items_module.get_item(l["item_id"]) or {})
+        ]
+    if optimal_only:
+        optimal = []
+        for l in listings:
+            upgrade = _market_optimal_upgrade(character, items_module.get_item(l["item_id"]) or {})
+            if upgrade is not None:
+                note, improvement = upgrade
+                upgrade_notes[l["listing_id"]] = note
+                optimal.append((improvement, l))
+        optimal.sort(key=lambda pair: pair[0], reverse=True)
+        listings = [l for _, l in optimal]
+    else:
+        listings = _market_sort_listings(listings, sort_by)
+
     header = "🏛️ **Player Marketplace:**"
+    filter_notes = []
     if filter_seller_id is not None:
         is_own = update.effective_user is not None and filter_seller_id == update.effective_user.id
         seller_label = "My Listings" if is_own else next(
             (l["seller_name"] for l in all_listings if l["seller_id"] == filter_seller_id), "that seller",
         )
-        header += f" (filtered: {seller_label})"
+        filter_notes.append(seller_label)
     elif filter_type:
-        header += f" (filtered: {_MARKET_TYPE_FILTER_LABELS.get(filter_type, filter_type.title())})"
+        filter_notes.append(_MARKET_TYPE_FILTER_LABELS.get(filter_type, filter_type.title()))
+    if optimal_only:
+        filter_notes.append("best upgrades for you")
+    elif usable_only:
+        filter_notes.append("usable by you")
+    if sort_by and not optimal_only:
+        filter_notes.append(_MARKET_SORT_LABELS.get(sort_by, sort_by))
+    if filter_notes:
+        header += f" (filtered: {', '.join(filter_notes)})"
     lines = [header]
     if not listings:
         lines.append("Nothing matches that filter right now.")
@@ -21546,6 +21642,9 @@ async def _do_check_market(update: Update, filter_type: str | None = None, filte
         stats_line = _format_item_stats_line(item) if item else None
         if stats_line:
             line += f"\n     📊 {stats_line}"
+        upgrade_note = upgrade_notes.get(listing["listing_id"])
+        if upgrade_note:
+            line += f"\n     🎯 {upgrade_note}"
         lines.append(line)
     lines.append(
         "\nTap a listing below to buy it (or Unlist your own), or just say \"buy listing <#>\" "
@@ -21558,6 +21657,7 @@ async def _do_check_market(update: Update, filter_type: str | None = None, filte
     keyboard = _market_keyboard(
         listings, viewer_id=viewer_id, all_listings=all_listings,
         active_filter=filter_type, active_seller_id=filter_seller_id,
+        usable_only=usable_only, optimal_only=optimal_only, sort_by=sort_by,
     )
     await _safe_send(update, "\n".join(lines), reply_markup=keyboard, speak=False)
 
@@ -30343,6 +30443,107 @@ def _levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
+# Real dev-bridge request (2026-10-08, Coffee: "create a sorting
+# option that will only show what the player can actually use" +
+# "optimal items... based off what is available in the market").
+# Confirmed before building this: no item anywhere in this game is
+# restricted by race or guild -- only real, grounded gates are class
+# weapon/armor proficiency (class_features.is_weapon_proficient/
+# is_armor_proficient) and the rarity-based level gate every piece of
+# gear already enforces at the real equip checkpoint (db.RARITY_LEVEL_
+# REQUIREMENT) -- so that's exactly what this checks, nothing invented.
+_MARKET_EQUIP_SLOT_BY_TYPE = {"weapon": "equipped_weapon", "armor": "equipped_armor", "shield": "equipped_shield"}
+
+
+def _character_can_use_market_item(character: dict, item: dict) -> bool:
+    """
+    Whether `character` could actually equip/use `item` right now --
+    non-gear items (potions, scrolls, materials, etc.) have no such
+    restriction in this game and always count as usable.
+    """
+    required_level = db.RARITY_LEVEL_REQUIREMENT.get(item.get("rarity"))
+    if required_level and character.get("level", 1) < required_level:
+        return False
+    item_type = item.get("type")
+    char_class = character.get("char_class")
+    if item_type == "weapon" and item.get("weapon_category"):
+        return class_features_module.is_weapon_proficient(char_class, item["weapon_category"])
+    if item_type in ("armor", "shield") and item.get("armor_category"):
+        return class_features_module.is_armor_proficient(char_class, item["armor_category"])
+    return True
+
+
+def _market_item_key_stat(item: dict) -> float | None:
+    """
+    One real, comparable power number for "is this an upgrade" --
+    average damage (base dice + any damage_bonus) for a weapon, AC
+    contribution for armor/shield. None for anything else (nothing
+    meaningful to compare a non-equippable item against).
+    """
+    item_type = item.get("type")
+    if item_type == "weapon" and item.get("damage_dice"):
+        return average_damage(item["damage_dice"], item.get("damage_bonus", 0))
+    if item_type == "armor" and item.get("ac_base"):
+        return float(item["ac_base"])
+    if item_type == "shield" and item.get("ac_bonus"):
+        return float(item["ac_bonus"])
+    return None
+
+
+def _market_optimal_upgrade(character: dict, item: dict) -> tuple[str, float] | None:
+    """
+    Returns (a real "X → Y" upgrade note, the improvement amount) if
+    `item` is a genuine stat upgrade over whatever `character` currently
+    has equipped in that same slot, comparing the exact same real
+    numbers _market_item_key_stat computes -- None for a non-equippable
+    item, an empty/unmatched slot with nothing to beat, or an item that
+    isn't actually better than what's already equipped.
+    """
+    slot = _MARKET_EQUIP_SLOT_BY_TYPE.get(item.get("type"))
+    if slot is None:
+        return None
+    candidate_stat = _market_item_key_stat(item)
+    if candidate_stat is None:
+        return None
+    equipped_item = items_module.get_item(character.get(slot) or "")
+    current_stat = _market_item_key_stat(equipped_item) if equipped_item else 0.0
+    current_stat = current_stat or 0.0
+    if candidate_stat <= current_stat:
+        return None
+    current_name = equipped_item["name"] if equipped_item else "nothing equipped"
+    note = f"upgrade over {current_name} ({current_stat:.1f} → {candidate_stat:.1f})"
+    return note, candidate_stat - current_stat
+
+
+_MARKET_SORT_LABELS = {
+    "price_asc": "💲 Price: Low to High", "price_desc": "💲 Price: High to Low",
+    "level_asc": "📈 Level Req: Low to High",
+}
+
+
+def _market_sort_listings(listings: list[dict], sort_by: str | None) -> list[dict]:
+    """
+    Real, computed sort over whatever listings already survived the
+    type/seller/usable filters -- per-unit price (a listing's own
+    stored `price` is the TOTAL for the whole quantity, same real
+    "divide down first" principle _market_average_sell_price_hint
+    already uses), or the item's own real rarity-based level gate
+    (db.RARITY_LEVEL_REQUIREMENT, 0 for anything with no real gate).
+    Unknown/missing sort_by leaves the original (listing-id) order
+    untouched.
+    """
+    if sort_by == "price_asc":
+        return sorted(listings, key=lambda l: l["price"] / max(l["quantity"], 1))
+    if sort_by == "price_desc":
+        return sorted(listings, key=lambda l: l["price"] / max(l["quantity"], 1), reverse=True)
+    if sort_by == "level_asc":
+        return sorted(
+            listings,
+            key=lambda l: db.RARITY_LEVEL_REQUIREMENT.get((items_module.get_item(l["item_id"]) or {}).get("rarity"), 0),
+        )
+    return listings
+
+
 def _format_item_stats_line(item: dict) -> str | None:
     """
     Real computed stats for a magic/generated item, not just flavor
@@ -36019,6 +36220,19 @@ async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         await _do_check_market(update, filter_seller_id=int(parts[2]))
         return
 
+    if action == "sort":
+        sort_key = parts[2] if len(parts) > 2 else "none"
+        await _do_check_market(update, sort_by=None if sort_key == "none" else sort_key)
+        return
+
+    if action == "usable":
+        await _do_check_market(update, usable_only=(parts[2] == "on") if len(parts) > 2 else False)
+        return
+
+    if action == "optimal":
+        await _do_check_market(update, optimal_only=(parts[2] == "on") if len(parts) > 2 else False)
+        return
+
     if action == "view" and len(parts) >= 3:
         listing = db.get_market_listing(int(parts[2]), update.effective_chat.id)
         if listing is None:
@@ -40927,6 +41141,9 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
             update,
             filter_type=None if _market_seller_filter is not None else _infer_market_filter_type(text),
             filter_seller_id=_market_seller_filter,
+            usable_only=_infer_market_usable_only(text),
+            optimal_only=_infer_market_optimal_only(text),
+            sort_by=_infer_market_sort(text),
         )
     elif action == "cancel_market":
         await _do_cancel_market_intent(update, text)
@@ -43754,6 +43971,9 @@ async def _dispatch_main_topic_action(update: Update, context: ContextTypes.DEFA
             update,
             filter_type=None if _market_seller_filter is not None else _infer_market_filter_type(text),
             filter_seller_id=_market_seller_filter,
+            usable_only=_infer_market_usable_only(text),
+            optimal_only=_infer_market_optimal_only(text),
+            sort_by=_infer_market_sort(text),
         )
     elif action == "cancel_market":
         await _do_cancel_market_intent(update, text)

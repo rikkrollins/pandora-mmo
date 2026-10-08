@@ -36416,6 +36416,79 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # Pending state is consumed, not left dangling for the next unrelated message.
         self.assertNotIn(seller_id, bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id))
 
+    # -- Market sorting + "usable by me"/"best for me" (2026-10-08, per
+    #    Coffee: "create a sorting option that will only show what the
+    #    player can actually use... create a way showing optimal items
+    #    for that player based off what is available in the market").
+    #    Confirmed before building: no item anywhere is race/guild
+    #    restricted, only real class weapon/armor proficiency and the
+    #    rarity-based level gate -- that's exactly what these check.
+    async def test_market_usable_only_filters_out_what_the_viewers_class_and_level_cant_use(self):
+        chat_id = self.MARKET_BUTTONS_CHAT - 7
+        other_seller, viewer_id = 950970, 950971
+        make_basic_character(
+            other_seller, "UsableFilterSeller", chat_id=chat_id,
+            inventory={"rusty_dagger": 1, "longsword": 1, "chain_mail": 1, "flametongue_shortsword": 1},
+        )
+        # Wizard: simple weapons only, zero armor proficiency (class_features.ARMOR_PROFICIENCIES["Wizard"] == set()).
+        make_basic_character(viewer_id, "UsableFilterViewer", char_class="Wizard", chat_id=chat_id)
+        db.update_character(viewer_id, chat_id, level=1)
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "2", "rusty dagger"])
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "15", "longsword"])
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "50", "chain mail"])
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "100", "flametongue shortsword"])
+
+        sink = []
+        await bot._do_check_market(FakeUpdate(viewer_id, "", sink, chat_id=chat_id), usable_only=True)
+        message = "\n".join(sink)
+        self.assertIn("Rusty Dagger", message)  # simple weapon, no level gate -- usable
+        self.assertNotIn("Longsword", message)  # martial -- Wizard isn't proficient
+        self.assertNotIn("Chain Mail", message)  # heavy armor -- Wizard has zero armor proficiency
+        self.assertNotIn("Flametongue", message)  # martial AND rare (requires level 5, viewer is level 1)
+
+    async def test_market_optimal_only_flags_real_upgrades_sorted_by_improvement(self):
+        chat_id = self.MARKET_BUTTONS_CHAT - 8
+        other_seller, viewer_id = 950972, 950973
+        make_basic_character(other_seller, "OptimalSeller", chat_id=chat_id, inventory={"shortsword": 1, "longsword": 1, "rusty_dagger": 1})
+        # Fighter, martial-proficient, currently wielding the weakest real weapon (1d4 avg 2.5).
+        make_basic_character(viewer_id, "OptimalViewer", char_class="Fighter", chat_id=chat_id)
+        db.update_character(viewer_id, chat_id, level=10, equipped_weapon="rusty_dagger")
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "10", "shortsword"])  # 1d6 avg 3.5 -- real upgrade
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "15", "longsword"])  # 1d8 avg 4.5 -- bigger real upgrade
+        await bot._do_sell_market(FakeUpdate(other_seller, "", [], chat_id=chat_id), ["1", "2", "rusty dagger"])  # identical to what's equipped -- NOT an upgrade
+
+        sink = []
+        await bot._do_check_market(FakeUpdate(viewer_id, "", sink, chat_id=chat_id), optimal_only=True)
+        message = "\n".join(sink)
+        self.assertIn("Shortsword", message)
+        self.assertIn("Longsword", message)
+        self.assertIn("upgrade over Rusty Dagger", message)
+        # Only ONE rusty dagger listing should appear in the whole market (other_seller's held copy is
+        # never listed here) -- the one actually listed is identical to what's equipped, so it must be excluded.
+        self.assertNotIn("1x Rusty Dagger", message)
+        # Biggest real improvement (longsword, +2.0) ranks before the smaller one (shortsword, +1.0).
+        self.assertLess(message.index("Longsword"), message.index("Shortsword"))
+
+    async def test_market_sort_by_price_orders_listings_correctly(self):
+        chat_id = self.MARKET_BUTTONS_CHAT - 9
+        seller_id = 950974
+        make_basic_character(seller_id, "SortSeller", chat_id=chat_id, inventory={"rusty_dagger": 3})
+        db.create_market_listing(seller_id, chat_id, "SortSeller", "rusty_dagger", 1, 100)
+        db.create_market_listing(seller_id, chat_id, "SortSeller", "shortsword", 1, 10)
+        db.create_market_listing(seller_id, chat_id, "SortSeller", "longsword", 1, 50)
+
+        sink = []
+        await bot._do_check_market(FakeUpdate(seller_id, "", sink, chat_id=chat_id), sort_by="price_asc")
+        message = "\n".join(sink)
+        self.assertLess(message.index("Shortsword"), message.index("Longsword"))
+        self.assertLess(message.index("Longsword"), message.index("Rusty Dagger"))
+
+        sink2 = []
+        await bot._do_check_market(FakeUpdate(seller_id, "", sink2, chat_id=chat_id), sort_by="price_desc")
+        message2 = "\n".join(sink2)
+        self.assertLess(message2.index("Rusty Dagger"), message2.index("Longsword"))
+        self.assertLess(message2.index("Longsword"), message2.index("Shortsword"))
+
     async def test_market_view_button_shows_full_detail_including_seller_and_cost(self):
         """
         Real live request (2026-08-20, Coffee): "we also need to be
