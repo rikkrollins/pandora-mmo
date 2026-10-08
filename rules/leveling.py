@@ -1027,6 +1027,51 @@ def repeat_boss_level_scale_multiplier(party_levels: list[int], monster_level: i
     return min(REPEAT_BOSS_STAT_CEILING, 1.0 + level_gap * REPEAT_BOSS_LEVEL_SCALE_PCT_PER_LEVEL)
 
 
+# Real live finding (2026-10-08, Coffee, watching an actual repeat
+# Wrathflame Unbound fight live: "enemy isnt doing much damage to the
+# party... seems too easy"). Confirmed with hard numbers from the real
+# combat session: after 4 full rounds, the boss had landed a total of
+# 69 damage across the party's entire 6,149 HP (1.1%). HP and
+# damage_bonus were both scaling correctly (confirmed: HP 7000 ->
+# 14840, damage_bonus 50 -> 73) -- the real broken lever was to-hit
+# chance. A level-curve boss's own strength/dexterity (and therefore
+# its attack-roll modifier) were NEVER part of repeat_boss_level_
+# scale_multiplier's own scaling at all, while this party's real AC
+# had grown substantially past the boss's original level-20 design
+# through levels and stacked magic gear (one real party member
+# measured at AC 45) -- the boss was missing almost every single
+# attack, not under-damaging on the hits that landed.
+# +1 ability score per 2 levels of real gap (the same granularity 5E's
+# own ASI progression uses), capped well short of making the fight
+# unfair -- a level_gap of 15 (this real fight) adds +7, moving a
+# starting 18 Strength to 25 (+4 modifier -> +7), closing most but not
+# all of the gap against a genuinely gear-stacked outlier AC, while a
+# merely-high AC still gets hit at a real, meaningful rate.
+REPEAT_BOSS_ABILITY_SCORE_BONUS_PER_2_LEVELS = 1
+REPEAT_BOSS_ABILITY_SCORE_BONUS_CAP = 10
+
+
+def repeat_boss_ability_score_bonus(party_levels: list[int], monster_level: int | None) -> int:
+    """
+    Real flat bump to a repeat-fight boss's own strength/dexterity (the
+    ability its attack roll is based on), so its to-hit chance keeps
+    pace with how far the party's own AC has likely grown since the
+    boss's original level-20-style design -- see this module's own
+    comment just above for the real live finding that led to this.
+    Shares the exact same "no change unless the party has genuinely
+    outleveled this boss" gate as repeat_boss_level_scale_multiplier
+    (returns 0 whenever that function would return 1.0), since both
+    only ever apply to the same real repeat-fight case.
+    """
+    if not party_levels or monster_level is None:
+        return 0
+    avg_level = round(sum(party_levels) / len(party_levels))
+    if avg_level <= monster_level:
+        return 0
+    level_gap = avg_level - monster_level
+    return min(REPEAT_BOSS_ABILITY_SCORE_BONUS_CAP, level_gap // 2 * REPEAT_BOSS_ABILITY_SCORE_BONUS_PER_2_LEVELS)
+
+
 def labyrinth_floor_reference_xp_budget(floor: int) -> float:
     """
     The Labyrinth's own equivalent of MEDIUM_ENCOUNTER_XP_PER_CHARACTER's

@@ -31250,6 +31250,66 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(enemy["damage_bonus"], template.get("damage_bonus", 0))
         sessions.end_session(-999)
 
+    async def test_repeat_boss_quest_fight_also_scales_up_the_bosss_to_hit_chance(self):
+        """
+        Real live finding (2026-10-08, Coffee, watching an actual
+        repeat Wrathflame Unbound fight live: "enemy isnt doing much
+        damage to the party... seems too easy"). Confirmed with hard
+        numbers from the real combat session: HP and damage_bonus were
+        both scaling correctly, but the boss's own strength/dexterity
+        (its attack-roll modifier) were never touched at all, so it
+        was missing almost every attack against a party whose real AC
+        had grown well past the boss's original level-20 design. Now
+        a repeat fight also bumps the boss's ability score so its
+        to-hit chance keeps pace.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900714
+        make_basic_character(user_id, "ToHitFixTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=35, hp_current=2000, hp_max=2000)
+        db.mark_defeated_monster(user_id, -999, "the_wrathflame_unbound")
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the wrathflame unbound", sink),
+                                        monster_key="the_wrathflame_unbound", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        from rules.leveling import repeat_boss_ability_score_bonus
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_wrathflame_unbound")
+        expected_bonus = repeat_boss_ability_score_bonus([35], template["level"])
+        self.assertGreater(expected_bonus, 0)
+        self.assertEqual(enemy["strength"], template["strength"] + expected_bonus)
+        self.assertEqual(enemy["dexterity"], template["dexterity"] + expected_bonus)
+        sessions.end_session(-999)
+
+    async def test_first_fight_against_a_level_curve_boss_never_bumps_ability_scores_either(self):
+        """Companion guard to the fix above: a party's genuine FIRST fight against a level-curve boss must leave strength/dexterity exactly as hand-authored, same as HP/damage already stayed untouched."""
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900715
+        make_basic_character(user_id, "FirstFightAbilityTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=60, hp_current=2000, hp_max=2000)
+        self.assertNotIn("the_wrathflame_unbound", db.get_character(user_id, -999)["defeated_monsters"])
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the wrathflame unbound", sink),
+                                        monster_key="the_wrathflame_unbound", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_wrathflame_unbound")
+        self.assertEqual(enemy["strength"], template["strength"])
+        self.assertEqual(enemy["dexterity"], template["dexterity"])
+        sessions.end_session(-999)
+
     async def test_hostile_npc_ambush_also_grows_for_an_overleveled_party(self):
         """
         Real live report (2026-08-14, per Coffee, dev-bridge screenshot:

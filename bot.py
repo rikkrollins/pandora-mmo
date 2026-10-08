@@ -156,6 +156,7 @@ from rules.item_generator import generate_item, PREFIXES as GENERATED_ITEM_PREFI
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, overtuned_monster_stat_multiplier, undertuned_monster_stat_multiplier,
     UNDERTUNED_DAMAGE_SCALE_EXPONENT, breath_weapon_dice_count, repeat_boss_level_scale_multiplier,
+    repeat_boss_ability_score_bonus,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill, is_proficient_in_save,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
     MAX_LEVEL, xp_gain_multiplier, hybrid_tier, HYBRID_MAX_TIER,
@@ -9659,6 +9660,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         # design.
         stat_mult = 1.0
         damage_mult = 1.0
+        repeat_boss_ability_bonus = 0
         # Real hand-authored level curve (2026-08-15, per Coffee: went
         # through the Encounter Ledger and submitted real level/HP/XP/
         # damage numbers for arcs 1-5 + side content, "let's try this
@@ -9719,6 +9721,16 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             if repeat_mult > 1.0:
                 stat_mult = repeat_mult
                 damage_mult = repeat_mult ** UNDERTUNED_DAMAGE_SCALE_EXPONENT
+                # Real live finding (2026-10-08, Coffee, watching an
+                # actual repeat fight live: "enemy isnt doing much
+                # damage... seems too easy") -- HP/damage_bonus alone
+                # don't help if the boss can't actually LAND a hit.
+                # See repeat_boss_ability_score_bonus's own docstring
+                # for the real numbers (69 damage dealt across a 6,149
+                # HP party over 4 full rounds) that drove this.
+                repeat_boss_ability_bonus = repeat_boss_ability_score_bonus(
+                    [p.get("level", 1) for p in party], template.get("level")
+                )
 
         # "The World Evolves" (2026-08-14, per Coffee): unlike stat_mult
         # just above, this DOES apply to bosses too -- strengthening the
@@ -9790,7 +9802,8 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
             enemies.append({
                 "formation_row": slot_formation_row,
                 "telegram_user_id": enemy_id, "name": enemy_name,
-                "dexterity": slot_template["dexterity"], "strength": slot_template["strength"],
+                "dexterity": slot_template["dexterity"] + repeat_boss_ability_bonus,
+                "strength": slot_template["strength"] + repeat_boss_ability_bonus,
                 "armor_class": slot_template["armor_class"], "hp_current": scaled_hp,
                 "hp_max": scaled_hp, "proficiency_bonus": slot_template["proficiency_bonus"],
                 "is_ai": 1, "xp_reward": round(slot_template.get("xp_reward", 0) * stat_mult),

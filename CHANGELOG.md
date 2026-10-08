@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.765] — Repeat boss fights now land real hits, not just hit harder
+
+Real live finding (Coffee, watching an actual repeat Wrathflame
+Unbound fight live: "enemy isnt doing much damage to the party...
+seems too easy"). Confirmed with hard numbers from the real combat
+session: after 4 full rounds, the boss had dealt a total of 69 damage
+across the party's entire 6,149 HP (1.1%). HP and per-hit damage were
+both scaling correctly — the real gap was to-hit chance. The boss's
+own strength/dexterity were never part of v1.27.746's repeat-boss
+scaling, while the party's real AC had grown well past the boss's
+original level-20 design through levels and stacked gear. A repeat
+fight now also bumps the boss's ability score (capped, same "never
+let it go unfair" principle every other growth multiplier here uses)
+so it can actually land hits that matter, not just survive longer
+while dealing nothing.
+
 ## [1.27.764] — "Pull the lever" now says so when there's nothing to pull
 
 Real live follow-up (Coffee/Elduinn, still stuck after the monster-
