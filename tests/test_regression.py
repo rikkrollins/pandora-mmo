@@ -35152,8 +35152,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch("bot.narrate_skill_check", return_value="ok"):
             await bot._do_flee(FakeUpdate(player_id, "I flee", sink), "I flee", forced_roll=20)
         reply = "\n".join(sink)
-        self.assertIn("FleeNamer breaks away and flees", reply, reply)
+        self.assertIn("FleeNamer breaks away", reply, reply)
         self.assertNotIn("You break away", reply)
+        sessions.end_session(-999)
+
+    async def test_successful_flee_in_the_overworld_stays_exactly_where_the_fight_was(self):
+        """
+        Real live request (2026-10-08, Coffee: "make sure when we flee
+        we stay in the location we are in, dont return us to the
+        tavern"). A successful overworld flee used to teleport the
+        fleeing character to their nearest safe waypoint
+        (_nearest_safe_waypoint, an inn/tavern) -- the Labyrinth case
+        already stayed in place (2026-09-02 fix); now the overworld
+        case matches it. Started the fight somewhere that is NOT the
+        safe fallback location, to prove this isn't passing by
+        coincidence.
+        """
+        import sessions
+        from unittest.mock import patch
+        sessions.end_session(-999)
+        player_id = 900963
+        make_basic_character(
+            player_id, "StaysPutFleer", char_class="Fighter", current_location="the_colosseum",
+            hp_max=50, armor_class=15,
+        )
+        player = db.get_character(player_id, -999)
+        player["telegram_user_id"] = player_id
+        enemy = {"telegram_user_id": -5200963, "name": "WeakFleeGoblin2", "dexterity": 8, "strength": 8,
+                 "armor_class": 5, "hp_current": 20, "hp_max": 20, "is_ai": 1}
+        session = sessions.start_session(-999, [player, enemy], {player_id: "party", -5200963: "enemy"})
+        session.turn_order = [player_id, -5200963]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="ok"):
+            await bot._do_flee(FakeUpdate(player_id, "I flee", sink), "I flee", forced_roll=20)
+        reply = "\n".join(sink)
+        self.assertIn("staying right where they are", reply, reply)
+        self.assertEqual(db.get_character(player_id, -999)["current_location"], "the_colosseum")
         sessions.end_session(-999)
 
     async def test_flee_broadcasts_retreat_guidance_to_every_ai_party_member(self):

@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.767] — Fleeing no longer teleports you back to the tavern
+
+Real live request (Coffee: "make sure when we flee we stay in the
+location we are in, dont return us to the tavern"). A successful
+overworld flee used to teleport the fleeing character (and, since
+v1.27.766, the whole party) to their nearest safe waypoint — an inn
+or tavern, same mechanic resting uses. The Labyrinth case already
+stayed in place (2026-09-02, since a teleport there would desync a
+character from their own run); the overworld case now matches it —
+breaking off from a fight is turning your back mid-melee, not a real
+trip home, so everyone just stays exactly where the fight was.
+
 ## [1.27.766] — A successful flee now takes the whole party with it
 
 Real live request (Coffee, watching a real fight: "if one player is

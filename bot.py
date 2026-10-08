@@ -17109,26 +17109,23 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         return
 
     character = db.get_character(user_id, update.effective_chat.id)
-    # Real gap (2026-09-02): _nearest_safe_waypoint has no concept of the
-    # Labyrinth at all -- cl.get_location(CAMPAIGN, LABYRINTH_LOCATION_
-    # SENTINEL) returns None, so this fell through to the character's
-    # own visited_locations and would have silently teleported a fleeing
-    # party member straight out of the Labyrinth to some real overworld
-    # waypoint, desyncing them from a run their party might still be in.
-    # A break-away here stays exactly where they already are (there's no
-    # "nearest inn" this deep down) -- current_location genuinely doesn't
-    # change, so no DB write is needed at all.
-    destination_id = None
+    # Real live request (2026-10-08, Coffee: "make sure when we flee we
+    # stay in the location we are in, dont return us to the tavern").
+    # Used to teleport a fleeing overworld character to their nearest
+    # safe waypoint (an inn/tavern) via _nearest_safe_waypoint -- the
+    # Labyrinth case (below) never did that at all (see the 2026-09-02
+    # fix that gave it its own real, in-place branch, since _nearest_
+    # safe_waypoint has no concept of the Labyrinth and would have
+    # desynced a fleeing character from their party's own run). Breaking
+    # off from a fight is turning your back mid-melee, not a real trip
+    # home -- both cases now share the same real behavior: stay exactly
+    # where the fight actually was, no DB location write needed at all.
     if character and character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
         run = db.get_labyrinth_run(update.effective_chat.id, _labyrinth_party_key(character))
         room = run["rooms"].get(run["current_room_id"]) if run else None
         flee_clause = f"breaks away from the fight, still deep in **{room['name']}**" if room else "breaks away from the fight"
     else:
-        destination_id = _nearest_safe_waypoint(character) if character else SAFE_LOCATION_FALLBACK
-        destination_name = cl.get_location(CAMPAIGN, destination_id)["name"]
-        if character:
-            db.update_character(user_id, update.effective_chat.id, current_location=destination_id)
-        flee_clause = f"breaks away and flees to {destination_name}"
+        flee_clause = "breaks away from the fight, staying right where they are"
 
     # Real live request (2026-10-08, Coffee, watching a real fight
     # live: "if one player is successful at running, can u make the
@@ -17149,10 +17146,6 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         p for p in session.living_on_side("party") if p["telegram_user_id"] != user_id
     ]
     for member in rest_of_party:
-        if destination_id is not None:
-            member_char = db.get_character(member["telegram_user_id"], update.effective_chat.id)
-            if member_char and member_char["current_location"] != LABYRINTH_LOCATION_SENTINEL:
-                db.update_character(member["telegram_user_id"], update.effective_chat.id, current_location=destination_id)
         session.remove_dead_player(member["telegram_user_id"])
 
     session.remove_dead_player(user_id)
