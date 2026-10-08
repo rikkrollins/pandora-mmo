@@ -35943,6 +35943,11 @@ def _market_average_sell_price_hint(chat_id: int, item_id: str, exclude_seller_i
        shop buy/sell-back prices (shop.py's own fixed formulas: buy =
        full catalog price, sell-back = 0.5x) as a grounded floor/
        ceiling anchor instead of a blind guess.
+    A real, named drop-only item (items.py's own "price": 0 convention
+    for combat-loot-only gear, e.g. flametongue_shortsword) has neither
+    source available -- states that honestly (2026-10-08, real dev-
+    bridge report: a player selling one of these got no reference at
+    all) rather than fabricating a number or returning nothing.
     A listing's own stored `price` is the TOTAL for the whole
     `quantity` (see db.create_market_listing), so this divides down to
     a real per-unit figure before averaging -- comparing two listings'
@@ -35966,7 +35971,16 @@ def _market_average_sell_price_hint(chat_id: int, item_id: str, exclude_seller_i
         )
     price = item.get("price", 0)
     if price <= 0:
-        return ""
+        # Real dev-bridge report (2026-10-08, Coffee, screenshot): a
+        # player selling a rare drop-only item (e.g. flametongue_
+        # shortsword, items.py's own deliberate "price": 0 convention
+        # for combat-loot-only named gear) got NO reference at all --
+        # neither branch above had anything to say, so the player was
+        # left guessing with zero information. Never fabricates a
+        # number for this real "no shop price exists" case (same "two
+        # real sources, never invented" principle as both branches
+        # above) -- states the honest fact instead of silence.
+        return "💡 This is a rare drop-only item with no shop reference price — price it based on what you think it's worth."
     return (
         f"💡 Nobody else has this listed right now — for reference, shops buy it for "
         f"{round(price * 0.5)} gold and sell it for {price} gold."
@@ -36064,6 +36078,18 @@ async def market_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         if price_hint:
             message += f"\n{price_hint}"
+        # Real dev-bridge report (2026-10-08, Coffee, screenshot): "Can
+        # you please list the average selling price? Please also show
+        # the item details... similar to looking at the item, this
+        # will help the user make an informed decision on what they
+        # want to put that item on the market for." price_hint above
+        # already covers the first ask; this is the same real stats
+        # line _do_sell_market already shows AFTER a listing is made --
+        # now shown BEFORE too, at the point the player actually picks
+        # a price, not just after.
+        stats_line = _format_item_stats_line(item)
+        if stats_line:
+            message += f"\n\n📊 **Stats:** {stats_line}"
         await _safe_send(update, message)
 
 

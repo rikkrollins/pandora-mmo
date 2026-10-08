@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.755] — Market sell prompt now shows a real price reference + stats
+
+Real dev-bridge report (Coffee, screenshot): a player listing a rare
+drop-only item (flametongue_shortsword — a real, deliberate "price": 0
+catalog convention for named combat-loot-only gear) got no pricing
+reference at all when asked how much to sell it for. Fixed two real
+gaps in that same prompt: (1) `_market_average_sell_price_hint` now
+states the honest fact ("no shop reference price") for a price-0 item
+instead of returning nothing — never fabricates a number; (2) the
+prompt now also shows the item's real stats line (rarity/damage/etc.),
+the same info `_do_sell_market` already shows AFTER a listing is made,
+now shown BEFORE too, at the actual pricing decision.
+
 ## [1.27.754] — Hourly update no longer repeats after a restart
 
 Real dev-bridge report (Coffee, screenshot): "I've gotten these

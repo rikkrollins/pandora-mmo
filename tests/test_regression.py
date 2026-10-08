@@ -36181,6 +36181,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2 gold", hint)  # shop buy price
         self.assertIn("Nobody else has this listed", hint)
 
+    def test_market_price_hint_gives_an_honest_fact_for_a_drop_only_item(self):
+        """
+        Real dev-bridge report (2026-10-08, Coffee, screenshot): a
+        player selling flametongue_shortsword (a real, deliberate
+        "price": 0 catalog convention for named combat-loot-only gear)
+        got NO reference at all -- neither real source (other live
+        listings, shop price) exists for one of these, and the old code
+        just returned "". Must now state that honest fact instead of
+        silence, and must never fabricate a numeric price.
+        """
+        chat_id = -998835
+        hint = bot._market_average_sell_price_hint(chat_id, "flametongue_shortsword")
+        self.assertIn("drop-only", hint)
+        self.assertIn("no shop reference price", hint)
+        self.assertNotRegex(hint, r"\d+ gold")
+
+    async def test_market_sellpick_prompt_shows_the_real_item_stats_too(self):
+        """
+        Same real dev-bridge report as above: "Please also show the
+        item details. Similar to looking at the item, this will help
+        the user make an informed decision." The sellpick prompt
+        already showed the price hint but never the item's own real
+        stats line (_do_sell_market, the LISTING CONFIRMATION, already
+        showed both) -- now shown at the pricing-decision prompt too,
+        not just after the listing is already made.
+        """
+        chat_id = -998836
+        seller_id = 950968
+        make_basic_character(seller_id, "StatsPromptSeller", chat_id=chat_id, inventory={"rusty_dagger": 1})
+        sink = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(seller_id, "market|sellpick|rusty_dagger", sink, chat_id=chat_id), DummyContext(),
+        )
+        self.assertTrue(any("Stats:" in m for m in sink), sink)
+
     async def test_market_sellpick_prompt_and_sell_confirmation_both_include_the_price_hint(self):
         """End-to-end: both real places a player sees a price prompt/confirmation actually show the real computed hint, not just the helper in isolation."""
         chat_id = -998834
