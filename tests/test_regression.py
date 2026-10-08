@@ -4993,6 +4993,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ask again", answer.lower())
         self.assertNotIn("pinned message", answer.lower())
 
+    def test_support_no_character_answer_mentions_both_real_topics(self):
+        """
+        Real support-topic gap audit (2026-10-08, per Coffee: "make
+        sure support topic gaps have been filled"): a question asked
+        with no active character used to tell the player to create one
+        "in Adventure" only -- stale since v1.27.749 made "I want to
+        create a character" work directly in Main too.
+        """
+        import ai.support_agent as support_agent_module
+        answer = support_agent_module.answer_support_question("who is my active character")
+        self.assertIn("Main", answer)
+        self.assertIn("Adventure", answer)
+
     def test_support_item_comparison_corrects_a_nonexistent_item_instead_of_asking_the_model(self):
         """
         Real live bug (2026-08-13, topic-activity monitoring): "Which is

@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.752] — Support topic gap audit + pinned "how to use it" guide
+
+Per Coffee's request to audit the Support topic for gaps and post a
+new-player guide there: confirmed `support_topic_handler`'s routing is
+unaffected by this week's Main-topic changes (real end-to-end test
+sweep, all clean), confirmed its deterministic grounding (spell slots,
+enchant, blacksmith, XP, sheet, inventory, location, item lookup/
+compare, quests, party) is solid and current. Found and fixed one
+real stale spot: the "you don't have an active character yet" answer
+still said "say it in Adventure" only — updated to "Main or Adventure"
+now that v1.27.749 made that work in both. New `scripts/
+pin_support_welcome.py` posts and pins a real "how to use Support"
+guide in the Support topic (how-to questions, checking a sheet,
+toggling physical dice, feedback voting, and the Main/Adventure
+division of labor), same pattern as the existing Main pin.
+
 ## [1.27.751] — Main's replies now actually land in Main
 
 Real dev-bridge report (Coffee, screenshots): "View my player sheet"

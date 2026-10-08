@@ -1486,11 +1486,11 @@ def answer_support_question(
     if character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
         return _deterministic_active_character_answer(character)
     if not character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
-        return "You don't have an active character yet — say \"I want to create a character\" in Adventure to get started."
+        return "You don't have an active character yet — say \"I want to create a character\" in Main or Adventure to get started."
     if character and any(w in lowered for w in _INVENTORY_QUESTION_WORDS):
         return _deterministic_inventory_answer(character)
     if not character and any(w in lowered for w in _INVENTORY_QUESTION_WORDS):
-        return "You don't have an active character yet — say \"I want to create a character\" in Adventure to get started."
+        return "You don't have an active character yet — say \"I want to create a character\" in Main or Adventure to get started."
     if character:
         location_answer = _deterministic_location_connections_answer(character, question)
         if location_answer is not None:
