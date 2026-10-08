@@ -39842,6 +39842,11 @@ def _clear_all_stateful_flows(context: ContextTypes.DEFAULT_TYPE, user_id: int, 
     if user_id in _chat_scoped_set(_PENDING_ASI_CHOICE, chat_id):
         _chat_scoped_set(_PENDING_ASI_CHOICE, chat_id).discard(user_id)
         cleared = True
+    # Real live bug (2026-10-08, Coffee, dev-bridge): "cancel" didn't
+    # actually clear a pending market-sell prompt -- see the real fix
+    # and full story at this dict's own consumption site above.
+    if _chat_scoped_dict(_PENDING_MARKET_SELL, chat_id).pop(user_id, None) is not None:
+        cleared = True
     return cleared
 
 
@@ -40107,10 +40112,29 @@ async def adventure_master_handler(update: Update, context: ContextTypes.DEFAULT
     # exact free-text shape _do_sell_market_intent's own regex already
     # parses ("sell <reply> <item name>"), rather than a second,
     # divergent quantity/price parser.
-    pending_sell_item_id = _chat_scoped_dict(_PENDING_MARKET_SELL, update.effective_chat.id).pop(
-        update.effective_user.id, None
+    #
+    # Real live bug (2026-10-08, Coffee, dev-bridge: "The game doesn't
+    # seem to understand that I'm not continuing with the market, and
+    # now im looking around. I also tried to cancel."): this used to
+    # unconditionally `.pop()` and consume the VERY NEXT message no
+    # matter what it said -- "Look around" got fed straight into
+    # _do_sell_market_intent as a bogus price reply, silently destroying
+    # the real pending sell AND leaving the player stuck with neither
+    # their sale nor their look-around actually happening. Same
+    # "don't trust the next message blindly" guard this project has
+    # already applied to bench_party_member/leave_party/summon_remnant:
+    # only consumed when the text actually contains a digit (the one
+    # thing a real quantity/price reply always has, and the exact same
+    # signal _do_sell_market_intent's own price regex requires below) --
+    # anything else (an unrelated action, a typo) falls through to
+    # ordinary classification untouched, and the pending sell survives
+    # for a real reply later. "cancel"/"stop"/"reset" now also clears
+    # it directly, see _clear_all_stateful_flows.
+    pending_sell_item_id = _chat_scoped_dict(_PENDING_MARKET_SELL, update.effective_chat.id).get(
+        update.effective_user.id
     )
-    if pending_sell_item_id is not None:
+    if pending_sell_item_id is not None and re.search(r"\d", update.message.text):
+        _chat_scoped_dict(_PENDING_MARKET_SELL, update.effective_chat.id).pop(update.effective_user.id, None)
         pending_item = items_module.get_item(pending_sell_item_id)
         if pending_item is None:
             await _safe_send(update, "That item no longer exists.")

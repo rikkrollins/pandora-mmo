@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.756] — Pending market-sell prompt no longer swallows the next message
+
+Real dev-bridge report (Coffee): "The game doesn't seem to understand
+that I'm not continuing with the market, and now im looking around. I
+also tried to cancel." After the "how much gold?" market-sell prompt,
+the very next message was blindly fed into the sell parser no matter
+what it said — "Look around" got misread as a bogus price reply,
+silently destroying the pending sale and never actually looking
+around. Now only consumed when the message actually contains a digit
+(the one thing a real price/quantity reply always has) — anything
+else falls through to ordinary classification, and the pending sell
+survives intact for a real reply later. "cancel"/"stop"/"reset" now
+also clears it directly instead of only working by coincidence.
+
 ## [1.27.755] — Market sell prompt now shows a real price reference + stats
 
 Real dev-bridge report (Coffee, screenshot): a player listing a rare

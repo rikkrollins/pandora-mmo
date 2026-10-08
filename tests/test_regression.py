@@ -36359,6 +36359,60 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listing["quantity"], 3)
         self.assertEqual(listing["price"], 60)
         self.assertEqual(db.get_character(seller_id, chat_id)["inventory"].get("silverleaf_herb", 0), 2)
+
+    async def test_market_sellpick_pending_state_survives_an_unrelated_message(self):
+        """
+        Real live bug (2026-10-08, Coffee, dev-bridge): "The game
+        doesn't seem to understand that I'm not continuing with the
+        market, and now im looking around. I also tried to cancel."
+        A pending sellpick used to consume the VERY NEXT message no
+        matter what it said -- "Look around" got silently fed into
+        _do_sell_market_intent as a bogus price reply, destroying the
+        pending sell and never actually looking around either. Now
+        only a message containing a real digit is treated as a
+        price/quantity reply; anything else falls through to ordinary
+        classification AND leaves the pending sell intact for later.
+        """
+        from unittest.mock import patch, AsyncMock
+        chat_id = self.MARKET_BUTTONS_CHAT - 5
+        seller_id = 900587
+        make_basic_character(
+            seller_id, "MarketSellSurvivor", inventory={"silverleaf_herb": 5},
+            current_location="crossroads_tavern", chat_id=chat_id,
+        )
+        sink = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(seller_id, "market|sellpick|silverleaf_herb", sink, chat_id=chat_id), DummyContext(),
+        )
+        self.assertEqual(bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id).get(seller_id), "silverleaf_herb")
+
+        sink2 = []
+        with patch("bot._do_look", new=AsyncMock()) as mock_look:
+            await bot.adventure_master_handler(FakeUpdate(seller_id, "Look around", sink2, chat_id=chat_id), DummyContext())
+        mock_look.assert_called_once()
+        # The pending sell must still be there -- an unrelated message never silently ate it.
+        self.assertEqual(bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id).get(seller_id), "silverleaf_herb")
+
+        # A real reply afterward still works normally.
+        sink3 = []
+        await bot.adventure_master_handler(FakeUpdate(seller_id, "2 for 40 gold", sink3, chat_id=chat_id), DummyContext())
+        self.assertTrue(any("lists" in msg and "40 gold" in msg for msg in sink3), sink3)
+
+    async def test_market_sellpick_pending_state_is_cleared_by_cancel(self):
+        """Same real bug as above -- "cancel" must directly clear a pending sellpick, not just happen to already be empty."""
+        chat_id = self.MARKET_BUTTONS_CHAT - 6
+        seller_id = 900588
+        make_basic_character(seller_id, "MarketSellCanceller", inventory={"silverleaf_herb": 5}, chat_id=chat_id)
+        sink = []
+        await bot.market_menu_callback(
+            FakeCallbackUpdate(seller_id, "market|sellpick|silverleaf_herb", sink, chat_id=chat_id), DummyContext(),
+        )
+        self.assertEqual(bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id).get(seller_id), "silverleaf_herb")
+
+        sink2 = []
+        await bot.adventure_master_handler(FakeUpdate(seller_id, "cancel", sink2, chat_id=chat_id), DummyContext())
+        self.assertTrue(any("Cancelled" in msg for msg in sink2), sink2)
+        self.assertIsNone(bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id).get(seller_id))
         # Pending state is consumed, not left dangling for the next unrelated message.
         self.assertNotIn(seller_id, bot._chat_scoped_dict(bot._PENDING_MARKET_SELL, chat_id))
 
