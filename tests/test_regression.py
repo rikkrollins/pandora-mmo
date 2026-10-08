@@ -35206,6 +35206,53 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         sessions.end_session(-999)
 
+    async def test_successful_flee_takes_the_whole_living_party_with_it(self):
+        """
+        Real live request (2026-10-08, Coffee, watching a real fight
+        live: "if one player is successful at running, can u make the
+        whole party run too?" -> "like make us all run at the same
+        time successfully" -> "seems to be taking to long to run
+        imho"). The OLD behavior only pulled the one fleeing character
+        out -- every AI companion still had to wait for their own
+        later turn and roll their own INDEPENDENT escape check, which
+        could (and did, in the real reported case) take several more
+        rounds and still fail for some of them. A successful flee now
+        takes the whole living party with it immediately, with no
+        separate roll for anyone else, and ends the fight outright
+        (nobody real left on the party side to keep fighting).
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock
+        sessions.end_session(-999)
+        player_id = 900494
+        make_basic_character(player_id, "WholePartyFleer", char_class="Fighter", current_location="crossroads_tavern")
+        player = db.get_character(player_id, -999)
+        player["telegram_user_id"] = player_id
+        ai1 = {"telegram_user_id": -960011, "name": "StaysBehindNoLonger1", "dexterity": 12, "strength": 12,
+               "armor_class": 13, "hp_current": 20, "hp_max": 20, "is_ai": 1, "char_class": "Fighter", "level": 1}
+        ai2 = {"telegram_user_id": -960012, "name": "StaysBehindNoLonger2", "dexterity": 12, "strength": 12,
+               "armor_class": 13, "hp_current": 20, "hp_max": 20, "is_ai": 1, "char_class": "Fighter", "level": 1}
+        enemy = {"telegram_user_id": -960013, "name": "WholePartyGoblin", "dexterity": 10, "strength": 10,
+                 "armor_class": 12, "hp_current": 30, "hp_max": 30, "is_ai": 1, "monster_key": "goblin"}
+        session = sessions.start_session(
+            -999, [player, ai1, ai2, enemy],
+            {player_id: "party", -960011: "party", -960012: "party", -960013: "enemy"},
+        )
+        session.turn_order = [player_id, -960011, -960012, -960013]
+        session.current_turn_index = 0
+        sink = []
+        with patch("bot.narrate_skill_check", return_value="ok"), \
+             patch("bot._resolve_ai_turns", new=AsyncMock()):
+            await bot._do_flee(FakeUpdate(player_id, "I flee", sink), "I flee", forced_roll=20)
+        reply = "\n".join(sink)
+        self.assertIn("StaysBehindNoLonger1", reply)
+        self.assertIn("StaysBehindNoLonger2", reply)
+        self.assertIn("no one left to finish", reply)
+        # The fight must actually be OVER -- nobody real left fighting on the party side.
+        self.assertIsNone(sessions.get_session_for_user(-999, player_id))
+        self.assertEqual(sessions.get_sessions_in_chat(-999), [])
+        sessions.end_session(-999)
+
     async def test_level_2_rogue_flee_skips_opportunity_attacks(self):
         from unittest.mock import patch
         import sessions

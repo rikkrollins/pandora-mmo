@@ -17118,6 +17118,7 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     # A break-away here stays exactly where they already are (there's no
     # "nearest inn" this deep down) -- current_location genuinely doesn't
     # change, so no DB write is needed at all.
+    destination_id = None
     if character and character["current_location"] == LABYRINTH_LOCATION_SENTINEL:
         run = db.get_labyrinth_run(update.effective_chat.id, _labyrinth_party_key(character))
         room = run["rooms"].get(run["current_room_id"]) if run else None
@@ -17128,6 +17129,31 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
         if character:
             db.update_character(user_id, update.effective_chat.id, current_location=destination_id)
         flee_clause = f"breaks away and flees to {destination_name}"
+
+    # Real live request (2026-10-08, Coffee, watching a real fight
+    # live: "if one player is successful at running, can u make the
+    # whole party run too?" -> "like make us all run at the same time
+    # successfully" -> "seems to be taking to long to run imho"). The
+    # OLD behavior only ever pulled the one fleeing character out --
+    # every AI companion still had to wait for their own later turn and
+    # roll their own INDEPENDENT escape check (via _broadcast_retreat_
+    # to_ai_party's guidance, set above), which could take several more
+    # real rounds and still fail for some of them individually. Once
+    # ANY party member's own roll succeeds, the rest of the living
+    # party now follows through the same opening immediately -- no
+    # separate roll, no separate opportunity attack (the original
+    # escapee already paid that real cost; narratively, the party
+    # breaks together once the way out is actually open). Captured
+    # BEFORE this participant is removed, so the list is accurate.
+    rest_of_party = [
+        p for p in session.living_on_side("party") if p["telegram_user_id"] != user_id
+    ]
+    for member in rest_of_party:
+        if destination_id is not None:
+            member_char = db.get_character(member["telegram_user_id"], update.effective_chat.id)
+            if member_char and member_char["current_location"] != LABYRINTH_LOCATION_SENTINEL:
+                db.update_character(member["telegram_user_id"], update.effective_chat.id, current_location=destination_id)
+        session.remove_dead_player(member["telegram_user_id"])
 
     session.remove_dead_player(user_id)
     combat_over = session.is_combat_over()
@@ -17144,9 +17170,13 @@ async def _resolve_flee_attempt(update, session: sessions.Session, action_text: 
     # attempt, an unnamed "You break away and flee" reasonably looked
     # like HER OWN character had fled, when it was really narrating an
     # AI companion's turn.
+    followers_clause = (
+        f"\n\n🏃 The rest of the party ({', '.join(m['name'] for m in rest_of_party)}) breaks away right behind them!"
+        if rest_of_party else ""
+    )
     await _safe_send(
         update,
-        f"{message}\n\n🏃 **{fleeing['name']} {flee_clause}!**"
+        f"{message}\n\n🏃 **{fleeing['name']} {flee_clause}!**" + followers_clause
         + ("\n\n🏳️ With them gone, the fight has no one left to finish — it ends here." if combat_over else ""),
     )
     if combat_over:

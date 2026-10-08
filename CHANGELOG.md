@@ -2,6 +2,22 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.766] — A successful flee now takes the whole party with it
+
+Real live request (Coffee, watching a real fight: "if one player is
+successful at running, can u make the whole party run too?" →
+"like make us all run at the same time successfully" → "seems to be
+taking to long to run imho"). Previously a successful flee only
+pulled the one fleeing character out — every AI companion still had
+to wait for their own later turn and roll their own independent
+escape check, which could take several more rounds and still fail
+for some of them individually (confirmed live: exactly this happened
+— the party fled but the fight kept going). Now the whole living
+party follows through the same opening immediately once anyone's
+flee roll succeeds — no separate roll, no separate opportunity
+attack for the rest (the original escapee already paid that real
+cost) — and the fight actually ends.
+
 ## [1.27.765] — Repeat boss fights now land real hits, not just hit harder
 
 Real live finding (Coffee, watching an actual repeat Wrathflame
