@@ -68,6 +68,7 @@ You'll choose a name, a race, a class, and the dice will hand you six numbers to
 - **Support** is where to ask questions about how to play.
 - **Development** is for the people running the *official* server — not part of the game, and not something any other group (including your own) has access to or can set up.
 - You can adventure with friends. Everyone shares the same world, the same threats, the same discoveries.
+- You don't have to type. Send a real Telegram voice message in Adventure and it's transcribed and acted on exactly like text — the bot echoes back what it heard so you can tell at a glance if it needs a retype.
 
 ---
 
