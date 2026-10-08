@@ -2219,6 +2219,22 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
                                     "survey the area", "look like", "what is this place", "observe the"]):
         return {**base, "action": "look"}
 
+    # Real live gap (2026-10-08, topic-activity monitoring: a real "Look
+    # arounf" -- a one-character typo on "around" -- fell through every
+    # check above (the exact-substring "look around" match doesn't
+    # tolerate ANY typo) and landed on this function's own silent "chat"
+    # default. This fallback only ever runs when Ollama itself already
+    # failed/timed out, so a typo'd "look around" during exactly that
+    # window silently did nothing at all -- for the single most common
+    # action in the entire game. Same difflib.SequenceMatcher fuzzy-match
+    # pattern already used elsewhere in this file (_fuzzy_match_spell_name)
+    # and in bot.py, tuned to the same 0.8-ratio/length-delta-1 bar.
+    look_around_match = re.match(r"look\s+(\w+)$", lowered.strip())
+    if look_around_match:
+        word = look_around_match.group(1)
+        if abs(len(word) - len("around")) <= 1 and difflib.SequenceMatcher(None, word, "around").ratio() >= 0.8:
+            return {**base, "action": "look"}
+
     # A specific object/detail, not the whole area (that's "look" above,
     # already checked first so "examine the area" can't be shadowed).
     # Target text is matched against the current location's real

@@ -534,6 +534,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # route to examine, not get swallowed by the new quest phrasing.
         self.assertEqual(_keyword_fallback("look at the strange amulet", [])["action"], "examine")
 
+    def test_look_around_typo_tolerance(self):
+        """
+        Real live gap found 2026-10-08 via topic-activity monitoring: a
+        genuine player message "Look arounf" (one-character typo) fell
+        through every existing "look around" check (exact substring
+        match, no typo tolerance) and landed on _keyword_fallback's own
+        silent "chat" default. This only ever runs when Ollama has
+        already failed/timed out, so a typo'd "look around" during that
+        exact window silently did nothing -- for the single most common
+        action in the whole game.
+        """
+        for text in ("look arounf", "Look arounf", "look aroud", "look arond", "look aorund"):
+            self.assertEqual(_keyword_fallback(text, [])["action"], "look", text)
+        # Regression guards: a genuinely unrelated short word after
+        # "look" must NOT get swallowed by this typo tolerance.
+        for text in ("look up", "look away", "look back", "look out"):
+            self.assertNotEqual(_keyword_fallback(text, [])["action"], "look", text)
+
     # -- Typo tolerance for "accept" (2026-07-16, task #89) -------------
     def test_accept_quest_typo_tolerance(self):
         for text in ("I accepet the quest", "Accepet this quest"):

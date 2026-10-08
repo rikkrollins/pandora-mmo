@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.743] — "look around" typo tolerance (found via topic-activity monitoring)
+
+A real player message, "Look arounf" (one-character typo), silently
+fell through to `_keyword_fallback`'s "chat" default — every existing
+"look around" check required an exact substring match, no typo
+tolerance. This fallback only runs when Ollama has already failed or
+timed out, so a typo during exactly that window silently did nothing
+at all, for the single most common action in the whole game.
+
+Added a `difflib.SequenceMatcher` fuzzy match (same pattern already
+used elsewhere in this file) for "look <word>" where `<word>` is
+close enough to "around" (length within 1, similarity ≥ 0.8) — covers
+"arounf", "aroud", "arond", "aorund" and similar. 2 new tests (typo
+coverage + a regression guard that genuinely unrelated short words
+like "look up"/"look away" are never swallowed); adjacent "look"
+classification tests stayed clean.
+
 ## [1.27.742] — Pin free image generation to the flux model
 
 Follow-up after researching Pollinations.ai's full paid gateway
