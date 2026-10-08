@@ -1,5 +1,10 @@
 # 🌒 Pandora MMO
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Play on Telegram](https://img.shields.io/badge/Play-t.me%2FPandoraMMO-26A5E4?logo=telegram&logoColor=white)](https://t.me/PandoraMMO)
+[![GitHub last commit](https://img.shields.io/github/last-commit/rikkrollins/pandora-mmo)](https://github.com/rikkrollins/pandora-mmo/commits/main)
+[![GitHub Discussions](https://img.shields.io/github/discussions/rikkrollins/pandora-mmo)](https://github.com/rikkrollins/pandora-mmo/discussions)
+
 *A persistent text-based MMORPG, inspired by classic 5th-edition-style tabletop role-playing, played entirely through natural conversation in a Telegram group.*
 
 No dice app. No character sheet software. No slash commands to memorize. You simply speak, and the world answers — an AI narrator narrates what unfolds, real 5E-style rules decide what actually happens, and other travelers walk the same roads you do.
