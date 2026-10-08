@@ -32205,6 +32205,23 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("leave it alone", [])["action"], "resolve_choice")
         self.assertEqual(_keyword_fallback("leave it be instead", [])["action"], "resolve_choice")
 
+    def test_repair_party_items_phrase_classifies_correctly_and_doesnt_swallow_single_item_repairs(self):
+        """
+        Real live bug (2026-10-08, dev-bridge, Coffee: "Repair the
+        parties items?"): the Repair menu only ever fixed the
+        requester's own gear, with no way to ask for the whole party's
+        gear via plain text either. The new deterministic keyword
+        match must fire for real party-wide phrasings but must NOT
+        swallow a genuine single-item request like "repair my sword".
+        """
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("Repair the party's items", [])["action"], "repair_party_items")
+        self.assertEqual(_keyword_fallback("Repair our party's items", [])["action"], "repair_party_items")
+        self.assertEqual(_keyword_fallback("repair everyone's gear", [])["action"], "repair_party_items")
+        self.assertEqual(_keyword_fallback("repair everybody's items", [])["action"], "repair_party_items")
+        self.assertEqual(_keyword_fallback("can you repair our items", [])["action"], "repair_party_items")
+        self.assertNotEqual(_keyword_fallback("repair my sword", [])["action"], "repair_party_items")
+
     # -- Real, mastery-gated dual wielding (2026-09-04) -----------------
     def test_can_dual_wield_refuses_below_mastery_and_allows_at_100_percent(self):
         user_id, chat_id = 900620, -900620
@@ -37575,6 +37592,80 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("only have 1", full_text)
         self.assertEqual(db.get_character(user_id, -999)["gold"], 1)
         self.assertEqual(items_module.get_item(item_id)["durability_pct"], 50)
+
+    async def test_repair_party_items_fixes_the_whole_partys_gear_not_just_the_requesters(self):
+        """
+        Real dev-bridge request (2026-10-08, Coffee: "How do I repair
+        our parties items?"). The Forge's own Repair menu only ever
+        scanned the REQUESTER's own inventory -- an AI companion's own
+        worn gear had no real way to get fixed at all. Confirms a real
+        human leader + a real AI companion (db.create_ai_companion,
+        same real party-membership shape combat itself uses) both get
+        their damaged gear repaired in one call, paid by the requester,
+        cheapest item first.
+        """
+        user_id = 951092
+        make_basic_character(user_id, "PartyRepairLeader", char_class="Fighter", current_location="crossroads_tavern")
+        party_id = db.create_party(user_id, -999)
+        companion = db.create_ai_companion(
+            -999, "RepairBuddy", "Human", "Fighter",
+            ability_scores={"strength": 15, "dexterity": 14, "constitution": 13,
+                             "intelligence": 10, "wisdom": 10, "charisma": 10},
+            hp_max=12, armor_class=15, gold=10, inventory={},
+        )
+        db.add_ai_companion_to_party(companion["telegram_user_id"], -999, party_id)
+
+        leader_item_id = db.create_item_instance(
+            item_type="weapon", name="Leader's Worn Blade", rarity="common", price=100,
+            base_stats={"type": "weapon", "damage_dice": "1d8", "damage_bonus": 0, "ability": "strength"},
+            affixes=[],
+        )
+        db.add_item(user_id, -999, leader_item_id, 1)
+        db.decay_item_durability(leader_item_id, amount=50)
+
+        companion_item_id = db.create_item_instance(
+            item_type="armor", name="Companion's Worn Armor", rarity="common", price=200,
+            base_stats={"type": "armor", "ac_base": 12}, affixes=[],
+        )
+        db.add_item(companion["telegram_user_id"], -999, companion_item_id, 1)
+        db.decay_item_durability(companion_item_id, amount=50)
+
+        db.update_character(user_id, -999, gold=1000)
+        sink = []
+        await bot._do_repair_party_items(FakeUpdate(user_id, "", sink))
+        full_text = "\n".join(sink)
+        self.assertIn("Leader's Worn Blade", full_text)
+        self.assertIn("Companion's Worn Armor", full_text)
+        self.assertEqual(items_module.get_item(leader_item_id)["durability_pct"], 100)
+        self.assertEqual(items_module.get_item(companion_item_id)["durability_pct"], 100)
+        self.assertLess(db.get_character(user_id, -999)["gold"], 1000)
+
+    async def test_repair_party_items_stops_honestly_when_gold_runs_out(self):
+        """A requester who can't afford everything gets a real, honest partial repair -- never silent skipping, never debt."""
+        user_id = 951093
+        make_basic_character(user_id, "PoorPartyRepairLeader", char_class="Fighter", current_location="crossroads_tavern")
+        cheap_id = db.create_item_instance(
+            item_type="weapon", name="Cheap Worn Dagger", rarity="common", price=10,
+            base_stats={"type": "weapon", "damage_dice": "1d4", "damage_bonus": 0, "ability": "dexterity"},
+            affixes=[],
+        )
+        db.add_item(user_id, -999, cheap_id, 1)
+        db.decay_item_durability(cheap_id, amount=50)
+        expensive_id = db.create_item_instance(
+            item_type="weapon", name="Expensive Worn Greatsword", rarity="legendary", price=10000,
+            base_stats={"type": "weapon", "damage_dice": "2d6", "damage_bonus": 0, "ability": "strength"},
+            affixes=[],
+        )
+        db.add_item(user_id, -999, expensive_id, 1)
+        db.decay_item_durability(expensive_id, amount=50)
+        db.update_character(user_id, -999, gold=5)  # affords the cheap one only
+        sink = []
+        await bot._do_repair_party_items(FakeUpdate(user_id, "", sink))
+        full_text = "\n".join(sink)
+        self.assertIn("Cheap Worn Dagger", full_text)
+        self.assertIn("Ran out of gold", full_text)
+        self.assertEqual(items_module.get_item(cheap_id)["durability_pct"], 100)
+        self.assertEqual(items_module.get_item(expensive_id)["durability_pct"], 50)
 
     def test_artifact_tier_generates_without_crashing_and_has_real_entries(self):
         """

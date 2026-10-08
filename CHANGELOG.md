@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.768] — Repair the whole party's gear in one go
+
+Real dev-bridge request (Coffee: "How do I repair our parties
+items?") — the Forge's Repair menu only ever fixed the requester's
+own inventory, with no way at all to fix an AI companion's or
+another party member's damaged gear. New "🛠️ Repair Whole Party"
+button on the Repair category screen, plus plain-text support
+("repair the party's items", "repair everyone's gear"), reusing the
+same roster `_get_real_party_combatants` already uses for combat.
+Scans every living party member's damaged generated items, repairs
+cheapest-first, all paid by the requester, and reports an honest
+"ran out of gold" note if their wallet can't cover everyone.
+
 ## [1.27.767] — Fleeing no longer teleports you back to the tavern
 
 Real live request (Coffee: "make sure when we flee we stay in the

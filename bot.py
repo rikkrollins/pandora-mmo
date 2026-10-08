@@ -24748,6 +24748,12 @@ async def _do_show_blacksmith_category(update: Update, category: str) -> None:
             ])
         if not button_rows:
             locked_lines.append("Everything you own is already in real full repair.")
+        # Real dev-bridge request (2026-10-08, Coffee: "How do I repair
+        # our parties items?") -- every button above only ever repairs
+        # the viewer's OWN gear; this one real tap repairs everyone's
+        # (see _do_repair_party_items's own docstring for the full
+        # "who counts as party" and payment shape).
+        button_rows.append([InlineKeyboardButton("🛠️ Repair Whole Party", callback_data="bsmenu|repairparty")])
     elif category == "artifact":
         title = "🌌 **The Forge — Artifact Reforging**"
         intro = (
@@ -24938,6 +24944,8 @@ async def _bsmenu_callback_inner(update: Update, context: ContextTypes.DEFAULT_T
         await _do_show_blacksmith_category(update, action)
     elif action == "repairdo" and len(parts) >= 3:
         await _do_repair_item(update, parts[2])
+    elif action == "repairparty":
+        await _do_repair_party_items(update)
     elif action == "artifactdo" and len(parts) >= 3:
         item = items_module.get_item(parts[2])
         if item is None:
@@ -24974,6 +24982,63 @@ async def _do_repair_item(update: Update, item_id: str) -> None:
     db.update_character(update.effective_user.id, update.effective_chat.id, gold=character["gold"] - cost)
     _repaired, actual_cost, repaired_item = db.repair_item_instance(item_id)
     await _safe_send(update, f"🔧 The {repaired_item['name']} is restored to full repair, for {actual_cost} gold.")
+
+
+async def _do_repair_party_items(update: Update) -> None:
+    """
+    Real dev-bridge request (2026-10-08, Coffee: "How do I repair our
+    parties items?"). The Forge's own Repair menu only ever scanned
+    the REQUESTER's own inventory (_do_show_blacksmith_category's
+    "repair" category) -- an AI companion's own worn gear had no real
+    way to get fixed at all, since repair always acted on whoever's
+    character row the request came from. Scans every real, present
+    party combatant's own inventory (_get_real_party_combatants, the
+    same real "who's actually on your side" roster combat itself
+    uses), repairs every damaged generated item it finds, cheapest
+    first, paid entirely by the requester (same single-payer shape
+    this game's other party-wide conveniences already use, e.g. a
+    board quest's shared reward). Stops and reports honestly the
+    moment the requester's own gold runs out, rather than silently
+    skipping items or going into debt.
+    """
+    requester = db.get_character(update.effective_user.id, update.effective_chat.id)
+    if requester is None:
+        await _safe_send(update, "You don't have a character yet!")
+        return
+    party = _get_real_party_combatants(requester)
+    to_repair = []
+    for member in party:
+        for item_id, qty in (member.get("inventory") or {}).items():
+            if qty <= 0 or not item_id.startswith(db.GENERATED_ITEM_ID_PREFIX):
+                continue
+            cost = db.repair_cost_for_item(item_id)
+            if cost is None:
+                continue
+            item = items_module.get_item(item_id)
+            if item is None:
+                continue
+            to_repair.append((cost, item_id, item["name"], member["name"]))
+    if not to_repair:
+        await _safe_send(update, "Everyone in the party is already in real full repair.")
+        return
+    to_repair.sort(key=lambda t: t[0])
+
+    gold_remaining = requester["gold"]
+    repaired_lines, skipped_count = [], 0
+    for cost, item_id, item_name, owner_name in to_repair:
+        if cost > gold_remaining:
+            skipped_count += 1
+            continue
+        gold_remaining -= cost
+        _repaired, actual_cost, _repaired_item = db.repair_item_instance(item_id)
+        repaired_lines.append(f"🔧 {owner_name}'s {item_name} — {actual_cost}g")
+    total_spent = requester["gold"] - gold_remaining
+    if total_spent:
+        db.update_character(update.effective_user.id, update.effective_chat.id, gold=gold_remaining)
+    lines = [f"**Party repairs** ({total_spent} gold spent, {gold_remaining} left):", *repaired_lines]
+    if skipped_count:
+        lines.append(f"\n💸 Ran out of gold — {skipped_count} more item(s) still need repair.")
+    await _safe_send(update, "\n".join(lines), speak=False)
 
 
 # Alchemy & Enchanting menu (2026-09-11, same real ask as the Blacksmith
@@ -41342,6 +41407,8 @@ async def _dispatch_intent(update: Update, context: ContextTypes.DEFAULT_TYPE, i
         await _do_accept_party_invite(update)
     elif action == "leave_party":
         await _do_leave_party(update)
+    elif action == "repair_party_items":
+        await _do_repair_party_items(update)
     elif action == "bench_party_member":
         await _do_bench_member(update, intent.get("target") or "")
     elif action == "unbench_party_member":
@@ -43984,7 +44051,7 @@ MAIN_TOPIC_ALLOWED_ACTIONS = frozenset({
     "check_quests", "check_story", "bestiary", "check_achievements",
     "check_guild_quest", "check_guild_curriculum",
     "equip_item", "unequip_item", "equip_offhand", "auto_equip",
-    "forge_item", "forge_magic_item", "enchant_item", "discard_item", "dismantle_item",
+    "forge_item", "forge_magic_item", "enchant_item", "discard_item", "dismantle_item", "repair_party_items",
     "invite_to_party", "accept_party_invite", "leave_party",
     "bench_party_member", "unbench_party_member", "set_front_row", "set_back_row",
     "check_market", "cancel_market", "sell_market", "buy_market", "view_market_listing",
@@ -44118,6 +44185,8 @@ async def _dispatch_main_topic_action(update: Update, context: ContextTypes.DEFA
         await _do_accept_party_invite(update)
     elif action == "leave_party":
         await _do_leave_party(update)
+    elif action == "repair_party_items":
+        await _do_repair_party_items(update)
     elif action == "bench_party_member":
         await _do_bench_member(update, intent.get("target") or "")
     elif action == "unbench_party_member":

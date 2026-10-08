@@ -1408,6 +1408,13 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     if any(w in lowered for w in ["leave the party", "leave my party", "quit the party", "i quit my party"]):
         return {**base, "action": "leave_party"}
 
+    # Real dev-bridge request (2026-10-08, Coffee: "How do I repair our
+    # parties items?") -- checked for "repair"/"fix" + a party-wide word
+    # specifically, so "repair my sword" (a real single-item request,
+    # menu-only for now) is never swallowed by this.
+    if "repair" in lowered and any(w in lowered for w in ["party", "everyone", "everybody", "our gear", "our items"]):
+        return {**base, "action": "repair_party_items"}
+
     # leave_guild (2026-08-13, per Coffee: "add a leave guild feature").
     # Checked here, BEFORE move_words' own "leave the "/"leave this"/
     # "leave here" phrases further down would otherwise claim "leave the
@@ -3093,7 +3100,7 @@ def parse_intent(text: str, known_npc_names: list[str] | None = None, force_mode
                 "list_characters", "switch_character", "delete_character",
                 "fast_travel", "accept_quest", "check_quests", "ask_clue",
                 "answer_puzzle", "gamble", "chat", "examine", "flee", "resolve_choice",
-                "invite_to_party", "accept_party_invite", "leave_party", "bench_party_member",
+                "invite_to_party", "accept_party_invite", "leave_party", "bench_party_member", "repair_party_items",
                 "unbench_party_member", "set_front_row", "set_back_row", "find_merchant",
                 "second_wind", "rage", "bardic_inspiration", "lay_on_hands", "divine_sense", "arcane_recovery",
                 "make_campfire", "give_item", "use_item", "equip_item", "unequip_item", "auto_equip", "breath_weapon",
