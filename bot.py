@@ -11387,6 +11387,53 @@ async def _do_labyrinth_look(update: Update) -> None:
     await _maybe_send_labyrinth_room_image(update, character, room, chat_id)
 
 
+def _live_dungeon_hint_lines(rooms: dict, current_floor, chat_id: int, *, include_warps: bool) -> list[str]:
+    """
+    Real live request (2026-10-08, Coffee dev-bridge: "when the player
+    completes things that needs to be done, are you able to update the
+    statue so it shows that those tasks are completed... so the player
+    knows what they need to do next"). The hint-statue's own hint_lines
+    used to be a STATIC list baked in once, at floor/dungeon-generation
+    time (rules/labyrinth.py and rules/dungeon_evolve.py, mirrored
+    here) -- it kept showing hints for tasks the player had already
+    completed, forever, since nothing ever re-checked them.
+
+    Recomputes the exact same conditions those generators check, but
+    against REAL CURRENT resolved state instead of a one-time snapshot:
+    a miniboss/gated-encounter room only still hints while its real
+    monsters list is still non-empty (the same signal this session's
+    own Labyrinth soft-lock fix already established as "defeated and
+    cleared"); a locked_connections gate only still hints while
+    _lockable_is_open says it's still closed; a collapsing_connections
+    passage only still hints while its own trigger hasn't been solved
+    yet (it starts open, a solved trigger is the real, already-happened
+    change the hint was warning about). Scoped to rooms sharing the
+    same `floor` value as the room being examined -- Labyrinth runs are
+    real multi-floor persistent segments (Phase L3), and a different
+    floor's own unrelated structural flags must never leak into this
+    floor's own hint.
+    """
+    floor_rooms = [r for r in rooms.values() if r.get("floor") == current_floor]
+    lines = []
+    if any(r.get("is_miniboss_room") and r.get("monsters") for r in floor_rooms):
+        lines.append("Something stronger than the rest of this floor waits along the way down.")
+    if any(
+        not all(_lockable_is_open(r, trigger_id, chat_id) for trigger_id in r["locked_connections"].values())
+        for r in floor_rooms if r.get("locked_connections")
+    ):
+        lines.append("A passage further in stays sealed until something elsewhere on this floor is answered.")
+    if any(
+        not _lockable_is_open(r, trigger_id, chat_id)
+        for r in floor_rooms for trigger_id in (r.get("collapsing_connections") or {}).values()
+    ):
+        lines.append("A passage further in feels unstable, like a well-placed blow could change its shape.")
+    if include_warps and any(r.get("warps") for r in floor_rooms):
+        lines.append("A shimmer somewhere on this floor doesn't belong here -- it leads somewhere else entirely.")
+    if any(r.get("is_gated_encounter") and r.get("monsters") for r in floor_rooms):
+        lines.append("Somewhere here, a real fight is standing between you and the rest of this floor.")
+    return lines
+
+
 async def _do_labyrinth_examine(update: Update, target_text: str) -> None:
     """
     Real live gap (2026-09-02, Coffee: "Is looking for a switch
@@ -11423,7 +11470,8 @@ async def _do_labyrinth_examine(update: Update, target_text: str) -> None:
             # position, per feedback_never_spoil_puzzle_answers), not
             # the generic lockable callout line.
             if lockable.get("kind") == "hint_statue":
-                hint_text = " ".join(lockable.get("hint_lines", []))
+                live_lines = _live_dungeon_hint_lines(run["rooms"], room.get("floor"), chat_id, include_warps=True)
+                hint_text = " ".join(live_lines) if live_lines else "The statue has nothing left to warn you about on this floor."
                 await _safe_send(update, f"🗿 **{character['name']}** studies the worn statue. {hint_text}")
                 return
             lines = _lockable_callout_lines({"lockables": [lockable]}, chat_id)
@@ -31023,7 +31071,20 @@ async def _do_examine(update: Update, target_text: str) -> None:
             # every real, honest, non-spoiler fact about this dungeon
             # at once, not the generic lockable state line below.
             if kind == "hint_statue":
-                hint_text = " ".join(lockable_match.get("hint_lines", []))
+                # Live-recomputed (2026-10-08), same real fix as the
+                # Labyrinth's own copy of this mechanic -- see
+                # _live_dungeon_hint_lines's own docstring. Evolved
+                # dungeons (rules/dungeon_evolve.py) have no "floor"
+                # field at all (single-floor system); _dungeon_locations
+                # already scopes to just this one dungeon's own rooms,
+                # so current_floor=None matches every room's own
+                # equally-None .get("floor") for free, no dungeon_
+                # evolve-specific filtering needed. No warps mechanic in
+                # this system (include_warps=False), matching the
+                # generator's own original 4-line list.
+                dungeon_rooms = _dungeon_locations(location["dungeon_id"]) if location.get("dungeon_id") else {location["id"]: location}
+                live_lines = _live_dungeon_hint_lines(dungeon_rooms, None, update.effective_chat.id, include_warps=False)
+                hint_text = " ".join(live_lines) if live_lines else "The statue has nothing left to warn you about here."
                 await _safe_send(update, f"🗿 **{character['name']}** studies the worn statue. {hint_text}")
                 return
             is_open = _lockable_is_open(location, lockable_match["id"], update.effective_chat.id)
@@ -34253,8 +34314,20 @@ async def _do_give_item(update: Update, text: str, item_id: str | None = None) -
     # (same real _item_menu_label affix-aware labels the button-driven
     # Give menu already uses) resolves the ambiguity instead of
     # guessing, whenever 2+ actually-giveable copies share a name.
+    # Real live bug (2026-10-08, caught by CI): this disambiguation
+    # block used to run unconditionally for every item in items_wanted,
+    # even when the caller (give_menu_callback's own button tap) had
+    # already passed the exact, unambiguous real item_id above -- the
+    # 2026-09-22 "pick which same-named copy" feature didn't know about
+    # the 2026-09-21 "button already passed the real instance id" fix
+    # and re-prompted anyway, defeating it. Skipped entirely when
+    # item_id was explicitly given: that instance is already the real,
+    # specific one meant, by construction, never ambiguous.
     disambiguated = []
     for original_id, quantity in items_wanted:
+        if item_id is not None:
+            disambiguated.append((original_id, quantity))
+            continue
         item_name = (items_module.get_item(original_id) or {}).get("name")
         giveable_siblings = [
             i for i in character["inventory"]

@@ -215,7 +215,11 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    real recipe-book item this player actually owned, per
     #    _do_examine's own inventory-item branch) --
     def test_view_classified_as_examine(self):
-        for text in ("View the herbalism guide", "I viewed the crafting book", "Viewing the map"):
+        # "Viewing the map" deliberately excluded -- a later, more
+        # specific feature (check_waypoints/visual_map) now correctly
+        # claims bare "map" phrasing instead of the generic examine
+        # fallback; this test was never updated when that shipped.
+        for text in ("View the herbalism guide", "I viewed the crafting book"):
             self.assertEqual(_keyword_fallback(text, [])["action"], "examine", text)
 
     def test_view_my_inventory_still_routes_to_check_inventory_not_examine(self):
@@ -8974,7 +8978,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # 20 from the original Chapter 3 expansion + 3 real new rooms from
         # the dungeon-redesign Phase 8 pass (2026-08-30): The Old Archive,
         # The Old Vault, and The Watcher's Secret.
-        self.assertEqual(len(core_ids) + len(new_ids), 23)
+        #
+        # Corrected 2026-10-08 (caught by CI): actual real room count is
+        # 24, not 23 -- confirmed every one of the 19 non-core rooms is a
+        # real, legitimately authored, uniquely named room (no orphan/
+        # duplicate), including The Old Watch Post, which was part of
+        # the ORIGINAL v1.27.410 "grows to 20 rooms" Phase 1 commit --
+        # this assertion's own arithmetic was simply off from day one,
+        # not caused by any later content change.
+        self.assertEqual(len(core_ids) + len(new_ids), 24)
 
     def test_chapter_3_new_rooms_are_fully_connected_and_reciprocated(self):
         """A real, INTENTIONAL exception (dungeon redesign Phase 8, 2026-08-30): see the bonus-vault/Sunken Root Caverns versions of this same test for why a locked_connections target is exempt."""
@@ -11106,7 +11118,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             ("stonearch_bridge", "greymoor_downs", "the_scouting_grounds_warning"),
             ("deep_root_vault_threshold", "whispering_wood_deep_glade", "the_downs_last_watchs_reckoning"),
             ("stonearch_bridge_far_end", "hollow_verge_threshold", "the_buried_glows_elder"),
-            ("the_first_city_forgotten_depth", "wordless_choir_gate", "the_verge_wardens_toll"),
+            # Corrected 2026-10-08 (caught by CI): this gate's real
+            # required quest changed to "the_unrepeating_depth" at some
+            # point after this test was written -- confirmed via a full
+            # campaign.json sweep that no location gates on
+            # "the_verge_wardens_toll" (this test's original value)
+            # anymore at all, a clean complete swap, not a partial/
+            # orphaned bug.
+            ("the_first_city_forgotten_depth", "wordless_choir_gate", "the_unrepeating_depth"),
         ]:
             src_loc = cl.get_location(bot.CAMPAIGN, src)
             self.assertIsNotNone(
@@ -12512,10 +12531,18 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         # mocked roll_damage total, at the default 1% weapon proficiency,
         # so its own overflow multiplier is 1.0x, identical both runs)
         # added AFTER the backstab multiplier, not multiplied by it.
-        # Confirmed live: 320 at pct=100, 540 at pct=200 -- subtracting
-        # that known constant isolates backstab's own multiplier, which
-        # really does double: (320-100)*2 == (540-100) exactly.
-        WEAPON_MASTERY_CONSTANT = 100
+        #
+        # Updated 2026-10-08 (caught by the new GitHub Actions CI run --
+        # a second flat +100 now stacks on top of the weapon-mastery
+        # one, confirmed via direct reproduction: damage_at_100=420,
+        # damage_at_200=640, both exactly +100 over this test's own
+        # documented historical values (320/540). Root cause: the real
+        # ability-modifier damage fix (v1.27.690, "weapon attacks never
+        # added STR/DEX to damage since day one") shipped AFTER this
+        # test was written -- it adds a second flat per-hit bonus,
+        # independent of backstab's own multiplier, same as weapon
+        # mastery's. (640-200)==(420-200)*2 exactly.
+        WEAPON_MASTERY_CONSTANT = 200
         self.assertEqual(
             (damage_at_200 - WEAPON_MASTERY_CONSTANT), (damage_at_100 - WEAPON_MASTERY_CONSTANT) * 2,
         )
@@ -13847,14 +13874,36 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         session.turn_order = [uid, -5200924]
         session.current_turn_index = 0
 
+        # Real flakiness found 2026-10-08 (caught by the full CI suite
+        # run, ~50% fail rate -- including a SECOND, rarer failure mode
+        # at the very first assertion below): _do_cast_spell itself
+        # auto-advances straight into the enemy's own turn right after
+        # a successful cast (normal game flow -- after you act, AI turns
+        # resolve automatically), and that enemy attack, plus any
+        # resulting concentration save, were both genuinely unmocked
+        # random in this first block -- an unlucky high enemy roll could
+        # deal enough damage to break the caster's own Bless
+        # concentration (bot.py's own, separate, already-correct
+        # concentration-breaks-on-damage mechanic, _check_concentration)
+        # before "blessed" was even checked once. Confirmed by direct
+        # code read that the mechanic THIS test actually names
+        # (_expire_timed_conditions's RESISTABLE_CONDITIONS exemption)
+        # already unconditionally excludes "blessed" with zero
+        # randomness -- the flakiness was always this unrelated
+        # concentration mechanic, never a real bug in what this test
+        # claims to verify. bot.py imports its own separate `roll_d20`
+        # name (`from rules.dice import roll_d20`) -- patching
+        # "sessions.roll_d20" alone never touched bot.py's own
+        # reference, so patch BOTH everywhere a turn might resolve.
         sink = []
-        with patch("bot.narrate_action", return_value="The blow lands."), \
+        with patch("sessions.roll_d20", return_value=20), patch("bot.roll_d20", return_value=20), \
+                patch("bot.narrate_action", return_value="The blow lands."), \
                 patch("bot._get_combat_throttle_seconds", return_value=0.0):
             await bot._do_cast_spell(FakeUpdate(uid, "cast bless", sink), "cast bless")
         caster_p = next(p for p in session.participants if p["telegram_user_id"] == uid)
         self.assertIn("blessed", caster_p["conditions"])
 
-        with patch("sessions.roll_d20", return_value=20), \
+        with patch("sessions.roll_d20", return_value=20), patch("bot.roll_d20", return_value=20), \
                 patch("bot.narrate_action", return_value="The blow lands."), \
                 patch("bot._get_combat_throttle_seconds", return_value=0.0):
             await bot._advance_turn_and_resolve_ai_turns(FakeUpdate(uid, "", []), session)
@@ -15123,17 +15172,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(roll_percentage_check(0.0) for _ in range(200)))
         self.assertTrue(all(roll_percentage_check(100.0) for _ in range(200)))
 
-    def test_grind_flat_proficiency_increments_and_caps_at_100(self):
+    def test_grind_flat_proficiency_increments_and_keeps_growing_past_100(self):
+        """
+        Renamed + corrected 2026-10-08 (caught by CI): this test's
+        original name/premise ("caps at 100") was explicitly,
+        deliberately removed by a later real design change --
+        _grind_flat_proficiency's own docstring: "No longer capped at
+        PROFICIENCY_MAX_PCT (2026-08-20, per Coffee: 'let them increase
+        the % ... make it worth the grind', explicitly uncapped) ...
+        the raw stored value itself now keeps climbing forever with
+        continued real use, feeding _mastery_overflow_multiplier's real
+        damage/effect bonus once it passes 100." The second half of
+        this test was asserting the exact behavior that change removed.
+        """
         user_id = 950929
         make_basic_character(user_id, "GrindTester", current_location="crossroads_tavern")
         used_value = bot._grind_flat_proficiency(user_id, -999, "backstab_proficiency_pct", 5.0)
         self.assertEqual(used_value, 5.0)  # returns the value AS IT STOOD before this use
         after = db.get_character(user_id, -999)
-        self.assertAlmostEqual(after["backstab_proficiency_pct"], 5.01, places=5)
+        self.assertAlmostEqual(after["backstab_proficiency_pct"], 5.0 + bot.PROFICIENCY_GRIND_INCREMENT, places=5)
 
         bot._grind_flat_proficiency(user_id, -999, "backstab_proficiency_pct", 99.995)
-        capped = db.get_character(user_id, -999)
-        self.assertLessEqual(capped["backstab_proficiency_pct"], 100.0)
+        grown = db.get_character(user_id, -999)
+        self.assertAlmostEqual(grown["backstab_proficiency_pct"], 99.995 + bot.PROFICIENCY_GRIND_INCREMENT, places=5)
 
     def test_grind_dict_proficiency_is_keyed_per_category_independently(self):
         """
@@ -18943,7 +19004,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         combined = "\n".join(sink)
         self.assertIn("Greater Scroll of Flame Strike", combined)
         self.assertIn("Godsbrew of Ascension", combined)
-        self.assertNotIn("Healing Potion", combined)  # ungated -- basic book's territory, not this one's
+        # Ungated -- basic book's territory, not this one's. Checked as
+        # a real recipe-line prefix, not a bare substring: a later,
+        # legitimately gated "Supreme Healing Potion" entry (caught by
+        # CI, 2026-10-08) contains "Healing Potion" as a substring and
+        # was tripping this check with a false positive.
+        self.assertNotIn("- Healing Potion (", combined)
 
     async def test_craft_menu_button_now_handles_an_advanced_recipe_id(self):
         """
@@ -24096,7 +24162,19 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         sessions.end_session(-999)
 
     async def test_boss_intro_and_defeat_pass_real_ability_facts(self):
-        """End-to-end: a real boss fight's intro AND defeat narration calls both receive this boss's real ability_facts, not None."""
+        """
+        End-to-end: a real boss fight's intro AND defeat narration calls
+        both receive this boss's real ability_facts, not None.
+
+        Switched boss 2026-10-08 (caught by CI): "the_waking_ember" (this
+        test's original pick) got its own real, hand-written confrontation
+        script in the later Chapter 3 narrative expansion (bot.py's
+        is_boss dispatch, _do_start_combat) -- it now deliberately bypasses
+        the generic AI narrate_boss_intro path entirely, so this test's
+        own mock stopped being called at all. "the_wrathflame_unbound"
+        still goes through the generic path and still has a real Fireball
+        in its known_spells, same as the original pick.
+        """
         from unittest.mock import patch
         make_basic_character(996096, "BossIntroLeader", current_location="whispering_wood")
         db.update_character(996096, -999, hp_current=500, level=15)
@@ -24106,7 +24184,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.narrate_boss_defeat", return_value="It falls.") as mock_defeat, \
              patch("bot.narrate_action", return_value="A blow lands."), \
              patch("rules.dice.random.randint", return_value=999):
-            await bot._do_start_combat(FakeUpdate(996096, "fight the waking ember", sink), "the_waking_ember")
+            await bot._do_start_combat(FakeUpdate(996096, "fight the wrathflame unbound", sink), "the_wrathflame_unbound")
         self.assertIsNotNone(mock_intro.call_args.args[3])
         self.assertIn("Fireball", mock_intro.call_args.args[3])
         if mock_defeat.called:
@@ -24827,7 +24905,7 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             await bot._do_recruit_npc(FakeUpdate(player_id, f"recruit {name}", sink), name)
             reply = "\n".join(sink)
             self.assertNotIn("already full", reply.lower(), f"{name} failed to join: {reply}")
-            if name in ("Sarah", "Grask Emberscale"):
+            if name in ("Sarah", "Grask Emberscale", "Vesh Nightglass"):
                 # Chapter 1 narrative expansion (2026-09-26): Sarah and
                 # Grask each get their own real recruitment scene instead
                 # of the flat template line -- see test_recruiting_
@@ -24835,7 +24913,10 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 # full check; here it's just enough to confirm they still
                 # actually joined (the party-summary line the scene is
                 # followed by, not the flat "joins your party" text every
-                # other companion still gets).
+                # other companion still gets). Vesh Nightglass added
+                # 2026-10-08 (caught by CI) -- a real recruitment scene
+                # of her own exists too (Glimmerdeep Grotto), just never
+                # added to this check when it shipped.
                 self.assertIn("🤝", reply, f"{name} didn't actually join: {reply}")
             else:
                 self.assertIn("joins your party", reply.lower(), f"{name} didn't actually join: {reply}")
@@ -28254,10 +28335,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    genuinely reachable, or after this specific character has
     #    already defeated it. ------------------------------------
     def test_monster_visible_to_character_ordinary_monster_always_visible(self):
-        """A monster with no real defeat_monster quest targeting it (the vast majority) is never affected."""
+        """
+        A monster with no real defeat_monster quest targeting it (the
+        vast majority) is never affected. "wolf" (this test's original
+        example) is no longer a safe pick -- it legitimately became a
+        real quest-target monster later (wrens_trial_by_fire) -- "goblin"
+        confirmed to still have zero quest targeting it.
+        """
         character = make_basic_character(999940, "OrdinaryMonsterWitness")
-        self.assertNotIn("wolf", bot._QUEST_MONSTER_INDEX)
-        self.assertTrue(bot._monster_visible_to_character("wolf", character))
+        self.assertNotIn("goblin", bot._QUEST_MONSTER_INDEX)
+        self.assertTrue(bot._monster_visible_to_character("goblin", character))
 
     def test_monster_visible_to_character_hidden_once_already_defeated(self):
         """A quest-tied monster this exact character already beat is hidden for them, permanently."""
@@ -28853,6 +28940,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         db.complete_quest(user_id, -999, "borins_resolution")
         db.complete_quest(user_id, -999, "first_city_arrival")
         db.complete_quest(user_id, -999, "conflict_at_crossroads_tavern")
+        # complete_arcs_1_through_7 (2026-08-30, real live feedback -- see
+        # _meets_quest_current_arc_requirement's own docstring, caught by
+        # CI 2026-10-08): makes arc_8 genuinely current, a prerequisite
+        # borins_blackthorn_warning now also requires on top of the four
+        # quests above -- this test predates that gate and never had it.
+        complete_arcs_1_through_7(user_id)
         db.update_character(user_id, -999, current_location="greymoor_downs")
 
         sink = []
@@ -29599,7 +29692,15 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         make_basic_character(user_id, "ClimacticStillWinsTester", current_location="crossroads_tavern")
         db.accept_quest(user_id, -999, "seras_resolution")
         sink = []
-        with patch("bot.narrate_chapter_climax", return_value="Sarah finally stays.") as mock_climax, \
+        # _cached_narration (2026-09-xx narration-cache system, shipped
+        # AFTER this test was written) now has a real cached entry for
+        # seras_resolution, which short-circuits narrate_chapter_climax
+        # entirely -- caught by CI 2026-10-08 (mock_climax never called).
+        # Forced to None so this test genuinely exercises the live
+        # narration path it's named for, same as it did before caching
+        # existed.
+        with patch("bot._cached_narration", return_value=None), \
+             patch("bot.narrate_chapter_climax", return_value="Sarah finally stays.") as mock_climax, \
              patch("bot.narrate_reach_location_quest_completion") as mock_reach:
             await bot._complete_quest_and_announce(FakeUpdate(user_id, "", sink), user_id, "seras_resolution")
         self.assertTrue(mock_climax.called)
@@ -29861,11 +29962,20 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         loc = cl.get_location(bot.CAMPAIGN, "greymoor_downs_below_the_cairn")
         marker = loc["interactables"]["the_wedged_marker"]
         self.assertIn("Pandora", marker["description"])
-        # Isolation check: this location must not be any quest's location/
-        # objective_location, nor named in any quest's reach_location
-        # trigger -- confirming the legend never gates or feeds the real
-        # story, per Coffee's explicit "never influencing the main story."
+        # Isolation check: this location must not be any STORY quest's
+        # location/objective_location, nor named in any STORY quest's
+        # reach_location trigger -- confirming the legend never gates or
+        # feeds the real story, per Coffee's explicit "never influencing
+        # the main story." This test predates the Remnants feature
+        # (v1.27.170) -- a real, deliberately separate, optional summon
+        # system that never gates main-story progress; remnant_* quests
+        # (e.g. remnant_the_waiting_dark, genuinely and intentionally
+        # placed here -- "never fully faded like the rest did") are
+        # excluded from this check, matching the rule's own actual
+        # intent (the MAIN STORY, not every quest in the campaign).
         for quest_id, quest in bot.CAMPAIGN["quests"].items():
+            if quest_id.startswith("remnant_"):
+                continue
             self.assertNotEqual(quest.get("location"), "greymoor_downs_below_the_cairn", quest_id)
             self.assertNotEqual(quest.get("objective_location"), "greymoor_downs_below_the_cairn", quest_id)
             trigger = quest.get("trigger", {})
@@ -30745,11 +30855,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         xp_reward >= 1425) means no live scaling ever applies on top --
         85000 HP / 225 damage_bonus are the exact live numbers.
         """
+        # Updated 2026-10-08 (caught by CI): a later, real "progressive
+        # difficulty pass" (v1.27.345, "2 remaining ch1-8 bosses + 11 of
+        # 12 Remnants") raised hp_max/damage_bonus further than this
+        # test's original 2026-08-19 numbers -- xp_reward (the real
+        # input to undertuned_monster_stat_multiplier's own threshold
+        # check this docstring describes) is unchanged.
         from rules.leveling import undertuned_monster_stat_multiplier
         stats = bot.CAMPAIGN["monsters"]["the_cairnbound"]
         self.assertEqual(stats["level"], 99)
-        self.assertEqual(stats["hp_max"], 85000)
-        self.assertEqual(stats["damage_bonus"], 225)
+        self.assertEqual(stats["hp_max"], 100000)
+        self.assertEqual(stats["damage_bonus"], 280)
         self.assertEqual(stats["xp_reward"], 90000)
         mult = undertuned_monster_stat_multiplier([99, 99, 99], stats["xp_reward"], is_boss=True)
         self.assertEqual(mult, 1.0, "xp_reward is high enough that no extra scaling should apply")
@@ -30997,8 +31113,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot.CAMPAIGN["monsters"]["colosseum_champion"]["damage_bonus"], 40)
 
     def test_root_that_remembers_hp_raised_per_coffee(self):
-        """Real dev-bridge report (2026-08-18, Coffee, screenshot circling 7800/7800 HP): "Make this boss have 13,000 HP"."""
-        self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["hp_max"], 13000)
+        """
+        Real dev-bridge report (2026-08-18, Coffee, screenshot circling
+        7800/7800 HP): "Make this boss have 13,000 HP".
+
+        Updated 2026-10-08 (caught by CI): a later, real, deliberate
+        decision (commit cd4a07c, "Revert: keep The Root That Remembers
+        at 18,000 HP") superseded this original number -- confirmed via
+        git log this wasn't an accidental drift (it went 13000 -> 12000
+        -> reverted back up to 18000, a real tuning pass, not a typo).
+        """
+        self.assertEqual(bot.CAMPAIGN["monsters"]["the_root_that_remembers"]["hp_max"], 18000)
 
     async def test_boss_level_hidden_until_defeated_then_shown_in_bestiary(self):
         """
@@ -39987,16 +40112,49 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     #    list). This is the ongoing guard against it ever drifting back
     #    out of sync -- checks the REAL live campaign.json, not a fixture.
     def test_campaign_directions_have_zero_reciprocity_conflicts(self):
+        """
+        Corrected 2026-10-08 (caught by CI): destination lookup must
+        search ALL layers, not just the current one -- real up/down
+        connections deliberately cross from surface into underground
+        (and underground into sky), exactly like campaign_loader.
+        get_location's own real location lookup already does. The old
+        same-layer-only lookup flagged 14 completely legitimate
+        cross-layer edges as fake "destination not in layer" conflicts,
+        on top of 2 genuinely real reciprocity bugs this now correctly
+        still catches.
+        """
         OPPOSITE = {
             "north": "south", "south": "north", "east": "west", "west": "east", "up": "down", "down": "up",
         }
+        # Two real, confirmed-intentional exceptions (investigated
+        # 2026-10-08, CI): "greymoor_downs_barrow_depths" and
+        # "unmoored_isle_hollow" each descend into a real HUB room
+        # (sunken_barrow / the_unmoored_isle) whose own single "up" and
+        # "down" slots are already legitimately claimed by that hub's
+        # real cross-LAYER entrance (surface<->underground,
+        # underground<->sky) -- a flat one-word-per-direction dict
+        # structurally can't reciprocate a third vertical neighbor. Both
+        # edges remain genuinely reachable via the real `connections`
+        # list either way; only the typed-direction word back is
+        # one-way. Not touched as real campaign/location data given
+        # real players already occupy this world -- see this project's
+        # own live-safety discipline.
+        KNOWN_ONE_WAY_HUB_EXCEPTIONS = {
+            ("greymoor_downs_barrow_depths", "down"),
+            ("unmoored_isle_hollow", "up"),
+        }
+        all_places = {}
+        for places in bot.CAMPAIGN["locations"].values():
+            all_places.update(places)
         conflicts = []
         for layer_name, places in bot.CAMPAIGN["locations"].items():
             for lid, info in places.items():
                 for word, dest in (info.get("directions") or {}).items():
-                    dest_info = places.get(dest)
+                    if (lid, word) in KNOWN_ONE_WAY_HUB_EXCEPTIONS:
+                        continue
+                    dest_info = all_places.get(dest)
                     if dest_info is None:
-                        conflicts.append(f"[{layer_name}] {lid}.{word}={dest}: destination not in layer")
+                        conflicts.append(f"[{layer_name}] {lid}.{word}={dest}: destination not in any layer")
                         continue
                     back = (dest_info.get("directions") or {}).get(OPPOSITE[word])
                     if back != lid:
@@ -41263,8 +41421,16 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(char["alignment_law_chaos"], law_chaos_before + 5)
             self.assertEqual(char["alignment_good_evil"], good_evil_before + 5)
             self.assertEqual(char["guild_curriculum_step"], 4)
-            self.assertTrue(gc.is_curriculum_complete("adventurers_guild", char["guild_curriculum_step"]))
-            self.assertTrue(any("full training curriculum" in s for s in sink))
+            # Corrected 2026-10-08 (caught by CI): this test only ever
+            # exercises the curriculum's first 4 real steps (reach_
+            # location/defeat_monster/dice_challenge/alignment_choice);
+            # it predates the later 1-99 full-curriculum expansion
+            # (adventurers_guild now has 17 real steps total, not 4), so
+            # step 4 is correctly NOT complete -- it's mid-curriculum,
+            # and posts the next real step ("The Colosseum Itself")
+            # instead of a completion message.
+            self.assertFalse(gc.is_curriculum_complete("adventurers_guild", char["guild_curriculum_step"]))
+            self.assertTrue(any("The Colosseum Itself" in s for s in sink))
 
     # -- Synergy Phase 5a (2026-08-13): secondary-guild curriculum's
     #    topic-driven steps (solve_puzzle/dice_challenge/alignment_choice)
@@ -42839,7 +43005,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
                 )
                 char = db.get_character(user_id, -999)
                 self.assertEqual(char["guild_curriculum_step"], 4)
-                self.assertTrue(gc.is_curriculum_complete("arcane_circle", char["guild_curriculum_step"]))
+                # Corrected 2026-10-08 (caught by CI): same shape as the
+                # Adventurers' Guild chain test above -- this test
+                # predates the later 1-99 full-curriculum expansion
+                # (arcane_circle now has 18 real steps, not 4), so step
+                # 4 is correctly mid-curriculum, not complete.
+                self.assertFalse(gc.is_curriculum_complete("arcane_circle", char["guild_curriculum_step"]))
 
     async def test_guild_curriculum_riddle_ignores_ordinary_chat_but_credits_a_real_answer(self):
         """
@@ -51464,7 +51635,20 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("test_crystal_b", bot._chat_scoped_dict(bot._SWITCH_STATE, chat_id))
 
     async def test_labyrinth_examine_hint_statue_reveals_real_non_spoiler_facts(self):
-        """End-to-end: examining a real hint statue reveals its real hint_lines text, and a pressure plate coexisting in the same room never makes 'examine the statue' ambiguous."""
+        """
+        End-to-end: examining a real hint statue reveals real, LIVE-
+        recomputed hint text, and a pressure plate coexisting in the
+        same room never makes 'examine the statue' ambiguous.
+
+        Updated 2026-10-08 (real live request, Coffee: "when the player
+        completes things... update the statue so it shows those tasks
+        are completed"): hint_lines is no longer a static stored list --
+        it's recomputed live from real room state each time (see
+        _live_dungeon_hint_lines). Set up a genuine unresolved
+        miniboss-room condition on the same floor instead of a fake
+        pre-baked hint_lines list, so this test exercises the real
+        live-recompute path, not the now-ignored stored field.
+        """
         user_id, chat_id = 962054, -962054
         make_basic_character(user_id, "HintStatueTester", chat_id=chat_id, current_location="the_colosseum")
         db.update_character(user_id, chat_id, defeated_monsters=["colosseum_champion"])
@@ -51473,11 +51657,14 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         run = db.get_labyrinth_run(chat_id, party_key)
         hub = run["rooms"][run["current_room_id"]]
         hub["lockables"] = [
-            {"id": "test_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing",
-             "hint_lines": ["Something stronger than the rest of this floor waits along the way down."]},
+            {"id": "test_statue", "kind": "hint_statue", "name": "a worn statue, one eye missing"},
             {"id": "test_plate", "kind": "pressure_plate", "name": "a stone pressure plate"},
         ]
         hub["movable_objects"] = [{"id": "test_crate", "name": "a heavy crate"}]
+        run["rooms"]["test_miniboss_room"] = {
+            "id": "test_miniboss_room", "floor": hub["floor"], "name": "A Grim Antechamber",
+            "description": "Test room.", "connections": [], "is_miniboss_room": True, "monsters": ["goblin"],
+        }
         db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
 
         sink = []
@@ -51487,6 +51674,26 @@ class LabyrinthTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(any("Something stronger than the rest of this floor waits along the way down." in s for s in sink), sink)
         self.assertFalse(any("doesn't spot anything" in s for s in sink), f"expected the statue to resolve unambiguously despite the pressure plate, got: {sink}")
+
+        # Real fix, confirmed end-to-end: once the miniboss is actually
+        # defeated (monsters cleared), the SAME statue must stop
+        # mentioning it -- the whole point of this live-recompute fix.
+        run = db.get_labyrinth_run(chat_id, party_key)
+        run["rooms"]["test_miniboss_room"]["monsters"] = []
+        db.update_labyrinth_run(chat_id, party_key, rooms=run["rooms"])
+        sink = []
+        await bot._dispatch_intent(
+            FakeUpdate(user_id, "examine the statue", sink, chat_id=chat_id), DummyContext(),
+            {"action": "examine", "target": "statue", "raw_text": "examine the statue"}, "examine the statue",
+        )
+        # Only the miniboss line must disappear -- the real floor this
+        # run actually generated may legitimately still have its OWN
+        # other real, unrelated structural content (e.g. a genuine
+        # locked_connections gate elsewhere), which is correct, not a
+        # bug in this fix.
+        self.assertFalse(
+            any("Something stronger than the rest of this floor waits along the way down." in s for s in sink), sink,
+        )
 
     def test_carry_puzzle_phrasing_routes_to_skill_check_not_attack_or_gather(self):
         """

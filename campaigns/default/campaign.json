@@ -2572,8 +2572,8 @@
         },
         "monsters": [],
         "grid_position": {
-          "x": -6,
-          "y": -60
+          "x": 2,
+          "y": -2
         },
         "dungeon_id": "the_first_city",
         "dungeon_interior": true,
@@ -2621,8 +2621,8 @@
           "the_deepest_record"
         ],
         "grid_position": {
-          "x": -6,
-          "y": -61
+          "x": 2,
+          "y": -3
         },
         "dungeon_id": "the_first_city",
         "dungeon_interior": true
@@ -4462,8 +4462,8 @@
           }
         ],
         "grid_position": {
-          "x": -6,
-          "y": -62
+          "x": 2,
+          "y": -4
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4481,8 +4481,8 @@
           "up": "the_first_city_forgotten_vault"
         },
         "grid_position": {
-          "x": -6,
-          "y": -63
+          "x": 2,
+          "y": -5
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city",
@@ -4518,8 +4518,8 @@
           }
         ],
         "grid_position": {
-          "x": -6,
-          "y": -64
+          "x": 2,
+          "y": -6
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4541,8 +4541,8 @@
           }
         },
         "grid_position": {
-          "x": -5,
-          "y": -64
+          "x": 3,
+          "y": -6
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4566,8 +4566,8 @@
           }
         },
         "grid_position": {
-          "x": -6,
-          "y": -65
+          "x": 2,
+          "y": -7
         },
         "dungeon_interior": true,
         "dungeon_checkpoint": true,
@@ -4596,8 +4596,8 @@
           }
         },
         "grid_position": {
-          "x": -6,
-          "y": -66
+          "x": 2,
+          "y": -8
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city"
@@ -4621,8 +4621,8 @@
           "damage_dice": "4d6"
         },
         "grid_position": {
-          "x": -6,
-          "y": -67
+          "x": 2,
+          "y": -9
         },
         "dungeon_interior": true,
         "dungeon_id": "the_first_city",
@@ -7037,8 +7037,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -79
+          "x": -2,
+          "y": -87
         },
         "layer": "underground",
         "requires_rebirth_count": 1
@@ -7057,8 +7057,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -78
+          "x": -2,
+          "y": -86
         },
         "layer": "underground"
       },
@@ -7076,8 +7076,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -77
+          "x": -2,
+          "y": -85
         },
         "layer": "underground"
       },
@@ -7095,8 +7095,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -76
+          "x": -2,
+          "y": -84
         },
         "layer": "underground"
       },
@@ -7114,8 +7114,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -75
+          "x": -2,
+          "y": -83
         },
         "layer": "underground"
       },
@@ -7135,8 +7135,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -74
+          "x": -2,
+          "y": -82
         },
         "layer": "underground",
         "dungeon_hub": true,
@@ -7186,8 +7186,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -73
+          "x": -2,
+          "y": -81
         },
         "layer": "underground",
         "monsters": [
@@ -7209,8 +7209,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -72
+          "x": -2,
+          "y": -80
         },
         "layer": "underground",
         "monsters": [
@@ -7229,8 +7229,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 1,
-          "y": -71
+          "x": -2,
+          "y": -79
         },
         "layer": "underground",
         "monsters": [
@@ -7353,8 +7353,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": -74
+          "x": -3,
+          "y": -82
         },
         "layer": "underground",
         "monsters": [
@@ -7373,8 +7373,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": -1,
-          "y": -74
+          "x": -4,
+          "y": -82
         },
         "layer": "underground",
         "monsters": [
@@ -7582,8 +7582,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": -73
+          "x": -3,
+          "y": -81
         },
         "layer": "underground"
       },
@@ -7598,8 +7598,8 @@
         "dungeon_id": "wrathflame_vault_evolved",
         "dungeon_interior": true,
         "grid_position": {
-          "x": 0,
-          "y": -72
+          "x": -3,
+          "y": -80
         },
         "layer": "underground"
       }

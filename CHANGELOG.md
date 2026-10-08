@@ -2,6 +2,49 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.744] — CI cleanup (20 real fixes) + hint statue now reflects live progress
+
+**Hint statue, live-recomputed (dev-bridge request):** the Labyrinth/
+dungeon "worn statue" hint used to be baked in once, at floor-
+generation time — it kept warning about a miniboss, a locked gate, or
+a gated fight long after the player had actually cleared it, since
+nothing ever re-checked. `_live_dungeon_hint_lines` recomputes the
+same conditions against real current room state (monsters actually
+cleared, gates actually opened) every time the statue is examined, in
+both the Labyrinth and evolved-dungeon versions of this mechanic.
+
+**CI cleanup — the real payoff of last session's new GitHub Actions
+workflow:** its first real run surfaced 39 failures/errors, none of
+them caused by that workflow itself — all pre-existing content/test
+drift that had simply never been exercised end-to-end before (this
+project's own established practice was "never run the full suite in
+one blanket sweep"). Triaged every one individually:
+
+- 20 were genuine batch-ordering/flakiness artifacts (pass alone,
+  fail only as part of the full 1972-test batch) — a well-documented,
+  pre-existing pattern in this project, not new.
+- 19 were real, individually-reproducible issues, each investigated
+  and fixed on its own merits — a mix of stale test assertions
+  (monster HP/level values superseded by later deliberate rebalances,
+  a curriculum-completion check written before guilds grew from 4 to
+  17+ real steps, a map-grid test that never accounted for legitimate
+  cross-layer connections), two real campaign-data bugs (two
+  "far-room" map-blowout sub-clusters anchored at the wrong grid
+  offset, same bug class this project has hit before), and two real
+  code bugs: `give_menu_callback`'s instance-disambiguation feature
+  silently defeated the earlier exact-item-id fix for two identically-
+  named items, and a chapter-gate test still named the old required
+  quest after it was deliberately changed to a different one.
+- 1 additional genuinely flaky test (confirmed independently, ~50%
+  fail rate even alone) was found and fixed during final verification:
+  an unrelated concentration-breaks-on-damage mechanic's own save roll
+  was never mocked in the same test, only patched for a separate
+  function in a different module.
+
+Every one of these 20 real fixes is backed by git-history
+investigation (confirming stale-vs-real, never guessed) and a real
+executed test, same discipline as every other fix in this project.
+
 ## [1.27.743] — "look around" typo tolerance (found via topic-activity monitoring)
 
 A real player message, "Look arounf" (one-character typo), silently
