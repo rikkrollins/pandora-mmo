@@ -28993,7 +28993,7 @@ def _location_image_prompt(location: dict) -> str:
     text already in campaign.json, never invented detail.
 
     Real live request (2026-10-07, Coffee dev-bridge, photo of a
-    physical D&D "Dungeon Tiles Reincarnated" set, asking to "purpose
+    physical third-party dungeon-tile set, asking to "purpose
     them for game visuals"): using that specific copyrighted/
     trademarked product art was declined (standing no-copyrighted-
     material rule), but the underlying ask -- a consistent, atmospheric

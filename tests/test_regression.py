@@ -39341,8 +39341,8 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
     def test_location_image_prompt_applies_a_consistent_per_layer_mood(self):
         """
         Real live request (2026-10-07, Coffee dev-bridge, photo of a
-        physical D&D dungeon tile set asking to "purpose them for game
-        visuals"): declined the actual copyrighted product art, but the
+        physical third-party dungeon tile set asking to "purpose them
+        for game visuals"): declined the actual copyrighted product art, but the
         real underlying ask -- consistent atmospheric styling across
         location images instead of each one looking visually unrelated
         -- is legitimate. Every location already carries a real `layer`

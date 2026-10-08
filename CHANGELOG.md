@@ -21,8 +21,8 @@ same free endpoint, same no-key deal, consistently better output.
 
 ## [1.27.741] — Consistent per-layer mood for every location image
 
-Prompted by a dev-bridge photo of a physical D&D "Dungeon Tiles
-Reincarnated" set, asking to "purpose them for game visuals" —
+Prompted by a dev-bridge photo of a physical third-party dungeon-tile
+set, asking to "purpose them for game visuals" —
 declined using that specific copyrighted/trademarked product art, but
 the real underlying ask (a consistent, atmospheric look across every
 location's generated image, instead of each one looking visually
