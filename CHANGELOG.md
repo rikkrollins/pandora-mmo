@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.745] — Automated new-member welcome + GitHub link on the pin post
+
+Real dev-bridge request (2026-10-08, Coffee, screenshot): a brand-new
+human member joining the live group got NO automated welcome at
+all — Coffee had to manually type "Heyy Adam welcome!!! Check the
+pinned post..." himself every time, right after Telegram's own
+"X joined the group" system message. There was already a handler for
+the BOT being added to a new group, but none for an ordinary member
+joining an EXISTING group (a different Telegram update shape —
+`new_chat_members` on a message, not a `my_chat_member` transition).
+New `new_chat_members_handler` posts a real automated welcome in Main
+pointing at the pinned "how to start" guide, for every genuine new
+member (skips the bot's own id, which rides along in the same list
+when the bot itself is added to a group — that case stays with
+`bot_added_to_group_handler`). Also added a GitHub link at the bottom
+of the pinned welcome post per the same request, and re-pinned it.
+
 ## [1.27.744] — CI cleanup (20 real fixes) + hint statue now reflects live progress
 
 **Hint statue, live-recomputed (dev-bridge request):** the Labyrinth/

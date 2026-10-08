@@ -27890,6 +27890,46 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("Private World" in t and "You're all set" in t for t in tg_bot.sent))
         self.assertNotIn(chat_id, bot._PENDING_ONBOARDING)
 
+    async def test_new_chat_member_gets_a_real_automated_welcome_pointing_at_the_pin(self):
+        """
+        Real gap found via dev-bridge screenshot (2026-10-08, Coffee):
+        a brand-new human member joining the live group got NO
+        automated welcome at all -- Coffee had to manually type one
+        himself every time. new_chat_members_handler now does this
+        automatically, and must skip the bot's own user id riding
+        along in the same new_chat_members list (that case belongs to
+        bot_added_to_group_handler, a different update shape entirely,
+        and must not get a duplicate welcome here).
+        """
+        class _FakeNewMemberBot:
+            def __init__(self, bot_id):
+                self.id = bot_id
+                self.sent = []
+
+            async def send_message(self, chat_id, text, parse_mode=None):
+                self.sent.append((chat_id, text, parse_mode))
+                return SimpleNamespace(message_id=1)
+
+        bot_id, chat_id = 999999, -5201
+        tg_bot = _FakeNewMemberBot(bot_id)
+        ctx = SimpleNamespace(bot=tg_bot)
+
+        new_member = SimpleNamespace(id=4242, mention_html=lambda: "<a href=\"tg://user?id=4242\">Adam</a>")
+        msg = SimpleNamespace(
+            chat=SimpleNamespace(id=chat_id),
+            new_chat_members=[new_member, SimpleNamespace(id=bot_id, mention_html=lambda: "Pandora MMO")],
+        )
+        update = SimpleNamespace(message=msg)
+
+        await bot.new_chat_members_handler(update, ctx)
+
+        self.assertEqual(len(tg_bot.sent), 1)
+        sent_chat_id, sent_text, sent_parse_mode = tg_bot.sent[0]
+        self.assertEqual(sent_chat_id, chat_id)
+        self.assertIn("Adam", sent_text)
+        self.assertIn("pinned post", sent_text)
+        self.assertEqual(sent_parse_mode, "HTML")
+
     async def test_onboarding_public_world_choice_points_at_the_real_invite_link(self):
         """
         Companion case to the test above: choosing "public" must never

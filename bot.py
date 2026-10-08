@@ -41669,6 +41669,45 @@ _ONBOARDING_MANUAL_SETUP_TEXT = (
 )
 
 
+async def new_chat_members_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Real gap found via dev-bridge screenshot (2026-10-08, Coffee): a
+    new human member joining the live group got NO automated welcome
+    at all -- the screenshot showed Coffee himself manually typing
+    "Heyy Adam welcome!!! Check the pinned post..." right after
+    Telegram's own "Adam joined the group" system message, because
+    nothing else ever would have. There was a handler for the BOT
+    being added to a NEW group (bot_added_to_group_handler, just
+    below) but none for an ordinary member joining an EXISTING group
+    this bot is already in -- a different Telegram update shape
+    entirely (a message carrying `new_chat_members`, not a
+    `my_chat_member` transition).
+
+    Fires once per real new member (skips the bot's own user id, which
+    also rides along inside `new_chat_members` the moment this bot
+    itself is added to a group -- that case is already fully handled
+    by bot_added_to_group_handler and would otherwise double-post).
+    Deliberately posts in Main even though Main is normally "bot never
+    speaks here" (topics.is_main) -- this mirrors Coffee's own manual
+    welcome, which he always posts in Main, and scripts/pin_main_welcome.py's
+    guide is pinned there too.
+    """
+    message = update.message
+    if message is None or not message.new_chat_members:
+        return
+    for member in message.new_chat_members:
+        if member.id == context.bot.id:
+            continue
+        try:
+            await context.bot.send_message(
+                chat_id=message.chat.id,
+                text=f"👋 Welcome, {member.mention_html()}! Check the pinned post 📌 above for how to get started 🤝",
+                parse_mode="HTML",
+            )
+        except TelegramError as e:
+            logger.warning(f"[onboarding] new-member welcome failed for chat {message.chat.id}: {e!r}")
+
+
 async def bot_added_to_group_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Real onboarding gap found during a full multi-tenant setup audit
@@ -44945,6 +44984,8 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("warning", warning_command))
     application.add_handler(CommandHandler("warning_list", warninglist_command))
     application.add_handler(CommandHandler("weather", weather_command))
+
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members_handler))
 
     # Single unified router for all plain text messages, across topics.
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_router))

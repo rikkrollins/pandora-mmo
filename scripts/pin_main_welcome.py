@@ -48,6 +48,8 @@ exact same rules here, so don't be surprised if an NPC remembers you \
 from last time.
 
 Welcome to Pandora. The road remembers everyone who's ever walked it.
+
+For more information, visit the GitHub: github.com/rikkrollins/pandora-mmo
 """
 
 
