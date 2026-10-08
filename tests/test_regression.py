@@ -30734,7 +30734,12 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         something else (a name/sentence containing it).
         """
         for text in ["Travel west", "Go north", "Head south", "I want to travel east",
-                     "let's move north", "ride west", "walk south", "march east"]:
+                     "let's move north", "ride west", "walk south", "march east",
+                     # Real live bug (2026-10-08, topic-activity log): "Go up" was
+                     # the exact same gap, just for "up"/"down" (real direction
+                     # words too -- campaign.json's own per-location directions
+                     # dict uses them for stairs/climbs the same as compass words).
+                     "Go up", "go down", "head down", "walk up the stairs"]:
             self.assertEqual(_keyword_fallback(text, [])["action"], "move", text)
         # A bare direction word with no movement verb, or the word
         # appearing as part of something else, must NOT false-positive.

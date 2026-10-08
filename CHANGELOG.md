@@ -2,6 +2,16 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.760] — "Go up"/"go down" typo-tolerance gap fixed
+
+Found via the standing topic-activity monitoring cron: "Go up"
+silently misclassified as chat instead of movement. Same root cause
+as the 2026-08-10 bare-compass-direction fix ("Travel west"), just for
+"up"/"down" specifically — real direction words in this game's own
+per-location data (used for stairs/climbs exactly like compass words),
+`_do_move` already fully supports them, the classifier's own
+movement-verb regex just never included them.
+
 ## [1.27.759] — Fewer redundant CI failure emails on high-commit days
 
 Real dev-bridge report (Coffee): "I keep getting emails about a failed

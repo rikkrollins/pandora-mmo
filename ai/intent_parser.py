@@ -2208,8 +2208,15 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # a movement VERB + direction word, not the bare word alone
     # ("west" by itself is too likely to be part of something else,
     # e.g. a location/NPC name containing it).
+    # Real live bug (2026-10-08, found via topic-activity monitoring):
+    # "Go up" got silently misclassified as chat, same root cause as
+    # the compass-direction fix just above -- "up"/"down" are real
+    # direction words too (campaign.json's own per-location "directions"
+    # dict uses them for stairs/climbs exactly like compass words,
+    # already read generically by _do_move), just never included in
+    # this regex's own direction-word alternation.
     if re.search(r"\b(?:travel|go|goto|head|walk|move|ride|run|march|sail)\s+"
-                 r"(?:north|south|east|west|northeast|northwest|southeast|southwest)\b", lowered):
+                 r"(?:north|south|east|west|northeast|northwest|southeast|southwest|up|down)\b", lowered):
         return {**base, "action": "move"}
 
     # Real live bug found via topic-activity monitoring (2026-09-04): an
