@@ -1725,7 +1725,32 @@ _LAST_HOURLY_UPDATE_AT: dict[int, datetime] = {}
 # e.g. "2026-07-10 05" — so it lands on the top of the hour rather than
 # drifting to whatever offset the bot process happened to start at.
 EASTERN_TZ = ZoneInfo("America/New_York")
+# Real live report (2026-10-08, Coffee, dev-bridge: "I've gotten these
+# updates within 5 to 10 minutes of each other... I want the hourly
+# updates to only show up on the hour"). Root cause: this dict used to
+# be in-memory ONLY, wiped on every restart -- an ordinary deploy day
+# with several restarts inside the same real clock hour means the
+# background world tick sees no bucket recorded for the current hour
+# right after each restart and immediately re-fires an update that had
+# already genuinely posted earlier that same hour. Persisted via
+# db.get_setting/set_setting (same convention as _SUPPORT_FEEDBACK_LOG)
+# so a restart can never cause a real duplicate within the same hour
+# again -- loaded once at startup (_load_hourly_update_buckets, see
+# main()), saved on every real post (_maybe_post_hourly_status_update).
+_HOURLY_UPDATE_BUCKET_SETTING_KEY = "last_hourly_update_bucket"
 _LAST_HOURLY_UPDATE_BUCKET: dict[int, str] = {}
+
+
+def _load_hourly_update_buckets() -> None:
+    """Real process startup only (see main()) -- restores the per-chat hourly-update bucket across a restart."""
+    raw = db.get_setting(_HOURLY_UPDATE_BUCKET_SETTING_KEY)
+    if not raw:
+        return
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+    _LAST_HOURLY_UPDATE_BUCKET.update({int(k): v for k, v in data.items()})
 # 2026-08-01 Phase 2, made real Phase 4b: chat-scoped -- each tenant's
 # own recent-events recap shouldn't include another tenant's combat
 # victories/level-ups. Every real caller (a session/character/update in
@@ -2152,6 +2177,7 @@ async def _maybe_post_hourly_status_update(bot, chat_id: int) -> None:
     # either way we don't want to re-check every 60s until the next hour.
     _LAST_HOURLY_UPDATE_AT[chat_id] = now
     _LAST_HOURLY_UPDATE_BUCKET[chat_id] = current_hour_bucket
+    db.set_setting(_HOURLY_UPDATE_BUCKET_SETTING_KEY, json.dumps(_LAST_HOURLY_UPDATE_BUCKET))
 
     if not last_active_row:
         return  # nobody has ever played — nothing to report on
@@ -45301,6 +45327,7 @@ def main() -> None:
     narration_cache.purge_stale_unplaceholdered_rows()
     setup_default_npcs()
     _load_support_feedback_state()
+    _load_hourly_update_buckets()
     application = build_application()
     logger.info("BotApplication created successfully. Starting polling...")
     application.run_polling()

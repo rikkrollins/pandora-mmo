@@ -5439,6 +5439,58 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         mock_ai_party.assert_not_called()
         mock_moltbook_social.assert_not_called()
 
+    async def test_hourly_update_bucket_survives_a_restart(self):
+        """
+        Real live report (2026-10-08, Coffee, dev-bridge screenshot:
+        "I've gotten these updates within 5 to 10 minutes of each
+        other... I want the hourly updates to only show up on the
+        hour"). Root cause: _LAST_HOURLY_UPDATE_BUCKET used to be
+        in-memory only, wiped on every restart -- several real restarts
+        inside the same clock hour (an ordinary deploy day) meant the
+        background world tick saw no bucket recorded right after each
+        one and immediately re-fired an update that had already
+        genuinely posted earlier that same hour. Now persisted via
+        db.get_setting/set_setting, reloaded at startup.
+        """
+        import json
+        from unittest.mock import patch
+
+        class _FakeHourlyBot:
+            def __init__(self):
+                self.sent = []
+
+            async def send_message(self, chat_id, text, message_thread_id=None, **kwargs):
+                self.sent.append(text)
+                return SimpleNamespace(message_id=1)
+
+        user_id, chat_id = 900730, -999
+        make_basic_character(user_id, "HourlyTester", current_location="crossroads_tavern")
+        bot._LAST_HOURLY_UPDATE_BUCKET.pop(chat_id, None)
+
+        fake_bot = _FakeHourlyBot()
+        with patch("bot.narrate_hourly_update", return_value="A quiet hour passes."):
+            await bot._maybe_post_hourly_status_update(fake_bot, chat_id)
+        self.assertTrue(fake_bot.sent, "first call this hour should post")
+        stored_bucket = bot._LAST_HOURLY_UPDATE_BUCKET[chat_id]
+
+        # Real persistence check -- the db setting itself must carry
+        # the bucket, not just the in-memory dict a restart would wipe.
+        persisted_raw = db.get_setting(bot._HOURLY_UPDATE_BUCKET_SETTING_KEY)
+        self.assertIsNotNone(persisted_raw)
+        self.assertEqual(json.loads(persisted_raw).get(str(chat_id)), stored_bucket)
+
+        # Simulate a real restart: in-memory dict wiped, then reloaded
+        # exactly as main() does at startup.
+        bot._LAST_HOURLY_UPDATE_BUCKET.clear()
+        bot._load_hourly_update_buckets()
+        self.assertEqual(bot._LAST_HOURLY_UPDATE_BUCKET.get(chat_id), stored_bucket)
+
+        # A second call in the SAME real hour, post-"restart", must NOT re-post.
+        fake_bot2 = _FakeHourlyBot()
+        with patch("bot.narrate_hourly_update", return_value="A quiet hour passes."):
+            await bot._maybe_post_hourly_status_update(fake_bot2, chat_id)
+        self.assertEqual(fake_bot2.sent, [], "must not re-post within the same real hour after a restart")
+
     def test_support_retries_and_logs_when_a_real_response_has_no_text_after_stripping_think_tags(self):
         """
         Real live bug (2026-08-10, Coffee: "How do i enchant my weapon?"

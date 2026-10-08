@@ -2,6 +2,20 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.754] — Hourly update no longer repeats after a restart
+
+Real dev-bridge report (Coffee, screenshot): "I've gotten these
+updates within 5 to 10 minutes of each other... I want the hourly
+updates to only show up on the hour." Root cause: the per-chat "have I
+already posted this hour" tracker was in-memory only, wiped on every
+restart — several real restarts inside the same clock hour (an
+ordinary deploy day) meant the background world tick saw no record
+right after each one and immediately re-fired an update that had
+already genuinely posted earlier that same hour. Now persisted via
+`db.get_setting`/`set_setting` (same convention as the existing
+support-feedback log) and reloaded at startup — a restart can no
+longer cause a duplicate within the same real hour.
+
 ## [1.27.753] — Support's new-feature answers: deterministic, not guessed
 
 Real follow-up to v1.27.752's Support audit, per Coffee: "have you
