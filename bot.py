@@ -119,7 +119,7 @@ from ai.dm_agent import (
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
-from ai.intent_parser import parse_intents, CREATE_CHARACTER_PHRASES, GUILD_CURRICULUM_STATUS_KEYWORDS
+from ai.intent_parser import parse_intents, _keyword_fallback, GUILD_CURRICULUM_STATUS_KEYWORDS
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.ollama_health import recently_congested as _ollama_recently_timed_out
 from ai.support_agent import answer_support_question, is_support_call_active
@@ -43507,6 +43507,132 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
     await _run_in_user_order(update.effective_user.id, lambda: _route_text_message(transcript_update, context))
 
 
+# See _route_text_message's own Main-topic branch for the real request
+# this answers. Every action here is already real and already exists
+# in adventure_master_handler's own dispatch -- this is a second, much
+# narrower door to the exact same functions, not a reimplementation,
+# so there is nothing here to drift out of sync as those functions
+# evolve. Deliberately excludes anything combat/movement/location/
+# narration-related (attack, move, look, examine, talk_npc, cast_spell,
+# rest, craft, gather, etc.) -- those stay Adventure-only, unchanged.
+MAIN_TOPIC_ALLOWED_ACTIONS = frozenset({
+    "create_character", "list_characters", "switch_character", "delete_character",
+    "check_sheet", "check_inventory", "check_party", "check_affinity",
+    "check_quests", "check_story", "bestiary", "check_achievements",
+    "check_guild_quest", "check_guild_curriculum",
+    "equip_item", "unequip_item", "equip_offhand", "auto_equip",
+    "forge_item", "forge_magic_item", "enchant_item", "discard_item", "dismantle_item",
+    "invite_to_party", "accept_party_invite", "leave_party",
+    "bench_party_member", "unbench_party_member", "set_front_row", "set_back_row",
+    "check_market", "cancel_market", "sell_market", "buy_market", "view_market_listing",
+    "check_weather", "leaderboard", "level_up", "auto_level_up_party",
+    "skill_tree", "check_professions",
+})
+
+
+async def _dispatch_main_topic_action(update: Update, context: ContextTypes.DEFAULT_TYPE, intent: dict, text: str) -> None:
+    """
+    Real dispatcher for MAIN_TOPIC_ALLOWED_ACTIONS (see that constant's
+    own docstring, and _route_text_message's Main-topic branch for the
+    real request this answers). Mirrors the matching branches inside
+    adventure_master_handler's own giant action dispatch exactly --
+    same functions, same argument shapes -- just reachable from Main
+    too, not gated behind topics.is_adventure.
+    """
+    action = intent["action"]
+    if action == "create_character":
+        await _begin_character_creation(update, context)
+    elif action == "check_sheet":
+        await _do_check_sheet(update, intent.get("target"))
+    elif action == "check_inventory":
+        await _do_check_inventory(update)
+    elif action == "check_party":
+        await _do_check_party(update, text)
+    elif action == "check_affinity":
+        await _do_show_affinity_menu(update, text)
+    elif action == "check_quests":
+        await _do_check_quests(update)
+    elif action == "check_story":
+        await _do_show_story_so_far(update)
+    elif action == "bestiary":
+        await _do_bestiary(update)
+    elif action == "check_achievements":
+        await _do_check_achievements(update)
+    elif action in ("check_guild_quest", "check_guild_curriculum"):
+        character = db.get_character(update.effective_user.id, update.effective_chat.id)
+        if character is None or not character.get("guild"):
+            await _safe_send(update, "You're not in a guild — join one first (\"join the Adventurers' Guild\", etc.).")
+        elif action == "check_guild_quest":
+            await _do_check_guild_quest(update, character["guild"])
+        else:
+            await _do_check_guild_curriculum(update, character["guild"])
+    elif action == "list_characters":
+        await _do_list_characters(update)
+    elif action == "switch_character":
+        await _do_switch_character(update, intent.get("target") or text)
+    elif action == "delete_character":
+        await _do_delete_character(update, intent.get("target") or text)
+    elif action == "equip_item":
+        await _do_equip_item(update, intent.get("raw_text", text))
+    elif action == "unequip_item":
+        await _do_unequip_item(update, intent.get("raw_text", text))
+    elif action == "equip_offhand":
+        await _do_equip_offhand(update, intent.get("raw_text", text))
+    elif action == "auto_equip":
+        await _do_auto_equip_gear(update, intent.get("raw_text", text))
+    elif action == "forge_item":
+        await _do_forge_item(update, intent.get("raw_text", text))
+    elif action == "forge_magic_item":
+        await _do_forge_magic_item(update, intent.get("raw_text", text))
+    elif action == "enchant_item":
+        await _do_enchant_item(update, intent.get("raw_text", text))
+    elif action == "discard_item":
+        await _do_discard_item(update, intent.get("raw_text", text))
+    elif action == "dismantle_item":
+        await _do_dismantle_item(update, intent.get("raw_text", text))
+    elif action == "invite_to_party":
+        await _do_invite_to_party(update, intent.get("target") or "")
+    elif action == "accept_party_invite":
+        await _do_accept_party_invite(update)
+    elif action == "leave_party":
+        await _do_leave_party(update)
+    elif action == "bench_party_member":
+        await _do_bench_member(update, intent.get("target") or "")
+    elif action == "unbench_party_member":
+        await _do_unbench_member(update, intent.get("target") or "")
+    elif action == "set_front_row":
+        await _do_set_formation_row(update, intent.get("target") or "", "front")
+    elif action == "set_back_row":
+        await _do_set_formation_row(update, intent.get("target") or "", "back")
+    elif action == "check_market":
+        _market_seller_filter = _infer_market_seller_filter(text, update.effective_chat.id, update.effective_user.id)
+        await _do_check_market(
+            update,
+            filter_type=None if _market_seller_filter is not None else _infer_market_filter_type(text),
+            filter_seller_id=_market_seller_filter,
+        )
+    elif action == "cancel_market":
+        await _do_cancel_market_intent(update, text)
+    elif action == "sell_market":
+        await _do_sell_market_intent(update, text)
+    elif action == "buy_market":
+        await _do_buy_market_intent(update, text)
+    elif action == "view_market_listing":
+        await _do_view_market_listing_intent(update, text)
+    elif action == "check_weather":
+        await _do_check_weather(update)
+    elif action == "leaderboard":
+        await _do_leaderboard(update)
+    elif action == "level_up":
+        await _do_level_up(update, intent.get("raw_text", text))
+    elif action == "auto_level_up_party":
+        await _do_auto_level_up_party(update)
+    elif action == "skill_tree":
+        await _do_show_skill_tree(update)
+    elif action == "check_professions":
+        await _do_check_professions(update)
+
+
 async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     raw_thread_id = update.effective_message.message_thread_id  # may genuinely be None for Main
     thread_id = raw_thread_id or 0
@@ -43519,27 +43645,32 @@ async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if topics.is_main(chat_id, raw_thread_id):
         if chat_id in _PENDING_ONBOARDING and await _handle_onboarding_reply(update, context, chat_id):
             return
-        # Real live gap found 2026-10-08 (a player asked directly in
-        # Main): the pinned welcome guide (scripts/pin_main_welcome.py)
-        # explicitly promises "I want to create a character" works
-        # "right here in Main, or in the Adventure topic" -- but Main
-        # was otherwise completely silent, so that promise was simply
-        # false. A narrow, deliberate exception to the rule below, not
-        # a reversal of it: ONLY a real create-character phrase (the
-        # same CREATE_CHARACTER_PHRASES list ai/intent_parser.py's own
-        # deterministic fallback already matches, imported directly so
-        # there's one source of truth, never two copies that could
-        # drift) is ever acted on here -- everything else in Main stays
-        # exactly as silent as before, and this never runs the real
-        # (Ollama-backed) intent classifier against ordinary Main chat.
-        # _begin_character_creation itself already posts its own first
-        # reply into the Adventure topic (message_thread_id=topics.
-        # thread_id_for(..., "adventure")), so the rest of the flow
-        # naturally continues there, not in Main.
+        # Real live request (2026-10-08, Coffee, across several
+        # messages): "in main topic players can view character sheet,
+        # view players they have created, switch players, equip,
+        # forge, enchant (anything a player would need to maintain
+        # their character)... let them view quests also, bestiary,
+        # story so far also, guild stuff as well... things that dont
+        # need to be cluttering the adventure topic that is passive for
+        # the player can be handled in Main... include party commands,
+        # joining, creating, leaving a party... market as well shud be
+        # available in main." A narrow, deliberate exception to the
+        # rule below, not a reversal of it: classify with the free,
+        # instant, purely-deterministic keyword fallback ONLY (never
+        # the real Ollama-backed classifier -- ordinary Main chit-chat
+        # must never cost a model call), and only ever act on it when
+        # the result is in MAIN_TOPIC_ALLOWED_ACTIONS -- a curated set
+        # of real, already-existing actions that only ever read or
+        # maintain a character/party/market, never advance the game
+        # world itself (no combat, no movement, no location-based
+        # interaction, no narration). Everything else in Main stays
+        # exactly as silent as before.
         message_text = update.effective_message.text or ""
-        if update.effective_user is not None and any(p in message_text.lower() for p in CREATE_CHARACTER_PHRASES):
-            await _begin_character_creation(update, context)
-            return
+        if update.effective_user is not None and message_text:
+            intent = _keyword_fallback(message_text, [])
+            if intent["action"] in MAIN_TOPIC_ALLOWED_ACTIONS:
+                await _dispatch_main_topic_action(update, context, intent, message_text)
+                return
         return  # Main is human-to-human chat only — the bot never speaks here otherwise
 
     if topics.is_adventure(chat_id, thread_id):

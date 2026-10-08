@@ -27969,6 +27969,63 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("creation", ctx.user_data)
         self.assertEqual(sink, [])
 
+    async def test_main_dispatches_real_character_maintenance_actions(self):
+        """
+        Real live request (2026-10-08, Coffee, several messages): Main
+        should handle "anything a player would need to maintain their
+        character" -- sheet, roster, quests, bestiary, story so far,
+        guild training, equip/forge/enchant, party commands, market,
+        achievements, weather, leaderboard, leveling, skills,
+        professions -- without cluttering the passive Adventure feed.
+        Spot-checks a representative sample of MAIN_TOPIC_ALLOWED_
+        ACTIONS end to end through the real _route_text_message path
+        (not just the keyword classifier), confirming each reaches its
+        real existing handler function with a real reply.
+        """
+        user_id = 900722
+        make_basic_character(user_id, "MainMaintenanceTester", current_location="crossroads_tavern")
+        ctx = SimpleNamespace(user_data={})
+
+        sink = []
+        await bot._route_text_message(FakeUpdate(user_id, "check my sheet", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+        self.assertTrue(any("MainMaintenanceTester" in m for m in sink), sink)
+
+        sink = []
+        await bot._route_text_message(FakeUpdate(user_id, "check my inventory", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+        self.assertTrue(sink, "check_inventory should have replied")
+
+        sink = []
+        await bot._route_text_message(FakeUpdate(user_id, "list my characters", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+        self.assertTrue(any("MainMaintenanceTester" in m for m in sink), sink)
+
+        sink = []
+        await bot._route_text_message(FakeUpdate(user_id, "check my quests", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+        self.assertTrue(sink, "check_quests should have replied")
+
+        sink = []
+        await bot._route_text_message(FakeUpdate(user_id, "check the market", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+        self.assertTrue(sink, "check_market should have replied")
+
+        sink = []
+        await bot._route_text_message(FakeUpdate(user_id, "what's the weather", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+        self.assertTrue(sink, "check_weather should have replied")
+
+    async def test_main_still_ignores_combat_and_movement_actions(self):
+        """
+        Companion case: the Main exception must stay scoped to passive
+        character-maintenance actions only -- a world-advancing action
+        (attack, movement, look) gets zero reply from Main, same as any
+        ordinary chat message, even from a player with a real character.
+        """
+        user_id = 900723
+        make_basic_character(user_id, "MainCombatGuard", current_location="crossroads_tavern")
+        ctx = SimpleNamespace(user_data={})
+
+        for text in ("I attack the goblin", "I look around", "I move north"):
+            sink = []
+            await bot._route_text_message(FakeUpdate(user_id, text, sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+            self.assertEqual(sink, [], f"{text!r} must stay silent in Main")
+
     async def test_onboarding_public_world_choice_points_at_the_real_invite_link(self):
         """
         Companion case to the test above: choosing "public" must never

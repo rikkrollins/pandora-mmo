@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.749] — Main now handles real character/party/market maintenance
+
+Real live request (Coffee): "things that dont need to be cluttering
+the adventure topic that is passive for the player can be handled in
+Main" — character sheet, roster (list/switch/delete character),
+quests, bestiary, story so far, guild quest/training, equip/forge/
+enchant/discard/dismantle, party commands (invite/accept/leave/bench/
+unbench/formation), the market (check/buy/sell/cancel/view listing),
+achievements, weather, leaderboard, leveling up, skill tree, and
+professions all now work directly in Main, not just Adventure. A new
+`MAIN_TOPIC_ALLOWED_ACTIONS` allowlist + `_dispatch_main_topic_action`
+reuse the exact same real functions Adventure's own dispatch already
+calls — nothing reimplemented — classified by the free, instant,
+purely-deterministic keyword fallback only (never the Ollama-backed
+classifier, so ordinary Main chat never costs a model call).
+Combat, movement, and location-based/narration actions deliberately
+stay Adventure-only and unchanged — Main is still otherwise silent for
+everything outside this curated maintenance set.
+
 ## [1.27.748] — "What is my guild training?" now works from Adventure
 
 Real dev-bridge report (Coffee): a player asked "What is my guild
