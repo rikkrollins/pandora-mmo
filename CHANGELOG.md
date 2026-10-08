@@ -2,6 +2,17 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.763] — "Keep it and accept the reward" now resolves correctly
+
+Found via the standing topic-activity monitoring cron: a player typed
+"Keep it and accept the reward" to a real board-quest/miniboss reward
+choice and got misclassified as a party-invite action instead (fell
+through to the model, which hallucinated). The only deterministic
+match was the literal, exact button string "keep it and collect the
+reward" — any natural paraphrase missed entirely. Broadened to the
+real shared signal (keeping it, in a reward context); "leave it be
+instead"'s own counterpart choice gets the same real tolerance.
+
 ## [1.27.762] — Levers/switches/chests no longer reset on a restart
 
 Real live follow-up (Coffee, on behalf of Elduinn: "im still not

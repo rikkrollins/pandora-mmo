@@ -32102,6 +32102,24 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_keyword_fallback("I choose the Archery fighting style", [])["action"], "choose_fighting_style")
         self.assertEqual(_keyword_fallback("I choose to keep it and collect the reward", [])["action"], "resolve_choice")
 
+    def test_keep_it_reward_choice_tolerates_a_natural_paraphrase(self):
+        """
+        Real live bug (2026-10-08, found via topic-activity
+        monitoring): "Keep it and accept the reward" fell all the way
+        through to the model, which then hallucinated action=
+        accept_party_invite -- the only deterministic match for this
+        real board-quest/miniboss reward choice was the literal, exact
+        button string "keep it and collect the reward", so a natural
+        paraphrase ("accept" instead of "collect") missed entirely.
+        Broadened to the real shared signal; "leave it be instead"'s
+        own counterpart choice gets the same real tolerance.
+        """
+        from ai.intent_parser import _keyword_fallback
+        self.assertEqual(_keyword_fallback("Keep it and accept the reward", [])["action"], "resolve_choice")
+        self.assertEqual(_keyword_fallback("Keep it and collect the reward", [])["action"], "resolve_choice")
+        self.assertEqual(_keyword_fallback("leave it alone", [])["action"], "resolve_choice")
+        self.assertEqual(_keyword_fallback("leave it be instead", [])["action"], "resolve_choice")
+
     # -- Real, mastery-gated dual wielding (2026-09-04) -----------------
     def test_can_dual_wield_refuses_below_mastery_and_allows_at_100_percent(self):
         user_id, chat_id = 900620, -900620

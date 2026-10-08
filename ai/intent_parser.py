@@ -1841,10 +1841,21 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     ):
         return {**base, "action": "choose_fighting_style"}
 
+    # Real live bug (2026-10-08, found via topic-activity monitoring):
+    # "Keep it and accept the reward" fell all the way through to the
+    # model (which then hallucinated accept_party_invite) -- the only
+    # deterministic match here was the literal, exact board-quest/
+    # miniboss reward button string "keep it and collect the reward",
+    # so any natural paraphrase of it ("accept" instead of "collect",
+    # or just "keep it" alone) missed entirely. Broadened to the real
+    # shared signal (keeping it, in a reward context) rather than one
+    # exact sentence; "leave it be instead"'s own counterpart choice
+    # gets the same real broadening for the identical reason.
     if any(w in lowered for w in ["i choose", "i decide to", "i decided to", "i've decided", "ive decided",
                                     "i have decided", "i'll go with", "ill go with",
-                                    "my choice is", "i'll take the", "ill take the",
-                                    "keep it and collect the reward", "leave it be instead"]):
+                                    "my choice is", "i'll take the", "ill take the"]) or (
+        "keep it" in lowered and "reward" in lowered
+    ) or any(w in lowered for w in ["leave it be", "leave it alone"]):
         return {**base, "action": "resolve_choice"}
 
     if any(w in lowered for w in ["i accept", "i'll do it", "ill do it", "count me in", "i'll help",
