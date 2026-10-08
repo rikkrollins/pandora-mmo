@@ -19315,6 +19315,41 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Forge Guild", text)
         self.assertNotIn("the The", text)
 
+    async def test_blacksmith_menu_has_a_dismantle_button_routing_to_the_real_confirm_flow(self):
+        """
+        Real dev-bridge request (2026-10-08, Coffee: "We need to be
+        able to dismantle from the forge"). Dismantling itself already
+        existed (an item's own view screen has a real Dismantle
+        button), but the Forge menu -- where a player is already
+        thinking about gear -- had no entry point into it. Confirms
+        the new button is on the landing screen, the category screen
+        lists a real owned eligible item and skips an equipped one, and
+        tapping it reaches the exact same real "are you sure?" confirm
+        screen the item-view path already uses -- not a second,
+        divergent implementation.
+        """
+        user_id = 951050
+        make_basic_character(user_id, "ForgeDismantleTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.add_item(user_id, -999, "longsword", 1)
+        db.add_item(user_id, -999, "shortsword", 1)
+        db.update_character(user_id, -999, equipped_weapon="shortsword")
+
+        landing_text, landing_callbacks = await self._render_category(user_id, bot._do_show_blacksmith_menu(FakeUpdate(user_id, "", [])))
+        self.assertIn("bsmenu|dismantle", landing_callbacks)
+
+        update = FakeUpdate(user_id, "", [])
+        text, callback_data = await self._render_category(user_id, bot._do_show_blacksmith_category(update, "dismantle"))
+        self.assertIn("itemview|dismantleconfirm|longsword", callback_data)
+        # The currently-equipped shortsword must be skipped -- same real equipped-item guard the confirm flow itself enforces.
+        self.assertNotIn("itemview|dismantleconfirm|shortsword", callback_data)
+
+        sink = []
+        confirm_update = FakeCallbackUpdate(user_id, "itemview|dismantleconfirm|longsword", sink)
+        await bot.itemview_callback(confirm_update, DummyContext())
+        self.assertTrue(any("Are you sure" in s for s in sink), sink)
+        character = db.get_character(user_id, -999)
+        self.assertIn("longsword", character["inventory"])  # not yet destroyed -- confirm step only
+
     async def test_cooking_menu_lists_real_recipes_and_shows_mastery_pct(self):
         """
         Real live request (2026-09-15, dev-bridge, Coffee: "include a

@@ -24488,6 +24488,7 @@ async def _do_show_blacksmith_menu(update: Update) -> None:
         [InlineKeyboardButton("✨ Forge Magic Item", callback_data="bsmenu|forge")],
         [InlineKeyboardButton("🔧 Repair", callback_data="bsmenu|repair")],
         [InlineKeyboardButton("🌌 Artifact Reforging", callback_data="bsmenu|artifact")],
+        [InlineKeyboardButton("🧨 Dismantle", callback_data="bsmenu|dismantle")],
     ])
     await _safe_send(update, text, reply_markup=_with_menu_button(keyboard), speak=False)
 
@@ -24629,6 +24630,27 @@ async def _do_show_blacksmith_category(update: Update, category: str) -> None:
                 button_rows.append([InlineKeyboardButton(f"🌌 Forge {item['name']} into an Artifact", callback_data=f"bsmenu|artifactdo|{item_id}")])
             if not button_rows:
                 locked_lines.append("You don't own a real mythic weapon, armor, or shield to forge into an artifact yet.")
+    elif category == "dismantle":
+        # Real dev-bridge request (2026-10-08, Coffee: "We need to be
+        # able to dismantle from the forge") -- dismantling itself
+        # already existed (an item's own view screen has a real
+        # Dismantle button, itemview|dismantleconfirm), but the Forge's
+        # own menu -- where a player is already thinking about gear --
+        # had no entry point into it at all. Reuses that exact same
+        # real confirm-then-destroy flow (DISMANTLE_ELIGIBLE_TYPES,
+        # the "are you sure?" step, the equipped-item guard) via one
+        # tap here, not a second implementation.
+        title = "🧨 **The Forge — Dismantle**"
+        intro = "Break down a weapon, armor, shield, ring, or amulet you own for its real crafting materials back. This destroys the item permanently."
+        for item_id in inventory:
+            item = items_module.get_item(item_id)
+            if item is None or item.get("type") not in DISMANTLE_ELIGIBLE_TYPES:
+                continue
+            if db.is_item_equipped(character, item_id):
+                continue
+            button_rows.append([InlineKeyboardButton(f"🧨 {_item_menu_label(item)}", callback_data=f"itemview|dismantleconfirm|{item_id}")])
+        if not button_rows:
+            locked_lines.append("You don't own anything dismantle-eligible right now (and anything equipped must be unequipped first).")
     else:
         return
 
@@ -24773,7 +24795,7 @@ async def _bsmenu_callback_inner(update: Update, context: ContextTypes.DEFAULT_T
     await _safe_answer(query)
     if action == "root":
         await _do_show_blacksmith_menu(update)
-    elif action in ("craft", "advanced", "forge", "repair", "artifact"):
+    elif action in ("craft", "advanced", "forge", "repair", "artifact", "dismantle"):
         await _do_show_blacksmith_category(update, action)
     elif action == "repairdo" and len(parts) >= 3:
         await _do_repair_item(update, parts[2])

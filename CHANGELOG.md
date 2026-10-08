@@ -2,6 +2,18 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.758] — Dismantle button added to the Forge menu
+
+Real dev-bridge request (Coffee): "We need to be able to dismantle
+from the forge." Dismantling already existed (an item's own view
+screen had a real Dismantle button), but the Forge menu itself — where
+a player is already thinking about gear — had no entry point into it.
+New 🧨 Dismantle button on the Forge landing screen lists owned
+dismantle-eligible items (skipping anything currently equipped,
+same real guard the confirm flow already enforces) and routes
+straight into the exact same real "are you sure?" confirm screen —
+not a second implementation.
+
 ## [1.27.757] — Market sorting + "usable by me" + "best for me" upgrades
 
 Real dev-bridge request (Coffee): "I want sorting options for the
