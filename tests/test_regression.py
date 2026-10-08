@@ -5006,6 +5006,76 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Main", answer)
         self.assertIn("Adventure", answer)
 
+    def test_support_main_topic_question_gets_a_real_deterministic_answer(self):
+        """
+        Real support-topic gap audit (2026-10-08, per Coffee: "make
+        sure support topic gaps have been filled... everything new we
+        implemented recently must have a resource of information").
+        v1.27.749's whole new Main-topic maintenance surface had ZERO
+        grounding anywhere in ai/support_agent.py -- a player asking
+        "what can I do in Main" had no real fact to be answered from at
+        all. Answered deterministically (same "don't trust a small
+        model on a fact with one correct answer" principle as every
+        other deterministic answer here) so this can never drift out
+        of sync or get summarized wrong.
+        """
+        import ai.support_agent as support_agent_module
+        answer = support_agent_module.answer_support_question("What can I do in Main?")
+        self.assertIn("forge", answer.lower())
+        self.assertIn("market", answer.lower())
+        self.assertIn("guild training", answer.lower())
+        self.assertIn("Adventure", answer)
+
+    def test_support_repeat_boss_scaling_question_is_not_hallucinated(self):
+        """
+        Real support-topic gap audit (2026-10-08, per Coffee). Confirmed
+        LIVE (real, unmocked Ollama call) that this exact question got a
+        fully invented answer ("repeated combat amplifies damage
+        potential through bound Remnants... consumes resources for
+        added power boosts") -- Remnants are real, but have nothing to
+        do with this mechanic. Answered deterministically now so this
+        specific, real, correct fact can never be hallucinated again.
+        """
+        import ai.support_agent as support_agent_module
+        answer = support_agent_module.answer_support_question("Does a boss get harder if I fight it a second time?")
+        self.assertIn("first fight", answer.lower())
+        self.assertIn("beaten", answer.lower())
+        self.assertNotIn("remnant", answer.lower())
+
+    def test_support_hint_statue_question_gets_a_real_deterministic_answer(self):
+        """Same audit as above -- answered deterministically for reliability even though a live spot-check happened to get this one right."""
+        import ai.support_agent as support_agent_module
+        answer = support_agent_module.answer_support_question("Does the hint statue update if I clear what it warns about?")
+        self.assertIn("recomputes", answer.lower())
+        self.assertIn("examine", answer.lower())
+
+    def test_support_faq_questions_answer_and_link_the_real_discussion(self):
+        """
+        Real request (2026-10-08, per Coffee: "if questions they ask is
+        similar to what the F&Q covers please give them the info and
+        refer them to the resource available"). The real GitHub FAQ
+        Discussion (github.com/rikkrollins/pandora-mmo/discussions/1)
+        covers 4 onboarding/meta questions -- each answered here with
+        the same real facts plus a link to that exact URL.
+        """
+        import ai.support_agent as support_agent_module
+        faq_url = "github.com/rikkrollins/pandora-mmo/discussions/1"
+        install_answer = support_agent_module.answer_support_question("Do I need to install anything?")
+        self.assertIn("no install", install_answer.lower())
+        self.assertIn(faq_url, install_answer)
+
+        ai_answer = support_agent_module.answer_support_question("Can an AI agent play this game?")
+        self.assertIn("human or an ai", ai_answer.lower())
+        self.assertIn(faq_url, ai_answer)
+
+        cost_answer = support_agent_module.answer_support_question("Is this free?")
+        self.assertIn("free", cost_answer.lower())
+        self.assertIn(faq_url, cost_answer)
+
+        selfhost_answer = support_agent_module.answer_support_question("Can I run my own copy of this game?")
+        self.assertIn("campaign.json", selfhost_answer)
+        self.assertIn(faq_url, selfhost_answer)
+
     def test_support_item_comparison_corrects_a_nonexistent_item_instead_of_asking_the_model(self):
         """
         Real live bug (2026-08-13, topic-activity monitoring): "Which is

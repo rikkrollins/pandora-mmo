@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.753] — Support's new-feature answers: deterministic, not guessed
+
+Real follow-up to v1.27.752's Support audit, per Coffee: "have you
+tested the support topic... everything new we implemented recently
+must have a resource of information." Live-tested it — confirmed the
+model fully hallucinated an answer about repeat-boss scaling ("repeated
+combat amplifies damage potential through bound Remnants... consumes
+resources for added power boosts" — invented, Remnants are real but
+unrelated). Fixed the same way this file fixes every other fact with
+one correct answer: deterministic, code-guaranteed replies for repeat-
+boss scaling, the hint statue, and "what can I do in Main" (zero
+grounding existed for any of these). Also added real answers for the
+4 topics the GitHub FAQ Discussion covers (install/cost/AI agents/
+self-hosting), each pointing to that Discussion for more. Confirmed
+live, post-fix: all three previously-tested questions now return
+instant, correct, non-hallucinated answers.
+
 ## [1.27.752] — Support topic gap audit + pinned "how to use it" guide
 
 Per Coffee's request to audit the Support topic for gaps and post a

@@ -130,7 +130,29 @@ Status conditions that can affect a character in combat, each with a real \
 mechanical effect (not just flavor text): prone, poisoned, blinded, \
 silenced, paralyzed, frightened. A character reduced to 0 HP starts making \
 death saves -- 3 failures means real, permanent death, reversible only by \
-a genuine Revivify spell/scroll, not an instant free undo."""
+a genuine Revivify spell/scroll, not an instant free undo.
+
+Which TOPIC a question/action belongs in (real, current, don't guess): \
+"Adventure" is for actually playing -- moving, fighting, casting, talking \
+to NPCs, exploring. "Main" now ALSO directly handles real character \
+maintenance -- character sheet, your roster (list/switch/delete \
+characters), creating a character, quests, bestiary, story so far, guild \
+quest/training, equip/unequip/auto-equip gear, forge/enchant/discard/ \
+dismantle items, party commands (invite/accept/leave/bench/formation), \
+the market (check/buy/sell/cancel/view a listing), achievements, weather, \
+leaderboard, leveling up, the skill tree, and professions -- all without \
+needing to go to Adventure for those. "Support" (here) is for how-to \
+questions, not actions.
+
+Two more real, current mechanics worth knowing: (1) a named boss with a \
+hand-set difficulty level stays exactly as first encountered on your \
+FIRST fight against it, but once you've already beaten that specific \
+boss before, fighting it again (e.g. for a later guild quest) scales it \
+up to match how much your own level has grown since -- a real, deliberate \
+difficulty increase, not a bug. (2) a dungeon's hint statue (the "worn \
+statue" lockable) recomputes its warning live every time you examine it \
+-- it only ever warns about a miniboss, locked gate, or fight that's \
+still actually unresolved right now, never one you've already cleared."""
 
 CRITICAL_GROUNDING_RULE = """
 
@@ -795,6 +817,134 @@ def _deterministic_enchant_item_answer() -> str:
         "member, Master/Grandmaster demand rebirth #1/#2, and the true Godsforged enchantment demands "
         "rebirth #3 and a Godshard (found only in a boss's remains)."
     )
+
+
+_MAIN_TOPIC_QUESTION_WORDS = [
+    "what can i do in main", "what can i do in the main", "what works in main",
+    "what works in the main topic", "can i check my sheet in main", "does main work",
+    "can i use main", "can i do things in main", "what is main for", "what's main for",
+]
+
+
+def _deterministic_main_topic_answer() -> str:
+    """
+    Real support-topic gap (2026-10-08, per Coffee: "make sure support
+    topic gaps have been filled... everything new we implemented
+    recently must have a resource of information"). A real, growing
+    list (bot.py's own MAIN_TOPIC_ALLOWED_ACTIONS) rather than
+    something trustworthy to paraphrase from a prompt header alone --
+    answered directly, same "don't trust a small model on a fact that
+    has one correct answer" principle as every other deterministic
+    answer in this file.
+    """
+    return (
+        "The Main topic now handles real character maintenance directly, without needing Adventure:\n"
+        "- Character: check your sheet, create a character, list/switch/delete your characters\n"
+        "- Gear: equip/unequip/auto-equip, forge, forge a magic item, enchant, discard, dismantle\n"
+        "- Progress: quests, bestiary, story so far, achievements, leaderboard, weather, level up, "
+        "the skill tree, professions\n"
+        "- Guild: guild quest, guild training/curriculum\n"
+        "- Party: invite, accept an invite, leave, bench/unbench, front/back row\n"
+        "- Market: check, buy, sell, cancel, view a listing\n\n"
+        "Actually playing — moving, fighting, casting, talking to NPCs, exploring — still only works in Adventure."
+    )
+
+
+_REPEAT_BOSS_SCALING_QUESTION_WORDS = [
+    "boss get harder", "boss harder the second", "boss scale", "does a boss scale",
+    "fight a boss again", "refight a boss", "fight it a second time", "beaten a boss before",
+    "boss gets stronger", "boss stay the same level",
+]
+
+
+def _deterministic_repeat_boss_scaling_answer() -> str:
+    """
+    Real support-topic gap audit (2026-10-08, per Coffee). Confirmed
+    live: the model answered this with a fully invented mechanism
+    ("repeated combat amplifies damage potential through bound
+    Remnants") -- real Remnants exist in this game, but have nothing
+    to do with this. Same "don't trust a small model on a fact with
+    one correct answer" principle as every other deterministic answer
+    here -- see rules.leveling.repeat_boss_level_scale_multiplier's
+    own docstring for the real mechanic this describes.
+    """
+    return (
+        "A named boss with its own hand-set difficulty stays exactly as you first found it on your "
+        "FIRST fight against it, no matter your level. But once you've already beaten that specific "
+        "boss before, fighting it again later (e.g. a guild quest sending you back) scales it up to "
+        "match how much your own level has grown since your last win — a real, deliberate increase, "
+        "not a bug and not random."
+    )
+
+
+_HINT_STATUE_QUESTION_WORDS = [
+    "hint statue", "worn statue", "does the statue update", "statue still warn",
+]
+
+
+def _deterministic_hint_statue_answer() -> str:
+    """
+    Real support-topic gap audit (2026-10-08, per Coffee). The model
+    answered this one correctly in a live test, but non-deterministically
+    (no guarantee it stays right next time) -- answered directly for the
+    same reliability reason as every other deterministic fact here. See
+    bot._live_dungeon_hint_lines's own docstring for the real mechanic.
+    """
+    return (
+        "Yes — a dungeon's hint statue recomputes its warning live every time you examine it. It only "
+        "ever warns about a miniboss, locked gate, or fight that's still genuinely unresolved right "
+        "now, never one you've already cleared."
+    )
+
+
+_FAQ_DISCUSSION_URL = "https://github.com/rikkrollins/pandora-mmo/discussions/1"
+
+_FAQ_INSTALL_QUESTION_WORDS = [
+    "need to install", "do i need an account", "do i need to download", "how do i join the game",
+]
+_FAQ_AI_AGENT_QUESTION_WORDS = [
+    "can an ai play", "can a bot play", "can an ai agent play", "ai agent join",
+]
+_FAQ_COST_QUESTION_WORDS = [
+    "is this free", "does it cost", "is there a cost", "do i have to pay",
+]
+_FAQ_SELF_HOST_QUESTION_WORDS = [
+    "run my own copy", "host my own", "contribute content", "contribute to the game",
+    "add my own content", "run this myself",
+]
+
+
+def _deterministic_faq_answer(lowered_question: str) -> str | None:
+    """
+    Real support-topic gap audit (2026-10-08, per Coffee: "if questions
+    they ask is similar to what the FAQ covers please give them the
+    info and refer them to the resource available"). The real GitHub
+    FAQ Discussion (_FAQ_DISCUSSION_URL) covers 4 onboarding/meta
+    questions -- answered directly here (same real facts, not
+    paraphrased by the model) with a pointer to the fuller resource,
+    rather than trusting the model to either know this static content
+    or find/cite the real URL correctly on its own.
+    """
+    if any(w in lowered_question for w in _FAQ_INSTALL_QUESTION_WORDS):
+        return (
+            "No install needed — join the Telegram group, say \"I want to create a character,\" and "
+            f"you're playing immediately.\n\nMore onboarding questions: {_FAQ_DISCUSSION_URL}"
+        )
+    if any(w in lowered_question for w in _FAQ_AI_AGENT_QUESTION_WORDS):
+        return (
+            "Yes — this game never checks whether whoever's typing is human or an AI, it only reads "
+            "what they said. Any AI-driven player that can send a Telegram message can create a "
+            f"character and play by the exact same rules as a human.\n\nMore: {_FAQ_DISCUSSION_URL}"
+        )
+    if any(w in lowered_question for w in _FAQ_COST_QUESTION_WORDS):
+        return f"No, it's free to play.\n\nMore: {_FAQ_DISCUSSION_URL}"
+    if any(w in lowered_question for w in _FAQ_SELF_HOST_QUESTION_WORDS):
+        return (
+            "See the \"Getting Started\" section of the README and SETUP_GUIDE.md — the whole game "
+            "world lives in one data file (campaigns/default/campaign.json), separate from the code, "
+            f"so adding content doesn't require touching Python.\n\nMore: {_FAQ_DISCUSSION_URL}"
+        )
+    return None
 
 
 _BLACKSMITH_QUESTION_WORDS = [
@@ -1481,6 +1631,15 @@ def answer_support_question(
         return _deterministic_enchant_item_answer()
     if any(w in lowered for w in _BLACKSMITH_QUESTION_WORDS):
         return _deterministic_blacksmith_answer()
+    if any(w in lowered for w in _MAIN_TOPIC_QUESTION_WORDS):
+        return _deterministic_main_topic_answer()
+    if any(w in lowered for w in _REPEAT_BOSS_SCALING_QUESTION_WORDS):
+        return _deterministic_repeat_boss_scaling_answer()
+    if any(w in lowered for w in _HINT_STATUE_QUESTION_WORDS):
+        return _deterministic_hint_statue_answer()
+    faq_answer = _deterministic_faq_answer(lowered)
+    if faq_answer is not None:
+        return faq_answer
     if character and any(w in lowered for w in _XP_QUESTION_WORDS):
         return _deterministic_xp_answer(character)
     if character and any(w in lowered for w in _ACTIVE_CHARACTER_QUESTION_WORDS):
