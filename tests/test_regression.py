@@ -27930,6 +27930,45 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pinned post", sent_text)
         self.assertEqual(sent_parse_mode, "HTML")
 
+    async def test_create_character_phrase_works_directly_in_main(self):
+        """
+        Real live gap (2026-10-08): a player asked to create a
+        character directly in Main, and nothing happened -- Main is
+        otherwise silent by design, but the pinned welcome guide
+        (scripts/pin_main_welcome.py) explicitly promises this exact
+        phrase works "right here in Main, or in the Adventure topic."
+        A narrow exception now honors that promise for real
+        create-character phrasing specifically (CREATE_CHARACTER_
+        PHRASES, shared with ai/intent_parser.py's own deterministic
+        fallback so the two can't drift apart) -- everything else in
+        Main must stay completely untouched.
+        """
+        user_id = 900720
+        sink = []
+        ctx = SimpleNamespace(user_data={})
+        # thread_id=None on FakeUpdate/FakeMessage defaults to Adventure
+        # for convenience (most tests want that) -- Main itself must be
+        # requested explicitly via its own real topic id here.
+        update = FakeUpdate(user_id, "I want to create a character", sink, thread_id=config.TOPIC_MAIN_ID)
+        await bot._route_text_message(update, ctx)
+        self.assertEqual(ctx.user_data.get("creation", {}).get("step"), "name")
+        self.assertTrue(any("Let's create your character" in m for m in sink))
+
+    async def test_main_stays_silent_for_ordinary_chat(self):
+        """
+        Companion case to the test above -- confirms the narrow
+        create-character exception didn't quietly widen Main back into
+        a general handler. An ordinary chat message gets no reply and
+        starts no character-creation flow.
+        """
+        user_id = 900721
+        sink = []
+        ctx = SimpleNamespace(user_data={})
+        update = FakeUpdate(user_id, "hey, anyone around tonight?", sink, thread_id=config.TOPIC_MAIN_ID)
+        await bot._route_text_message(update, ctx)
+        self.assertNotIn("creation", ctx.user_data)
+        self.assertEqual(sink, [])
+
     async def test_onboarding_public_world_choice_points_at_the_real_invite_link(self):
         """
         Companion case to the test above: choosing "public" must never

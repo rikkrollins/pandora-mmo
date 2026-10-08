@@ -319,6 +319,18 @@ def _fuzzy_match_spell_name(clause: str) -> str | None:
     return best_spell
 
 
+# Module-level (not private) so bot.py's Main-topic handler can match
+# against the exact same phrase list, rather than keeping its own copy
+# that could silently drift from this one (2026-10-08, see the real
+# gap this closed: the pinned welcome guide promises "create a
+# character" works directly in Main, which this list makes true).
+CREATE_CHARACTER_PHRASES = [
+    "create a character", "make a character", "new character", "join the game",
+    "create character", "make character", "second character", "another character",
+    "additional character",
+]
+
+
 def _split_target_clause(text: str) -> tuple[str, str | None]:
     """Splits off a trailing "at/on/against <target>" clause, if present."""
     match = re.search(r"\s+(?:at|on|against)\s+", text)
@@ -1627,11 +1639,7 @@ def _keyword_fallback(text: str, known_npc_names: list[str], environment_name: s
     # phrasing (a player's own second character, not a request about an
     # NPC), same narrow "fix the observed collision" pattern as every
     # other phrasing gap here.
-    if any(w in lowered for w in [
-        "create a character", "make a character", "new character", "join the game",
-        "create character", "make character", "second character", "another character",
-        "additional character",
-    ]):
+    if any(w in lowered for w in CREATE_CHARACTER_PHRASES):
         return {**base, "action": "create_character"}
 
     # Checked BEFORE check_inventory below: "what items do you have for

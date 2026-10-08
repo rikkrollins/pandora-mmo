@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.747] — "Create a character" now actually works in Main
+
+Real live gap: a player asked to create a character directly in Main
+and nothing happened — the pinned welcome guide explicitly promises
+"say it right here in Main, or in the Adventure topic," but Main was
+otherwise completely silent by design, so that promise was simply
+false. A narrow, deliberate exception now honors it: a real
+create-character phrase typed in Main starts character creation for
+real (reusing the exact same phrase list ai/intent_parser.py's own
+deterministic fallback already matches, now shared so the two can't
+drift apart) — everything else in Main stays exactly as silent as
+before, and this never runs the Ollama-backed intent classifier
+against ordinary Main chat. The first reply (and the rest of the
+flow) still lands in the Adventure topic, same as always.
+
 ## [1.27.746] — Repeat boss quest fights now scale with your level
 
 Real player question (Adventure topic, forwarded by Coffee, who then

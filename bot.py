@@ -119,7 +119,7 @@ from ai.dm_agent import (
     _fallback_hourly_update, _fallback_narration,
     is_narration_call_active,
 )
-from ai.intent_parser import parse_intents
+from ai.intent_parser import parse_intents, CREATE_CHARACTER_PHRASES
 from ai.npc_agent import register_npc, talk_to_npc, generate_ambient_line, _NPCS
 from ai.ollama_health import recently_congested as _ollama_recently_timed_out
 from ai.support_agent import answer_support_question, is_support_call_active
@@ -43505,7 +43505,28 @@ async def _route_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if topics.is_main(chat_id, raw_thread_id):
         if chat_id in _PENDING_ONBOARDING and await _handle_onboarding_reply(update, context, chat_id):
             return
-        return  # Main is human-to-human chat only — the bot never speaks here
+        # Real live gap found 2026-10-08 (a player asked directly in
+        # Main): the pinned welcome guide (scripts/pin_main_welcome.py)
+        # explicitly promises "I want to create a character" works
+        # "right here in Main, or in the Adventure topic" -- but Main
+        # was otherwise completely silent, so that promise was simply
+        # false. A narrow, deliberate exception to the rule below, not
+        # a reversal of it: ONLY a real create-character phrase (the
+        # same CREATE_CHARACTER_PHRASES list ai/intent_parser.py's own
+        # deterministic fallback already matches, imported directly so
+        # there's one source of truth, never two copies that could
+        # drift) is ever acted on here -- everything else in Main stays
+        # exactly as silent as before, and this never runs the real
+        # (Ollama-backed) intent classifier against ordinary Main chat.
+        # _begin_character_creation itself already posts its own first
+        # reply into the Adventure topic (message_thread_id=topics.
+        # thread_id_for(..., "adventure")), so the rest of the flow
+        # naturally continues there, not in Main.
+        message_text = update.effective_message.text or ""
+        if update.effective_user is not None and any(p in message_text.lower() for p in CREATE_CHARACTER_PHRASES):
+            await _begin_character_creation(update, context)
+            return
+        return  # Main is human-to-human chat only — the bot never speaks here otherwise
 
     if topics.is_adventure(chat_id, thread_id):
         await adventure_master_handler(update, context)
