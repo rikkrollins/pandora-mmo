@@ -2,6 +2,25 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.751] — Main's replies now actually land in Main
+
+Real dev-bridge report (Coffee, screenshots): "View my player sheet"
+typed in Main got no visible reply there — it silently landed in
+Adventure instead, and Coffee only found it by hunting for it
+("Oh, the reply went into the adventure topic"). Root cause: every
+real action v1.27.749 wired into Main replies via `_safe_send`/
+`update.effective_chat.send_message` with no explicit thread override,
+which always resolves to Adventure's own hardcoded thread id —
+correct for Adventure's own callers, wrong once the same functions
+became reachable from Main too. A new `_MainTopicUpdate`/
+`_MainTopicChatProxy` pair now rewrites just that one specific
+Adventure fallback back to wherever the message actually came from, at
+the point of sending — every maintenance action now genuinely replies
+in Main. Character creation is deliberately excluded (it's a real
+multi-step flow that must keep landing in Adventure, where its
+continuation already lives) and still works exactly as it did in
+v1.27.747.
+
 ## [1.27.750] — Loot-vote acknowledgement now names the real voter
 
 Real dev-bridge report (Coffee, screenshot): the loot-vote Pass/Want-it

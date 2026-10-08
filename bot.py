@@ -43539,6 +43539,48 @@ MAIN_TOPIC_ALLOWED_ACTIONS = frozenset({
 })
 
 
+class _MainTopicChatProxy:
+    """
+    Duck-typed stand-in for Update.effective_chat, used only by
+    _dispatch_main_topic_action. Real live report (2026-10-08, Coffee,
+    dev-bridge screenshots): "View my player sheet" typed in Main
+    produced no visible reply there at all -- Coffee found it only
+    after hunting it down in Adventure ("Oh, the reply went into the
+    adventure topic"). Root cause: every _do_* function this dispatches
+    to replies via _safe_send/update.effective_chat.send_message with
+    NO explicit thread_id override, which always resolves to
+    Adventure's own real thread id (see _safe_send's own docstring --
+    correct for every actual Adventure-topic caller, since that's
+    always where the incoming message already was). Rewrites ONLY that
+    one specific Adventure thread id back to wherever this message
+    ACTUALLY came from (Main) at the point of actually sending --
+    every other real Chat method/attribute, and any other explicit
+    thread_id a function might pass, goes straight through untouched.
+    """
+    def __init__(self, real_chat, adventure_thread_id, origin_thread_id):
+        self._real_chat = real_chat
+        self._adventure_thread_id = adventure_thread_id
+        self._origin_thread_id = origin_thread_id
+
+    async def send_message(self, *args, **kwargs):
+        if kwargs.get("message_thread_id") == self._adventure_thread_id:
+            kwargs["message_thread_id"] = self._origin_thread_id
+        return await self._real_chat.send_message(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real_chat, name)
+
+
+class _MainTopicUpdate:
+    """Duck-typed stand-in for Update -- identical except effective_chat is swapped for _MainTopicChatProxy. See that class's own docstring."""
+    def __init__(self, real_update: Update, adventure_thread_id: int, origin_thread_id: int | None):
+        self._real_update = real_update
+        self.effective_chat = _MainTopicChatProxy(real_update.effective_chat, adventure_thread_id, origin_thread_id)
+
+    def __getattr__(self, name):
+        return getattr(self._real_update, name)
+
+
 async def _dispatch_main_topic_action(update: Update, context: ContextTypes.DEFAULT_TYPE, intent: dict, text: str) -> None:
     """
     Real dispatcher for MAIN_TOPIC_ALLOWED_ACTIONS (see that constant's
@@ -43546,12 +43588,29 @@ async def _dispatch_main_topic_action(update: Update, context: ContextTypes.DEFA
     real request this answers). Mirrors the matching branches inside
     adventure_master_handler's own giant action dispatch exactly --
     same functions, same argument shapes -- just reachable from Main
-    too, not gated behind topics.is_adventure.
+    too, not gated behind topics.is_adventure. Wrapped in
+    _MainTopicUpdate so every reply actually lands back in Main, not
+    silently in Adventure (see that class's own docstring).
     """
     action = intent["action"]
     if action == "create_character":
+        # Deliberately NOT routed through _MainTopicUpdate below --
+        # character creation is a real multi-step back-and-forth
+        # (name, race, class, abilities...) continued via
+        # adventure_master_handler's own "creation" in context.
+        # user_data check, which only ever runs for Adventure-topic
+        # messages. _begin_character_creation already posts its first
+        # prompt into Adventure on purpose (v1.27.747), precisely so
+        # every later reply naturally keeps landing somewhere that
+        # continues the flow -- redirecting just this one prompt back
+        # to Main would orphan the rest of the flow.
         await _begin_character_creation(update, context)
-    elif action == "check_sheet":
+        return
+
+    adventure_thread_id = topics.thread_id_for(update.effective_chat.id, "adventure")
+    origin_thread_id = update.effective_message.message_thread_id
+    update = _MainTopicUpdate(update, adventure_thread_id, origin_thread_id)
+    if action == "check_sheet":
         await _do_check_sheet(update, intent.get("target"))
     elif action == "check_inventory":
         await _do_check_inventory(update)

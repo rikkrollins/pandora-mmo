@@ -27978,6 +27978,14 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         await bot._route_text_message(update, ctx)
         self.assertEqual(ctx.user_data.get("creation", {}).get("step"), "name")
         self.assertTrue(any("Let's create your character" in m for m in sink))
+        # Deliberate exception to v1.27.749's "reply in the topic you
+        # asked from" fix just below: character creation is a real
+        # multi-step flow continued via adventure_master_handler's own
+        # "creation" in context.user_data check, which only runs for
+        # Adventure-topic messages -- so this one prompt must keep
+        # landing in Adventure, not Main, or every later reply would
+        # have nowhere real to continue the flow.
+        self.assertEqual(update.effective_chat.sent_thread_ids[-1], config.TOPIC_ADVENTURE_ID)
 
     async def test_main_stays_silent_for_ordinary_chat(self):
         """
@@ -28012,8 +28020,17 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(user_data={})
 
         sink = []
-        await bot._route_text_message(FakeUpdate(user_id, "check my sheet", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
+        update = FakeUpdate(user_id, "check my sheet", sink, thread_id=config.TOPIC_MAIN_ID)
+        await bot._route_text_message(update, ctx)
         self.assertTrue(any("MainMaintenanceTester" in m for m in sink), sink)
+        # Real live report (2026-10-08, Coffee, dev-bridge screenshots):
+        # "View my player sheet" in Main produced no visible reply
+        # there -- it silently landed in Adventure instead (_safe_send's
+        # own hardcoded default for every caller that doesn't pass an
+        # explicit thread_id). Must actually reply in the SAME topic the
+        # question was asked in, not wherever _do_check_sheet happens to
+        # default to.
+        self.assertEqual(update.effective_chat.sent_thread_ids[-1], config.TOPIC_MAIN_ID)
 
         sink = []
         await bot._route_text_message(FakeUpdate(user_id, "check my inventory", sink, thread_id=config.TOPIC_MAIN_ID), ctx)
@@ -28050,6 +28067,29 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
             sink = []
             await bot._route_text_message(FakeUpdate(user_id, text, sink, thread_id=config.TOPIC_MAIN_ID), ctx)
             self.assertEqual(sink, [], f"{text!r} must stay silent in Main")
+
+    async def test_main_guild_curriculum_reply_lands_in_main_not_adventure(self):
+        """
+        Same real thread-redirect fix as test_main_dispatches_real_
+        character_maintenance_actions above, but for
+        check_guild_curriculum specifically -- it computes its own
+        reply thread directly from the incoming message rather than
+        relying on _safe_send's hardcoded default, so this confirms
+        that path also already lands correctly without needing the
+        _MainTopicUpdate proxy to intervene.
+        """
+        import guild_curriculum as gc
+        user_id = 900724
+        make_basic_character(user_id, "MainGuildCurriculumTester", char_class="Wizard", current_location="market_row")
+        db.update_character(user_id, -999, guild="arcane_circle", level=50)
+        step = gc.get_step("arcane_circle", db.get_character(user_id, -999)["guild_curriculum_step"])
+        self.assertIsNotNone(step)
+        ctx = SimpleNamespace(user_data={})
+        sink = []
+        update = FakeUpdate(user_id, "What is my guild training?", sink, thread_id=config.TOPIC_MAIN_ID)
+        await bot._route_text_message(update, ctx)
+        self.assertTrue(any(step["title"] in m for m in sink), sink)
+        self.assertEqual(update.effective_chat.sent_thread_ids[-1], config.TOPIC_MAIN_ID)
 
     async def test_onboarding_public_world_choice_points_at_the_real_invite_link(self):
         """
