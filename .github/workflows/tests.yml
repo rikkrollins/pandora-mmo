@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  fast-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run FastRegressionTests
+        # Real, deterministic unit tests -- no live Ollama/Telegram
+        # network calls, no real secrets needed (every config value
+        # here falls back to a safe default via os.getenv). DB_PATH
+        # points at a throwaway file, same convention every test run
+        # in this project already uses -- never the real database.
+        run: DB_PATH=tests/tmp/ci_regression.db python3 -m unittest tests.test_regression.FastRegressionTests -v
