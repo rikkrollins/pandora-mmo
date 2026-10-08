@@ -6,6 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+# Real fix (2026-10-08, Coffee: "I keep getting emails about a failed
+# GitHub" -- a high-commit-rate day, each push queuing its own ~20min
+# full-suite run): a new push to the same branch now cancels whatever
+# run is still in flight for it, instead of letting a now-superseded
+# run finish and send its own separate email too. The LATEST commit's
+# own run is never cancelled by this -- cancel-in-progress only ever
+# cancels an OLDER run when a newer one for the same group starts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   fast-regression:
     runs-on: ubuntu-latest

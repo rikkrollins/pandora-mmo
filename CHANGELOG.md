@@ -2,6 +2,19 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.759] — Fewer redundant CI failure emails on high-commit days
+
+Real dev-bridge report (Coffee): "I keep getting emails about a failed
+GitHub." Checked the actual failures — same known, pre-existing
+batch-ordering test flakiness already fully triaged in v1.27.744 (not
+a new regression; confirmed passing again in isolation). The real
+problem was volume: ~15 pushes in one day, each queuing its own
+~20-minute full-suite run and its own failure email. The CI workflow
+now cancels a still-running run for the same branch the moment a
+newer push supersedes it, instead of letting a stale run finish and
+email about it too — the latest commit's own run is never cancelled
+by this, only older superseded ones.
+
 ## [1.27.758] — Dismantle button added to the Forge menu
 
 Real dev-bridge request (Coffee): "We need to be able to dismantle
