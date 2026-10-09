@@ -2,6 +2,21 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.769] — Repeat bosses now get extra attacks to keep pace with real healing
+
+Real live finding (Coffee, watching a second real repeat Wrathflame
+Unbound fight: "i feel this shud of been a challenge"). Even after
+v1.27.765's to-hit fix, 16 rounds in, the boss had landed ~1000 real
+raw damage but the party's own healers (healing_word/mass_cure_wounds,
+cure_wounds/lesser_restoration) kept everyone topped off roughly as
+fast as it landed — HP/ability-score scaling alone couldn't out-
+throughput real sustain at this level. Deliberately NOT a bigger
+per-hit number (that's kept dampened on purpose, see
+UNDERTUNED_DAMAGE_SCALE_EXPONENT) — a repeat-fight boss now gets up to
+2 extra attacks per round, scaled by the same real level-gap already
+driving HP/ability-score growth, so it does more total damage over
+the fight without any single hit getting scarier.
+
 ## [1.27.768] — Repair the whole party's gear in one go
 
 Real dev-bridge request (Coffee: "How do I repair our parties

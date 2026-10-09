@@ -1072,6 +1072,41 @@ def repeat_boss_ability_score_bonus(party_levels: list[int], monster_level: int 
     return min(REPEAT_BOSS_ABILITY_SCORE_BONUS_CAP, level_gap // 2 * REPEAT_BOSS_ABILITY_SCORE_BONUS_PER_2_LEVELS)
 
 
+REPEAT_BOSS_EXTRA_ATTACK_PER_LEVELS = 5
+REPEAT_BOSS_EXTRA_ATTACK_CAP = 2
+
+
+def repeat_boss_extra_attacks(party_levels: list[int], monster_level: int | None) -> int:
+    """
+    Real live finding (2026-10-09, Coffee, watching a second real
+    repeat Wrathflame fight live: "i feel this shud of been a
+    challenge" -- 16 rounds in, the boss had landed real hits totaling
+    ~1000 raw damage, but the party's own healers (a Bard's healing_
+    word/mass_cure_wounds, a Paladin's cure_wounds/lesser_restoration)
+    were topping the whole party back up roughly as fast as it landed,
+    so HP/ability-score scaling alone (repeat_boss_level_scale_
+    multiplier, repeat_boss_ability_score_bonus) couldn't out-throughput
+    real sustain at this level even once to-hit was fixed.
+
+    Deliberately NOT a per-hit damage increase -- UNDERTUNED_DAMAGE_
+    SCALE_EXPONENT's own docstring already explains why raw damage is
+    kept dampened relative to HP/stat growth (it overshoots fast at
+    wide level gaps). This instead gives the boss more real attacks
+    per round, same lever is_boss/extra_attack_when_enraged/
+    extra_monster_actions already use elsewhere in this engine for
+    "more total damage over the fight" without any single hit getting
+    more dangerous. Same repeat-fight-only gate as its two siblings
+    above (0 unless the party has genuinely outleveled this boss).
+    """
+    if not party_levels or monster_level is None:
+        return 0
+    avg_level = round(sum(party_levels) / len(party_levels))
+    if avg_level <= monster_level:
+        return 0
+    level_gap = avg_level - monster_level
+    return min(REPEAT_BOSS_EXTRA_ATTACK_CAP, level_gap // REPEAT_BOSS_EXTRA_ATTACK_PER_LEVELS)
+
+
 def labyrinth_floor_reference_xp_budget(floor: int) -> float:
     """
     The Labyrinth's own equivalent of MEDIUM_ENCOUNTER_XP_PER_CHARACTER's

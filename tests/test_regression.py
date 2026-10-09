@@ -31310,6 +31310,61 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enemy["dexterity"], template["dexterity"])
         sessions.end_session(-999)
 
+    async def test_repeat_boss_quest_fight_also_gets_extra_attacks_per_round(self):
+        """
+        Real live finding (2026-10-09, Coffee, watching a SECOND real
+        repeat Wrathflame fight live: "i feel this shud of been a
+        challenge"). Even with v1.27.765's to-hit fix landed, the
+        boss's total damage over 16 real rounds still couldn't out-
+        pace the party's own real healers (Bard healing_word/mass_
+        cure_wounds, Paladin cure_wounds/lesser_restoration). This
+        bakes a real extra-attacks-per-round count onto the repeat-
+        fight boss at construction, read by the attack_count
+        calculation in the enemy-turn loop.
+        """
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900716
+        make_basic_character(user_id, "ExtraAttackTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=35, hp_current=2000, hp_max=2000)
+        db.mark_defeated_monster(user_id, -999, "the_wrathflame_unbound")
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the wrathflame unbound", sink),
+                                        monster_key="the_wrathflame_unbound", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        import campaign_loader as cl
+        from rules.leveling import repeat_boss_extra_attacks
+        template = cl.get_monster_template(bot.CAMPAIGN, "the_wrathflame_unbound")
+        expected_extra = repeat_boss_extra_attacks([35], template["level"])
+        self.assertGreater(expected_extra, 0)
+        self.assertEqual(enemy["repeat_boss_extra_attack_count"], expected_extra)
+        sessions.end_session(-999)
+
+    async def test_first_fight_against_a_level_curve_boss_never_gets_extra_attacks_either(self):
+        """Companion guard: a party's genuine first fight against a level-curve boss must leave repeat_boss_extra_attack_count at 0."""
+        import sessions
+        from unittest.mock import patch, AsyncMock, Mock
+        sessions.end_session(-999)
+        user_id = 900717
+        make_basic_character(user_id, "FirstFightExtraAttackTester", char_class="Fighter", current_location="crossroads_tavern")
+        db.update_character(user_id, -999, level=60, hp_current=2000, hp_max=2000)
+        self.assertNotIn("the_wrathflame_unbound", db.get_character(user_id, -999)["defeated_monsters"])
+        sink = []
+        with patch("bot._resolve_ai_turns", new=AsyncMock()), \
+             patch("bot._maybe_send_monster_image", new=AsyncMock()), \
+             patch("bot.narrate_boss_intro", new=Mock(return_value="A shadow falls.")):
+            await bot._do_start_combat(FakeUpdate(user_id, "fight the wrathflame unbound", sink),
+                                        monster_key="the_wrathflame_unbound", count=1)
+        session = sessions.get_session_for_user(-999, user_id)
+        enemy = next(p for p in session.participants if p["telegram_user_id"] != user_id)
+        self.assertEqual(enemy["repeat_boss_extra_attack_count"], 0)
+        sessions.end_session(-999)
+
     async def test_hostile_npc_ambush_also_grows_for_an_overleveled_party(self):
         """
         Real live report (2026-08-14, per Coffee, dev-bridge screenshot:

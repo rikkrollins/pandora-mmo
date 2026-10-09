@@ -156,6 +156,7 @@ from rules.item_generator import generate_item, PREFIXES as GENERATED_ITEM_PREFI
 from rules.leveling import (
     CLASS_HIT_DICE, scaled_enemy_count, overtuned_monster_stat_multiplier, undertuned_monster_stat_multiplier,
     UNDERTUNED_DAMAGE_SCALE_EXPONENT, breath_weapon_dice_count, repeat_boss_level_scale_multiplier,
+    repeat_boss_extra_attacks,
     repeat_boss_ability_score_bonus,
     CLASS_PRIMARY_ABILITY, CLASS_SAVE_PROFICIENCIES, is_proficient_in_skill, is_proficient_in_save,
     skill_check_proficiency_bonus, wild_shape_temp_hp, XP_THRESHOLDS,
@@ -8811,6 +8812,13 @@ async def _resolve_ai_turns_inner(update: Update, session: sessions.Session) -> 
         # to rebirth, an entirely different, orthogonal axis).
         if current.get("frenzied_floor"):
             attack_count += 1
+        # Real live finding (2026-10-09, per Coffee, watching a repeat
+        # Wrathflame fight live: "i feel this shud of been a
+        # challenge") -- see repeat_boss_extra_attacks's own docstring
+        # for why this boosts attack COUNT rather than per-hit damage.
+        # Baked onto the enemy dict at construction (_do_start_combat's
+        # repeat-boss branch), 0 for every first-ever/non-repeat fight.
+        attack_count += current.get("repeat_boss_extra_attack_count", 0)
         # Per Coffee (2026-07-21): same clear preface as the human attack
         # path above -- skipped for bosses specifically, since those
         # already get their own "sizing up its target" flavor line each
@@ -9661,6 +9669,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
         stat_mult = 1.0
         damage_mult = 1.0
         repeat_boss_ability_bonus = 0
+        repeat_boss_extra_attack_count = 0
         # Real hand-authored level curve (2026-08-15, per Coffee: went
         # through the Encounter Ledger and submitted real level/HP/XP/
         # damage numbers for arcs 1-5 + side content, "let's try this
@@ -9729,6 +9738,17 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 # for the real numbers (69 damage dealt across a 6,149
                 # HP party over 4 full rounds) that drove this.
                 repeat_boss_ability_bonus = repeat_boss_ability_score_bonus(
+                    [p.get("level", 1) for p in party], template.get("level")
+                )
+                # Real live finding (2026-10-09, same thread, a second
+                # live-monitored repeat fight): even landing hits, the
+                # boss's total damage over 16 rounds still couldn't
+                # out-pace the party's own healers (Bard healing_word/
+                # mass_cure_wounds, Paladin cure_wounds/lesser_
+                # restoration) -- see repeat_boss_extra_attacks's own
+                # docstring for why this is more real attacks per round,
+                # not a bigger per-hit number.
+                repeat_boss_extra_attack_count = repeat_boss_extra_attacks(
                     [p.get("level", 1) for p in party], template.get("level")
                 )
 
@@ -9811,6 +9831,7 @@ async def _do_start_combat(update: Update, monster_key: str | None = None, count
                 "monster_key": slot_key,
                 "is_boss": slot_template.get("is_boss", False),
                 "life_drain": slot_template.get("life_drain", False),
+                "repeat_boss_extra_attack_count": repeat_boss_extra_attack_count,
                 # Synergy Phase 6 boss signature mechanics (2026-08-13):
                 # same real-flag-on-the-template convention as on_hit_
                 # condition/life_drain above -- adapts_to_damage (The
