@@ -29105,6 +29105,20 @@ def _look_action_keyboard(location: dict, unclaimed_board_quests: list, chat_id:
         dest = cl.get_location(CAMPAIGN, dest_id)
         if dest is None:
             continue
+        # Real dev-bridge request (2026-10-09, Coffee: "not showing
+        # areas that we can't get to until we are able to do it or
+        # until we are in that chapter") -- same real gate
+        # (requires_item/story_gates/min_level/rebirth)
+        # _location_extra_detail's own "You can travel to" text now
+        # filters its connections through, so the tap-target buttons
+        # here agree with the text instead of offering a button for
+        # something the text no longer even names. character is None
+        # only for a theoretical caller with no real character (none
+        # exist today -- the one real call site always passes one), in
+        # which case this skips the check rather than hiding buttons
+        # with nothing to gate them against.
+        if character is not None and not _character_can_currently_reach(character, dest, location, dest_id):
+            continue
         # Real dev-bridge request (2026-08-22, Coffee: "Can you use
         # emoji's for navigations?! ⬇️⬆️➡️⬅️..."), same pass as the
         # Waypoints pin below. Only the campaign's own real direction
@@ -30274,7 +30288,26 @@ def _location_extra_detail(character: dict, location: dict, location_id: str, ch
     monsters_here = [k for k in location.get("monsters", []) if _monster_visible_to_character(k, character)]
     if monsters_here:
         lines.append(f"You sense danger here: {_monster_danger_line(monsters_here)}")
-    connections = location.get("connections", [])
+    # Real dev-bridge request (2026-10-09, Coffee: "you have a lot of
+    # areas posted here that can be very confusing to new players...
+    # not showing areas that we can't get to until we are able to do
+    # it or until we are in that chapter"). `connections` used to be
+    # shown here completely unconditionally -- descends_to/ascends_to
+    # just below already ran every real connection through
+    # _character_can_currently_reach (requires_item, story_gates,
+    # min_level, rebirth) before ever mentioning it (2026-08-26,
+    # 2026-09-09), but lateral `connections` (the far more common
+    # case -- most of a chapter's own gated story locations) never got
+    # the same treatment, so a not-yet-reachable destination (e.g. a
+    # later chapter's own area) was named right alongside ones the
+    # player could actually walk to today. Filtered the same way here,
+    # once, so both this text line and _look_action_keyboard's own
+    # button list below (which reads this same filtered list) agree.
+    connections = []
+    for c in location.get("connections", []):
+        dest = cl.get_location(CAMPAIGN, c)
+        if dest is not None and _character_can_currently_reach(character, dest, location, c):
+            connections.append(c)
     if connections:
         # Sensory travel descriptions (task #220, per Coffee: "explain
         # to them how/why they can go there" instead of just naming a

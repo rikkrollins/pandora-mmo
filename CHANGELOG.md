@@ -2,6 +2,23 @@
 
 All notable changes to Pandora MMO are documented here.
 
+## [1.27.770] — Not-yet-reachable areas no longer shown in "You can travel to"
+
+Real dev-bridge request (Coffee, screenshot of Stonearch Bridge: "You
+have a lot of areas posted here that can be very confusing to new
+players. I would consider not showing areas that we can't get to
+until we are able to do it or until we are in that chapter"). The
+existing reachability gate (requires_item/story_gates/min_level/
+rebirth) was already checked for ascend/descend, but a location's
+ordinary lateral connections were always named in "You can travel to"
+and always had a real tap-target button, gate or no gate — so a
+not-yet-unlocked chapter area (e.g. Greymoor Downs before its own
+scouting quest) showed up right alongside places actually reachable
+today. Both the text line and the button list now share the exact
+same real gate check, and both show the destination again the moment
+it's actually met — never a permanent hide, never a spoiler of
+something further off that was already genuinely visited.
+
 ## [1.27.769] — Repeat bosses now get extra attacks to keep pace with real healing
 
 Real live finding (Coffee, watching a second real repeat Wrathflame

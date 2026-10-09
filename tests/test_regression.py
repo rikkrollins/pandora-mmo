@@ -8372,6 +8372,43 @@ class FastRegressionTests(unittest.IsolatedAsyncioTestCase):
         other_datas = [btn.callback_data for row in other_chat_kb.inline_keyboard for btn in row] if other_chat_kb else []
         self.assertNotIn("travel|go|wrathflame_vault_ember_hall", other_datas)
 
+    async def test_story_gated_connection_hidden_from_travel_text_and_buttons_until_cleared(self):
+        """
+        Real dev-bridge request (2026-10-09, Coffee, screenshot of
+        Stonearch Bridge: "You have a lot of areas posted here that
+        can be very confusing to new players. I would consider not
+        showing areas that we can't get to until we are able to do it
+        or until we are in that chapter"). Stonearch Bridge -> Greymoor
+        Downs carries a real story_gates entry (requires_completed_
+        quest: the_scouting_grounds_warning) -- _character_can_
+        currently_reach already existed for descends_to/ascends_to but
+        was never applied to lateral `connections`, so this exact real
+        destination was always named in "You can travel to" and always
+        had a tap-target button, gate or no gate. Both the text line
+        and the button list must now agree with the real gate, and
+        both must show it again the moment the gate is actually met.
+        """
+        chat_id = -960400
+        character = make_basic_character(
+            960400, "StoryGateTester", chat_id=chat_id, current_location="stonearch_bridge",
+        )
+        location = cl.get_location(bot.CAMPAIGN, "stonearch_bridge")
+        self.assertIn("greymoor_downs", location.get("connections", []))
+
+        lines, kb = bot._location_extra_detail(character, location, "stonearch_bridge", chat_id)
+        travel_line = next((l for l in lines if l.startswith("You can travel to")), "")
+        self.assertNotIn("Greymoor Downs", travel_line)
+        datas = [btn.callback_data for row in kb.inline_keyboard for btn in row] if kb else []
+        self.assertNotIn("travel|go|greymoor_downs", datas)
+
+        db.update_character(960400, chat_id, completed_quests=["the_scouting_grounds_warning"])
+        character = db.get_character(960400, chat_id)
+        lines, kb = bot._location_extra_detail(character, location, "stonearch_bridge", chat_id)
+        travel_line = next((l for l in lines if l.startswith("You can travel to")), "")
+        self.assertIn("Greymoor Downs", travel_line)
+        datas = [btn.callback_data for row in kb.inline_keyboard for btn in row] if kb else []
+        self.assertIn("travel|go|greymoor_downs", datas)
+
     async def test_blocked_lever_connection_tells_the_player_to_pull_not_pick(self):
         """
         Real live bug (2026-08-31, dev-bridge: "I picked the lock
